@@ -8,7 +8,7 @@ license.workspace = true
 [features]
 default = ["clip"]
 # In-process CLIP through ONNX Runtime (loaded dynamically, CPU).
-clip = ["dep:ort", "dep:ndarray", "dep:tokenizers", "dep:safetensors"]
+clip = ["dep:ort", "dep:tokenizers", "dep:safetensors"]
 
 [dependencies]
 image.workspace = true
@@ -18,6 +18,13 @@ thiserror.workspace = true
 tracing.workspace = true
 sha2.workspace = true
 ort = { workspace = true, optional = true }
-ndarray = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
 safetensors = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "probe"
+required-features = ["clip"]

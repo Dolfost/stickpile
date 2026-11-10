@@ -10,10 +10,14 @@ default = ["wayland", "x11"]
 # CLI clipboard backends (the GTK client uses GDK instead).
 wayland = ["dep:wl-clipboard-rs"]
 x11 = ["dep:x11rb"]
+# In-process axum mock of the stickpile REST API (`stickpile_core::mock`), for
+# client tests in this crate and in the CLI.
+mock = ["dep:axum"]
 
 [dependencies]
 stickpile-api.workspace = true
 stickpile-search.workspace = true
+stickpile-setfmt.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -32,8 +36,10 @@ hex.workspace = true
 image.workspace = true
 bytes.workspace = true
 futures.workspace = true
+libc = "0.2"
 wl-clipboard-rs = { workspace = true, optional = true }
 x11rb = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

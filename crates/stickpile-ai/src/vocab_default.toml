@@ -1,0 +1,471 @@
+# Built-in zero-shot vocabulary of stickpile-ai (docs/ai.md).
+#
+# A file given as `[ai] vocabulary_file` uses this exact format. Each of the
+# three top-level keys is optional: a missing key keeps the built-in list, an
+# explicit empty list disables that kind of suggestion.
+#
+#   keywords = ["cat", "thumbs up", ...]          # plain English noun phrases
+#   [[emojis]]  emoji = "😂"  description = "..."  # what it depicts; the CLIP prompt
+#   [[vibes]]   label = "dismissive"  synonyms = ["nah", "nope", ...]
+#
+# Keywords are prompted as "a meme of {keyword}" / "a sticker of {keyword}" /
+# "a picture of {keyword}"; emoji descriptions as "{description}" / "a sticker
+# of {description}" (describe what the emoji looks like). Vibe labels are what
+# `vibe:` search uses; synonyms feed the zero-shot vibe prototype and lexical
+# search expansion, where repeated letters are squashed ("naahh" matches "nah").
+
+keywords = [
+  # animals
+  "cat", "kitten", "dog", "puppy", "shiba inu", "frog", "monkey", "gorilla", "bear", "panda",
+  "fox", "raccoon", "capybara", "hamster", "rabbit", "bird", "duck", "goose", "owl", "penguin",
+  "parrot", "chicken", "horse", "cow", "pig", "sheep", "goat", "fish", "shark", "dolphin",
+  "snake", "lizard", "turtle", "spider", "bee", "butterfly", "mouse", "rat", "squirrel", "otter",
+  "seal", "lion", "tiger", "wolf", "deer", "llama", "sloth", "koala", "hedgehog", "crab",
+  "octopus", "dinosaur", "unicorn", "dragon",
+  # people and characters
+  "man", "woman", "boy", "girl", "baby", "old man", "old woman", "couple", "crowd", "businessman",
+  "office worker", "student", "teacher", "doctor", "police officer", "soldier", "athlete", "gamer",
+  "programmer", "chef", "clown", "cowboy", "pirate", "ninja", "knight", "wizard", "king", "queen",
+  "astronaut", "superhero", "robot", "alien", "zombie", "ghost", "skeleton", "vampire", "devil",
+  "angel", "santa claus",
+  # styles and meme formats
+  "anime girl", "anime boy", "chibi", "cartoon", "pixel art", "3d render", "sketch", "comic",
+  "wojak", "troll face", "stick figure", "smiley face", "screenshot", "text", "speech bubble",
+  # gestures and actions
+  "thumbs up", "thumbs down", "facepalm", "shrug", "waving hand", "clapping", "pointing finger",
+  "peace sign", "ok hand", "fist bump", "high five", "hug", "kiss", "heart hands", "praying hands",
+  "salute", "dancing", "running", "jumping", "sleeping", "eating", "drinking", "crying", "laughing",
+  "screaming", "smiling", "winking", "staring", "side eye", "eye roll", "thinking", "sweating",
+  "blushing", "hiding", "falling", "sitting", "lying in bed", "working on a laptop",
+  # reactions
+  "mind blown", "explosion", "applause", "surprised face", "angry face", "crying face",
+  "laughing face", "sad face", "happy face", "disgusted face", "confused face", "smug face",
+  "nervous face", "panic", "rage", "heartbreak", "celebration", "party", "victory", "fail",
+  "this is fine", "deal with it", "popcorn",
+  # objects and food
+  "coffee", "tea", "beer", "wine", "pizza", "burger", "cake", "ice cream", "sushi", "cookie",
+  "bread", "fruit", "banana", "money", "phone", "computer", "keyboard", "video game", "car",
+  "bicycle", "train", "airplane", "rocket", "house", "bed", "couch", "book", "guitar",
+  "microphone", "camera", "television", "clock", "gift", "balloon", "flower", "rose", "tree",
+  "cactus", "heart", "skull", "crown", "sunglasses", "hat", "trophy", "flag", "sign",
+  # nature, places and occasions
+  "sun", "moon", "star", "rain", "snow", "fire", "water", "ocean", "beach", "mountain", "city",
+  "night", "outer space", "rainbow", "christmas", "halloween", "birthday",
+]
+
+[[emojis]]
+emoji = "😂"
+description = "laughing face with tears of joy"
+[[emojis]]
+emoji = "🤣"
+description = "rolling on the floor laughing"
+[[emojis]]
+emoji = "😭"
+description = "face sobbing with rivers of tears"
+[[emojis]]
+emoji = "😢"
+description = "sad face with a single tear"
+[[emojis]]
+emoji = "😊"
+description = "smiling face with blushing cheeks"
+[[emojis]]
+emoji = "😀"
+description = "big grinning happy face"
+[[emojis]]
+emoji = "😍"
+description = "smiling face with heart eyes, in love"
+[[emojis]]
+emoji = "🥰"
+description = "smiling face surrounded by hearts"
+[[emojis]]
+emoji = "😘"
+description = "face blowing a kiss"
+[[emojis]]
+emoji = "😎"
+description = "cool face with sunglasses"
+[[emojis]]
+emoji = "🤔"
+description = "thinking face with hand on chin"
+[[emojis]]
+emoji = "🙄"
+description = "face with eyes rolled up in annoyance"
+[[emojis]]
+emoji = "😏"
+description = "smug smirking face with a sly half smile"
+[[emojis]]
+emoji = "😒"
+description = "unamused annoyed face"
+[[emojis]]
+emoji = "😞"
+description = "disappointed face"
+[[emojis]]
+emoji = "😔"
+description = "pensive sad face looking down"
+[[emojis]]
+emoji = "😡"
+description = "furious red angry face"
+[[emojis]]
+emoji = "🤬"
+description = "furious red face with grawlix symbols covering its mouth"
+[[emojis]]
+emoji = "😤"
+description = "face huffing with steam from the nose"
+[[emojis]]
+emoji = "😱"
+description = "face screaming in fear"
+[[emojis]]
+emoji = "😨"
+description = "fearful scared face"
+[[emojis]]
+emoji = "😳"
+description = "flushed embarrassed face with wide eyes"
+[[emojis]]
+emoji = "🥺"
+description = "pleading face with big puppy eyes"
+[[emojis]]
+emoji = "😴"
+description = "sleeping face"
+[[emojis]]
+emoji = "🥱"
+description = "face yawning with hand over open mouth"
+[[emojis]]
+emoji = "😩"
+description = "weary exhausted face"
+[[emojis]]
+emoji = "🤯"
+description = "head exploding with a mushroom cloud, mind blown"
+[[emojis]]
+emoji = "🤮"
+description = "face vomiting in disgust"
+[[emojis]]
+emoji = "🤢"
+description = "nauseated green face"
+[[emojis]]
+emoji = "😬"
+description = "grimacing awkward face showing teeth"
+[[emojis]]
+emoji = "🙃"
+description = "upside-down face"
+[[emojis]]
+emoji = "😐"
+description = "neutral face with a straight mouth"
+[[emojis]]
+emoji = "😑"
+description = "expressionless face"
+[[emojis]]
+emoji = "😶"
+description = "speechless face without a mouth"
+[[emojis]]
+emoji = "🤫"
+description = "shushing face with finger on lips"
+[[emojis]]
+emoji = "🤭"
+description = "face with hand over mouth, giggling"
+[[emojis]]
+emoji = "😇"
+description = "innocent smiling face with a halo"
+[[emojis]]
+emoji = "😈"
+description = "smiling purple devil face with horns"
+[[emojis]]
+emoji = "🤡"
+description = "clown face"
+[[emojis]]
+emoji = "💀"
+description = "skull, dead from laughing"
+[[emojis]]
+emoji = "👻"
+description = "cute ghost"
+[[emojis]]
+emoji = "👽"
+description = "alien"
+[[emojis]]
+emoji = "🤖"
+description = "robot face"
+[[emojis]]
+emoji = "💩"
+description = "pile of poo"
+[[emojis]]
+emoji = "🙈"
+description = "monkey covering its eyes"
+[[emojis]]
+emoji = "🗿"
+description = "moai stone head statue"
+[[emojis]]
+emoji = "🫠"
+description = "melting face"
+[[emojis]]
+emoji = "🥳"
+description = "partying face with party hat"
+[[emojis]]
+emoji = "🤓"
+description = "nerd face with glasses"
+[[emojis]]
+emoji = "🤠"
+description = "face with cowboy hat"
+[[emojis]]
+emoji = "🥵"
+description = "hot red face sweating"
+[[emojis]]
+emoji = "🥶"
+description = "cold blue freezing face"
+[[emojis]]
+emoji = "😵"
+description = "dizzy face"
+[[emojis]]
+emoji = "🫣"
+description = "face peeking through fingers"
+[[emojis]]
+emoji = "🫡"
+description = "saluting face"
+[[emojis]]
+emoji = "🐸"
+description = "frog"
+[[emojis]]
+emoji = "🐱"
+description = "cat"
+[[emojis]]
+emoji = "🐶"
+description = "dog"
+[[emojis]]
+emoji = "🐵"
+description = "monkey"
+[[emojis]]
+emoji = "🦆"
+description = "duck"
+[[emojis]]
+emoji = "🐧"
+description = "penguin"
+[[emojis]]
+emoji = "🐻"
+description = "bear"
+[[emojis]]
+emoji = "🐼"
+description = "panda"
+[[emojis]]
+emoji = "🦊"
+description = "fox"
+[[emojis]]
+emoji = "🐷"
+description = "pig"
+[[emojis]]
+emoji = "🐭"
+description = "mouse"
+[[emojis]]
+emoji = "🐰"
+description = "rabbit"
+[[emojis]]
+emoji = "🐍"
+description = "snake"
+[[emojis]]
+emoji = "🦀"
+description = "crab"
+[[emojis]]
+emoji = "🍕"
+description = "slice of pizza"
+[[emojis]]
+emoji = "🍔"
+description = "hamburger"
+[[emojis]]
+emoji = "☕"
+description = "hot cup of coffee"
+[[emojis]]
+emoji = "🍺"
+description = "mug of beer"
+[[emojis]]
+emoji = "🍷"
+description = "glass of red wine"
+[[emojis]]
+emoji = "🍿"
+description = "bucket of popcorn"
+[[emojis]]
+emoji = "🎂"
+description = "birthday cake with candles"
+[[emojis]]
+emoji = "🎉"
+description = "party popper with confetti, celebration"
+[[emojis]]
+emoji = "🎁"
+description = "wrapped gift box"
+[[emojis]]
+emoji = "🎮"
+description = "video game controller"
+[[emojis]]
+emoji = "💻"
+description = "laptop computer"
+[[emojis]]
+emoji = "📱"
+description = "mobile phone"
+[[emojis]]
+emoji = "💸"
+description = "money with wings flying away"
+[[emojis]]
+emoji = "💰"
+description = "money bag with a dollar sign"
+[[emojis]]
+emoji = "🔥"
+description = "fire flames"
+[[emojis]]
+emoji = "✨"
+description = "sparkles"
+[[emojis]]
+emoji = "⭐"
+description = "yellow star"
+[[emojis]]
+emoji = "🌈"
+description = "rainbow"
+[[emojis]]
+emoji = "☀️"
+description = "bright sun"
+[[emojis]]
+emoji = "🌧️"
+description = "cloud with rain"
+[[emojis]]
+emoji = "❄️"
+description = "snowflake"
+[[emojis]]
+emoji = "🌙"
+description = "crescent moon"
+[[emojis]]
+emoji = "🌸"
+description = "pink cherry blossom flower"
+[[emojis]]
+emoji = "🌹"
+description = "red rose"
+[[emojis]]
+emoji = "❤️"
+description = "red heart, love"
+[[emojis]]
+emoji = "💔"
+description = "broken heart"
+[[emojis]]
+emoji = "💯"
+description = "hundred points symbol"
+[[emojis]]
+emoji = "✅"
+description = "green check mark"
+[[emojis]]
+emoji = "❌"
+description = "red cross mark"
+[[emojis]]
+emoji = "⚠️"
+description = "yellow warning sign"
+[[emojis]]
+emoji = "💤"
+description = "zzz, sleeping"
+[[emojis]]
+emoji = "💪"
+description = "flexed biceps, strong arm"
+[[emojis]]
+emoji = "👍"
+description = "thumbs up"
+[[emojis]]
+emoji = "👎"
+description = "thumbs down"
+[[emojis]]
+emoji = "👏"
+description = "clapping hands"
+[[emojis]]
+emoji = "🙏"
+description = "folded praying hands, please or thank you"
+[[emojis]]
+emoji = "👋"
+description = "waving hand, hello or goodbye"
+[[emojis]]
+emoji = "🤝"
+description = "handshake"
+[[emojis]]
+emoji = "✌️"
+description = "victory hand, peace sign"
+[[emojis]]
+emoji = "🤞"
+description = "crossed fingers for good luck"
+[[emojis]]
+emoji = "👌"
+description = "ok hand gesture"
+[[emojis]]
+emoji = "👉"
+description = "finger pointing right"
+[[emojis]]
+emoji = "🤷"
+description = "person shrugging"
+[[emojis]]
+emoji = "🤦"
+description = "person facepalming"
+[[emojis]]
+emoji = "🙅"
+description = "person crossing arms, gesturing no"
+[[emojis]]
+emoji = "💃"
+description = "woman dancing"
+[[emojis]]
+emoji = "🏃"
+description = "person running"
+[[emojis]]
+emoji = "👀"
+description = "eyes looking sideways"
+[[emojis]]
+emoji = "🧠"
+description = "brain"
+[[emojis]]
+emoji = "👑"
+description = "golden crown"
+[[emojis]]
+emoji = "🚀"
+description = "rocket launching"
+[[emojis]]
+emoji = "💥"
+description = "explosion, boom"
+[[emojis]]
+emoji = "💣"
+description = "bomb"
+
+# The fixed vibe set. Labels are what `vibe:` search uses.
+[[vibes]]
+label = "happy"
+synonyms = ["joyful", "cheerful", "glad", "smiling", "laughing", "lol", "lmao", "rofl", "haha", "yay", "хаха", "радий", "весело"]
+[[vibes]]
+label = "sad"
+synonyms = ["unhappy", "crying", "depressed", "heartbroken", "sob", "sigh", "sadge", ":(", "сумно", "сум", "плачу"]
+[[vibes]]
+label = "sarcastic"
+synonyms = ["ironic", "sarcasm", "mocking", "yeah right", "sure jan", "oh really", "wow so funny", "іронія", "сарказм"]
+[[vibes]]
+label = "angry"
+synonyms = ["mad", "furious", "rage", "pissed", "annoyed", "grr", "ugh", "wtf", "злий", "бісить"]
+[[vibes]]
+label = "tired"
+synonyms = ["exhausted", "sleepy", "done", "burnt out", "sigh", "ugh", "zzz", "meh", "втомився", "втома", "спати"]
+[[vibes]]
+label = "cringe"
+synonyms = ["embarrassing", "cringey", "yikes", "secondhand embarrassment", "oof", "кринж"]
+[[vibes]]
+label = "wholesome"
+synonyms = ["cute", "sweet", "adorable", "heartwarming", "aww", "uwu", "мило", "милота"]
+[[vibes]]
+label = "confused"
+synonyms = ["puzzled", "what", "huh", "wut", "wtf", "???", "confusion", "що", "шо"]
+[[vibes]]
+label = "smug"
+synonyms = ["smirk", "smirking", "cocky", "self-satisfied", "told you so", "ez", "gg"]
+[[vibes]]
+label = "scared"
+synonyms = ["afraid", "fear", "terrified", "frightened", "panic", "spooky", "страшно"]
+[[vibes]]
+label = "love"
+synonyms = ["in love", "heart", "crush", "romantic", "adore", "kiss", "<3", "ily", "кохаю", "люблю", "любов"]
+[[vibes]]
+label = "shocked"
+synonyms = ["surprised", "astonished", "omg", "wow", "whoa", "shook", "wtf", "шок", "ого"]
+[[vibes]]
+label = "dismissive"
+synonyms = ["nah", "nope", "no", "whatever", "meh", "bruh", "no thanks", "not interested", "ні", "нє", "неа"]
+[[vibes]]
+label = "excited"
+synonyms = ["hyped", "hype", "thrilled", "yay", "woohoo", "lets go", "pog", "ура", "круто"]
+[[vibes]]
+label = "bored"
+synonyms = ["boring", "uninterested", "meh", "yawn", "dull", "sigh", "нудно"]
+[[vibes]]
+label = "awkward"
+synonyms = ["uncomfortable", "nervous", "nervous laugh", "uhh", "um", "oof", "ніяково"]

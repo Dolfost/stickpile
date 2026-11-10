@@ -64,7 +64,14 @@ pub struct UiConfig {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        UiConfig { columns: 6, thumb_px: 128, hide_on_copy: true, start_hidden: true, recent_count: 24, max_results: 60 }
+        UiConfig {
+            columns: 6,
+            thumb_px: 128,
+            hide_on_copy: true,
+            start_hidden: true,
+            recent_count: 24,
+            max_results: 60,
+        }
     }
 }
 
@@ -80,12 +87,21 @@ pub struct FocusConfig {
 
 impl Default for FocusConfig {
     fn default() -> Self {
-        let r = |contains: &[&str], target| FocusRule { contains: contains.iter().map(|s| s.to_string()).collect(), target };
+        let r = |contains: &[&str], target| FocusRule {
+            contains: contains.iter().map(|s| s.to_string()).collect(),
+            target,
+        };
         FocusConfig {
             detect: true,
             rules: vec![
-                r(&["telegram", "ayugram", "materialgram", "64gram", "kotatogram"], TargetApp::Telegram),
-                r(&["discord", "vesktop", "webcord", "armcord", "legcord"], TargetApp::Discord),
+                r(
+                    &["telegram", "ayugram", "materialgram", "64gram", "kotatogram"],
+                    TargetApp::Telegram,
+                ),
+                r(
+                    &["discord", "vesktop", "webcord", "armcord", "legcord"],
+                    TargetApp::Discord,
+                ),
                 r(&["signal"], TargetApp::Signal),
                 r(&["whatsapp", "zapzap", "wasistlos"], TargetApp::Whatsapp),
                 r(&["slack"], TargetApp::Slack),
@@ -181,32 +197,61 @@ impl ClientConfig {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ClientConfig::default()),
-            Err(source) => return Err(ConfigError::Io { path: path.into(), source }),
+            Err(source) => {
+                return Err(ConfigError::Io {
+                    path: path.into(),
+                    source,
+                })
+            }
         };
         Self::from_toml(&text).map_err(|e| match e {
-            ConfigError::Parse { source, .. } => ConfigError::Parse { path: path.into(), source },
+            ConfigError::Parse { source, .. } => ConfigError::Parse {
+                path: path.into(),
+                source,
+            },
             other => other,
         })
     }
 
     pub fn from_toml(text: &str) -> Result<ClientConfig, ConfigError> {
-        let cfg: ClientConfig =
-            toml::from_str(text).map_err(|source| ConfigError::Parse { path: PathBuf::from("<string>"), source })?;
+        let cfg: ClientConfig = toml::from_str(text).map_err(|source| ConfigError::Parse {
+            path: PathBuf::from("<string>"),
+            source,
+        })?;
         cfg.validate()?;
         Ok(cfg)
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(self.server_url.starts_with("http://") || self.server_url.starts_with("https://")) {
-            return Err(ConfigError::Invalid(format!("server_url must be http(s), got {:?}", self.server_url)));
+            return Err(ConfigError::Invalid(format!(
+                "server_url must be http(s), got {:?}",
+                self.server_url
+            )));
         }
         if self.ui.columns == 0 || self.ui.thumb_px < 32 {
-            return Err(ConfigError::Invalid("ui.columns must be > 0 and ui.thumb_px >= 32".into()));
+            return Err(ConfigError::Invalid(
+                "ui.columns must be > 0 and ui.thumb_px >= 32".into(),
+            ));
         }
-        let known = ["image/png", "image/gif", "image/webp", "image/jpeg", "text/uri-list", "x-special/gnome-copied-files", "text/plain"];
+        let known = [
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "image/jpeg",
+            "text/uri-list",
+            "x-special/gnome-copied-files",
+            "text/plain",
+        ];
         let all = std::iter::once(&self.clipboard.default).chain(self.clipboard.targets.values());
         for offers in all {
-            for m in offers.still.iter().chain(&offers.animation).chain(&offers.video).chain(&offers.sticker) {
+            for m in offers
+                .still
+                .iter()
+                .chain(&offers.animation)
+                .chain(&offers.video)
+                .chain(&offers.sticker)
+            {
                 if !known.contains(&m.as_str()) {
                     return Err(ConfigError::Invalid(format!("clipboard: unsupported MIME type {m:?}")));
                 }
@@ -218,7 +263,11 @@ impl ClientConfig {
     pub fn token_path(&self) -> PathBuf {
         self.token_file.clone().unwrap_or_else(|| {
             let base = directories::ProjectDirs::from("", "", "stickpile")
-                .map(|d| d.state_dir().map(Path::to_path_buf).unwrap_or_else(|| d.data_local_dir().to_path_buf()))
+                .map(|d| {
+                    d.state_dir()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| d.data_local_dir().to_path_buf())
+                })
                 .unwrap_or_else(|| PathBuf::from("."));
             base.join("token")
         })
@@ -239,10 +288,12 @@ impl ClientConfig {
         self.focus
             .rules
             .iter()
-            .find(|r| r.contains.iter().any(|s| {
-                let s = s.to_lowercase();
-                class.contains(&s) || title.contains(&s)
-            }))
+            .find(|r| {
+                r.contains.iter().any(|s| {
+                    let s = s.to_lowercase();
+                    class.contains(&s) || title.contains(&s)
+                })
+            })
             .map(|r| r.target)
     }
 }
@@ -278,7 +329,10 @@ mod tests {
     #[test]
     fn focus_rules_match_ayugram() {
         let c = ClientConfig::default();
-        assert_eq!(c.target_for_window("com.ayugram.desktop", ""), Some(TargetApp::Telegram));
+        assert_eq!(
+            c.target_for_window("com.ayugram.desktop", ""),
+            Some(TargetApp::Telegram)
+        );
         assert_eq!(c.target_for_window("vesktop", "Discord"), Some(TargetApp::Discord));
         assert_eq!(c.target_for_window("firefox", "Element"), None);
     }

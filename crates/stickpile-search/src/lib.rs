@@ -8,18 +8,27 @@
 //!    `likes>`, `by:`, `is:`) and visibility (own items + public sets; unlisted
 //!    sets are never searchable by non-owners) cut the candidate set.
 //! 2. Lexical score: per-field weighted BM25-style scoring over name,
-//!    keywords, emojis, vibe, tags and set name, with exact > prefix >
-//!    squashed (`naahh` == `nah`) > fuzzy (edit distance) matches, plus
-//!    caller-supplied expansion terms (vibe synonyms, zero-shot related terms)
-//!    at reduced weight.
+//!    keywords, emojis (plus a small built-in emoji vocabulary, 😂 -> laugh),
+//!    vibe, tags and set name, with exact > squashed (`naahh` == `nah`) >
+//!    prefix > fuzzy (edit distance) > substring matches, a coordination
+//!    factor for multi-word queries, plus caller-supplied expansion terms
+//!    (vibe synonyms, zero-shot related terms) at reduced weight.
 //! 3. Vector score: cosine between the caller-supplied query text embedding
 //!    and each item's image embedding.
 //! 4. Reciprocal-rank fusion of the two rankings (k = 60); ties broken by
 //!    copies, then recency. `sort:` other than relevance overrides the order.
 
+mod emoji_names;
+mod rank;
+mod store;
+#[cfg(test)]
+mod tests;
+mod text;
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
+pub use rank::DEFAULT_LIMIT;
 pub use stickpile_api::query::{Query, Sort};
 use stickpile_api::{MediaFormat, MediaKind, Visibility};
 
@@ -59,6 +68,7 @@ pub struct Viewer {
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
+    /// Page size; 0 means [`DEFAULT_LIMIT`]. Not capped here (the server caps it).
     pub limit: usize,
     pub offset: usize,
     /// Query text embedding in the image embedding space (from the AI backend).
@@ -84,63 +94,55 @@ pub struct Outcome {
     pub total: usize,
 }
 
-#[derive(Debug, Default)]
+/// The in-memory index. Not internally synchronised: wrap it in a lock to share.
+#[derive(Debug, Default, Clone)]
 pub struct Index {
-    _private: (),
+    store: store::Store,
 }
 
 impl Index {
     pub fn new() -> Index {
-        todo!("search agent")
+        Index::default()
     }
     pub fn len(&self) -> usize {
-        todo!("search agent")
+        self.store.len()
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
     /// Insert or replace by `item_id`.
     pub fn upsert(&mut self, doc: Doc) {
-        let _ = doc;
-        todo!("search agent")
+        self.store.upsert(doc);
     }
     pub fn remove(&mut self, item_id: &str) {
-        let _ = item_id;
-        todo!("search agent")
+        self.store.remove(item_id);
     }
     pub fn remove_set(&mut self, set_id: &str) {
-        let _ = set_id;
-        todo!("search agent")
+        self.store.remove_set(set_id);
     }
     pub fn get(&self, item_id: &str) -> Option<&Doc> {
-        let _ = item_id;
-        todo!("search agent")
+        self.store.get(item_id)
     }
     /// Update the counters of an item without re-indexing text.
     pub fn set_counters(&mut self, item_id: &str, likes: u64, copies: u64) {
-        let _ = (item_id, likes, copies);
-        todo!("search agent")
+        self.store.set_counters(item_id, likes, copies);
     }
     /// Set (or clear) the embedding of every doc with this media id.
     pub fn set_embedding(&mut self, media_id: &str, embedding: Option<Arc<[f32]>>) {
-        let _ = (media_id, embedding);
-        todo!("search agent")
+        self.store.set_embedding(media_id, embedding);
     }
     pub fn search(&self, query: &Query, viewer: &Viewer, opts: &SearchOptions) -> Outcome {
-        let _ = (query, viewer, opts);
-        todo!("search agent")
+        self.store.search(query, viewer, opts)
     }
 }
 
 /// Lowercase, NFKD, strip combining marks: `Café` -> `cafe`. Non-Latin scripts
 /// are kept (Cyrillic stays Cyrillic).
 pub fn normalize(text: &str) -> String {
-    let _ = text;
-    todo!("search agent")
+    text::normalize(text)
 }
 
 /// Collapse runs of the same letter: `naahh` -> `nah`, `sooo` -> `so`.
 pub fn squash(word: &str) -> String {
-    let _ = word;
-    todo!("search agent")
+    text::squash(word)
 }

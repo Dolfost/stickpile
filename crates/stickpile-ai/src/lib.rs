@@ -8,14 +8,16 @@
 
 use std::path::{Path, PathBuf};
 
-pub mod mock;
-pub mod vocab;
-pub mod zeroshot;
 #[cfg(feature = "clip")]
 pub mod clip;
+pub mod mock;
+pub mod preprocess;
+pub mod vocab;
+pub mod zeroshot;
 
+pub use mock::MockEnricher;
 pub use vocab::Vocabulary;
-pub use zeroshot::{Suggestions, ZeroShot};
+pub use zeroshot::{Suggestions, ZeroShot, ZeroShotParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
@@ -33,9 +35,21 @@ pub trait Enricher: Send + Sync {
     /// Identifies the embedding space; stored next to every embedding so a model
     /// change triggers re-enrichment.
     fn model_id(&self) -> &str;
+    /// Identifies the image tower alone. Two enrichers with the same
+    /// `image_model_id` produce identical image embeddings, so switching only
+    /// the text encoder (`clip` <-> `multilingual`) does not require
+    /// re-embedding images. Defaults to [`Enricher::model_id`].
+    fn image_model_id(&self) -> &str {
+        self.model_id()
+    }
     fn dim(&self) -> usize;
     fn embed_image(&self, rgba: &image::RgbaImage) -> Result<Vec<f32>, AiError>;
     fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError>;
+    /// Batch form of [`Enricher::embed_text`]; backends override it when
+    /// batching is faster (CLIP does). Output order matches input order.
+    fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, AiError> {
+        texts.iter().map(|t| self.embed_text(t)).collect()
+    }
     /// Free-text caption, for backends that can produce one (none in v1).
     fn caption(&self, _rgba: &image::RgbaImage) -> Result<Option<String>, AiError> {
         Ok(None)
@@ -51,6 +65,134 @@ pub enum TextEncoderKind {
     /// mean pooling + dense 768->512), aligned to the CLIP image space.
     Multilingual,
 }
+
+impl TextEncoderKind {
+    /// The [`Enricher::model_id`] of a [`clip::ClipEnricher`] using this text encoder.
+    pub fn model_id(self) -> &'static str {
+        match self {
+            TextEncoderKind::Clip => MODEL_ID_CLIP,
+            TextEncoderKind::Multilingual => MODEL_ID_MULTILINGUAL,
+        }
+    }
+}
+
+/// Image tower id (see [`Enricher::image_model_id`]).
+pub const IMAGE_MODEL_ID: &str = "clip-vit-b32";
+/// CLIP ViT-B/32 image tower + OpenAI CLIP text tower.
+pub const MODEL_ID_CLIP: &str = "clip-vit-b32+clip-text";
+/// CLIP ViT-B/32 image tower + clip-ViT-B-32-multilingual-v1 text model.
+pub const MODEL_ID_MULTILINGUAL: &str = "clip-vit-b32+mclip-v1";
+/// Embedding dimension of both CLIP configurations.
+pub const CLIP_DIM: usize = 512;
+
+/// File layout below `[ai] model_dir` (docs/ai.md). `scripts/fetch-models.sh`
+/// and `nix/models.nix` produce exactly this.
+pub mod layout {
+    /// CLIP ViT-B/32 vision tower, input `pixel_values` `[N,3,224,224]`, output `image_embeds` `[N,512]`.
+    pub const VISION: &str = "clip-vit-b32/vision.onnx";
+    /// CLIP ViT-B/32 text tower, input `input_ids` `[N,L<=77]`, output `text_embeds` `[N,512]`.
+    pub const CLIP_TEXT: &str = "clip-vit-b32/text.onnx";
+    /// CLIP byte-level BPE tokenizer (Hugging Face `tokenizer.json`).
+    pub const CLIP_TOKENIZER: &str = "clip-vit-b32/tokenizer.json";
+    /// Multilingual DistilBERT, inputs `input_ids`/`attention_mask`, output `last_hidden_state` `[N,L,768]`.
+    pub const MCLIP_MODEL: &str = "multilingual/model.onnx";
+    /// Multilingual WordPiece tokenizer (Hugging Face `tokenizer.json`).
+    pub const MCLIP_TOKENIZER: &str = "multilingual/tokenizer.json";
+    /// Dense 768->512 projection (`linear.weight` `[512,768]`, no bias, identity activation).
+    pub const MCLIP_DENSE: &str = "multilingual/dense.safetensors";
+}
+
+impl TextEncoderKind {
+    /// Paths (relative to the model dir) that this configuration needs.
+    pub fn required_files(self) -> &'static [&'static str] {
+        match self {
+            TextEncoderKind::Clip => &[layout::VISION, layout::CLIP_TEXT, layout::CLIP_TOKENIZER],
+            TextEncoderKind::Multilingual => &[
+                layout::VISION,
+                layout::MCLIP_MODEL,
+                layout::MCLIP_TOKENIZER,
+                layout::MCLIP_DENSE,
+            ],
+        }
+    }
+
+    /// Download sources of [`TextEncoderKind::required_files`].
+    pub fn model_files(self) -> Vec<&'static ModelFile> {
+        let req = self.required_files();
+        MODEL_FILES.iter().filter(|f| req.contains(&f.path)).collect()
+    }
+}
+
+/// Where a model file comes from (pinned Hugging Face revision) and its
+/// sha256, for `fetch-models` style downloaders. Same table as
+/// `scripts/fetch-models.sh` and `nix/models.nix`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelFile {
+    /// Path below the model dir ([`layout`]).
+    pub path: &'static str,
+    pub url: &'static str,
+    /// Lowercase hex.
+    pub sha256: &'static str,
+    pub size: u64,
+}
+
+macro_rules! xenova {
+    ($file:literal) => {
+        concat!(
+            "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523/",
+            $file
+        )
+    };
+}
+macro_rules! mclip {
+    ($file:literal) => {
+        concat!(
+            "https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/58edf8cada9e398793dca955574a48cbb7f18be2/",
+            $file
+        )
+    };
+}
+
+/// Every model file of both configurations (docs/ai.md explains the choice of
+/// fp32 CLIP towers and the qint8 multilingual model).
+pub const MODEL_FILES: [ModelFile; 6] = [
+    ModelFile {
+        path: layout::VISION,
+        url: xenova!("onnx/vision_model.onnx"),
+        sha256: "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40",
+        size: 351_685_709,
+    },
+    ModelFile {
+        path: layout::CLIP_TEXT,
+        url: xenova!("onnx/text_model.onnx"),
+        sha256: "3f6571f5bad13a97c469c1622e1cfc4d9aef78b79fdbfcff804ca357bfada8cc",
+        size: 254_058_553,
+    },
+    ModelFile {
+        path: layout::CLIP_TOKENIZER,
+        url: xenova!("tokenizer.json"),
+        sha256: "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd",
+        size: 2_224_119,
+    },
+    ModelFile {
+        path: layout::MCLIP_MODEL,
+        url: mclip!("onnx/model_qint8_avx512.onnx"),
+        sha256: "3bed77e83926519660b5c0833cb3321cfde952331edec4f7d501c7d384b8a8a7",
+        size: 135_336_307,
+    },
+    ModelFile {
+        path: layout::MCLIP_TOKENIZER,
+        url: mclip!("tokenizer.json"),
+        sha256: "5b4e1a8171c81dfd666ae40265b9530c6e0b3d53923fe8ac493dcc84229adf81",
+        size: 1_961_847,
+    },
+    ModelFile {
+        path: layout::MCLIP_DENSE,
+        url: mclip!("2_Dense/model.safetensors"),
+        sha256: "d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74",
+        size: 1_572_984,
+    },
+];
 
 #[derive(Debug, Clone)]
 pub struct ClipOptions {
@@ -80,11 +222,174 @@ pub fn to_blob(v: &[f32]) -> Vec<u8> {
 }
 
 pub fn from_blob(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
 }
 
 /// Expected files for `opts` that are missing (for `check-config` / startup errors).
 pub fn missing_model_files(model_dir: &Path, text_encoder: TextEncoderKind) -> Vec<PathBuf> {
-    let _ = (model_dir, text_encoder);
-    todo!("ai agent")
+    text_encoder
+        .required_files()
+        .iter()
+        .map(|rel| model_dir.join(rel))
+        .filter(|p| !p.is_file())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blob_round_trip() {
+        let v = vec![0.0f32, -1.5, 3.25, f32::MIN_POSITIVE, 1e-7, f32::MAX];
+        let b = to_blob(&v);
+        assert_eq!(b.len(), v.len() * 4);
+        assert_eq!(&b[4..8], &(-1.5f32).to_le_bytes());
+        assert_eq!(from_blob(&b), v);
+        // A trailing partial chunk is ignored rather than misread.
+        let mut b2 = b.clone();
+        b2.push(0xff);
+        assert_eq!(from_blob(&b2), v);
+        assert!(from_blob(&[]).is_empty());
+    }
+
+    #[test]
+    fn normalise_and_cosine() {
+        let mut a = vec![3.0, 4.0];
+        l2_normalize(&mut a);
+        assert!((a[0] - 0.6).abs() < 1e-6 && (a[1] - 0.8).abs() < 1e-6);
+        assert!((cosine(&a, &a) - 1.0).abs() < 1e-6);
+        let mut z = vec![0.0, 0.0];
+        l2_normalize(&mut z);
+        assert_eq!(z, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn missing_files_follow_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let all = missing_model_files(dir.path(), TextEncoderKind::Clip);
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&dir.path().join("clip-vit-b32/vision.onnx")));
+        assert_eq!(missing_model_files(dir.path(), TextEncoderKind::Multilingual).len(), 4);
+
+        for rel in [layout::VISION, layout::CLIP_TEXT, layout::CLIP_TOKENIZER] {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"x").unwrap();
+        }
+        assert!(missing_model_files(dir.path(), TextEncoderKind::Clip).is_empty());
+        let ml = missing_model_files(dir.path(), TextEncoderKind::Multilingual);
+        assert_eq!(
+            ml,
+            vec![
+                dir.path().join(layout::MCLIP_MODEL),
+                dir.path().join(layout::MCLIP_TOKENIZER),
+                dir.path().join(layout::MCLIP_DENSE)
+            ]
+        );
+        // A directory where a file is expected counts as missing.
+        std::fs::create_dir_all(dir.path().join(layout::MCLIP_MODEL)).unwrap();
+        assert!(missing_model_files(dir.path(), TextEncoderKind::Multilingual)
+            .contains(&dir.path().join(layout::MCLIP_MODEL)));
+    }
+
+    #[test]
+    fn model_file_table_covers_layout() {
+        let mut all: Vec<&str> = TextEncoderKind::Clip.required_files().to_vec();
+        all.extend(TextEncoderKind::Multilingual.required_files());
+        all.sort();
+        all.dedup();
+        let mut table: Vec<&str> = MODEL_FILES.iter().map(|f| f.path).collect();
+        table.sort();
+        assert_eq!(all, table);
+        assert_eq!(TextEncoderKind::Clip.model_files().len(), 3);
+        assert_eq!(TextEncoderKind::Multilingual.model_files().len(), 4);
+        for f in MODEL_FILES {
+            assert_eq!(f.sha256.len(), 64);
+            assert!(f
+                .sha256
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+            assert!(f.url.starts_with("https://huggingface.co/") && f.url.contains("/resolve/"));
+        }
+    }
+
+    /// `sha256-<base64>` as used by `pkgs.fetchurl { hash }`.
+    fn sri(hex: &str) -> String {
+        const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        let mut out = String::from("sha256-");
+        for c in bytes.chunks(3) {
+            let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            for i in 0..4 {
+                if i <= c.len() {
+                    out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sri_encoding() {
+        assert_eq!(
+            sri("fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40"),
+            "sha256-/W4UAqWIJ50XI8dTTUvLpbwLFLR9+rDkb4xHuCcNfUA="
+        );
+    }
+
+    /// The fetch script and the Nix expression must list the same files and
+    /// hashes. Skipped when the repository files are not available (e.g. a
+    /// Nix build with a Rust-only source filter).
+    #[test]
+    fn model_file_table_matches_script_and_nix() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (Ok(script), Ok(nix)) = (
+            std::fs::read_to_string(root.join("scripts/fetch-models.sh")),
+            std::fs::read_to_string(root.join("nix/models.nix")),
+        ) else {
+            eprintln!("scripts/ or nix/ not present; skipping");
+            return;
+        };
+        for f in MODEL_FILES {
+            let line = script
+                .lines()
+                .find(|l| l.split_whitespace().nth(1) == Some(f.path))
+                .unwrap_or_else(|| panic!("{} missing from fetch-models.sh", f.path));
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(cols[3], f.sha256, "{}", f.path);
+            assert_eq!(cols[4], f.size.to_string(), "{}", f.path);
+            let file = f.url.rsplit_once("/resolve/").unwrap().1.split_once('/').unwrap().1;
+            assert!(cols[2].ends_with(file), "{} url {}", f.path, cols[2]);
+            assert!(script.contains(f.url.split("/resolve/").next().unwrap()));
+            assert!(script.contains(f.url.rsplit_once("/resolve/").unwrap().1.split('/').next().unwrap()));
+
+            assert!(
+                nix.contains(&format!("\"{}\"", f.path)),
+                "{} missing from models.nix",
+                f.path
+            );
+            assert!(
+                nix.contains(&format!("\"{}\"", sri(f.sha256))),
+                "{} hash in models.nix",
+                f.path
+            );
+            assert!(nix.contains(&format!("/{file}\"")), "{} url in models.nix", f.path);
+        }
+    }
+
+    #[test]
+    fn model_ids() {
+        assert_eq!(TextEncoderKind::Clip.model_id(), "clip-vit-b32+clip-text");
+        assert_eq!(TextEncoderKind::Multilingual.model_id(), "clip-vit-b32+mclip-v1");
+        assert!(MODEL_ID_CLIP.starts_with(IMAGE_MODEL_ID));
+        assert!(MODEL_ID_MULTILINGUAL.starts_with(IMAGE_MODEL_ID));
+    }
 }

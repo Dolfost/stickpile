@@ -2,13 +2,17 @@
 //! perceptual hashes and the quality score. Everything here is blocking; the
 //! server calls it from `spawn_blocking`.
 //!
-//! Security rules (docs/security.md): the format comes from magic bytes, never
-//! the extension; every still/animation is fully decoded under [`Limits`]
-//! before it is accepted; the stored original is rewritten (PNG/GIF
-//! re-encoded losslessly, JPEG/WebP rebuilt from whitelisted segments/chunks)
-//! so no metadata or trailing payload survives; ffmpeg/ffprobe only ever run
-//! with fixed arguments on server-generated paths, a timeout, and
-//! `-protocol_whitelist file`.
+//! Security rules (docs/security.md, details in docs/media.md): the format
+//! comes from magic bytes, never the extension; every still/animation is
+//! fully decoded under [`Limits`] before it is accepted; the stored original
+//! is rewritten (PNG/GIF re-encoded losslessly, JPEG/WebP rebuilt from
+//! whitelisted segments/chunks, videos remuxed without metadata) so no
+//! metadata or trailing payload survives; ffmpeg/ffprobe only ever run with
+//! fixed arguments on server-generated paths inside [`Tools::tmp_dir`], a
+//! forced demuxer, `-protocol_whitelist file` (`pipe` for raw frames we
+//! decoded ourselves), a cleared environment and a timeout.
+//!
+//! The quality score is documented in docs/quality.md.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,6 +21,15 @@ pub use stickpile_api::{MediaFormat, MediaKind, QualityComponent, QualityReport,
 
 pub mod hash;
 pub mod quality;
+
+mod grey;
+mod jpeg;
+mod raster;
+mod sniff;
+mod tools;
+mod variants;
+mod video;
+mod webp;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MediaError {
@@ -43,7 +56,12 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { max_bytes: 50 << 20, max_pixels: 40_000_000, max_frames: 3000, max_video_ms: 120_000 }
+        Limits {
+            max_bytes: 50 << 20,
+            max_pixels: 40_000_000,
+            max_frames: 3000,
+            max_video_ms: 120_000,
+        }
     }
 }
 
@@ -107,15 +125,54 @@ pub struct IngestOptions {
 }
 
 /// Magic-byte sniffing. `None` for anything not in [`MediaFormat`].
+///
+/// MP4 means an ISO-BMFF `ftyp` box with a video brand (HEIF/AVIF brands are
+/// rejected); WebM means an EBML header whose DocType is `webm` (generic
+/// Matroska is rejected).
 pub fn sniff(bytes: &[u8]) -> Option<MediaFormat> {
-    let _ = bytes;
-    todo!("media agent")
+    sniff::sniff(bytes)
 }
 
 /// Validate, sanitise and analyse an upload.
+///
+/// Order: size limit, sha256 of the bytes as uploaded, magic-byte sniff,
+/// format-specific sanitising (which fully decodes the stored result under
+/// `opts.limits`), hashes and quality on the representative frame, thumbnail.
 pub fn ingest(bytes: &[u8], opts: &IngestOptions, tools: &Tools) -> Result<Ingested, MediaError> {
-    let _ = (bytes, opts, tools);
-    todo!("media agent")
+    let limits = &opts.limits;
+    if bytes.len() as u64 > limits.max_bytes {
+        return Err(MediaError::TooLarge(format!(
+            "{} bytes, limit {}",
+            bytes.len(),
+            limits.max_bytes
+        )));
+    }
+    let sha256 = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(bytes));
+    let format = sniff(bytes).ok_or(MediaError::Unsupported)?;
+    let (original, probe, frame) = match format {
+        MediaFormat::Mp4 | MediaFormat::Webm => {
+            let v = video::ingest(bytes, format, limits, tools)?;
+            (v.original, v.probe, v.frame)
+        }
+        _ => {
+            let s = raster::sanitise(bytes, format, limits)?;
+            (s.original, s.probe, s.frame)
+        }
+    };
+    let phash = hash::phash(&frame);
+    let dhash = hash::dhash(&frame);
+    let quality = quality::assess(bytes, &probe, &frame, opts.recommended_px);
+    let thumb = variants::thumb(&frame, opts.thumb_px)?;
+    Ok(Ingested {
+        sha256,
+        probe,
+        original,
+        phash,
+        dhash,
+        quality,
+        thumb,
+        frame,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -127,14 +184,42 @@ pub struct VariantOptions {
 /// item's kind (see [`Variant`] docs). `original` is the stored sanitised file.
 /// Variants that cannot meet their constraints are skipped with a warning,
 /// not an error.
-pub fn generate_variants(original: &Path, probe: &Probe, opts: &VariantOptions, tools: &Tools) -> Result<Vec<Rendition>, MediaError> {
-    let _ = (original, probe, opts, tools);
-    todo!("media agent")
+///
+/// Renditions come back sorted by [`Variant`]. See docs/media.md for the
+/// constraints of each variant.
+pub fn generate_variants(
+    original: &Path,
+    probe: &Probe,
+    opts: &VariantOptions,
+    tools: &Tools,
+) -> Result<Vec<Rendition>, MediaError> {
+    variants::generate(original, probe, opts, tools)
 }
 
 /// Decode a still (or first frame) for re-processing (e.g. Telegram import of
-/// a WebP sticker). Enforces `limits`.
+/// a WebP sticker). Enforces `limits` (`max_bytes`, `max_pixels`; the
+/// dimensions are read from the header before decoding). JPEG EXIF
+/// orientation is applied.
 pub fn decode_frame(bytes: &[u8], limits: &Limits) -> Result<image::RgbaImage, MediaError> {
-    let _ = (bytes, limits);
-    todo!("media agent")
+    if bytes.len() as u64 > limits.max_bytes {
+        return Err(MediaError::TooLarge(format!(
+            "{} bytes, limit {}",
+            bytes.len(),
+            limits.max_bytes
+        )));
+    }
+    let format = sniff(bytes).ok_or(MediaError::Unsupported)?;
+    match format {
+        MediaFormat::Mp4 | MediaFormat::Webm => Err(MediaError::Unsupported),
+        MediaFormat::Gif | MediaFormat::Webp => raster::first_frame(bytes, format, limits),
+        MediaFormat::Jpeg => {
+            let mut img = raster::decode_still(bytes, format, limits)?;
+            let orientation = jpeg::parse(bytes).ok().and_then(|p| jpeg::exif_orientation(&p));
+            if let Some(o) = orientation.and_then(image::metadata::Orientation::from_exif) {
+                img.apply_orientation(o);
+            }
+            Ok(img.to_rgba8())
+        }
+        MediaFormat::Png => Ok(raster::decode_still(bytes, format, limits)?.to_rgba8()),
+    }
 }

@@ -17,5 +17,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
+# Raw PNG decode/encode (palette, bit depth and tRNS kept as-is); same
+# version the image crate already pulls in.
+png = "0.18"
 
 [dev-dependencies]
