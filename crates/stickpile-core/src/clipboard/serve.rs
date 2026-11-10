@@ -76,10 +76,10 @@ pub enum Backend {
 /// only compiled-in backends.
 pub fn detect_backend(wayland_display: Option<&str>, display: Option<&str>) -> Option<Backend> {
     let set = |v: Option<&str>| v.is_some_and(|s| !s.is_empty());
-    if cfg!(feature = "wayland") && set(wayland_display) {
+    if cfg!(wl_backend) && set(wayland_display) {
         return Some(Backend::Wayland);
     }
-    if cfg!(feature = "x11") && set(display) {
+    if cfg!(x11_backend) && set(display) {
         return Some(Backend::X11);
     }
     None
@@ -223,12 +223,12 @@ pub fn serve_offers(offers: Vec<ClipOffer>, ready: impl FnOnce()) -> Result<()> 
         }
     };
     match backend {
-        #[cfg(feature = "wayland")]
+        #[cfg(wl_backend)]
         Backend::Wayland => match super::wayland::serve(offers.clone(), &mut signal) {
             Ok(()) => Ok(()),
             Err(super::wayland::WaylandError::Unsupported(msg)) => {
                 let has_x = std::env::var("DISPLAY").is_ok_and(|d| !d.is_empty());
-                if cfg!(feature = "x11") && has_x {
+                if cfg!(x11_backend) && has_x {
                     tracing::debug!("{msg}; falling back to X11");
                     serve_x11(offers, &mut signal)
                 } else {
@@ -237,7 +237,7 @@ pub fn serve_offers(offers: Vec<ClipOffer>, ready: impl FnOnce()) -> Result<()> 
             }
             Err(super::wayland::WaylandError::Other(msg)) => Err(CoreError::Other(msg)),
         },
-        #[cfg(feature = "x11")]
+        #[cfg(x11_backend)]
         Backend::X11 => serve_x11(offers, &mut signal),
         #[allow(unreachable_patterns)]
         _ => {
@@ -247,12 +247,12 @@ pub fn serve_offers(offers: Vec<ClipOffer>, ready: impl FnOnce()) -> Result<()> 
     }
 }
 
-#[cfg(feature = "x11")]
+#[cfg(x11_backend)]
 fn serve_x11(offers: Vec<ClipOffer>, ready: &mut dyn FnMut()) -> Result<()> {
     super::x11::serve(offers, ready)
 }
 
-#[cfg(all(feature = "wayland", not(feature = "x11")))]
+#[cfg(all(wl_backend, not(x11_backend)))]
 fn serve_x11(_offers: Vec<ClipOffer>, _ready: &mut dyn FnMut()) -> Result<()> {
     Err(CoreError::Other("X11 clipboard support not compiled in".into()))
 }

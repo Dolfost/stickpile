@@ -36,10 +36,17 @@ hex.workspace = true
 image.workspace = true
 bytes.workspace = true
 futures.workspace = true
+axum = { workspace = true, optional = true }
+
+# The CLI clipboard backends exist only on Linux; build.rs turns the
+# `wayland`/`x11` features into `wl_backend`/`x11_backend` cfgs there, so the
+# crate still builds for macOS and Windows with default features.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 wl-clipboard-rs = { workspace = true, optional = true }
 x11rb = { workspace = true, optional = true }
-axum = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

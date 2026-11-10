@@ -22,9 +22,9 @@ use image::{AnimationDecoder, ImageFormat};
 use crate::{CoreError, Result};
 
 pub mod serve;
-#[cfg(feature = "wayland")]
+#[cfg(wl_backend)]
 mod wayland;
-#[cfg(feature = "x11")]
+#[cfg(x11_backend)]
 pub mod x11;
 
 /// One MIME representation offered on the clipboard.
@@ -187,9 +187,19 @@ fn animation_to_gif(src: &[u8], from: ImageFormat) -> Result<Vec<u8>, String> {
 /// `file:///…` with every byte outside RFC 3986 unreserved characters and `/`
 /// percent-encoded (spaces, `#`, `%`, non-ASCII, ...).
 pub fn file_uri(path: &Path) -> String {
-    use std::os::unix::ffi::OsStrExt;
+    #[cfg(not(unix))]
+    if let Ok(url) = url::Url::from_file_path(path) {
+        return url.into();
+    }
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let bytes = path.as_os_str().as_encoded_bytes();
     let mut s = String::from("file://");
-    for &b in path.as_os_str().as_bytes() {
+    for &b in bytes {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
             s.push(b as char);
         } else {
