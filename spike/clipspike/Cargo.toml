@@ -1,0 +1,13 @@
+[package]
+name = "clipspike"
+description = "Phase 0 throwaway: put media on the clipboard in configurable MIME combinations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gtk.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+wl-clipboard-rs.workspace = true

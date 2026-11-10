@@ -1,0 +1,40 @@
+[package]
+name = "stickpile-core"
+description = "Shared client library: API client, token storage, offline cache, usage queue, clipboard offers, quick-search model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["wayland", "x11"]
+# CLI clipboard backends (the GTK client uses GDK instead).
+wayland = ["dep:wl-clipboard-rs"]
+x11 = ["dep:x11rb"]
+
+[dependencies]
+stickpile-api.workspace = true
+stickpile-search.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+directories.workspace = true
+url.workspace = true
+rand.workspace = true
+data-encoding.workspace = true
+sha2.workspace = true
+hex.workspace = true
+image.workspace = true
+bytes.workspace = true
+futures.workspace = true
+wl-clipboard-rs = { workspace = true, optional = true }
+x11rb = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+axum.workspace = true

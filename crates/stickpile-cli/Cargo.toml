@@ -1,0 +1,24 @@
+[package]
+name = "stickpile-cli"
+description = "stickpile command-line client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stickpile"
+path = "src/main.rs"
+
+[dependencies]
+stickpile-api.workspace = true
+stickpile-core = { workspace = true, features = ["wayland", "x11"] }
+stickpile-setfmt.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

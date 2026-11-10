@@ -1,0 +1,65 @@
+# stickpile server configuration. Every key is optional; shown values are
+# examples (see docs/configuration.md for defaults and meaning).
+
+[server]
+listen = "127.0.0.1:8080"
+public_url = "https://stickpile.example.ts.net"
+data_dir = "/var/lib/stickpile"
+log = "info"
+secure_cookies = true
+
+[trusted_proxy]
+# `tailscale serve --https=443 unix:/var/lib/stickpile/tailscale.sock`
+socket = "/var/lib/stickpile/tailscale.sock"
+socket_mode = "0660"
+
+[auth]
+registration = "invite"
+tailscale_autocreate = true
+tailscale_admins = ["alice@github"]
+session_ttl_days = 30
+totp_issuer = "stickpile"
+initial_admin_username = "admin"
+initial_admin_password_file = "/run/secrets/stickpile-admin-password"
+
+[limits]
+max_upload_mb = 50
+max_request_mb = 500
+max_pixels = 40000000
+max_animation_frames = 3000
+max_video_seconds = 120
+login_per_minute = 10
+upload_per_minute = 120
+
+[media]
+ffmpeg = "ffmpeg"
+ffprobe = "ffprobe"
+ffmpeg_timeout_secs = 120
+thumb_px = 256
+discord_gif_max_mb = 10
+workers = 2
+default_recommended_px = 512
+near_duplicate_distance = 8
+
+[ai]
+enabled = true
+model_dir = "/var/lib/stickpile/models"
+text_encoder = "multilingual"
+threads = 2
+max_keywords = 5
+max_emojis = 3
+
+[telegram]
+enabled = true
+bot_token_file = "/run/secrets/stickpile-telegram-bot-token"
+api_url = "https://api.telegram.org"
+default_owner_user_id = 123456789
+
+[git]
+enabled = true
+pull_interval_minutes = 60
+allowed_schemes = ["https"]
+https_username = "x-access-token"
+author_name = "stickpile"
+author_email = "stickpile@localhost"
+max_repo_mb = 1024

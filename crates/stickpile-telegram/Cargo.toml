@@ -1,0 +1,17 @@
+[package]
+name = "stickpile-telegram"
+description = "Telegram Bot API client for sticker pack import and export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

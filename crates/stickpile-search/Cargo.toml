@@ -1,0 +1,11 @@
+[package]
+name = "stickpile-search"
+description = "In-memory hybrid (lexical + vector) search index shared by server and offline clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+stickpile-api.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true

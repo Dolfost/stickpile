@@ -1,0 +1,21 @@
+[package]
+name = "stickpile-media"
+description = "Media sniffing, sanitising, variants, perceptual hashing and quality scoring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+stickpile-api.workspace = true
+image.workspace = true
+gif.workspace = true
+webp.workspace = true
+sha2.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]

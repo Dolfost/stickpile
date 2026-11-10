@@ -1,0 +1,108 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stickpile-api",
+    "crates/stickpile-search",
+    "crates/stickpile-setfmt",
+    "crates/stickpile-media",
+    "crates/stickpile-ai",
+    "crates/stickpile-telegram",
+    "crates/stickpile-gitpack",
+    "crates/stickpile-server",
+    "crates/stickpile-core",
+    "crates/stickpile-cli",
+    "crates/stickpile-desktop",
+    "spike/clipspike",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Dolfost/stickpile"
+authors = ["Vladyslav Rehan <rehanvladyslav@gmail.com>"]
+
+[workspace.dependencies]
+# internal
+stickpile-api = { path = "crates/stickpile-api" }
+stickpile-search = { path = "crates/stickpile-search" }
+stickpile-setfmt = { path = "crates/stickpile-setfmt" }
+stickpile-media = { path = "crates/stickpile-media" }
+stickpile-ai = { path = "crates/stickpile-ai", default-features = false }
+stickpile-telegram = { path = "crates/stickpile-telegram" }
+stickpile-gitpack = { path = "crates/stickpile-gitpack" }
+stickpile-core = { path = "crates/stickpile-core", default-features = false }
+
+# common
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+data-encoding = "2"
+tempfile = "3"
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+bytes = "1"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+directories = "5"
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+
+# server
+axum = { version = "0.8", features = ["multipart", "macros", "ws"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+tower-http = { version = "0.6", features = ["trace", "fs", "set-header", "limit", "compression-gzip", "request-id", "util"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "http1", "http2"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+maud = { version = "0.27", features = ["axum"] }
+utoipa = { version = "5", features = ["axum_extras"] }
+argon2 = "0.5"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+governor = "0.8"
+subtle = "2"
+tar = "0.4"
+mime_guess = "2"
+
+# http client
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
+
+# media
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+gif = "0.13"
+webp = "0.3"
+
+# ai
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
+ndarray = "0.16"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+safetensors = "0.4"
+
+# git
+git2 = "0.20"
+
+# clients
+rusqlite = { version = "0.32", features = ["bundled"] }
+url = "2"
+gtk = { package = "gtk4", version = "0.10", features = ["v4_16"] }
+adw = { package = "libadwaita", version = "0.8", features = ["v1_6"] }
+wl-clipboard-rs = "0.9"
+x11rb = "0.13"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,61 @@
+[package]
+name = "stickpile-server"
+description = "stickpile server: REST API, web UI, media pipeline, search, imports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stickpile-server"
+path = "src/main.rs"
+
+[features]
+default = ["clip"]
+clip = ["stickpile-ai/clip"]
+
+[dependencies]
+stickpile-api = { workspace = true, features = ["openapi"] }
+stickpile-search.workspace = true
+stickpile-setfmt.workspace = true
+stickpile-media.workspace = true
+stickpile-ai.workspace = true
+stickpile-telegram.workspace = true
+stickpile-gitpack.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+futures.workspace = true
+bytes.workspace = true
+clap.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+data-encoding.workspace = true
+time.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+sqlx.workspace = true
+maud.workspace = true
+utoipa.workspace = true
+argon2.workspace = true
+totp-rs.workspace = true
+governor.workspace = true
+subtle.workspace = true
+tar.workspace = true
+mime_guess.workspace = true
+image.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["cookies"] }
+tempfile.workspace = true
