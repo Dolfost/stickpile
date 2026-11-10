@@ -116,7 +116,10 @@ pub struct Filter<T> {
 
 impl<T> Default for Filter<T> {
     fn default() -> Self {
-        Filter { any: Vec::new(), none: Vec::new() }
+        Filter {
+            any: Vec::new(),
+            none: Vec::new(),
+        }
     }
 }
 
@@ -164,7 +167,11 @@ impl Query {
             }
             if let Some((key, cmp, val)) = split_comparison(&tok).filter(|_| !neg) {
                 let ok = match key.as_str() {
-                    "q" | "quality" => val.parse::<u8>().ok().filter(|v| *v <= 100).map(|v| q.quality.push((cmp, v))),
+                    "q" | "quality" => val
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|v| *v <= 100)
+                        .map(|v| q.quality.push((cmp, v))),
                     "likes" | "like" => val.parse::<u64>().ok().map(|v| q.likes.push((cmp, v))),
                     "copies" | "used" => val.parse::<u64>().ok().map(|v| q.copies.push((cmp, v))),
                     _ => None,
@@ -218,7 +225,8 @@ impl Query {
     }
 
     pub fn quality_ok(&self, quality: Option<u8>) -> bool {
-        self.quality.is_empty() || quality.is_some_and(|v| self.quality.iter().all(|(c, n)| c.test(v as u64, *n as u64)))
+        self.quality.is_empty()
+            || quality.is_some_and(|v| self.quality.iter().all(|(c, n)| c.test(v as u64, *n as u64)))
     }
     pub fn likes_ok(&self, likes: u64) -> bool {
         self.likes.iter().all(|(c, n)| c.test(likes, *n))
@@ -372,7 +380,9 @@ mod tests {
 
     #[test]
     fn parses_full_syntax() {
-        let q = Query::parse(r#"human e:😂 set:Cats vibe:tired q>70 type:gif tag:reaction -tag:nsfw likes>=2 sort:likes "big chungus""#);
+        let q = Query::parse(
+            r#"human e:😂 set:Cats vibe:tired q>70 type:gif tag:reaction -tag:nsfw likes>=2 sort:likes "big chungus""#,
+        );
         assert_eq!(q.text, vec!["human", "big chungus"]);
         assert_eq!(q.emojis.any, vec!["😂"]);
         assert_eq!(q.sets.any, vec!["cats"]);
@@ -410,7 +420,10 @@ mod tests {
 
     #[test]
     fn filter_accepts() {
-        let f = Filter { any: vec!["a".to_string()], none: vec!["b".to_string()] };
+        let f = Filter {
+            any: vec!["a".to_string()],
+            none: vec!["b".to_string()],
+        };
         assert!(f.accepts(|v| v == "a"));
         assert!(!f.accepts(|v| v == "b" || v == "a"));
         assert!(Filter::<String>::default().accepts(|_| false));

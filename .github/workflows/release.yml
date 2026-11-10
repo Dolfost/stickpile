@@ -1,0 +1,266 @@
+# Release on a `v*` tag (e.g. v0.2.0; must match the workspace version).
+#
+#   linux      server, CLI, desktop for x86_64 and aarch64, built by Nix and
+#              repackaged to run outside Nix (see "Linux tarballs" below)
+#   macos      CLI + server for arm64 and x86_64, built by cargo
+#   windows    CLI, built by cargo (best effort)
+#   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
+#              built by Nix and pushed with skopeo
+#   android    post-v1 placeholder (disabled)
+#   release    GitHub release with every artifact and SHA256SUMS
+#
+# Linux tarballs: Nix binaries point at /nix/store for their loader and
+# libraries. The release job rewrites the ELF interpreter to the distribution's
+# (/lib64/ld-linux-x86-64.so.2, /lib/ld-linux-aarch64.so.1) and drops the store
+# RUNPATH, so they run against system libraries. README.txt in each tarball
+# lists the shared libraries every binary needs and the minimum glibc. On
+# NixOS or with Nix, use the flake instead (`nix profile install
+# github:Dolfost/stickpile#stickpile-cli`).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  IMAGE: ghcr.io/dolfost/stickpile
+
+jobs:
+  linux:
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            interpreter: /lib64/ld-linux-x86-64.so.2
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            interpreter: /lib/ld-linux-aarch64.so.1
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Tag matches the workspace version
+        run: |
+          version="$(nix eval --raw .#stickpile-server.version)"
+          [ "v$version" = "$TAG" ] || { echo "tag $TAG != workspace version $version"; exit 1; }
+      - name: Build
+        run: |
+          nix build -L --out-link server .#stickpile-server
+          nix build -L --out-link cli .#stickpile-cli
+          nix build -L --out-link desktop .#stickpile-desktop
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="stickpile-${TAG}-${{ matrix.arch }}-linux"
+          mkdir -p "$name/bin" "$name/share" dist
+          # The real ELF files, not the Nix wrappers (makeBinaryWrapper /
+          # wrapGAppsHook4 keep them as .<name>-wrapped).
+          for pair in server:stickpile-server cli:stickpile desktop:stickpile-desktop; do
+            link="${pair%%:*}" bin="${pair#*:}"
+            src="$link/bin/.$bin-wrapped"
+            [ -e "$src" ] || src="$link/bin/$bin"
+            install -m755 "$src" "$name/bin/$bin"
+          done
+          cp -rL desktop/share/applications desktop/share/icons "$name/share/" 2>/dev/null || true
+          cp -L server/share/doc/stickpile/config.example.toml "$name/"
+          cp LICENSE* README* "$name/" 2>/dev/null || true
+          patchelf() { nix run --inputs-from . nixpkgs#patchelf -- "$@"; }
+          {
+            echo "stickpile $TAG for ${{ matrix.arch }} Linux (glibc)."
+            echo
+            echo "Runtime: ffmpeg/ffprobe on PATH for videos and animations;"
+            echo "libonnxruntime (ORT_DYLIB_PATH or ai.onnxruntime_library) for AI."
+            echo
+          } > "$name/README.txt"
+          for f in "$name"/bin/*; do
+            patchelf --set-interpreter "${{ matrix.interpreter }}" --remove-rpath "$f"
+            glibc="$(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)"
+            echo "$(basename "$f") needs $glibc or newer and:" >> "$name/README.txt"
+            patchelf --print-needed "$f" | sed 's/^/  /' >> "$name/README.txt"
+          done
+          cat "$name/README.txt"
+          tar -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*
+
+  macos:
+    name: macos (${{ matrix.arch }})
+    # Best effort until the clients are checked on macOS (post-v1).
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+            target: aarch64-apple-darwin
+          # macos-13 (the brief's choice) was retired in December 2025;
+          # macos-15-intel is GitHub's last x86_64 macOS image.
+          - runner: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # libgit2 is vendored here; its ssh transport (libssh2) links the
+      # Homebrew OpenSSL that the runner image ships. The server keeps the
+      # `clip` feature: ort is loaded at runtime (load-dynamic), so nothing
+      # links ONNX Runtime at build time; install it with
+      # `brew install onnxruntime` to enable AI.
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p stickpile-cli -p stickpile-server
+      - name: Package
+        run: |
+          name="stickpile-${TAG}-${{ matrix.arch }}-macos"
+          mkdir -p "$name" dist
+          cp target/${{ matrix.target }}/release/stickpile target/${{ matrix.target }}/release/stickpile-server "$name/"
+          cp crates/stickpile-server/config.example.toml "$name/"
+          printf 'Runtime: brew install ffmpeg (videos, animations), brew install onnxruntime (AI).\n' > "$name/README.txt"
+          tar -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*
+
+  windows:
+    name: windows (x86_64, CLI)
+    # Best effort: the CLI's Wayland/X11 clipboard backends must be gated to
+    # Linux before it builds on Windows.
+    continue-on-error: true
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --locked -p stickpile-cli
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/release/stickpile.exe -DestinationPath "dist/stickpile-$env:TAG-x86_64-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*
+
+  container:
+    name: container (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Build image
+        run: nix build -L --out-link image .#container
+      - name: Push ${{ env.IMAGE }}:${{ env.TAG }}-${{ matrix.arch }}
+        run: |
+          nix run --inputs-from . nixpkgs#skopeo -- copy \
+            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            docker-archive:image "docker://$IMAGE:${TAG#v}-${{ matrix.arch }}"
+
+  container-manifest:
+    name: container (multi-arch tags)
+    needs: container
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create :<version> and :latest
+        run: |
+          v="${TAG#v}"
+          docker buildx imagetools create \
+            --tag "$IMAGE:$v" --tag "$IMAGE:latest" \
+            "$IMAGE:$v-amd64" "$IMAGE:$v-arm64"
+          docker buildx imagetools inspect "$IMAGE:$v"
+
+  android:
+    name: android (post-v1)
+    # Post-v1: the Kotlin app over stickpile-core (UniFFI), a signed APK from a
+    # reproducible Gradle build without proprietary dependencies, and the
+    # F-Droid metadata directory (metadata/, fastlane/) for submission. The
+    # Unexpected Keyboard fork releases from its own repository.
+    if: false
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Android builds start after v1."
+
+  release:
+    name: GitHub release
+    needs: [linux, macos, windows, container-manifest]
+    # macOS and Windows are best effort; Linux and the image are required.
+    if: ${{ !cancelled() && needs.linux.result == 'success' && needs.container-manifest.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<EOF
+          Container image: \`$IMAGE:${TAG#v}\` (also \`:latest\`), linux/amd64 and linux/arm64.
+
+          Nix: \`nix profile install github:Dolfost/stickpile/$TAG#stickpile-cli\`,
+          NixOS module \`nixosModules.default\`, home-manager module \`homeManagerModules.default\`
+          (docs/deployment.md, docs/nix.md).
+          EOF
+          gh release create "$TAG" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "stickpile $TAG" \
+            --notes-file notes.md \
+            --generate-notes \
+            --verify-tag

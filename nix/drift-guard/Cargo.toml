@@ -1,0 +1,22 @@
+# Config drift guard, built and run only by `nix flake check`
+# (checks.config-drift; docs/nix.md). It compiles the real config modules of the
+# server and the client (`#[path]` includes, see src/main.rs) and compares their
+# defaults with what the Nix modules render.
+[package]
+name = "stickpile-config-drift"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-or-later"
+
+# Not a member of the main workspace: its own root. The build copies the main
+# Cargo.lock in, so the versions below resolve to exactly the workspace's.
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+directories = "5"
+stickpile-api = { path = "../../crates/stickpile-api" }

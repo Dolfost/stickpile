@@ -1,0 +1,57 @@
+# stickpile server configuration for the container (stickpile.container).
+# Copy to $STICKPILE_DIR/config.toml. The quadlet mounts it read-only at
+# /etc/stickpile/config.toml and $STICKPILE_DIR/secrets at
+# /run/secrets/stickpile, so every path below is a CONTAINER path.
+# Every key is optional; anything left out takes the server's default
+# (crates/stickpile-server/config.example.toml lists them all).
+# Check it before restarting:
+# 	podman run --rm -v $STICKPILE_DIR/config.toml:/etc/stickpile/config.toml:ro \
+# 		ghcr.io/dolfost/stickpile:latest check-config
+
+[server]
+# Inside the container: listen on all of ITS interfaces; the quadlet publishes
+# the port on the host's loopback only (127.0.0.1:8080).
+listen = "0.0.0.0:8080"
+public_url = "https://stickpile.example.ts.net"
+data_dir = "/var/lib/stickpile"
+log = "info"
+secure_cookies = true
+
+[trusted_proxy]
+# $STICKPILE_DIR/tailscale.sock on the host, the target of
+# 	tailscale serve --service=svc:stickpile --https=443 unix:$STICKPILE_DIR/tailscale.sock
+# Tailscale-User-Login is trusted on this socket only.
+socket = "/var/lib/stickpile/tailscale.sock"
+socket_mode = "0660"
+
+[auth]
+registration = "closed"
+tailscale_autocreate = true
+# Your tailnet login gets the admin role on first sight.
+tailscale_admins = ["you@github"]
+# Bootstrap a local admin on the first start (an empty database only), e.g.
+# for logging in from outside the tailnet:
+# 	mkdir -p $STICKPILE_DIR/secrets && chmod 700 $STICKPILE_DIR/secrets
+# 	openssl rand -base64 24 > $STICKPILE_DIR/secrets/admin-password
+#initial_admin_username = "admin"
+#initial_admin_password_file = "/run/secrets/stickpile/admin-password"
+
+[media]
+# ffmpeg/ffprobe are on the image's PATH.
+workers = 2
+
+[ai]
+# CLIP enrichment needs the models under $STICKPILE_DIR/models
+# (docs/deployment.md, "AI models"). onnxruntime is in the image.
+enabled = false
+model_dir = "/var/lib/stickpile/models"
+text_encoder = "multilingual"
+
+[telegram]
+enabled = false
+#bot_token_file = "/run/secrets/stickpile/telegram-bot-token"
+
+[git]
+enabled = true
+allowed_schemes = ["https"]
+#https_token_file = "/run/secrets/stickpile/git-token"

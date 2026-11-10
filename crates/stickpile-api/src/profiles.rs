@@ -196,15 +196,29 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
         let Some(v) = item.variants.iter().find(|v| v.variant == *want) else {
             continue;
         };
-        let Some(fmt) = format_of_variant(v, item.format) else { continue };
+        let Some(fmt) = format_of_variant(v, item.format) else {
+            continue;
+        };
         if sticker {
             let spec = p.sticker.as_ref().expect("checked");
-            let max = if *want == Variant::TgSticker { spec.static_max_bytes } else { spec.video_max_bytes };
+            let max = if *want == Variant::TgSticker {
+                spec.static_max_bytes
+            } else {
+                spec.video_max_bytes
+            };
             if v.size_bytes > max {
-                last_reason = Some(format!("{} sticker is {} KB, limit {} KB", p.display_name, v.size_bytes / 1024, max / 1024));
+                last_reason = Some(format!(
+                    "{} sticker is {} KB, limit {} KB",
+                    p.display_name,
+                    v.size_bytes / 1024,
+                    max / 1024
+                ));
                 continue;
             }
-            return Ok(Choice { variant: v.clone(), sticker: true });
+            return Ok(Choice {
+                variant: v.clone(),
+                sticker: true,
+            });
         }
         let kind_for_format = match fmt {
             MediaFormat::Mp4 | MediaFormat::Webm if item.kind == MediaKind::Animation => MediaKind::Animation,
@@ -212,7 +226,10 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
             _ => item.kind,
         };
         if !p.accepts(kind_for_format, fmt) {
-            last_reason = Some(format!("{} does not accept {:?} {:?}", p.display_name, kind_for_format, fmt));
+            last_reason = Some(format!(
+                "{} does not accept {:?} {:?}",
+                p.display_name, kind_for_format, fmt
+            ));
             continue;
         }
         if v.size_bytes > p.max_file_bytes {
@@ -231,7 +248,10 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
                 continue;
             }
         }
-        return Ok(Choice { variant: v.clone(), sticker: false });
+        return Ok(Choice {
+            variant: v.clone(),
+            sticker: false,
+        });
     }
     Err(Incompatible(last_reason.unwrap_or_else(|| {
         if sticker {
@@ -247,13 +267,24 @@ mod tests {
     use super::*;
 
     fn v(variant: Variant, size: u64) -> VariantInfo {
-        VariantInfo { variant, mime: String::new(), width: 512, height: 512, size_bytes: size }
+        VariantInfo {
+            variant,
+            mime: String::new(),
+            width: 512,
+            height: 512,
+            size_bytes: size,
+        }
     }
 
     #[test]
     fn still_prefers_original() {
         let vs = [v(Variant::Original, 1000), v(Variant::Png, 2000)];
-        let shape = ItemShape { kind: MediaKind::Still, format: MediaFormat::Jpeg, duration_ms: None, variants: &vs };
+        let shape = ItemShape {
+            kind: MediaKind::Still,
+            format: MediaFormat::Jpeg,
+            duration_ms: None,
+            variants: &vs,
+        };
         let c = choose_variant(TargetApp::Discord, &shape, false).unwrap();
         assert_eq!(c.variant.variant, Variant::Original);
     }
@@ -261,15 +292,29 @@ mod tests {
     #[test]
     fn whatsapp_webp_still_falls_back_to_png() {
         let vs = [v(Variant::Original, 1000), v(Variant::Png, 2000)];
-        let shape = ItemShape { kind: MediaKind::Still, format: MediaFormat::Webp, duration_ms: None, variants: &vs };
+        let shape = ItemShape {
+            kind: MediaKind::Still,
+            format: MediaFormat::Webp,
+            duration_ms: None,
+            variants: &vs,
+        };
         let c = choose_variant(TargetApp::Whatsapp, &shape, false).unwrap();
         assert_eq!(c.variant.variant, Variant::Png);
     }
 
     #[test]
     fn big_gif_falls_back_for_discord() {
-        let vs = [v(Variant::Original, 30 * MIB), v(Variant::DiscordGif, 9 * MIB), v(Variant::Mp4, MIB)];
-        let shape = ItemShape { kind: MediaKind::Animation, format: MediaFormat::Gif, duration_ms: Some(2000), variants: &vs };
+        let vs = [
+            v(Variant::Original, 30 * MIB),
+            v(Variant::DiscordGif, 9 * MIB),
+            v(Variant::Mp4, MIB),
+        ];
+        let shape = ItemShape {
+            kind: MediaKind::Animation,
+            format: MediaFormat::Gif,
+            duration_ms: Some(2000),
+            variants: &vs,
+        };
         let c = choose_variant(TargetApp::Discord, &shape, false).unwrap();
         assert_eq!(c.variant.variant, Variant::DiscordGif);
     }
@@ -277,7 +322,12 @@ mod tests {
     #[test]
     fn telegram_sticker_requires_variant() {
         let vs = [v(Variant::Original, 1000)];
-        let shape = ItemShape { kind: MediaKind::Still, format: MediaFormat::Png, duration_ms: None, variants: &vs };
+        let shape = ItemShape {
+            kind: MediaKind::Still,
+            format: MediaFormat::Png,
+            duration_ms: None,
+            variants: &vs,
+        };
         assert!(choose_variant(TargetApp::Telegram, &shape, true).is_err());
         let vs = [v(Variant::Original, 1000), v(Variant::TgSticker, 100_000)];
         let shape = ItemShape { variants: &vs, ..shape };
@@ -289,7 +339,12 @@ mod tests {
     #[test]
     fn oversized_video_is_incompatible_with_reason() {
         let vs = [v(Variant::Original, 50 * MIB), v(Variant::Mp4, 40 * MIB)];
-        let shape = ItemShape { kind: MediaKind::Video, format: MediaFormat::Mp4, duration_ms: Some(60_000), variants: &vs };
+        let shape = ItemShape {
+            kind: MediaKind::Video,
+            format: MediaFormat::Mp4,
+            duration_ms: Some(60_000),
+            variants: &vs,
+        };
         let err = choose_variant(TargetApp::Discord, &shape, false).unwrap_err();
         assert!(err.0.contains("10 MiB"), "{}", err.0);
     }
