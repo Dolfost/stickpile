@@ -1,9 +1,11 @@
 //! REST paths. `{id}`-style segments use axum 0.8 syntax and are substituted by
 //! clients with [`path`].
 //!
-//! Authentication for every `/api/v1` route except [`AUTH_TOKEN`] and
-//! [`GIT_WEBHOOK`]: `Authorization: Bearer <token>` or the web session cookie
-//! (cookie-authenticated non-GET requests additionally need `X-CSRF-Token`).
+//! Authentication for every `/api/v1` route except [`AUTH_TOKEN`],
+//! [`AUTH_REGISTER`], [`OPENAPI`] and [`GIT_WEBHOOK`]: `Authorization: Bearer
+//! <token>`, the tailnet identity from the trusted `tailscale serve` proxy, or
+//! the web session cookie (cookie-authenticated non-GET requests additionally
+//! need `X-CSRF-Token`). See docs/api.md.
 //! Errors are returned as [`crate::model::ApiError`] JSON with a matching status.
 
 pub const PREFIX: &str = "/api/v1";
@@ -14,8 +16,19 @@ pub const OPENAPI: &str = "/api/v1/openapi.json";
 // --- auth & tokens -----------------------------------------------------------
 /// POST [`crate::model::TokenRequest`] -> [`crate::model::TokenCreated`]. Password (+TOTP) login for API clients.
 pub const AUTH_TOKEN: &str = "/api/v1/auth/token";
+/// POST [`crate::model::RegisterRequest`] -> [`crate::model::User`] (201). Unauthenticated;
+/// obeys the server's registration policy (closed / invite / open).
+pub const AUTH_REGISTER: &str = "/api/v1/auth/register";
 /// GET -> [`crate::model::User`]
 pub const ME: &str = "/api/v1/me";
+/// PUT [`crate::model::ChangePassword`] -> 204. Revokes the caller's other web sessions.
+pub const ME_PASSWORD: &str = "/api/v1/me/password";
+/// POST -> [`crate::model::TotpSetup`]: start TOTP enrolment (pending until confirmed).
+pub const ME_TOTP: &str = "/api/v1/me/totp";
+/// POST [`crate::model::TotpCode`] -> [`crate::model::User`]: confirm enrolment with a current code.
+pub const ME_TOTP_CONFIRM: &str = "/api/v1/me/totp/confirm";
+/// POST [`crate::model::TotpCode`] -> [`crate::model::User`]: disable TOTP (needs a current code).
+pub const ME_TOTP_DISABLE: &str = "/api/v1/me/totp/disable";
 /// GET -> `Vec<ApiToken>`; POST [`crate::model::CreateToken`] -> [`crate::model::TokenCreated`]
 pub const TOKENS: &str = "/api/v1/tokens";
 /// DELETE: revoke

@@ -80,7 +80,7 @@ timeout_secs = 5
 columns = 6
 thumb_px = 128          # >= 32
 hide_on_copy = true
-start_hidden = true
+start_hidden = false
 recent_count = 24       # items shown before typing, most recently copied first
 max_results = 60
 
@@ -135,7 +135,7 @@ sticker = ["text/uri-list"]
 | `ui.columns` | `6` | popup grid columns (> 0) |
 | `ui.thumb_px` | `128` | popup thumbnail size (>= 32) |
 | `ui.hide_on_copy` | `true` | hide the popup after copying |
-| `ui.start_hidden` | `true` | start resident without showing the popup |
+| `ui.start_hidden` | `false` | a bare `stickpile-desktop` that starts the resident instance does not show the popup (autostart uses `--hidden` instead) |
 | `ui.recent_count` | `24` | recently used items shown before typing |
 | `ui.max_results` | `60` | popup search results |
 | `focus.detect` | `true` | detect the focused window |

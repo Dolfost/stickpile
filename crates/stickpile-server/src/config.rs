@@ -302,15 +302,23 @@ pub enum ConfigError {
 
 impl Config {
     pub fn load(path: &Path) -> Result<Config, ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io { path: path.into(), source })?;
-        let cfg: Config = toml::from_str(&text).map_err(|source| ConfigError::Parse { path: path.into(), source })?;
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
+            path: path.into(),
+            source,
+        })?;
+        let cfg: Config = toml::from_str(&text).map_err(|source| ConfigError::Parse {
+            path: path.into(),
+            source,
+        })?;
         cfg.validate()?;
         Ok(cfg)
     }
 
     pub fn from_toml(text: &str) -> Result<Config, ConfigError> {
-        let cfg: Config =
-            toml::from_str(text).map_err(|source| ConfigError::Parse { path: PathBuf::from("<string>"), source })?;
+        let cfg: Config = toml::from_str(text).map_err(|source| ConfigError::Parse {
+            path: PathBuf::from("<string>"),
+            source,
+        })?;
         cfg.validate()?;
         Ok(cfg)
     }
@@ -320,13 +328,19 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         let bad = |m: String| Err(ConfigError::Invalid(m));
         if !(self.server.public_url.starts_with("http://") || self.server.public_url.starts_with("https://")) {
-            return bad(format!("server.public_url must be an absolute http(s) URL, got {:?}", self.server.public_url));
+            return bad(format!(
+                "server.public_url must be an absolute http(s) URL, got {:?}",
+                self.server.public_url
+            ));
         }
         if !self.server.data_dir.is_absolute() {
             return bad("server.data_dir must be an absolute path".into());
         }
         if u32::from_str_radix(self.trusted_proxy.socket_mode.trim_start_matches("0o"), 8).is_err() {
-            return bad(format!("trusted_proxy.socket_mode must be octal, got {:?}", self.trusted_proxy.socket_mode));
+            return bad(format!(
+                "trusted_proxy.socket_mode must be octal, got {:?}",
+                self.trusted_proxy.socket_mode
+            ));
         }
         if self.trusted_proxy.secret_header.trim().is_empty() {
             return bad("trusted_proxy.secret_header must not be empty".into());

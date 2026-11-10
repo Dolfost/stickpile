@@ -55,6 +55,8 @@ tar.workspace = true
 mime_guess.workspace = true
 image.workspace = true
 tempfile.workspace = true
+tokio-util = { version = "0.7.20", features = ["io", "rt"] }
+form_urlencoded = "1.2.2"
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["cookies"] }

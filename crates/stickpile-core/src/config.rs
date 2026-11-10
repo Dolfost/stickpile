@@ -55,7 +55,9 @@ pub struct UiConfig {
     pub thumb_px: u32,
     /// Hide the popup after copying.
     pub hide_on_copy: bool,
-    /// Start resident without showing the popup (e.g. from a systemd user unit).
+    /// A bare `stickpile-desktop` that starts the resident instance does not
+    /// show the popup. Off by default so the first key press shows it; the
+    /// systemd unit / autostart pass `--hidden` explicitly instead.
     pub start_hidden: bool,
     /// Items shown before typing: most recently used first.
     pub recent_count: u32,
@@ -68,7 +70,7 @@ impl Default for UiConfig {
             columns: 6,
             thumb_px: 128,
             hide_on_copy: true,
-            start_hidden: true,
+            start_hidden: false,
             recent_count: 24,
             max_results: 60,
         }

@@ -52,9 +52,9 @@ The desktop entry and icon live in `crates/stickpile-desktop/data/`.
 
 "Toggle" hides the popup only if it is visible *and focused*; if it is
 visible behind another window, it is brought back for the newly focused
-app. Bind `stickpile-desktop toggle` instead of the bare command if you do
-not autostart the resident instance, so the very first press shows it
-even with `ui.start_hidden = true` (the default).
+app. With the default `ui.start_hidden = false`, the very first press of a
+key bound to the bare command already shows the popup, whether or not the
+resident instance was autostarted (autostart passes `--hidden`).
 
 ## Why it stays resident
 
@@ -244,7 +244,7 @@ in Discord. This is stored in `$XDG_CACHE_HOME/stickpile/desktop-window-history.
 columns = 6          # grid columns
 thumb_px = 128       # thumbnail cell size (logical px)
 hide_on_copy = true  # hide after copying / dropping
-start_hidden = true  # bare `stickpile-desktop` starts resident without showing
+start_hidden = false # true: a bare first `stickpile-desktop` starts resident without showing
 recent_count = 24    # recently used items shown before typing
 max_results = 60
 ```

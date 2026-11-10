@@ -292,6 +292,44 @@ pub struct TokenCreated {
     pub user: User,
 }
 
+/// Self-service registration ([`crate::routes::AUTH_REGISTER`]).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RegisterRequest {
+    /// 2..=32 chars of `[A-Za-z0-9_.-]`, starting with a letter or digit.
+    pub username: String,
+    /// At least 8 characters.
+    pub password: String,
+    pub display_name: Option<String>,
+    /// Required when the server's registration policy is `invite`.
+    pub invite_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChangePassword {
+    /// Required when the account already has a password.
+    pub current_password: Option<String>,
+    pub new_password: String,
+}
+
+/// Returned when TOTP enrolment starts; the secret is pending until confirmed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TotpSetup {
+    /// Base32 secret for manual entry.
+    pub secret: String,
+    /// `otpauth://totp/...` URL (QR code content).
+    pub otpauth_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TotpCode {
+    /// Current 6-digit code.
+    pub code: String,
+}
+
 // ---------------------------------------------------------------------------
 // Sets
 // ---------------------------------------------------------------------------
@@ -506,7 +544,8 @@ pub struct Item {
     pub id: String,
     pub set_id: String,
     pub position: u32,
-    /// Export filename stem, e.g. `001-cat`.
+    /// Export filename stem without the numeric order prefix or extension,
+    /// e.g. `cat` (exported as `001-cat.png` via `stickpile_setfmt::export_filename`).
     pub filename: String,
     pub name: String,
     pub name_source: FieldSource,
