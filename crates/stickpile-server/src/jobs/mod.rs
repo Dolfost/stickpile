@@ -3,12 +3,14 @@
 //! by polling. Failures are retried with exponential backoff up to
 //! [`MAX_ATTEMPTS`]; [`JobError::Fatal`] fails immediately.
 //!
-//! Adding a job kind: add a handler module and a match arm in [`dispatch`].
-//! Git and Telegram kinds are registered but fail with "not implemented yet"
-//! until the integrations land.
+//! Adding a job kind: add a handler and a match arm in [`dispatch`]. Git
+//! and Telegram job bodies live next to their services
+//! ([`crate::service::gitpack`], [`crate::service::telegram`]).
 
 pub mod media;
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -95,6 +97,19 @@ impl From<crate::error::AppError> for JobError {
 }
 
 pub type JobResult = Result<Option<Value>, JobError>;
+
+/// An async lock per key (e.g. `git:<set id>`), for jobs that must not run
+/// concurrently on the same subject (git checkouts, Telegram packs). Idle
+/// locks are dropped from the map on the next call.
+pub fn subject_lock(key: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut map = LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, l| Arc::strong_count(l) > 1);
+    map.entry(key.to_string()).or_default().clone()
+}
 
 /// Enqueue a job and wake a worker.
 pub async fn enqueue(
@@ -213,15 +228,15 @@ async fn claim(db: &SqlitePool) -> AppResult<Option<JobRow>> {
     .await?)
 }
 
-/// Run one job by kind. The integrations agent replaces the `not
-/// implemented` arms with real handlers.
+/// Run one job by kind.
 pub async fn dispatch(state: &AppState, job: &JobRow) -> JobResult {
     match job.kind() {
         Some(JobKind::Variants) => media::variants(state, job).await,
         Some(JobKind::Enrich) => media::enrich(state, job).await,
-        Some(kind @ (JobKind::GitPull | JobKind::GitPush | JobKind::TelegramImport | JobKind::TelegramExport)) => Err(
-            JobError::Fatal(format!("{} jobs are not implemented yet", enum_str(&kind))),
-        ),
+        Some(JobKind::GitPull) => crate::service::gitpack::pull_job(state, job).await,
+        Some(JobKind::GitPush) => crate::service::gitpack::push_job(state, job).await,
+        Some(JobKind::TelegramImport) => crate::service::telegram::import_job(state, job).await,
+        Some(JobKind::TelegramExport) => crate::service::telegram::export_job(state, job).await,
         None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
     }
 }

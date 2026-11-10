@@ -14,6 +14,7 @@ fn user(id: &str, name: &str) -> User {
         totp_enabled: false,
         tailscale_login: None,
         created_at: 0,
+        telegram_user_id: None,
     }
 }
 

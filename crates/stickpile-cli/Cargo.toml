@@ -25,6 +25,9 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 stickpile-core = { workspace = true, features = ["mock"] }
+# server_e2e.rs runs the real server in-process (no CLIP needed).
+stickpile-server = { path = "../stickpile-server", default-features = false }
+sqlx.workspace = true
 stickpile-setfmt.workspace = true
 image.workspace = true
 tempfile.workspace = true

@@ -236,8 +236,14 @@ pub async fn serve_unix(state: AppState, listener: UnixListener, shutdown: Cance
 }
 
 /// Bind the trusted unix socket (removing a stale one) with `mode` (octal).
+///
+/// The socket is never reachable with wider permissions than `mode`, not even
+/// briefly: it is bound inside a fresh 0700 directory next to `path`, gets
+/// its mode there, and is then renamed into place (no process-wide umask
+/// change, which would race with other threads creating files).
 pub fn bind_unix(path: &Path, mode: &str) -> anyhow::Result<UnixListener> {
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
+    let bits = u32::from_str_radix(mode.trim_start_matches("0o"), 8)?;
     if let Ok(meta) = std::fs::symlink_metadata(path) {
         if meta.file_type().is_socket() {
             std::fs::remove_file(path)?;
@@ -245,13 +251,30 @@ pub fn bind_unix(path: &Path, mode: &str) -> anyhow::Result<UnixListener> {
             anyhow::bail!("{} exists and is not a socket", path.display());
         }
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    };
+    std::fs::create_dir_all(&parent)?;
+    if path.file_name().is_none() {
+        anyhow::bail!("{} has no file name", path.display());
     }
-    let listener = UnixListener::bind(path).map_err(|e| anyhow::anyhow!("binding {}: {e}", path.display()))?;
-    let bits = u32::from_str_radix(mode.trim_start_matches("0o"), 8)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits))?;
-    Ok(listener)
+    // Short names: the staging path must fit sun_path (108 bytes) as well.
+    let staging = parent.join(format!(".{}", crate::ids::random_base32(4)));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&staging)
+        .map_err(|e| anyhow::anyhow!("creating {}: {e}", staging.display()))?;
+    let tmp = staging.join("s");
+    let bound = (|| -> anyhow::Result<UnixListener> {
+        let listener = UnixListener::bind(&tmp).map_err(|e| anyhow::anyhow!("binding {}: {e}", path.display()))?;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(bits))?;
+        std::fs::rename(&tmp, path).map_err(|e| anyhow::anyhow!("moving the socket to {}: {e}", path.display()))?;
+        Ok(listener)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_dir(&staging);
+    bound
 }
 
 /// Job workers plus the periodic cleanup task.
@@ -272,6 +295,24 @@ pub fn spawn_background(state: &AppState, cancel: &CancellationToken) -> Vec<Joi
             }
         }
     }));
+    // Git packs due for a scheduled pull.
+    let st = state.clone();
+    let c = cancel.clone();
+    handles.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(service::gitpack::SCHEDULER_TICK_SECS));
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {
+                    match service::gitpack::schedule_due(&st).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!("queued {n} scheduled git pulls"),
+                        Err(e) => tracing::error!("scheduling git pulls: {e}"),
+                    }
+                }
+                _ = c.cancelled() => break,
+            }
+        }
+    }));
     handles
 }
 
@@ -286,8 +327,17 @@ pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     let jobs = jobs::purge_finished(&state.db, 30 * 86_400).await?;
     let tombstones = service::items::purge_tombstones(&state.db, 180 * 86_400).await?;
     let media = gc_orphan_media(state).await?;
-    if sessions + stale as u64 + jobs + tombstones + media > 0 {
-        tracing::info!(sessions, stale_tmp = stale, jobs, tombstones, media, "cleanup");
+    let checkouts = service::gitpack::gc_checkouts(state).await? as u64;
+    if sessions + stale as u64 + jobs + tombstones + media + checkouts > 0 {
+        tracing::info!(
+            sessions,
+            stale_tmp = stale,
+            jobs,
+            tombstones,
+            media,
+            checkouts,
+            "cleanup"
+        );
     }
     Ok(())
 }
@@ -385,4 +435,45 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     }
     state.db.close().await;
     result
+}
+
+/// A running in-process server for integration tests of other crates (the
+/// CLI end-to-end test): TCP listener on `config.server.listen` (use port 0),
+/// job workers and background tasks, no AI. Stops when dropped.
+#[doc(hidden)]
+pub struct TestServerHandle {
+    pub state: AppState,
+    /// `http://127.0.0.1:<port>`; also written to `server.public_url`.
+    pub url: String,
+    cancel: CancellationToken,
+}
+
+impl Drop for TestServerHandle {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+
+#[doc(hidden)]
+pub async fn spawn_for_tests(mut config: Config) -> anyhow::Result<TestServerHandle> {
+    let tcp = TcpListener::bind(config.server.listen).await?;
+    let addr = tcp.local_addr()?;
+    config.server.listen = addr;
+    config.server.public_url = format!("http://{addr}");
+    config.validate()?;
+    let state = build_state(
+        config,
+        StartOptions {
+            enricher: EnricherSource::Disabled,
+        },
+    )
+    .await?;
+    let cancel = CancellationToken::new();
+    spawn_background(&state, &cancel);
+    tokio::spawn(serve_tcp(state.clone(), tcp, cancel.clone()));
+    Ok(TestServerHandle {
+        state,
+        url: format!("http://{addr}"),
+        cancel,
+    })
 }

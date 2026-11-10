@@ -36,6 +36,14 @@ have. The implementation is `crates/stickpile-telegram`.
    default_owner_user_id = 123456789          # users can set their own in the web UI
    ```
 
+The integration is on when `telegram.enabled` is set **and** the token file
+is readable and not empty. Otherwise both endpoints answer `404`, and
+`stickpile-server check-config` prints a warning. Each user sets the
+Telegram user id that should own their exported packs with
+`PATCH /api/v1/me` (`{"telegram_user_id": 123456789}`, `null` clears it) or
+in the web UI. `default_owner_user_id` is the fallback for users who have
+not set one.
+
 The token is a secret and is passed only as a file path, never inline. It is
 part of every Bot API URL, so stickpile strips URLs from HTTP errors, keeps
 the token out of `Debug` output, and never logs it. A test checks this.
@@ -60,7 +68,11 @@ only its own packs.
 ## Import
 
 `POST /api/v1/telegram/import` with `{"pack_name": "…", "slug": null,
-"visibility": "private"}` runs `import_pack`:
+"visibility": "private"}` queues a `telegram_import` job and returns it.
+`pack_name` may also be a `https://t.me/addstickers/<name>` link. The slug
+defaults to the pack name slugified (`Animal_Friends` becomes
+`animal-friends`). A slug you already use is `409` right away. The request
+counts against `limits.upload_per_minute`. The job runs `import_pack`:
 
 1. `getStickerSet` reads the pack.
 2. Each sticker is fetched in pack order with `getFile` and a download from
@@ -69,8 +81,18 @@ only its own packs.
 3. Static stickers arrive as WebP and video stickers as WebM (VP9). Each
    becomes an item in pack order and goes through normal ingest: sniffing,
    variants and enrichment.
-4. A sticker's emoji becomes the item's `emojis`. The Bot API exposes only
-   one emoji per sticker and no keywords, so the import can carry no more.
+4. A sticker's emoji becomes the item's `emojis` (user-sourced). The Bot API
+   exposes only one emoji per sticker and no keywords, so the import can
+   carry no more.
+5. Everything is downloaded before the set is created, so a job retried
+   after a network error starts clean. The new set has `source = telegram`,
+   the pack title as its name, aspect ratio 1:1 and 512 px recommended
+   size. Items are named `sticker 1`, `sticker 2`, … in pack order.
+
+The job result has `set_id`, `slug`, `pack_name`, `title`, `url`
+(`https://t.me/addstickers/<name>`), `imported`, `skipped`
+(`[{file_unique_id, reason}]`) and `bound` (see below). An unknown pack
+fails the job with "sticker pack not found".
 
 Skipped stickers are listed in the job report with a reason:
 
@@ -78,20 +100,41 @@ Skipped stickers are listed in the job report with a reason:
 |---|---|
 | Animated stickers (`.tgs`, Lottie) | `animated .tgs stickers are not supported (stretch goal)` |
 | File over the media upload limit | `file is larger than N bytes` |
+| Same file as an earlier sticker of the pack | `the same file as an earlier sticker of the pack` |
+| Rejected by ingest (sniffing, limits) | the ingest error, e.g. `unsupported or unrecognised file type` |
 
-If you later export an imported pack that your bot owns, the server can seed
-the export mapping from the import. Each imported sticker's
-`file_unique_id`, together with the item's media hash, identifies the
-sticker. The first export then keeps the existing stickers instead of
-re-uploading them.
+If the imported pack belongs to your bot (its name ends in
+`_by_<bot username>`, checked with `getMe`), the set is **bound** to it
+(`Set.telegram_pack`). The export mapping is seeded from the import: each
+imported sticker's `file_unique_id`, together with the item's media hash,
+identifies the sticker. The first export then keeps the existing stickers
+instead of re-uploading them.
 
 ## Export
 
 `POST /api/v1/sets/{id}/telegram/export` with `{"pack_name": null, "title":
-null}` runs `export_pack`. By default it uses the previously bound pack name
-(or `<slug>_by_<bot>`) and the set name as title. Every item is exported as
-its `tg_sticker` variant (512 px static WebP) or its `tg_video_sticker`
-variant (512 px VP9 WebM, at most 3 s, no audio).
+null}` (the set's owner only, read-only git packs included) queues a
+`telegram_export` job and returns it. Without a Telegram user id for the
+caller (their own, else `telegram.default_owner_user_id`) the request is a
+`400` that says how to set one. The job runs `export_pack`. By default it
+uses the previously bound pack name (or `<slug>_by_<bot>`) and the set name
+as title. A pack name that does not end in `_by_<bot username>` fails the job
+with an explanation.
+
+Every item is exported as its `tg_sticker` variant (512 px static WebP) for
+stills, or its `tg_video_sticker` variant (512 px VP9 WebM, at most 3 s, no
+audio) for animations and videos. If the `variants` job has not produced the
+variant yet, the export job renders it itself. Items that cannot become
+stickers are skipped and listed in the result, for example an animation
+without ffmpeg on the server, or a video that cannot fit Telegram's limits.
+A set with no exportable item fails the job.
+
+The job result has `pack_name`, `url` (`https://t.me/addstickers/<name>`),
+`title`, `created_pack`, `added`, `removed`, `updated`, `reordered`,
+`exported` and `skipped` (`[{item_id, name, reason}]`). The pack name and the
+new mapping are stored on the set (`sets.telegram_pack`,
+`sets.telegram_mapping`). Exporting under a different pack name starts that
+pack with an empty mapping.
 
 **First export.** The pack does not exist yet: `getStickerSet` answers
 `STICKERSET_INVALID`. `createNewStickerSet` creates it with the first 50
@@ -147,6 +190,12 @@ The new mapping is returned in the job result and stored on the set.
   bot can edit them, but stickpile cannot move a pack to a different owner.
 
 ## Testing
+
+`crates/stickpile-server/tests/integrations_telegram.rs` tests the server
+side (import with skipped `.tgs` and duplicates, binding and seeding,
+export create and update, ordering, emoji, titles, owner resolution, pack
+name validation, the disabled integration) against a compact mock in
+`tests/integrations_support/mock_bot.rs`.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps

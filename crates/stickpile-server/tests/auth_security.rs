@@ -65,7 +65,7 @@ async fn health_openapi_headers_and_static() {
     assert_eq!(r.code(), "not_found");
     let u = srv.user("alice").await;
     let r = srv
-        .send(Some(&u), Method::PATCH, routes::ME, Some(json!({})))
+        .send(Some(&u), Method::DELETE, routes::ME, Some(json!({})))
         .await
         .expect(405);
     assert_eq!(r.code(), "method_not_allowed");
@@ -1156,24 +1156,35 @@ async fn admin_user_management() {
 }
 
 #[tokio::test]
-async fn not_implemented_integrations() {
+async fn integrations_require_auth() {
+    // Behaviour is covered by tests/integrations_*.rs; here only the access rules.
     let srv = TestServer::start().await;
     let u = srv.user("alice").await;
     let set = srv.create_set(&u, "s", Visibility::Private).await;
-    let cases = [
-        (routes::SETS_GITPACK.to_string(), true),
-        (routes::path(routes::SET_PULL, &[&set.id]), true),
-        (routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]), true),
-        (routes::TELEGRAM_IMPORT.to_string(), true),
-        (routes::path(routes::GIT_WEBHOOK, &[&set.id]), false),
-    ];
-    for (path, needs_auth) in cases {
-        if needs_auth {
-            srv.send(None, Method::POST, &path, Some(json!({}))).await.expect(401);
-        }
-        let r = srv.post(&u, &path, json!({})).await.expect(501);
-        assert_eq!(r.code(), "not_implemented");
+    for path in [
+        routes::SETS_GITPACK.to_string(),
+        routes::path(routes::SET_PULL, &[&set.id]),
+        routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]),
+        routes::TELEGRAM_IMPORT.to_string(),
+    ] {
+        let r = srv.send(None, Method::POST, &path, Some(json!({}))).await.expect(401);
+        assert_eq!(r.code(), "unauthorized");
     }
+    // The webhook needs no login, but only knows git packs.
+    let r = srv
+        .send(
+            None,
+            Method::POST,
+            &routes::path(routes::GIT_WEBHOOK, &[&set.id]),
+            Some(json!({})),
+        )
+        .await
+        .expect(404);
+    assert_eq!(r.code(), "not_found");
+    // Pulling a local set is a client error.
+    srv.post(&u, &routes::path(routes::SET_PULL, &[&set.id]), json!({}))
+        .await
+        .expect(400);
 }
 
 #[tokio::test]

@@ -6,7 +6,7 @@ use stickpile_api::{
     StorageUsage,
 };
 
-use crate::auth::{login::invitation_hash, password, session, CurrentUser};
+use crate::auth::{login::invitation_hash, password, session, tokens, CurrentUser};
 use crate::db::{self, enum_str, UserRow, USER_COLUMNS};
 use crate::error::{AppError, AppResult};
 use crate::ids::{is_id, new_id, now, random_base32};
@@ -132,7 +132,11 @@ pub async fn update_user(
             .execute(&state.db)
             .await?;
         session::destroy_all(&state.db, id, None).await?;
+        // A reset means the old credentials may be compromised: API tokens go
+        // too (a self-service password change keeps them).
+        let revoked = tokens::revoke_all(&state.db, id).await?;
         changes.insert("password".into(), "reset".into());
+        changes.insert("tokens_revoked".into(), revoked.into());
     }
     if let Some(login) = &req.tailscale_login {
         let login = login.as_deref().map(users::validate_tailscale_login).transpose()?;

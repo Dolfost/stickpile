@@ -68,6 +68,16 @@ PublishPort=127.0.0.1:8080:8080
 
 Environment=TZ=Europe/Kyiv
 
+# Liveness through the server binary itself, in exec form (the image has no
+# shell, so the plain-string form, which podman runs via /bin/sh -c, would fail):
+# GET /healthz on the configured listen address, exit 0/1.
+HealthCmd=["CMD","/bin/stickpile-server","healthcheck"]
+HealthInterval=1m
+HealthTimeout=5s
+HealthStartPeriod=30s
+HealthRetries=3
+HealthOnFailure=kill
+
 [Service]
 Restart=on-failure
 RestartSec=5

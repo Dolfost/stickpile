@@ -20,8 +20,11 @@ Use systemd credentials, agenix/sops-nix or podman secrets to provide them.
 | Command | Does |
 |---|---|
 | `stickpile-server [serve]` | Run the server until SIGINT/SIGTERM (graceful shutdown). |
-| `stickpile-server check-config` | Parse and validate the file, then exit. Static checks only: secret files are not read. |
+| `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: missing CLIP model files when `ai.enabled`, an unreadable or empty Telegram token or git token file, a missing `git.ssh_key_file`. |
 | `stickpile-server create-user <username> [--admin] [--password-file F] [--tailscale-login L]` | Create a user directly in the database (at least one of `--password-file` / `--tailscale-login`). |
+| `stickpile-server backup <dir>` | Full backup: every set as a set directory plus a database snapshot; safe while the server runs. See [backup.md](backup.md). |
+| `stickpile-server restore <dir>` | Rebuild a fresh `data_dir` from such a backup. |
+| `stickpile-server healthcheck [--url URL]` | `GET http://<server.listen>/healthz` (a wildcard address is checked on loopback) or `URL` (plain `http://` only); exit 0 on a 2xx answer within 3 s, else 1. For container health checks: no shell or curl needed. |
 
 ## `[server]`
 
@@ -121,7 +124,7 @@ Used by git packs (integrations, [git-packs.md](git-packs.md)).
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `enabled` | bool | `true` | Allow binding sets to git repositories. |
-| `pull_interval_minutes` | integer | `60` | Scheduled re-pull interval. |
+| `pull_interval_minutes` | integer | `60` | Scheduled re-pull interval (`0` = only webhooks and manual pulls). |
 | `allowed_schemes` | list of `https`, `http`, `ssh`, `file` | `["https"]` | URL schemes users may bind (`file` for tests only). |
 | `ssh_key_file` | path | unset | Key for `ssh` remotes and pushing. |
 | `https_token_file` | path | unset | HTTPS token used as the password when pushing (`push` mode). |

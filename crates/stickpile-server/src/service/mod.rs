@@ -6,11 +6,15 @@
 pub mod account;
 pub mod admin;
 pub mod ai;
+pub mod backup;
+pub mod gitpack;
 pub mod hydrate;
 pub mod items;
 pub mod search;
 pub mod sets;
 pub mod stats;
+pub mod telegram;
 pub mod transfer;
+pub mod ui;
 pub mod upload;
 pub mod users;

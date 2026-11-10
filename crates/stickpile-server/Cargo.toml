@@ -57,7 +57,10 @@ image.workspace = true
 tempfile.workspace = true
 tokio-util = { version = "0.7.20", features = ["io", "rt"] }
 form_urlencoded = "1.2.2"
+qrcode = { version = "0.14.1", default-features = false }
+http-body-util = "0.1.3"
 
 [dev-dependencies]
+git2.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
 tempfile.workspace = true

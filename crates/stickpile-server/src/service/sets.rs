@@ -101,15 +101,6 @@ fn list_select() -> String {
     )
 }
 
-fn git_web_url(url: &str) -> Option<String> {
-    let u = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
-    let u = u.trim_end_matches('/').trim_end_matches(".git");
-    if u.contains('@') {
-        return None;
-    }
-    Some(format!("https://{u}"))
-}
-
 pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, viewer: &str) -> Set {
     let git = (row.source == "git").then(|| GitBinding {
         url: row.git_url.clone().unwrap_or_default(),
@@ -122,7 +113,10 @@ pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, viewer: &str)
         last_commit: row.git_last_commit.clone(),
         last_pull_at: row.git_last_pull_at,
         last_error: row.git_last_error.clone(),
-        web_url: row.git_url.as_deref().and_then(git_web_url),
+        web_url: row
+            .git_url
+            .as_deref()
+            .and_then(|u| stickpile_gitpack::web_url(u, row.git_branch.as_deref(), row.git_subdir.as_deref())),
     });
     Set {
         id: row.id.clone(),
@@ -278,14 +272,15 @@ pub async fn detail(state: &AppState, viewer: &CurrentUser, set_id: &str) -> App
     Ok(SetDetail { set, items })
 }
 
-/// Bump `version` and `updated_at` (any content or metadata change).
+/// Bump `version` and `updated_at` (any content or metadata change). For
+/// push-mode git packs this also (re)schedules the debounced `GitPush`.
 pub async fn bump_version(conn: &mut sqlx::SqliteConnection, set_id: &str) -> AppResult<()> {
     sqlx::query("UPDATE sets SET version = version + 1, updated_at = ? WHERE id = ?")
         .bind(now())
         .bind(set_id)
-        .execute(conn)
+        .execute(&mut *conn)
         .await?;
-    Ok(())
+    crate::service::gitpack::schedule_push(conn, set_id).await
 }
 
 /// Bump `updated_at` of every item of a set (their summaries changed: set

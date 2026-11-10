@@ -7,7 +7,7 @@ use axum::Json;
 use stickpile_api::routes as r;
 use stickpile_api::{
     ApiError, ApiToken, ChangePassword, CreateToken, RegisterRequest, TokenCreated, TokenRequest, TotpCode, TotpSetup,
-    User,
+    UpdateMe, User,
 };
 
 use super::empty;
@@ -69,7 +69,19 @@ pub async fn me(user: CurrentUser) -> Json<User> {
     Json(user.user.to_api())
 }
 
-/// Change the caller's password; other web sessions are revoked.
+/// Update the caller's profile (display name, Telegram user id for pack export).
+#[utoipa::path(patch, path = r::ME, tag = "auth", request_body = UpdateMe,
+    responses((status = 200, body = User), (status = 400, body = ApiError), (status = 401, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn update_me(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(req): Json<UpdateMe>,
+) -> AppResult<Json<User>> {
+    Ok(Json(account::update_me(&state, &user, req).await?))
+}
+
+/// Change the caller's password; other web sessions are revoked (API tokens are kept).
 #[utoipa::path(put, path = r::ME_PASSWORD, tag = "auth", request_body = ChangePassword,
     responses((status = 204), (status = 400, body = ApiError), (status = 403, body = ApiError)),
     security(("bearer" = []), ("session" = [])))]

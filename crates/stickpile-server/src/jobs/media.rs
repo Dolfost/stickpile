@@ -37,6 +37,13 @@ async fn variant_row(state: &AppState, media_id: &str, variant: Variant) -> Resu
 /// Generate every non-thumb variant of a media item and record them.
 pub async fn variants(state: &AppState, job: &JobRow) -> JobResult {
     let media_id = media_id(job)?;
+    generate_variants(state, &media_id).await
+}
+
+/// The body of the `Variants` job, callable directly (the Telegram export
+/// renders missing sticker variants itself instead of waiting for the queue).
+pub async fn generate_variants(state: &AppState, media_id: &str) -> JobResult {
+    let media_id = media_id.to_string();
     let _guard = state.media_lock.read().await;
     let Some(media) = db::media_by_id(&state.db, &media_id)
         .await

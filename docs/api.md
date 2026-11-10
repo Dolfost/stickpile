@@ -94,7 +94,6 @@ Every non-2xx response has an `ApiError` body:
 | `unsupported_media` | 415 | Not an accepted media type (after content sniffing), corrupt file, or a non-JSON body |
 | `rate_limited` | 429 | Too many requests; `Retry-After` gives the seconds to wait |
 | `internal` | 500 | Server error (details only in the server log) |
-| `not_implemented` | 501 | Git-pack and Telegram endpoints (for now) |
 | `unavailable` | 503 | AI enrichment is off or the model is still loading |
 
 Content the caller may not read (other users' private sets, their items and
@@ -138,7 +137,8 @@ set's name, slug or visibility and new variants bump `updated_at` of its items.
 | `POST /api/v1/auth/token` | `TokenRequest` -> `TokenCreated` | Password login for API clients. `401 totp_required` if the account has TOTP and no code was sent. Rate limited per IP and per username. |
 | `POST /api/v1/auth/register` | `RegisterRequest` -> `User` (201) | Policy `auth.registration`: `closed` -> 403; `invite` -> `invite_code` required, the account gets the invitation's role, codes are single-use; `open` -> role `user`. Usernames: 2-32 of `A-Za-z0-9_.-`, starting alphanumeric; passwords at least 8 characters. Rate limited like login. |
 | `GET /api/v1/me` | -> `User` | |
-| `PUT /api/v1/me/password` | `ChangePassword` -> 204 | `current_password` required if the account has one. Other web sessions of the user are revoked. |
+| `PATCH /api/v1/me` | `UpdateMe` -> `User` | `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears). Absent fields stay. Audited as `user.update_self`. |
+| `PUT /api/v1/me/password` | `ChangePassword` -> 204 | `current_password` required if the account has one. Other web sessions of the user are revoked; API tokens are kept. |
 | `POST /api/v1/me/totp` | -> `TotpSetup` | Starts enrolment (secret + `otpauth://` URL); 409 if TOTP is already on. |
 | `POST /api/v1/me/totp/confirm` | `TotpCode` -> `User` | Enables TOTP with a current code. |
 | `POST /api/v1/me/totp/disable` | `TotpCode` -> `User` | Needs a current code. |
@@ -162,15 +162,17 @@ TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 | `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below. |
 | `GET /api/v1/sets/{id}/export.tar` | -> `application/x-tar` | Anyone who can read the set. |
 | `POST /api/v1/sets/import?into=` | multipart -> `ImportReport` | See below. |
-| `POST /api/v1/sets/gitpack` | 501 | Git packs ([git-packs.md](git-packs.md)), not implemented yet. |
-| `POST /api/v1/sets/{id}/pull` | 501 | Same. |
-| `POST /api/v1/hooks/git/{id}` | 501 | Same; unauthenticated. |
-| `POST /api/v1/sets/{id}/telegram/export` | 501 | Telegram ([telegram.md](telegram.md)), not implemented yet. |
-| `POST /api/v1/telegram/import` | 501 | Same. |
+| `POST /api/v1/sets/gitpack` | `CreateGitPack` -> `GitPackCreated` (201) | Bind a new set to a git repository; the clone runs as a `git_pull` job. The webhook secret is only shown here. 400 for a URL outside `git.allowed_schemes` (or with credentials, a transport helper, ...), a bad branch, subdir or slug; 409 for a taken slug. See [git-packs.md](git-packs.md). |
+| `POST /api/v1/sets/{id}/pull` | -> `Job` | Owner only (read-only packs included); a queued pull is reused. 400 if the set is not a git pack. |
+| `POST /api/v1/hooks/git/{id}` | raw body -> `Job` (202) | **Unauthenticated** forge webhook: `X-Stickpile-Webhook-Secret` or `X-Gitlab-Token` with the secret, or `X-Hub-Signature-256` (HMAC-SHA256 of the body). 401 without, 403 with a wrong secret or signature, 404 for an unknown set or one that is not a git pack, 429 over 60 calls per minute per client IP. |
+| `POST /api/v1/sets/{id}/telegram/export` | `TelegramExport` -> `Job` | Owner only. 400 for a bad pack name/title or when the caller has no Telegram user id and `telegram.default_owner_user_id` is unset. See [telegram.md](telegram.md). |
+| `POST /api/v1/telegram/import` | `TelegramImport` -> `Job` | Into a new set; 409 if the slug is taken; counts as an upload for rate limiting. |
 
-The 501 endpoints still require authentication (except the webhook), so
-anonymous callers already get their final `401`. Every content or metadata
-change bumps the set's `version`.
+With `git.enabled = false`, the three git endpoints answer `404`. If
+Telegram is not configured (`telegram.enabled` and a readable token file),
+the two Telegram endpoints do the same. Every content or metadata change
+bumps the set's `version`, and for push-mode git packs it also schedules a
+push. Read-only git packs refuse every edit with `403` (`editable: false`).
 
 **Uploads** (`POST /api/v1/sets/{id}/items`), owner only:
 
@@ -276,7 +278,7 @@ All admin routes need the `admin` role: anonymous callers get 401, other users
 |---|---|---|
 | `GET /api/v1/admin/users` | -> `[AdminUser]` | With set/item counts and storage. |
 | `POST /api/v1/admin/users` | `AdminCreateUser` -> `AdminUser` (201) | Username or tailnet login taken -> 409. |
-| `PATCH /api/v1/admin/users/{id}` | `AdminUpdateUser` -> `AdminUser` | A new password or disabling revokes the user's web sessions; `reset_totp` removes TOTP; `tailscale_login: null` unbinds. Demoting or disabling the last active admin -> 409. |
+| `PATCH /api/v1/admin/users/{id}` | `AdminUpdateUser` -> `AdminUser` | A new password revokes the user's web sessions **and API tokens** (audit detail `tokens_revoked`); disabling revokes the sessions (disabled users cannot authenticate at all); `reset_totp` removes TOTP; `tailscale_login: null` unbinds. Demoting or disabling the last active admin -> 409. |
 | `DELETE /api/v1/admin/users/{id}` | -> 204 | Deletes the user and everything they own. Not yourself, not the last admin (409). |
 | `GET /api/v1/admin/invitations` | -> `[Invitation]` | |
 | `POST /api/v1/admin/invitations` | `CreateInvitation` -> `InvitationCreated` (201) | `url` = `<public_url>/register?code=<code>`; the code is shown only here (stored hashed). `expires_in` 60 s to 365 days, default 7 days. |
@@ -287,7 +289,16 @@ All admin routes need the `admin` role: anonymous callers get 401, other users
 
 ## Jobs
 
-Background work (variants, AI enrichment, later git and Telegram) runs in a
-database-backed queue with `media.workers` workers. Failed jobs are retried
-with exponential backoff (10 s, 20 s) up to 3 attempts; permanent errors fail
-at once. Finished jobs are deleted after 30 days.
+Background work runs in a database-backed queue with `media.workers`
+workers. Failed jobs are retried with exponential backoff (10 s, 20 s) up to
+3 attempts; permanent errors fail at once. Finished jobs are deleted after 30
+days. `Job.result` is kind-specific:
+
+| Kind | Queued by | `result` |
+|---|---|---|
+| `variants` | uploads, imports, restores | `{"variants": [...]}` |
+| `enrich` | uploads, `POST /items/{id}/enrich`, AI start-up | model, keywords, emojis, vibe, items updated |
+| `git_pull` | binding, `POST /sets/{id}/pull`, webhook, scheduler | `commit`, `changed`; after an import also `version`, `created`, `updated`, `unchanged`, `removed`, `errors`; `pushed` when local edits were pushed instead |
+| `git_push` | every change of a push-mode pack (debounced 5 s) | `pushed`, `committed`, `commit`, `version`, or `skipped` |
+| `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
+| `telegram_export` | `POST /sets/{id}/telegram/export` | `pack_name`, `url` (`https://t.me/addstickers/…`), `created_pack`, `added`, `removed`, `updated`, `reordered`, `exported`, `skipped` |

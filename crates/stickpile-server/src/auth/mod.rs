@@ -45,9 +45,19 @@ const FORM_BUFFER_LIMIT: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum AuthMethod {
-    Bearer { token_id: String },
-    Tailscale { login: String },
-    Session { session_id: String, csrf_token: String },
+    Bearer {
+        token_id: String,
+    },
+    Tailscale {
+        login: String,
+    },
+    Session {
+        session_id: String,
+        csrf_token: String,
+    },
+    /// A background job acting for the owner of what it works on (git-pack
+    /// pulls, Telegram imports). Never produced from a request.
+    Background,
 }
 
 /// The authenticated caller.
@@ -59,6 +69,14 @@ pub struct CurrentUser {
 }
 
 impl CurrentUser {
+    /// The identity a background job uses to act for `user`.
+    pub fn background(user: UserRow) -> CurrentUser {
+        CurrentUser {
+            user,
+            method: AuthMethod::Background,
+            ip: None,
+        }
+    }
     pub fn id(&self) -> &str {
         &self.user.id
     }

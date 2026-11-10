@@ -4,11 +4,11 @@
 
 pub mod admin;
 pub mod auth;
+pub mod integrations;
 pub mod items;
 pub mod misc;
 pub mod openapi;
 pub mod sets;
-pub mod stubs;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Request};
@@ -32,7 +32,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         // auth & account
         .route(r::AUTH_TOKEN, post(auth::token))
         .route(r::AUTH_REGISTER, post(auth::register))
-        .route(r::ME, get(auth::me))
+        .route(r::ME, get(auth::me).patch(auth::update_me))
         .route(r::ME_PASSWORD, put(auth::change_password))
         .route(r::ME_TOTP, post(auth::totp_begin))
         .route(r::ME_TOTP_CONFIRM, post(auth::totp_confirm))
@@ -42,15 +42,15 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         // sets
         .route(r::SETS, get(sets::list).post(sets::create))
         .route(r::SETS_IMPORT, post(sets::import).layer(big))
-        .route(r::SETS_GITPACK, post(stubs::create_gitpack))
+        .route(r::SETS_GITPACK, post(integrations::create_gitpack))
         .route(r::SET, get(sets::get).patch(sets::update).delete(sets::delete))
         .route(r::SET_ORDER, put(sets::reorder))
         .route(r::SET_ITEMS, post(sets::upload).layer(big))
         .route(r::SET_EXPORT, get(sets::export))
-        .route(r::SET_PULL, post(stubs::pull))
-        .route(r::GIT_WEBHOOK, post(stubs::git_webhook))
-        .route(r::SET_TELEGRAM_EXPORT, post(stubs::telegram_export))
-        .route(r::TELEGRAM_IMPORT, post(stubs::telegram_import))
+        .route(r::SET_PULL, post(integrations::pull))
+        .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
+        .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))
+        .route(r::TELEGRAM_IMPORT, post(integrations::telegram_import))
         // items
         .route(r::ITEMS, get(items::sync))
         .route(r::ITEM, get(items::get).patch(items::update).delete(items::delete))

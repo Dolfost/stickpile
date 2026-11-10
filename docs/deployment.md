@@ -318,9 +318,10 @@ Everything is in the state directory: `/var/lib/stickpile` on NixOS,
 - **Media**: `media/` is content-addressed and append-mostly, so incremental
   backups (restic, borg, rsync) are cheap. `models/` and `gitpacks/` can be
   re-downloaded.
-- **Export**: a `stickpile-server backup` subcommand (every set as a
-  directory plus a database dump, brief §5.7) is being added. It will be the
-  recommended backup method once it lands.
+- **`stickpile-server backup <dir>`** (recommended): every set as a set
+  directory plus a consistent database snapshot, safe while the server runs;
+  `stickpile-server restore <dir>` rebuilds a fresh data directory from it.
+  See [backup.md](backup.md).
 - **Upgrades**: NixOS: `nix flake update stickpile && nixos-rebuild switch`.
   Container: `podman auto-update` or a pinned tag. Migrations run at startup.
   Take a backup before upgrading across a minor version.

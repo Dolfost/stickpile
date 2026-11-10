@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use super::{admin, auth, items, misc, sets, stubs};
+use super::{admin, auth, integrations, items, misc, sets};
 
 struct SecuritySchemes;
 
@@ -51,6 +51,7 @@ impl Modify for SecuritySchemes {
         auth::token,
         auth::register,
         auth::me,
+        auth::update_me,
         auth::change_password,
         auth::totp_begin,
         auth::totp_confirm,
@@ -67,11 +68,11 @@ impl Modify for SecuritySchemes {
         sets::upload,
         sets::import,
         sets::export,
-        stubs::create_gitpack,
-        stubs::pull,
-        stubs::git_webhook,
-        stubs::telegram_export,
-        stubs::telegram_import,
+        integrations::create_gitpack,
+        integrations::pull,
+        integrations::git_webhook,
+        integrations::telegram_export,
+        integrations::telegram_import,
         items::sync,
         items::get,
         items::update,
@@ -107,7 +108,7 @@ impl Modify for SecuritySchemes {
         (name = "search", description = "Hybrid search"),
         (name = "stats", description = "Usage events, popular items, statistics"),
         (name = "admin", description = "Administration (role admin)"),
-        (name = "integrations", description = "Git packs and Telegram (not implemented yet: 501)"),
+        (name = "integrations", description = "Git packs and Telegram import/export (background jobs)"),
         (name = "misc", description = "Health, profiles, jobs, this document"),
     )
 )]

@@ -249,6 +249,20 @@ pub struct User {
     /// `Tailscale-User-Login` this account is bound to, if any.
     pub tailscale_login: Option<String>,
     pub created_at: i64,
+    /// Telegram user id that owns the packs this user exports (falls back to
+    /// the server's `telegram.default_owner_user_id`).
+    #[serde(default)]
+    pub telegram_user_id: Option<i64>,
+}
+
+/// `PATCH /api/v1/me`: absent = unchanged; `telegram_user_id: null` clears it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateMe {
+    /// Empty resets the display name to the username.
+    pub display_name: Option<String>,
+    #[serde(default, with = "double_option")]
+    pub telegram_user_id: Option<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

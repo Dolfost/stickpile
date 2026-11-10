@@ -19,7 +19,7 @@ use stickpile_setfmt::{ItemMeta, Manifest, SetBundle, SetFile};
 
 use crate::auth::CurrentUser;
 use crate::authz;
-use crate::db::{self, i64_to_u64, source, source_str, to_json_list};
+use crate::db::{self, i64_to_u64, source, source_str, to_json_list, SetRow};
 use crate::error::{AppError, AppResult};
 use crate::files;
 use crate::ids::{now, sha256_hex};
@@ -175,12 +175,28 @@ pub async fn import(
 }
 
 /// Import a bundle as a new set, or into an existing own set (`into`).
-/// No rate limiting (callers do it); also used by git-pack pulls.
+/// No rate limiting (callers do it).
 pub async fn import_bundle(
     state: &AppState,
     viewer: &CurrentUser,
     bundle: SetBundle,
     into: Option<&str>,
+) -> AppResult<ImportReport> {
+    let target = match into {
+        Some(id) => Some(authz::editable_set(state, viewer.id(), id).await?),
+        None => None,
+    };
+    import_bundle_into(state, viewer, bundle, target).await
+}
+
+/// [`import_bundle`] with the target set already authorized by the caller.
+/// Git-pack pulls use it to write into read-only packs, which
+/// [`authz::editable_set`] (rightly) refuses for users.
+pub async fn import_bundle_into(
+    state: &AppState,
+    viewer: &CurrentUser,
+    bundle: SetBundle,
+    into: Option<SetRow>,
 ) -> AppResult<ImportReport> {
     let m = &bundle.manifest;
     let aspect = m.aspect();
@@ -193,7 +209,7 @@ pub async fn import_bundle(
         });
     }
     let (set, is_new) = match into {
-        Some(id) => (authz::editable_set(state, viewer.id(), id).await?, false),
+        Some(row) => (row, false),
         None => {
             let slug = match m.slug.as_deref() {
                 Some(s) => {
@@ -395,6 +411,9 @@ pub async fn import_bundle(
             .bind(&set.id)
             .execute(&mut *tx)
             .await?;
+        if changed {
+            crate::service::gitpack::schedule_push(&mut tx, &set.id).await?;
+        }
     }
     tx.commit().await?;
     index::refresh_set(state, &set.id).await?;
@@ -408,9 +427,17 @@ pub async fn import_bundle(
 /// Build the export bundle of a set the caller can read.
 pub async fn export_bundle(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<(String, SetBundle)> {
     let set = authz::readable_set(state, viewer.id(), set_id).await?;
-    let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
+    let bundle = export_set(&state.db, &state.media_dir(), &set).await?;
+    Ok((set.slug.clone(), bundle))
+}
+
+/// The export bundle of `set` from `db` and the media files under
+/// `media_dir`, without authorization (also used by `stickpile-server
+/// backup` on a database snapshot).
+pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set: &SetRow) -> AppResult<SetBundle> {
+    let rows = hydrate::fetch_by_set(db, &set.id).await?;
     let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
-    let variants = hydrate::variant_rows(&state.db, &media_ids).await?;
+    let variants = hydrate::variant_rows(db, &media_ids).await?;
     let total = rows.len();
     let mut out_files = Vec::with_capacity(total);
     for (i, r) in rows.iter().enumerate() {
@@ -418,7 +445,7 @@ pub async fn export_bundle(state: &AppState, viewer: &CurrentUser, set_id: &str)
             .get(&r.media_id)
             .and_then(|vs| vs.iter().find(|v| v.variant() == Some(Variant::Original)))
             .ok_or_else(|| AppError::internal(format!("original of media {} missing", r.media_id)))?;
-        let abs = files::resolve(&state.media_dir(), &original.path).ok_or_else(|| AppError::internal("bad path"))?;
+        let abs = files::resolve(media_dir, &original.path).ok_or_else(|| AppError::internal("bad path"))?;
         let bytes = files::read(abs).await?;
         let filename = stickpile_setfmt::export_filename(i + 1, total, &r.filename, r.format().extension());
         let meta = ItemMeta {
@@ -449,14 +476,11 @@ pub async fn export_bundle(state: &AppState, viewer: &CurrentUser, set_id: &str)
             .collect::<BTreeMap<_, _>>(),
         extra: string_to_table(set.extra_toml.as_deref()),
     };
-    Ok((
-        set.slug.clone(),
-        SetBundle {
-            manifest,
-            files: out_files,
-            warnings: Vec::new(),
-        },
-    ))
+    Ok(SetBundle {
+        manifest,
+        files: out_files,
+        warnings: Vec::new(),
+    })
 }
 
 /// Export a set as a tar (`<slug>/set.toml` + files).

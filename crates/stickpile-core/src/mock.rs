@@ -185,6 +185,7 @@ impl MockState {
             totp_enabled: false,
             tailscale_login: None,
             created_at: self.clock,
+            telegram_user_id: None,
         };
         self.users.push(MockUser {
             user: user.clone(),

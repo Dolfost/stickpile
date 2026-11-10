@@ -147,3 +147,16 @@ pub async fn revoke(db: &SqlitePool, user_id: &str, token_id: &str) -> AppResult
         .await?;
     Ok(tok)
 }
+
+/// Revoke every active token of `user_id` (admin password reset). Returns how
+/// many were revoked.
+pub async fn revoke_all(db: &SqlitePool, user_id: &str) -> AppResult<u64> {
+    Ok(
+        sqlx::query("UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+            .bind(now())
+            .bind(user_id)
+            .execute(db)
+            .await?
+            .rows_affected(),
+    )
+}

@@ -44,9 +44,13 @@ with a read-only root filesystem is part of the deployment
   step, compared in constant time. The last accepted step is stored, so a code
   cannot be replayed. Enrolment is pending until confirmed with a valid code;
   an admin can reset TOTP for a lost device (`auth/totp.rs`).
-- Changing a password revokes the user's other web sessions; an admin
-  password reset or disabling an account revokes all of them. Disabled users
-  cannot authenticate by any method.
+- Changing your own password revokes your other web sessions but keeps your
+  API tokens, so the CLI and desktop clients stay logged in (revoke tokens
+  explicitly if a device may be compromised). An admin password reset
+  assumes the old credentials are compromised and revokes all web sessions
+  **and all API tokens** of the user (audit detail `tokens_revoked`).
+  Disabling an account revokes its sessions; disabled users cannot
+  authenticate by any method.
 
 ### Authorization
 
@@ -135,14 +139,20 @@ In-memory GCRA limiters (`governor`, `security.rs`):
 | What | Key | Limit |
 |---|---|---|
 | Password logins (`/auth/token`, web login), registrations, password changes, TOTP confirm/disable | client IP **and** lowercased username, both must pass | `limits.login_per_minute` |
-| Uploads and imports | user | `limits.upload_per_minute` requests |
+| Uploads and imports (also Telegram imports) | user | `limits.upload_per_minute` requests |
+| Git webhook (`/api/v1/hooks/git/{id}`, unauthenticated) | client IP, checked before the signature | 60 per minute |
 
 Every attempt counts, successful or not. Over the limit: 429 `rate_limited`
 with `Retry-After`. The per-username limit means a flood of bad guesses can
 delay the real user's login by up to a minute; that is the intended trade-off.
 When the client IP is unknown (a trusted-socket request without
-`X-Forwarded-For`), only the per-username limit applies, so one tailnet caller
-cannot lock everyone on the socket out.
+`X-Forwarded-For`), the per-username limit applies plus one bucket shared by
+all such callers with 5 × `limits.login_per_minute`. The shared bucket caps
+password spraying across many usernames through the socket. It is five times
+larger than a per-IP bucket, so a single tailnet caller cannot easily starve
+the others, and it can never lock out a particular account beyond that
+account's own username bucket. Webhook calls with an unknown IP likewise
+share one bucket.
 
 ### Audit log
 
@@ -156,6 +166,8 @@ IP and JSON details. Writing an entry never fails the action it records.
 | `login_failed` | Failed login (details: username, reason `unknown_user`, `password`, `disabled` or `totp`) |
 | `register` | Self-service registration |
 | `token.create`, `token.revoke` | API token created (also by password login) or revoked |
+| `user.update_self` | Own display name or Telegram user id changed (`PATCH /api/v1/me`) |
+| `gitpack.create` | A set was bound to a git repository (URL redacted) |
 | `password.change`, `totp.enable`, `totp.disable` | Account security changes |
 | `user.create`, `user.update`, `user.delete` | Admin actions on users (`user.create` also from the `create-user` CLI) |
 | `user.autocreate`, `user.promote` | Tailnet auto-create; promotion via `auth.tailscale_admins` |
@@ -178,6 +190,10 @@ request provably came from that proxy (`security::from_trusted_proxy`):
 1. **Unix socket (preferred)**: `trusted_proxy.socket`, created with
    `trusted_proxy.socket_mode` (default `0660`), so only root and the service
    user/group can connect. `tailscale serve ... unix:<socket>` points there.
+   The socket is never reachable with wider permissions, not even for a
+   moment. It is bound inside a fresh `0700` directory next to the target,
+   gets its mode there, and is then renamed into place (`app::bind_unix`).
+   No process-wide umask change is involved.
 2. **Loopback TCP with a shared secret**: for a reverse proxy that cannot use
    a socket. The request must come from a loopback address **and** carry
    `trusted_proxy.secret_header` with the contents of

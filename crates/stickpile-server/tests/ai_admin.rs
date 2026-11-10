@@ -297,20 +297,31 @@ async fn storage_and_job_listing() {
 }
 
 #[tokio::test]
-async fn unimplemented_job_kinds_fail_permanently() {
+async fn integration_jobs_without_a_subject() {
     let srv = TestServer::start().await;
-    let job = stickpile_server::jobs::enqueue(&srv.state, JobKind::GitPull, json!({"set_id": "x"}), None, None)
+    // The set is gone (deleted meanwhile): nothing to do.
+    let gone = stickpile_server::jobs::enqueue(&srv.state, JobKind::GitPull, json!({"set_id": "x"}), None, None)
+        .await
+        .unwrap();
+    // A malformed payload fails permanently.
+    let bad = stickpile_server::jobs::enqueue(&srv.state, JobKind::GitPush, json!({}), None, None)
         .await
         .unwrap();
     srv.run_jobs().await;
-    let row = stickpile_server::jobs::get(&srv.state.db, &job.id)
-        .await
+    let get = |id: String| {
+        let db = srv.state.db.clone();
+        async move { stickpile_server::jobs::get(&db, &id).await.unwrap().unwrap().to_api() }
+    };
+    let row = get(gone.id).await;
+    assert_eq!(row.status, JobStatus::Done);
+    assert!(row.result.unwrap()["skipped"]
+        .as_str()
         .unwrap()
-        .unwrap()
-        .to_api();
+        .contains("no longer exists"));
+    let row = get(bad.id).await;
     assert_eq!(row.status, JobStatus::Failed);
     assert_eq!(row.attempts, 1);
-    assert!(row.error.unwrap().contains("not implemented"));
+    assert!(row.error.unwrap().contains("set_id"));
 }
 
 #[tokio::test]

@@ -81,7 +81,7 @@ pub fn i64_to_u64(v: i64) -> u64 {
 // ---------------------------------------------------------------------------
 
 pub const USER_COLUMNS: &str = "id, username, display_name, password_hash, totp_secret, totp_pending_secret, \
-     totp_last_step, role, tailscale_login, disabled, created_at, last_login_at";
+     totp_last_step, role, tailscale_login, telegram_user_id, disabled, created_at, last_login_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRow {
@@ -94,6 +94,7 @@ pub struct UserRow {
     pub totp_last_step: Option<i64>,
     pub role: String,
     pub tailscale_login: Option<String>,
+    pub telegram_user_id: Option<i64>,
     pub disabled: bool,
     pub created_at: i64,
     pub last_login_at: Option<i64>,
@@ -119,6 +120,7 @@ impl UserRow {
             totp_enabled: self.totp_secret.is_some(),
             tailscale_login: self.tailscale_login.clone(),
             created_at: self.created_at,
+            telegram_user_id: self.telegram_user_id,
         }
     }
 }

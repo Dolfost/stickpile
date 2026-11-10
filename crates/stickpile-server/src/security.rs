@@ -108,8 +108,20 @@ pub fn client_ip(state: &AppState, peer: &Peer, headers: &HeaderMap) -> Option<I
 pub struct RateLimiters {
     login_ip: DefaultKeyedRateLimiter<String>,
     login_user: DefaultKeyedRateLimiter<String>,
+    /// One shared bucket for logins whose client IP is unknown (the trusted
+    /// unix socket without `X-Forwarded-For`).
+    login_unknown_ip: DefaultKeyedRateLimiter<String>,
     upload_user: DefaultKeyedRateLimiter<String>,
+    webhook_ip: DefaultKeyedRateLimiter<String>,
 }
+
+/// Logins without a known client IP share one bucket this many times the
+/// per-IP quota.
+pub const UNKNOWN_IP_LOGIN_FACTOR: u32 = 5;
+/// Unauthenticated git webhook calls per client IP (or for all callers with
+/// an unknown IP together) and minute.
+pub const WEBHOOKS_PER_MINUTE: u32 = 60;
+const UNKNOWN_IP_KEY: &str = "unknown";
 
 fn per_minute(n: u32) -> Quota {
     Quota::per_minute(NonZeroU32::new(n.max(1)).expect("non-zero"))
@@ -127,19 +139,35 @@ impl RateLimiters {
         RateLimiters {
             login_ip: RateLimiter::keyed(per_minute(limits.login_per_minute)),
             login_user: RateLimiter::keyed(per_minute(limits.login_per_minute)),
+            login_unknown_ip: RateLimiter::keyed(per_minute(
+                limits.login_per_minute.saturating_mul(UNKNOWN_IP_LOGIN_FACTOR),
+            )),
             upload_user: RateLimiter::keyed(per_minute(limits.upload_per_minute)),
+            webhook_ip: RateLimiter::keyed(per_minute(WEBHOOKS_PER_MINUTE)),
         }
     }
 
     /// Password logins, token requests and registrations: per client IP and
     /// per (lowercased) username. Every attempt counts, successful or not.
-    /// Without a known IP (trusted socket without `X-Forwarded-For`) only the
-    /// per-username limit applies, so one caller cannot lock out everyone.
+    ///
+    /// Without a known IP (trusted socket without `X-Forwarded-For`) the
+    /// per-username limit applies plus one bucket shared by all such callers
+    /// with [`UNKNOWN_IP_LOGIN_FACTOR`] times the per-IP quota: it caps
+    /// password spraying across usernames, while one caller still cannot lock
+    /// out a particular account of someone else beyond its own username bucket.
     pub fn check_login(&self, ip: Option<IpAddr>, username: &str) -> AppResult<()> {
-        if let Some(ip) = ip {
-            check(&self.login_ip, ip.to_string())?;
+        match ip {
+            Some(ip) => check(&self.login_ip, ip.to_string())?,
+            None => check(&self.login_unknown_ip, UNKNOWN_IP_KEY.to_string())?,
         }
         check(&self.login_user, username.trim().to_lowercase())
+    }
+
+    /// Unauthenticated git webhook calls, per client IP (callers with an
+    /// unknown IP share one bucket). Checked before the signature.
+    pub fn check_webhook(&self, ip: Option<IpAddr>) -> AppResult<()> {
+        let key = ip.map(|i| i.to_string()).unwrap_or_else(|| UNKNOWN_IP_KEY.to_string());
+        check(&self.webhook_ip, key)
     }
 
     /// One unit per upload or import request.
@@ -151,7 +179,9 @@ impl RateLimiters {
     pub fn prune(&self) {
         self.login_ip.retain_recent();
         self.login_user.retain_recent();
+        self.login_unknown_ip.retain_recent();
         self.upload_user.retain_recent();
+        self.webhook_ip.retain_recent();
     }
 }
 
@@ -286,5 +316,30 @@ mod tests {
         assert!(l.check_login(ip, "x2").is_ok());
         assert_eq!(l.check_login(ip, "x3").unwrap_err().code, "rate_limited");
         assert!(l.check_login(Some("192.0.2.8".parse().unwrap()), "x4").is_ok());
+    }
+
+    #[test]
+    fn unknown_ips_share_a_larger_bucket() {
+        let l = RateLimiters::new(&crate::config::LimitsConfig {
+            login_per_minute: 2,
+            ..Default::default()
+        });
+        // Spraying many usernames without a known IP stops at 5 x 2 attempts.
+        let ok = (0..20)
+            .filter(|i| l.check_login(None, &format!("user{i}")).is_ok())
+            .count();
+        assert_eq!(ok, 2 * UNKNOWN_IP_LOGIN_FACTOR as usize);
+        // Callers with a known IP are not affected.
+        assert!(l.check_login(Some("192.0.2.9".parse().unwrap()), "user0").is_ok());
+    }
+
+    #[test]
+    fn webhooks_limited_per_ip() {
+        let l = RateLimiters::new(&crate::config::LimitsConfig::default());
+        let ip = Some("198.51.100.1".parse().unwrap());
+        let ok = (0..100).filter(|_| l.check_webhook(ip).is_ok()).count();
+        assert_eq!(ok, WEBHOOKS_PER_MINUTE as usize);
+        assert!(l.check_webhook(Some("198.51.100.2".parse().unwrap())).is_ok());
+        assert!(l.check_webhook(None).is_ok());
     }
 }

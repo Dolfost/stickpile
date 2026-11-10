@@ -30,9 +30,37 @@ worker threads.
   default is the repository root.
 - `mode`: `read_only` or `push` (see below).
 
-The server clones into `<data_dir>/gitpacks/<set id>`, imports the
-directory, and returns the set together with a webhook URL and secret. The
-secret is shown only once.
+The answer is `201` with a `GitPackCreated`: the new set, the webhook URL
+(`<public_url>/api/v1/hooks/git/<set id>`), the webhook secret and the
+`git_pull` job that clones the repository. The secret is shown only here.
+The job clones into `<data_dir>/gitpacks/<set id>` and imports the directory
+(`GET /api/v1/jobs/{id}` shows its progress and result).
+
+- `slug`: defaults to the last component of `subdir`, else the repository
+  name (`…/cat-stickpile.git` becomes `cat-stickpile`). A slug you already
+  use is `409`. The slug never changes on later pulls.
+- The set is named after the repository until the first import. From then
+  on name, description, **visibility**, aspect ratio, recommended size and
+  item metadata come from upstream's `set.toml`. A pack whose `set.toml` says
+  `visibility = "public"` is public on your server too.
+- `branch` must be a plain branch name (no options, revision syntax or
+  whitespace). `subdir` must be a relative path inside the repository with
+  no `..` and no hidden components (so never `.git`). Violations are `400`.
+- With `git.enabled = false` every git endpoint answers `404`, and the
+  scheduler does nothing.
+- Edits made in stickpile before the first pull has finished are replaced by
+  the repository content.
+
+The set's `git` field (`GitBinding`) shows the binding: `last_commit` is the
+imported or pushed commit, `last_pull_at` is the time of the last pull
+attempt, and `last_error` is the error of the last failed pull or push
+(cleared on success). Deleting the set unsubscribes; its checkout is removed
+by the periodic cleanup.
+
+Job failures: a URL that is not allowed, a repository over the size limit,
+an unreadable or missing set directory and an invalid `set.toml` fail at
+once. Network and credential errors are retried twice with backoff (10 s,
+20 s).
 
 ### What a sync does
 
@@ -74,7 +102,14 @@ Safety properties of the checkout:
 | Local edits | Not possible | Exported, committed and pushed |
 | Credentials | Only for private repositories | Must have push rights |
 
-**Edit upstream** links come from `web_url(url, branch, subdir)`:
+In read-only mode the API refuses every edit with `403` ("edit it
+upstream"): set `PATCH`, reordering, uploads, `import?into=`, item `PATCH`
+and `DELETE`, and moving items in or out. `Set.editable` is `false`. The
+owner may still pull and delete (unsubscribe). Likes and usage work as for
+any set.
+
+**Edit upstream** links (`GitBinding.web_url`) come from
+`web_url(url, branch, subdir)`:
 
 | Host | Link |
 |---|---|
@@ -85,25 +120,51 @@ Safety properties of the checkout:
 ssh and scp-like remotes map to `https://host/…`; the ssh port is dropped.
 `file://` remotes get no link.
 
-In push mode the server exports the set into the checkout with `write_dir`,
-which rewrites `set.toml` and the media files and leaves other files such as
-`README.md` or `LICENSE` alone. It then calls `commit_and_push`, which:
+Every change of a push-mode set (anything that bumps its `version`: item
+and set edits, uploads, deletions, reordering, imports into it, AI
+suggestions) schedules a `git_push` job 5 seconds later. Further changes
+within that time move the same job, so a burst of edits becomes one commit.
+The job fetches upstream, exports the set into the checkout with
+`write_dir`, and calls `commit_and_push`:
 
-- stages everything, deletions included, and respects `.gitignore`;
-- commits as the configured author only if the tree changed;
-- pushes the current branch as a normal fast-forward push. If someone pushed
-  upstream in the meantime, the push is rejected. The job then re-syncs
-  (which drops the local commit), re-imports, re-exports and tries again. A
-  commit left unpushed by an earlier failure is pushed by the next run.
+- `write_dir` rewrites `set.toml` and the media files and leaves other files
+  such as `README.md` or `LICENSE` alone. Media files are named
+  `NNN-<name>.<ext>` as in every export, so the first push renames upstream
+  files that follow another naming scheme.
+- `commit_and_push` stages everything, deletions included, and respects
+  `.gitignore`. It commits as `git.author_name` / `git.author_email`, with
+  the message `stickpile: update <set name> (version <n>)`, only if the
+  tree changed. It then pushes the current branch as a normal fast-forward
+  push.
+- If someone pushed upstream between the fetch and the push, the push is
+  rejected. The job then re-syncs (which drops the local commit),
+  re-exports and tries once more. If that fails too, the job fails with the
+  error, and it is recorded in the set's `git.last_error`. The edit is not
+  lost: the next pull pushes it (see below).
+
+**Conflicts.** The database is the source of truth. The server remembers
+which version of the set matches the last imported or pushed commit
+(`sets.git_synced_version`). When a pull finds local edits that are not
+upstream yet (the set's version differs), it does **not** import. It pushes
+the local state on top of the new upstream commit instead, so stickpile wins.
+Upstream's concurrent change stays in the repository history, and
+non-set files it added (such as a new `NOTES.md`) are kept. When there are
+no pending local edits, a pull imports upstream as in read-only mode, and
+nothing is pushed back.
 
 Push mode also works with an empty repository. Create an empty repository on
-the forge, bind it in push mode, and the first export creates the initial
+the forge, bind it in push mode, and the first change creates the initial
 commit on `main` (or the configured branch).
 
 ## Schedule and webhooks
 
-Every git pack is re-pulled every `git.pull_interval_minutes` (default 60).
-`POST /api/v1/sets/{id}/pull` pulls immediately. A webhook makes updates
+Every git pack is re-pulled every `git.pull_interval_minutes` (default 60,
+`0` turns scheduled pulls off). The scheduler runs every minute and queues a
+pull for each pack whose last pull attempt is older than the interval and
+that has no pull queued or running. `POST /api/v1/sets/{id}/pull` (the owner
+only, read-only packs included) pulls immediately and returns the job. If a
+pull is already queued, that job is returned instead of a second one. A pull
+that finds the commit unchanged imports nothing. A webhook makes updates
 near-instant:
 
 ```
@@ -114,15 +175,24 @@ The endpoint is unauthenticated. It accepts a request only if it carries the
 set's webhook secret, in one of these forms:
 
 - `X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of the body>` (GitHub,
-  Gitea, Forgejo);
+  Gitea, Forgejo), or the bare hex form that Gitea and Forgejo send in
+  `X-Gitea-Signature` and `X-Forgejo-Signature`;
+- `X-Gitlab-Token: <secret>` (GitLab's secret token);
 - `X-Stickpile-Webhook-Secret: <secret>` (any forge that can send a custom
   header).
 
-Both are compared in constant time (`verify_hub_signature`, `verify_token`).
-`verify_hub_signature` also accepts the bare hex form that Gitea and Forgejo
-send in `X-Gitea-Signature` and `X-Forgejo-Signature`. An empty secret never
-verifies. The request body is not interpreted beyond the signature: any valid
-call enqueues a pull.
+All are compared in constant time (`verify_hub_signature`, `verify_token`).
+An empty secret never verifies. The request body (at most 2 MiB) is not
+interpreted beyond the signature: any valid call enqueues a pull, or reuses
+the one already queued.
+
+| Answer | When |
+|---|---|
+| `202` + `Job` | Verified; pull queued |
+| `401` | No secret or signature header |
+| `403` | A header is present but does not verify |
+| `404` | Unknown set, a set that is not a git pack, or git packs disabled |
+| `429` | More than 60 calls per minute from the client IP (checked before the signature) |
 
 **GitHub**: *Settings → Webhooks → Add webhook*. Payload URL = the webhook
 URL, content type `application/json`, secret = the webhook secret, event
@@ -132,8 +202,8 @@ URL, content type `application/json`, secret = the webhook secret, event
 (or Forgejo). Target URL = the webhook URL, method POST, content type
 `application/json`, secret = the webhook secret, trigger "Push events".
 
-**GitLab**: *Settings → Webhooks*. URL = the webhook URL, add a custom header
-`X-Stickpile-Webhook-Secret: <secret>`, trigger "Push events".
+**GitLab**: *Settings → Webhooks*. URL = the webhook URL, *Secret token* =
+the webhook secret (sent as `X-Gitlab-Token`), trigger "Push events".
 
 ## Version
 
@@ -141,12 +211,17 @@ URL, content type `application/json`, secret = the webhook secret, event
 upstream authors are expected to bump it when they publish. The value lets
 the server and clients tell an upstream update from a local edit:
 
-- After a pull, the imported set carries the upstream `version`. Clients that
-  cached the set see the number change and refresh.
+- A pull that changes anything sets the version to
+  `max(stored + 1, upstream version)`. It always increases, so clients that
+  cached the set see the number change and refresh. It equals the upstream
+  version whenever the author bumped it past the stored one. (A new pack
+  starts as an empty set with version 1, so its first pull gives
+  `max(2, upstream version)`.)
+- A pull that changes nothing keeps the version.
 - In push mode the exported `set.toml` carries the server's version, so the
   upstream history shows each stickpile edit as a version bump.
 - A pulled `version` lower than the one stored is still imported (upstream
-  wins). The difference is logged.
+  content wins, the version still increases). The difference is logged.
 
 ## URL policy
 
@@ -193,5 +268,16 @@ looping.
   `/etc/ssl/certs`, in the container set `SSL_CERT_FILE` to the `cacert`
   bundle.
 - No `git` binary is needed at runtime.
-- Network timeouts can be set once at startup with
-  `stickpile_gitpack::set_network_timeouts`.
+- `stickpile-server serve` sets libgit2's network timeouts at startup
+  (`set_network_timeouts`): 30 s to connect, 120 s per read or write.
+
+## Testing
+
+`crates/stickpile-gitpack/tests` covers the library against local `file://`
+repositories. `crates/stickpile-server/tests/integrations_git.rs` covers the
+server end to end: clone and import, webhooks (secret, GitLab token, HMAC,
+wrong or missing credentials, unknown set, rate limit), re-pull, read-only
+enforcement on every edit path, push mode against a bare repository
+(debounced commits, conflicts, an empty repository, a remote that refuses
+the push), the size limit, the URL policy, the scheduler and checkout
+cleanup. No test needs the network.

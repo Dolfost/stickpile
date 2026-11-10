@@ -19,7 +19,7 @@ pub const AUTH_TOKEN: &str = "/api/v1/auth/token";
 /// POST [`crate::model::RegisterRequest`] -> [`crate::model::User`] (201). Unauthenticated;
 /// obeys the server's registration policy (closed / invite / open).
 pub const AUTH_REGISTER: &str = "/api/v1/auth/register";
-/// GET -> [`crate::model::User`]
+/// GET -> [`crate::model::User`]; PATCH [`crate::model::UpdateMe`] -> User
 pub const ME: &str = "/api/v1/me";
 /// PUT [`crate::model::ChangePassword`] -> 204. Revokes the caller's other web sessions.
 pub const ME_PASSWORD: &str = "/api/v1/me/password";
@@ -51,12 +51,13 @@ pub const SET_EXPORT: &str = "/api/v1/sets/{id}/export.tar";
 /// Optional query `?into=<set id>` re-imports into an existing own set.
 /// -> [`crate::model::ImportReport`]
 pub const SETS_IMPORT: &str = "/api/v1/sets/import";
-/// POST [`crate::model::CreateGitPack`] -> [`crate::model::Set`] (clone runs as a job)
+/// POST [`crate::model::CreateGitPack`] -> [`crate::model::GitPackCreated`] (201; the clone runs as a job)
 pub const SETS_GITPACK: &str = "/api/v1/sets/gitpack";
 /// POST -> [`crate::model::Job`]: re-pull now.
 pub const SET_PULL: &str = "/api/v1/sets/{id}/pull";
-/// POST, unauthenticated; `X-Stickpile-Webhook-Secret: <secret>` or GitHub
-/// `X-Hub-Signature-256`. Enqueues a pull.
+/// POST, unauthenticated; `X-Stickpile-Webhook-Secret: <secret>`, GitLab
+/// `X-Gitlab-Token`, or GitHub/Gitea/Forgejo `X-Hub-Signature-256` (HMAC of
+/// the body). Enqueues a pull -> 202 [`crate::model::Job`].
 pub const GIT_WEBHOOK: &str = "/api/v1/hooks/git/{id}";
 /// POST [`crate::model::TelegramExport`] -> [`crate::model::Job`]
 pub const SET_TELEGRAM_EXPORT: &str = "/api/v1/sets/{id}/telegram/export";
