@@ -10,6 +10,7 @@ members = [
     "crates/stickpile-gitpack",
     "crates/stickpile-server",
     "crates/stickpile-core",
+    "crates/stickpile-quick",
     "crates/stickpile-cli",
     "crates/stickpile-desktop",
     "spike/clipspike",
@@ -33,6 +34,7 @@ stickpile-ai = { path = "crates/stickpile-ai", default-features = false }
 stickpile-telegram = { path = "crates/stickpile-telegram" }
 stickpile-gitpack = { path = "crates/stickpile-gitpack" }
 stickpile-core = { path = "crates/stickpile-core", default-features = false }
+stickpile-quick = { path = "crates/stickpile-quick" }
 
 # common
 anyhow = "1"

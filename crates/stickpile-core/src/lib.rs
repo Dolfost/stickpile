@@ -11,15 +11,14 @@
 //!   target, plus CLI clipboard backends (Wayland data-control, X11)
 //! * [`session`] — the high-level facade UI shells use (search with offline
 //!   fallback, thumbnails, prepare a copy, record usage)
-//! * [`focus`] — focused-window detection (Hyprland, Sway, X11) -> target app
-//! * [`quick`] — toolkit-free state machine of the quick-search popup
+//!
+//! The popup state machine and focused-window detection live in the
+//! toolkit-free `stickpile-quick` crate.
 
 pub mod cache;
 pub mod client;
 pub mod clipboard;
 pub mod config;
-pub mod focus;
-pub mod quick;
 pub mod session;
 pub mod token;
 pub mod usage;

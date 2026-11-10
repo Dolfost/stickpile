@@ -11,7 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 stickpile-api.workspace = true
-stickpile-core = { workspace = true, default-features = false }
+stickpile-core.workspace = true
+stickpile-quick.workspace = true
 gtk.workspace = true
 adw.workspace = true
 anyhow.workspace = true

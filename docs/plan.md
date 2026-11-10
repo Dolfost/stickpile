@@ -16,7 +16,7 @@ and the decisions and open questions behind them.
 | Media tools | Pure Rust for stills and GIF (image, gif, libwebp). ffmpeg/ffprobe only for video and animated renditions, always with fixed arguments on server-generated paths, `-protocol_whitelist file`, a timeout and no network. | §9 forbids user-controlled arguments, not ffmpeg itself. Video transcoding without ffmpeg is not realistic. |
 | Re-encoding | PNG and GIF are re-encoded losslessly. JPEG and WebP are fully decoded (validated) and then rebuilt from whitelisted segments/chunks. Videos are remuxed with metadata dropped. | A lossy re-encode of a JPEG would add a compression generation, which defeats the quality score and "find a better version". Rebuilding from whitelisted segments still removes metadata, comments, trailing payloads and polyglots. |
 | Tailscale auth | The server has a second listener on a **unix socket** (`tailscale serve unix:/state/tailscale.sock`). Identity headers are trusted only on that listener (or on TCP with a loopback peer plus a shared-secret header). | `tailscale serve` cannot add a secret header. A socket in the state directory is reachable only by root and the service user, which is stronger than "loopback", because with rootless podman every local user can reach loopback. |
-| Desktop toolkit | gtk4-rs + libadwaita directly. The popup's state machine lives in `stickpile-core::quick` with no toolkit dependency. | The state machine is testable without a display and reusable by the Android and macOS shells. Relm4 would add a macro layer without making anything easier to test. |
+| Desktop toolkit | gtk4-rs + libadwaita directly. The popup's state machine lives in `stickpile-quick` with no toolkit dependency. | The state machine is testable without a display and reusable by the Android and macOS shells. Relm4 would add a macro layer without making anything easier to test. |
 | Global shortcut | The resident GApplication is unique on D-Bus, so running `stickpile-desktop` again toggles the popup. Bind it in the compositor (Hyprland `bind = SUPER, period, exec, stickpile-desktop`). | This works on every compositor. The XDG GlobalShortcuts portal is optional and post-v1. |
 | Target detection | Read the focused window (Hyprland IPC, Sway IPC, X11 `_NET_ACTIVE_WINDOW`) when the popup opens, and map its class with configurable rules (AyuGram → Telegram, Vesktop → Discord). | This drives the variant choice and the "cannot be sent to this app" warning. |
 | macOS (post-v1) | **SwiftUI shell over `stickpile-core` via UniFFI** | A good quick-search popup on macOS needs a non-activating `NSPanel`, an `NSStatusItem`, `NSPasteboard` writes of several representations, and Carbon or `MASShortcut` hotkeys. These are all one-liners in Swift and awkward or impossible in iced, egui or slint, none of which look native. Tauri needs a JavaScript toolchain. |
@@ -34,7 +34,8 @@ stickpile-ai        Enricher trait, CLIP via ort, zero-shot vocabularies    (ser
 stickpile-telegram  Bot API sticker import/export                           (server)
 stickpile-gitpack   clone/pull/commit/push, webhook signatures              (server)
 stickpile-server    axum app: auth, REST, web UI, jobs, stats, admin
-stickpile-core      client lib: API client, token, cache, usage queue, clipboard, focus, quick model
+stickpile-core      client lib: API client, token, cache, usage queue, clipboard offers, session facade
+stickpile-quick     toolkit-free popup state machine + focused-window detection (api types only)
 stickpile-cli       `stickpile` binary
 stickpile-desktop   GTK4/libadwaita resident popup
 spike/clipspike     phase 0 throwaway clipboard tool
