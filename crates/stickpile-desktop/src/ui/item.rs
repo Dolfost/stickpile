@@ -1,0 +1,61 @@
+//! Grid item: a GObject wrapping one model entry. Cells bind to its
+//! properties with expressions, so a thumbnail that arrives later just sets
+//! `texture` and the visible cell updates.
+
+use gtk::gdk;
+use gtk::glib;
+use gtk::subclass::prelude::*;
+use stickpile_quick::model::Entry;
+
+mod imp {
+    use std::cell::{Cell, RefCell};
+
+    use gtk::glib::prelude::*;
+    use gtk::glib::Properties;
+
+    use super::*;
+
+    #[derive(Default, Properties)]
+    #[properties(wrapper_type = super::StickerObject)]
+    pub struct StickerObject {
+        #[property(get, set)]
+        pub item_id: RefCell<String>,
+        #[property(get, set, nullable)]
+        pub texture: RefCell<Option<gdk::Texture>>,
+        #[property(get, set)]
+        pub tooltip: RefCell<String>,
+        #[property(get, set)]
+        pub badge: RefCell<String>,
+        #[property(get, set)]
+        pub has_badge: Cell<bool>,
+        #[property(get, set)]
+        pub incompatible: Cell<bool>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for StickerObject {
+        const NAME: &'static str = "StickpileSticker";
+        type Type = super::StickerObject;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for StickerObject {}
+}
+
+glib::wrapper! {
+    pub struct StickerObject(ObjectSubclass<imp::StickerObject>);
+}
+
+impl StickerObject {
+    pub fn new(entry: &Entry, texture: Option<&gdk::Texture>) -> StickerObject {
+        let badge = entry.badge();
+        glib::Object::builder()
+            .property("item-id", &entry.item.id)
+            .property("texture", texture)
+            .property("tooltip", entry.tooltip())
+            .property("badge", badge.unwrap_or(""))
+            .property("has-badge", badge.is_some())
+            .property("incompatible", entry.incompatible.is_some())
+            .build()
+    }
+}

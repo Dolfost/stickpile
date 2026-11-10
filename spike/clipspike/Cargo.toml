@@ -11,3 +11,9 @@ gtk.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 wl-clipboard-rs.workspace = true
+image.workspace = true
+time.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

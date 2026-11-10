@@ -5,8 +5,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Focused-window detection on X11 sessions (`_NET_ACTIVE_WINDOW`).
+x11 = ["dep:x11rb"]
+
 [dependencies]
 stickpile-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+x11rb = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

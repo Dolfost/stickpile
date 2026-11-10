@@ -1,3 +1,3 @@
-fn main() {
-    println!("stickpile-desktop: not implemented yet");
+fn main() -> gtk::glib::ExitCode {
+    stickpile_desktop::app::run()
 }

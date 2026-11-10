@@ -1,0 +1,29 @@
+# Example systemd user unit: keep the stickpile popup resident so that the
+# clipboard content it owns survives on Wayland (see docs/desktop.md).
+#
+# Install: copy to ~/.config/systemd/user/, fix the ExecStart path, then
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now stickpile-desktop.service
+# The home-manager module generates an equivalent unit with the store path.
+#
+# The compositor must export WAYLAND_DISPLAY / DISPLAY to the user manager
+# (uwsm does; otherwise `dbus-update-activation-environment --systemd
+# WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP` in your autostart).
+
+[Unit]
+Description=stickpile quick-search popup (resident)
+Documentation=https://github.com/Dolfost/stickpile/blob/main/docs/desktop.md
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+# Not Type=dbus: if the shortcut already started an instance, this one just
+# forwards --hidden to it and exits 0, which is fine for Type=simple.
+Type=simple
+ExecStart=/usr/bin/stickpile-desktop --hidden
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

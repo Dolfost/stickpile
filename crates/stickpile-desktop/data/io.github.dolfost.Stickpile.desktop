@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=stickpile
+GenericName=Sticker search
+Comment=Find a sticker or meme and copy it to the clipboard
+# Toggles the popup of the resident instance (starts it if needed).
+Exec=stickpile-desktop
+Icon=io.github.dolfost.Stickpile
+Terminal=false
+NoDisplay=false
+StartupNotify=false
+Categories=Utility;GTK;
+Keywords=sticker;meme;gif;emoji;clipboard;paste;
+Actions=show;quit;
+
+[Desktop Action show]
+Name=Show popup
+Exec=stickpile-desktop show
+
+[Desktop Action quit]
+Name=Quit resident instance
+Exec=stickpile-desktop quit

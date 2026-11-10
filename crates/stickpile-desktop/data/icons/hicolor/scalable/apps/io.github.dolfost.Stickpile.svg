@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Placeholder icon: a sticker with a peeled corner. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffbe6f"/>
+      <stop offset="1" stop-color="#e66100"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 12h80a12 12 0 0 1 12 12v52l-40 40H24a12 12 0 0 1-12-12V24a12 12 0 0 1 12-12z" fill="url(#bg)"/>
+  <path d="M116 76l-40 40V88a12 12 0 0 1 12-12z" fill="#fdf6e3" stroke="#c64600" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="48" cy="52" r="7" fill="#3d3846"/>
+  <circle cx="80" cy="52" r="7" fill="#3d3846"/>
+  <path d="M42 74q22 18 44 0" fill="none" stroke="#3d3846" stroke-width="6" stroke-linecap="round"/>
+</svg>
