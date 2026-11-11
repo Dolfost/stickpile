@@ -311,7 +311,9 @@ button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1
 /* Each field flows like text: a tiny label, the value or chips, and the
    pencil floated to the right of the last line. */
 .card.editor .field { display: flow-root; flex: 1 1 100%; min-width: 0; padding: 0.05rem 0.25rem; border-radius: 5px; }
-.card.editor .field-emojis, .card.editor .field-vibe { flex: 1 1 calc(50% - 0.3rem); }
+/* Emojis and vibe share a line only when both fit whole; a fixed 50 % split
+   broke words like "wholesome" mid-word and pushed the vibe off its label. */
+.card.editor .field-emojis, .card.editor .field-vibe { flex: 1 1 auto; }
 .card.editor .field dt { display: inline; margin-right: 0.25rem; font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .card.editor .field dd { display: inline; }
 .card.editor .field-name .value { font-weight: 650; font-size: 0.9rem; overflow-wrap: anywhere; }

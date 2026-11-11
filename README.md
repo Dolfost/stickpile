@@ -8,6 +8,11 @@ stickers, GIFs and short videos on your own server, find one from any device
 in a keystroke, and paste it into whatever chat app you are using: Telegram,
 Discord, Signal, WhatsApp, Slack or a browser chat.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/set-editor-dark.png">
+  <img alt="The set editor in the web UI: a grid of sticker cards, each with its quality score, name, keywords, emojis, vibe and tags, AI suggestions highlighted with a confirm tick, and buttons to like, copy, download, reorder and delete" src="docs/screenshots/set-editor-light.png">
+</picture>
+
 - **Sets** like Telegram sticker packs (`private`, `unlisted` or `public`),
   stored as plain directories with a `set.toml` for import and export, or
   bound to a git repository that the server re-pulls.
@@ -90,6 +95,49 @@ file paths.
 edit keywords and emojis inline, confirm or override AI suggestions, copy
 stills to the clipboard, and see popular items and your stats. See
 [docs/web.md](docs/web.md).
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/search-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/search-dark.png">
+          <img alt="Search for &quot;cat&quot;: cat stickers first, matched by name, keyword, emoji, tag, set and image content, with semantic search on" src="docs/screenshots/search-light.png">
+        </picture>
+      </a>
+      <br><sub>Search: words, emojis, filters and what is in the picture</sub>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/compact-menu-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/compact-menu-dark.png">
+          <img alt="The compact view of a set with the right-click menu open: copy image, like, open, download, rename, edit all fields, move up, down, to top or bottom, delete" src="docs/screenshots/compact-menu-light.png">
+        </picture>
+      </a>
+      <br><sub>Compact view and the right-click menu</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/item-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/item-dark.png">
+          <img alt="An item page: a large preview of an animated GIF sticker, its likes and copies, media details and its editable name, keywords, emojis, vibe and tags" src="docs/screenshots/item-light.png">
+        </picture>
+      </a>
+      <br><sub>An item with its details and inline editing</sub>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/stats-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/stats-dark.png">
+          <img alt="The stats page: totals for sets, items, storage, copies and likes, and a bar chart of copies per day over the last 30 days" src="docs/screenshots/stats-light.png">
+        </picture>
+      </a>
+      <br><sub>Your stats: copies per day over 30 days</sub>
+    </td>
+  </tr>
+</table>
 
 **CLI** ([docs/cli.md](docs/cli.md)):
 

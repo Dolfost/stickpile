@@ -49,8 +49,8 @@ The item editor grid shows one card per item: the thumbnail with its kind
 and quality badges, then the fields in a dense layout. The name is the
 card's title; keywords, vibe and tags have small uppercase labels;
 keywords and tags are chips (tags with `#`); emojis and the vibe share a
-line. A pencil after each field edits it in place (see below), "✓"
-confirms an AI suggestion. Below the fields one row of small buttons:
+line when both fit. A pencil after each field edits it in place (see
+below), "✓" confirms an AI suggestion. Below the fields one row of small buttons:
 like (♡/♥ with the count), Copy, Download (icon), and for editors ↑ and ↓
 (set order only) and Delete (icon). Every icon button has a text name for
 screen readers and a tooltip. On narrow screens (below 40rem) the cards
