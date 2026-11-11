@@ -65,6 +65,10 @@ sudo tailscale serve --bg --https=443 unix:/run/stickpile/tailscale.sock
 `config.toml` there. Step by step in
 [docs/deployment.md](docs/deployment.md#podman-quadlet-rootless).
 
+**Try it locally** from the checkout: `scripts/run-local.sh up` starts the
+server (<http://localhost:8080>) and the desktop popup as systemd user
+units ([details](docs/deployment.md#from-the-checkout-trying-it-locally)).
+
 **From source:**
 
 ```sh
@@ -106,6 +110,11 @@ the target app.
 ```
 # ~/.config/hypr/hyprland.conf
 bind = SUPER, semicolon, exec, stickpile-desktop
+```
+
+```lua
+-- ~/.config/hypr/hyprland.lua (Lua config, Hyprland 0.55+)
+hl.bind('SUPER + semicolon', hl.dsp.exec_cmd('stickpile-desktop'))
 ```
 
 The client config (`~/.config/stickpile/config.toml`, or

@@ -1,8 +1,10 @@
 # Deployment
 
 stickpile is one process with one state directory (SQLite database, media,
-git clones, models). This page covers three ways to run it:
+git clones, models). This page covers four ways to run it:
 
+- [From the checkout](#from-the-checkout-trying-it-locally): a quick local
+  instance for trying it out, `scripts/run-local.sh`.
 - [NixOS](#nixos): the `services.stickpile` module.
 - [Podman quadlet](#podman-quadlet-rootless): the container image as a
   rootless quadlet, as on the aorus host.
@@ -25,6 +27,25 @@ accounts and API tokens work on both listeners.
 > `tailscale serve` does. Verify this after the first deployment (see
 > [Check the tailnet login](#7-check-the-tailnet-login)). Without the headers,
 > users log in with local accounts and tokens, and nothing else changes.
+
+## From the checkout (trying it locally)
+
+`scripts/run-local.sh up` builds the server, CLI and desktop client with Nix
+into `target/local/`, writes a loopback-only config, and starts the server
+and the resident popup as transient systemd user units. Run it again after
+a reboot or logout.
+
+| | |
+|---|---|
+| State and config | `~/.local/share/stickpile-local/` (`$STICKPILE_LOCAL_DIR`), with `config.toml` written once and never overwritten |
+| Admin | `$USER`, password in `secrets/admin-password` (generated) |
+| Web UI | <http://localhost:8080>, plain HTTP, `secure_cookies = false` |
+| AI | on if `models/` in the checkout holds the models (`scripts/fetch-models.sh --all models`) |
+| CLI | logged in as the admin; the token is in `~/.local/state/stickpile/token` |
+
+`scripts/run-local.sh status`, `logs` and `down` (stops both units and keeps
+the data). There is no tailnet listener, so tailnet login cannot be tested
+this way.
 
 ## NixOS
 
