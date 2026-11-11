@@ -120,8 +120,9 @@ pub struct FocusRule {
     pub target: TargetApp,
 }
 
-/// MIME types offered on the clipboard, in offer order. Provisional defaults
-/// until the docs/clipboard.md matrix is filled in; tune without rebuilding.
+/// MIME types offered on the clipboard, in offer order. The still, animation
+/// and video defaults are confirmed for Telegram on Wayland; the rest of the
+/// docs/clipboard.md matrix is still provisional. Tune without rebuilding.
 ///
 /// Supported entries: `image/png`, `image/gif`, `image/webp`, `image/jpeg`
 /// (raw bytes of the chosen variant, converted if needed), `text/uri-list`

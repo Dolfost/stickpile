@@ -9,10 +9,13 @@ automated. This document holds three things:
 3. the provisional clipboard defaults the clients ship with, how to change
    them without rebuilding, and the checklist to re-run before every release.
 
-> **Status:** the matrix is not filled in yet. Everything in the "expected"
-> columns is reasoning from how the apps are built (Qt for Telegram Desktop,
-> Chromium/Electron for Discord, Gecko for Firefox), not observation. Treat
-> it as a hypothesis until a row has a result.
+> **Status (2026-11-11):** Telegram Desktop / AyuGram on Wayland (Hyprland,
+> no clipboard manager) is observed for T1–T7 and T12 (raw log:
+> [clipboard-results.md](clipboard-results.md)). Everything else, including
+> the sticker rows, Discord, the browser, persistence and X11, is still the
+> "expected" column: reasoning from how the apps are built (Qt for Telegram
+> Desktop, Chromium/Electron for Discord, Gecko for Firefox), not
+> observation. Treat it as a hypothesis until a row has a result.
 
 ## 1. The spike
 
@@ -60,7 +63,8 @@ The window has:
   data-control), what happened (photo, sticker, file, animation, video,
   text pasted, nothing, error) and notes. **Record** appends a row to
   `clipboard-results.md` in the working directory (`--results FILE` to
-  change). The session (Wayland/X11, compositor, running clipboard
+  change; `--results docs/clipboard-results.md` appends to the log kept in
+  the repo). The session (Wayland/X11, compositor, running clipboard
   managers) is detected and written into every row.
 
 ### Data-control mode
@@ -121,20 +125,28 @@ document is turned into a sticker (sticker attribute added at upload).
 
 | # | Offer combination (fixture) | Expected (UNVERIFIED) | Wayland (Hyprland) | X11 | macOS (post-v1) |
 |---|---|---|---|---|---|
-| T1 | PNG data (png) | box → photo | | | |
-| T2 | PNG data + uri-list (png) | uri wins: box → photo (compressed by default; "send as file" possible) | | | |
-| T3 | uri-list only (png) | box → photo, same as T2 | | | |
-| T4 | GIF data (gif) | first frame only → photo (Qt decodes the image, animation lost), unless the build reads raw `image/gif` | | | |
-| T5 | GIF data + uri-list (gif) | uri wins: box → animation | | | |
-| T6 | uri-list only (gif) | box → animation | | | |
-| T7 | MP4 uri-list (mp4) | box → video | | | |
+| T1 | PNG data (png) | box → photo | photo, box | | |
+| T2 | PNG data + uri-list (png) | uri wins: box → photo (compressed by default; "send as file" possible) | photo, box | | |
+| T3 | uri-list only (png) | box → photo, same as T2 | photo | | |
+| T4 | GIF data (gif) | first frame only → photo (Qt decodes the image, animation lost), unless the build reads raw `image/gif` | photo, box (animation lost, as expected) | | |
+| T5 | GIF data + uri-list (gif) | uri wins: box → animation | **animation**, box | | |
+| T6 | uri-list only (gif) | box → animation | **animation**, box | | |
+| T7 | MP4 uri-list (mp4) | box → video | **video**, box | | |
 | T8 | 512 px WebP uri-list (webp) | **sticker** (the brief's open question) | | | |
 | T9 | 512 px WebP data + uri-list (webp) | uri wins → sticker | | | |
 | T10 | gnome-copied-files only (png) | nothing (Qt ignores it) | | | |
 | T11 | uri-list + gnome-copied-files (png) | same as T3 | | | |
-| T12 | path as text/plain (png) | text: the path is inserted into the input | | | |
+| T12 | path as text/plain (png) | text: the path is inserted into the input | text (path inserted) | | |
 | T13 | drag: GdkFileList + uri-list (webp) | sticker | | | |
 | T14 | drag: GdkFileList + uri-list (gif / mp4) | animation / video | | | |
+| T15 | provisional *still* default on a 512 px WebP: PNG data + uri-list + gnome-copied-files (webp) | photo (not a sticker) | photo, box | | |
+
+Observed on Wayland: pastes show Telegram's confirmation box (noted for
+every row except T3), so the flow is Enter in the popup, Ctrl+V, Enter. Raw `image/gif` alone loses the
+animation (T4); any offer that includes the file reference keeps it (T5,
+T6). T15 shows that a WebP still copied with the normal still offers
+becomes a photo; whether the uri-list-only sticker offer (T8) makes a real
+sticker is still open.
 
 ### 2.2 Discord / Vesktop (Electron, Chromium)
 
@@ -233,10 +245,12 @@ Additional questions worth noting while testing:
 - Flatpak/Snap builds: do file references from `~/.cache` work, or only
   the `GdkFileList` portal types?
 
-## 3. Provisional defaults
+## 3. Defaults
 
-Until the matrix is filled in, the clients offer these MIME types, in this
-order (`stickpile-core`, `ClipboardOffers::default`):
+The clients offer these MIME types, in this order (`stickpile-core`,
+`ClipboardOffers::default`). For Telegram on Wayland the still, animation
+and video rows are confirmed by T1–T7 (photo, animation, video); the
+sticker row and every other app are still provisional:
 
 | Item kind | Offers |
 |---|---|
@@ -246,7 +260,9 @@ order (`stickpile-core`, `ClipboardOffers::default`):
 | sticker (Shift+Enter / sticker mode, Telegram) | `text/uri-list`, `x-special/gnome-copied-files` |
 
 Rationale: image data is the most widely accepted for stills; GIFs and
-videos need the file reference to keep their motion; the sticker route
+videos need the file reference to keep their motion (confirmed for
+Telegram: T4 vs. T5/T6); `text/plain` is never offered by default because
+Telegram pastes it as text (T12); the sticker route
 depends on Telegram receiving a 512 px WebP *file*. `image/*` offers carry
 the bytes of the chosen variant (converted to PNG if needed); file
 references point at the materialised file in the cache,
