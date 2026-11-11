@@ -32,6 +32,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use ort::environment::Environment;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
@@ -89,7 +90,14 @@ impl std::fmt::Debug for ClipEnricher {
     }
 }
 
-static RUNTIME: OnceLock<Result<String, String>> = OnceLock::new();
+/// The loaded runtime. `ort` only keeps a weak reference to the environment
+/// and every session needs it, so it lives here for the whole process.
+struct Runtime {
+    env: Environment,
+    library: String,
+}
+
+static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
 
 /// Loads ONNX Runtime and creates the global environment (once per process).
 /// Returns the library that was used.
@@ -99,6 +107,10 @@ static RUNTIME: OnceLock<Result<String, String>> = OnceLock::new();
 /// load attempt (success or failure) is final for the process: ONNX Runtime
 /// cannot be unloaded or swapped, so fixing a broken library needs a restart.
 pub fn init_runtime(library: Option<&Path>) -> Result<&'static str, AiError> {
+    runtime(library).map(|rt| rt.library.as_str())
+}
+
+fn runtime(library: Option<&Path>) -> Result<&'static Runtime, AiError> {
     let path: Option<PathBuf> = library
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os("ORT_DYLIB_PATH").map(PathBuf::from));
@@ -116,30 +128,36 @@ pub fn init_runtime(library: Option<&Path>) -> Result<&'static str, AiError> {
         let shown = path
             .as_ref()
             .map_or_else(|| "libonnxruntime.so (system)".to_owned(), |p| p.display().to_string());
-        let committed = catch_panic(|| {
+        // Without a path ort falls back to ORT_DYLIB_PATH and the loader
+        // itself, and panics if that fails, hence `catch_panic`.
+        let built = catch_panic(|| -> Result<Environment, String> {
             let builder = match &path {
-                Some(p) => ort::init_from(p.to_string_lossy()),
+                Some(p) => ort::init_from(p).map_err(|e| e.to_string())?,
                 None => ort::init(),
             };
-            builder.with_name("stickpile").with_telemetry(false).commit()
+            builder
+                .with_name("stickpile")
+                .with_telemetry(false)
+                .build()
+                .map_err(|e| e.to_string())
         });
-        match committed {
-            Ok(Ok(_)) => {
+        match built {
+            Ok(Ok(env)) => {
                 tracing::info!(library = %shown, "ONNX Runtime loaded");
-                Ok(shown)
+                Ok(Runtime { env, library: shown })
             }
             Ok(Err(e)) => Err(format!("ONNX Runtime ({shown}): {e}")),
             Err(panic) => Err(format!("cannot load ONNX Runtime ({shown}): {panic}")),
         }
     });
     match res {
-        Ok(lib) => {
+        Ok(rt) => {
             if let Some(wanted) = library {
-                if wanted.display().to_string() != *lib {
-                    tracing::warn!(wanted = %wanted.display(), loaded = %lib, "ONNX Runtime already loaded; keeping it");
+                if wanted.display().to_string() != rt.library {
+                    tracing::warn!(wanted = %wanted.display(), loaded = %rt.library, "ONNX Runtime already loaded; keeping it");
                 }
             }
-            Ok(lib.as_str())
+            Ok(rt)
         }
         Err(e) => Err(AiError::Model(e.clone())),
     }
@@ -163,10 +181,10 @@ fn inference<E: std::fmt::Display>(e: E) -> AiError {
 /// Opens a session with full graph optimisation. Some exports (e.g. the fp16
 /// CLIP graphs) trip an ONNX Runtime fusion bug at level 3; those are retried
 /// at level 1 so other ONNX exports can be dropped into the model dir.
-fn open_session(path: &Path, threads: usize) -> Result<Session, AiError> {
+fn open_session(env: &Environment, path: &Path, threads: usize) -> Result<Session, AiError> {
     let build = |level: GraphOptimizationLevel| {
         catch_panic(|| -> ort::Result<Session> {
-            let mut b = Session::builder()?
+            let mut b = Session::builder(env)?
                 .with_optimization_level(level)?
                 .with_intra_op_spinning(false)?
                 .with_inter_threads(1)?;
@@ -191,11 +209,11 @@ fn open_session(path: &Path, threads: usize) -> Result<Session, AiError> {
 }
 
 fn input_names(s: &Session) -> Vec<&str> {
-    s.inputs.iter().map(|i| i.name.as_str()).collect()
+    s.inputs().iter().map(|i| i.name()).collect()
 }
 
 fn output_names(s: &Session) -> Vec<&str> {
-    s.outputs.iter().map(|o| o.name.as_str()).collect()
+    s.outputs().iter().map(|o| o.name()).collect()
 }
 
 /// Picks the first of `wanted` among the graph outputs.
@@ -398,11 +416,11 @@ impl ClipEnricher {
                 list.join(", ")
             )));
         }
-        init_runtime(opts.onnxruntime_library.as_deref())?;
+        let env = &runtime(opts.onnxruntime_library.as_deref())?.env;
         let dir = &opts.model_dir;
 
         let vpath = dir.join(layout::VISION);
-        let vs = open_session(&vpath, opts.threads)?;
+        let vs = open_session(env, &vpath, opts.threads)?;
         require_input(&vs, "pixel_values", &vpath)?;
         let output = pick_output(&vs, &["image_embeds"], &vpath)?;
         let vision = Tower {
@@ -413,7 +431,7 @@ impl ClipEnricher {
         let text = match opts.text_encoder {
             TextEncoderKind::Clip => {
                 let path = dir.join(layout::CLIP_TEXT);
-                let s = open_session(&path, opts.threads)?;
+                let s = open_session(env, &path, opts.threads)?;
                 require_input(&s, "input_ids", &path)?;
                 let output = pick_output(&s, &["text_embeds"], &path)?;
                 TextModel {
@@ -430,7 +448,7 @@ impl ClipEnricher {
             }
             TextEncoderKind::Multilingual => {
                 let path = dir.join(layout::MCLIP_MODEL);
-                let s = open_session(&path, opts.threads)?;
+                let s = open_session(env, &path, opts.threads)?;
                 require_input(&s, "input_ids", &path)?;
                 require_input(&s, "attention_mask", &path)?;
                 let output = pick_output(&s, &["last_hidden_state", "token_embeddings"], &path)?;

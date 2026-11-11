@@ -150,9 +150,9 @@ dependency. `libonnxruntime.so` is loaded at runtime from the first of:
    nixpkgs `onnxruntime`),
 3. `libonnxruntime.so` through the dynamic loader.
 
-The crate uses `ort` `=2.0.0-rc.10` (ORT C API version 22), tested with
+The crate uses `ort` `=2.0.0-rc.15` (ORT C API version 17), tested with
 nixpkgs `onnxruntime` 1.24.4. Newer runtimes are backwards compatible; ort
-only logs a version notice. Runtimes older than 1.22 are rejected. The
+only logs a version notice. Runtimes older than 1.17 are rejected. The
 library is loaded once per process. A missing path is reported without
 touching ONNX Runtime. A library that fails to load (wrong file, wrong
 architecture) gives `AiError::Model`, not a crash, and needs a restart once

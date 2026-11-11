@@ -30,7 +30,8 @@ fn bad_runtime_library_is_an_error() {
         "{err}"
     );
 
-    // A file that is not a shared library: ort panics internally; we get an error.
+    // A file that is not a shared library: an error, not a panic (ort returns
+    // one for an explicit path; without a path it panics and we catch it).
     let bogus = dir.path().join("libonnxruntime.so");
     std::fs::write(&bogus, b"definitely not ELF").unwrap();
     let err = ClipEnricher::load(&opts(bogus.clone())).unwrap_err();
