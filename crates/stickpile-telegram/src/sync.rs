@@ -384,6 +384,22 @@ pub fn valid_pack_name(name: &str, bot_username: &str) -> bool {
     lower.len() > suffix.len() && lower.ends_with(&suffix)
 }
 
+/// A pack name as a user types it, with `_by_<bot>` appended when it is
+/// missing: `test` becomes `test_by_<bot>`. A name that already ends in this
+/// bot's suffix, or in another bot's (`x_by_other_bot`, which this bot cannot
+/// edit), is returned unchanged for [`valid_pack_name`] to judge.
+pub fn complete_pack_name(name: &str, bot_username: &str) -> String {
+    let bot = bot_username.trim_start_matches('@');
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(&format!("_by_{}", bot.to_ascii_lowercase())) {
+        return name.to_string();
+    }
+    if lower.rsplit_once("_by_").is_some_and(|(_, tail)| tail.ends_with("bot")) {
+        return name.to_string();
+    }
+    format!("{}_by_{bot}", name.trim_end_matches('_'))
+}
+
 /// `<slug>_by_<bot>` turned into a valid pack name (dashes become
 /// underscores, a leading digit gets a `s` prefix, the stem is shortened to
 /// fit 64 characters). `None` if the bot username itself makes that
@@ -448,6 +464,21 @@ mod tests {
         assert!(valid_pack_name(&long, bot));
         assert!(!valid_pack_name(&format!("a{long}"), bot));
         assert!(!valid_pack_name("cats_by_stickpile_bot", ""));
+    }
+
+    #[test]
+    fn completed_names() {
+        let bot = "@Stickpile_bot";
+        assert_eq!(complete_pack_name("test", bot), "test_by_Stickpile_bot");
+        assert_eq!(complete_pack_name("test_", bot), "test_by_Stickpile_bot");
+        assert_eq!(
+            complete_pack_name("Cats_by_stickpile_BOT", bot),
+            "Cats_by_stickpile_BOT"
+        );
+        assert_eq!(complete_pack_name("cats_by_other_bot", bot), "cats_by_other_bot");
+        assert_eq!(complete_pack_name("made_by_hand", bot), "made_by_hand_by_Stickpile_bot");
+        assert!(valid_pack_name(&complete_pack_name("test", bot), bot));
+        assert!(!valid_pack_name(&complete_pack_name("cats_by_other_bot", bot), bot));
     }
 
     #[test]

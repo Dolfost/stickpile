@@ -426,7 +426,7 @@ fn tg_export_form(ctx: &Ctx, set: &Set, f: &TgExportForm, error: Option<&str>) -
                 label for="tge-name" { "Pack short name (optional)" }
                 input #tge-name type="text" name="pack_name" value=(f.pack_name) maxlength="64" spellcheck="false"
                     aria-describedby="tge-name-hint";
-                p.hint #tge-name-hint { "Must end in _by_<bot name>. Empty: the bound pack, or one derived from the slug." }
+                p.hint #tge-name-hint { "Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug." }
             }
             div.field-row {
                 label for="tge-title" { "Pack title (optional)" }

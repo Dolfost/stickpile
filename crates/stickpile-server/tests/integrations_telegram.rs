@@ -307,6 +307,12 @@ async fn export_validates_pack_names_and_uses_the_default_owner() {
     let j = export(srv, &alice, &set.id, json!({"pack_name": custom})).await;
     assert_eq!(j.status, JobStatus::Done, "{j:?}");
     assert_eq!(tg.mock.lock().unwrap().packs[&custom].owner, 777);
+    // A bare name gets the bot suffix appended.
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "test"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let short = format!("test_by_{BOT}");
+    assert_eq!(j.result.unwrap()["pack_name"], short.as_str());
+    assert!(tg.mock.lock().unwrap().packs.contains_key(&short));
     // Others cannot export someone else's set; an empty set has nothing to export.
     let bob = srv.user("bob").await;
     srv.post(&bob, &routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]), json!({}))

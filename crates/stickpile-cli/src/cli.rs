@@ -313,7 +313,7 @@ pub enum TelegramCmd {
     /// Publish a set as a Telegram sticker pack (create or update)
     Export {
         set: String,
-        /// Pack short name (must end in _by_<bot>)
+        /// Pack short name; _by_<bot> is appended if missing [default: the bound pack, else <slug>_by_<bot>]
         #[arg(long)]
         pack: Option<String>,
         #[arg(long)]

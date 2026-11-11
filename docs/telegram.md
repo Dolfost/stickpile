@@ -118,8 +118,10 @@ null}` (the set's owner only, read-only git packs included) queues a
 caller (their own, else `telegram.default_owner_user_id`) the request is a
 `400` that says how to set one. The job runs `export_pack`. By default it
 uses the previously bound pack name (or `<slug>_by_<bot>`) and the set name
-as title. A pack name that does not end in `_by_<bot username>` fails the job
-with an explanation.
+as title. A given pack name without the `_by_<bot username>` suffix gets it
+appended (`test` becomes `test_by_<bot>`). A name that ends in another bot's
+suffix (`x_by_other_bot`) fails the job with an explanation, because a bot
+can edit only its own packs.
 
 Every item is exported as its `tg_sticker` variant (512 px static WebP) for
 stills, or its `tg_video_sticker` variant (512 px VP9 WebM, at most 3 s, no

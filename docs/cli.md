@@ -337,7 +337,7 @@ and the clone job. See [docs/git-packs.md](git-packs.md).
 
 ```sh
 stickpile telegram import Animals --slug animals --visibility private --wait
-stickpile telegram export cats --pack cats_by_mybot --title "Cats" --wait
+stickpile telegram export cats --pack cats --title "Cats" --wait   # pack cats_by_<bot>
 ```
 
 Both run as server jobs. `--wait` polls until the job is done and exits 1 if

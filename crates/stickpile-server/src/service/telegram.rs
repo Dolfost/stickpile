@@ -319,7 +319,7 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
         .username
         .ok_or_else(|| JobError::Fatal("the bot has no username (getMe)".into()))?;
     let name = match p["pack_name"].as_str() {
-        Some(n) => n.to_string(),
+        Some(n) => stickpile_telegram::complete_pack_name(n, &bot_name),
         None => match &set.telegram_pack {
             Some(n) => n.clone(),
             None => stickpile_telegram::default_pack_name(&set.slug, &bot_name)
@@ -329,7 +329,8 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
     if !stickpile_telegram::valid_pack_name(&name, &bot_name) {
         return Err(JobError::Fatal(format!(
             "pack name {name:?} is not valid for @{bot_name}: Telegram requires 1-64 characters of A-Z a-z 0-9 _, \
-             starting with a letter, without \"__\", ending in _by_{bot_name}"
+             starting with a letter, without \"__\", ending in _by_{bot_name} (added for you when the name has no \
+             _by_…bot suffix), and a bot can only edit its own packs"
         )));
     }
     let title = p["title"]
