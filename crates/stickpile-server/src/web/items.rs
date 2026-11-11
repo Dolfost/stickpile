@@ -16,8 +16,8 @@ use serde::Deserialize;
 use stickpile_api::{FieldSource, Item, ItemDetail, MediaKind, UpdateItem, Variant};
 
 use super::components::{
-    ai_mark, copy_controls, file_url, fmt_bytes, grid, item_card, item_url, kind_badge, like_form, plural,
-    quality_badge, quality_class, set_url, thumb, Card,
+    ai_mark, copy_controls, file_url, fmt_bytes, grid, icon, item_card, item_url, kind_badge, like_form, plural,
+    quality_badge, quality_class, set_url, thumb, Card, Icon,
 };
 use super::layout::{self, Nav};
 use super::{integrations, Ctx};
@@ -153,23 +153,41 @@ fn field_value(item: &Item, f: Field) -> Markup {
     }
 }
 
+/// `class` of a field block: `field field-{key}` plus `ai-field` (an AI
+/// suggestion), `empty` and `editing`. The per-field class lets the set
+/// editor lay fields out differently (and hide most of them in the compact
+/// view) without touching the swap unit.
+fn field_class(f: Field, ai: bool, empty: bool, editing: bool) -> String {
+    let mut c = format!("field field-{}", f.key());
+    for (on, name) in [(ai, " ai-field"), (empty, " empty"), (editing, " editing")] {
+        if on {
+            c.push_str(name);
+        }
+    }
+    c
+}
+
 /// Display block of one field (the htmx swap unit).
 pub fn field_block(ctx: &Ctx, item: &Item, f: Field, editable: bool) -> Markup {
-    let ai = f.source(item) == FieldSource::Ai && !f.is_empty(item);
+    let empty = f.is_empty(item);
+    let ai = f.source(item) == FieldSource::Ai && !empty;
     let base = format!("/items/{}", item.id);
+    let label = f.label().to_lowercase();
     html! {
-        div.field.ai-field[ai] id=(field_id(item, f)) {
+        div class=(field_class(f, ai, empty, false)) id=(field_id(item, f)) {
             dt {
-                (f.label())
+                span.field-label { (f.label()) }
                 @if ai { " " (ai_mark()) }
             }
             dd {
                 (field_value(item, f))
                 @if editable {
                     span.field-actions {
+                        // The set editor shows the pencil only; the text
+                        // stays for screen readers ("Edit keywords").
                         a.edit href=(format!("{base}?edit=1#edit")) hx-get=(format!("{base}/field/{}/edit", f.key()))
-                            hx-target="closest .field" hx-swap="outerHTML" {
-                            "Edit" span.sr-only { " " (f.label().to_lowercase()) }
+                            hx-target="closest .field" hx-swap="outerHTML" title=(format!("Edit {label}")) {
+                            (icon(Icon::Edit)) span.edit-text { "Edit" } span.sr-only { " " (label) }
                         }
                         @if ai {
                             form.inline method="post" action=(format!("{base}/confirm/{}", f.key()))
@@ -177,7 +195,7 @@ pub fn field_block(ctx: &Ctx, item: &Item, f: Field, editable: bool) -> Markup {
                                 (ctx.csrf_input())
                                 input type="hidden" name="next" value=(ctx.here);
                                 button.link.confirm type="submit" title="Keep the AI suggestion as yours" {
-                                    "✓ Confirm" span.sr-only { " " (f.label().to_lowercase()) }
+                                    span aria-hidden="true" { "✓" } span.confirm-text { " Confirm" } span.sr-only { " " (label) }
                                 }
                             }
                         }
@@ -210,7 +228,7 @@ fn field_form(ctx: &Ctx, vibes: &[String], item: &Item, f: Field, value: &str, e
     let base = format!("/items/{}", item.id);
     let action = format!("{base}/field/{}", f.key());
     html! {
-        div.field.editing id=(field_id(item, f)) {
+        div class=(field_class(f, false, false, true)) id=(field_id(item, f)) {
             dt { label for=(format!("in-{}-{}", item.id, f.key())) { (f.label()) } }
             dd {
                 form.inline-edit method="post" action=(action) hx-post=(action) hx-target="closest .field" hx-swap="outerHTML" {
@@ -234,15 +252,26 @@ fn vibes(state: &AppState) -> Vec<String> {
     state.vocab.vibes.iter().map(|v| v.label.clone()).collect()
 }
 
-/// An item in the set editor: thumb, badges, editable fields, like, copy,
-/// reorder and delete. `movable` = (is first, is last) when reordering is
-/// possible.
+/// An item in the set editor: thumb, badges, editable fields, and one row
+/// of small buttons (like, copy, download, reorder, delete, "⋯").
+/// `movable` = (is first, is last) when reordering is possible.
+///
+/// The `data-*` attributes describe what app.js may offer in the item's
+/// context menu (right click, the context-menu key, or "⋯"): only actions
+/// this viewer can take here. Like and copy reuse the card's own buttons.
 pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>) -> Markup {
     let card = Card::from_item(item);
+    let page = item_url(&item.id);
     let move_url = format!("/sets/{}/items/{}/move", item.set_id, item.id);
+    let delete_url = format!("/items/{}/delete", item.id);
+    let (first, last) = movable.unwrap_or((false, false));
     html! {
-        article.card.editor id=(format!("item-{}", item.id)) {
-            a.thumb href=(item_url(&item.id)) {
+        article.card.editor id=(format!("item-{}", item.id)) data-menu=""
+            data-item-url=(page) data-download-url=(file_url(&item.id, Variant::Original))
+            data-edit-url=[editable.then(|| format!("{page}?edit=1#edit"))]
+            data-delete-url=[editable.then_some(&delete_url)]
+            data-move-url=[movable.map(|_| &move_url)] data-first[first] data-last[last] {
+            a.thumb href=(page) {
                 (thumb(&item.id, &item.name, item.media.width, item.media.height))
             }
             div.badges {
@@ -255,27 +284,31 @@ pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool
                 }
                 div.card-actions {
                     (like_form(ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))
-                    (copy_controls(&card, false))
-                }
-                @if editable {
-                    div.card-actions.manage {
-                        @if let Some((first, last)) = movable {
-                            @for (dir, label, sym, off) in [("up", "Move up", "↑", first), ("down", "Move down", "↓", last)] {
-                                form.inline method="post" action=(move_url) hx-post=(move_url) hx-target="#set-items" hx-swap="outerHTML" {
-                                    (ctx.csrf_input())
-                                    input type="hidden" name="dir" value=(dir);
-                                    button.small type="submit" title=(label) disabled[off] {
-                                        span aria-hidden="true" { (sym) } span.sr-only { (label) ": " (item.name) }
+                    (copy_controls(&card, false, true))
+                    @if editable {
+                        div.manage {
+                            @if movable.is_some() {
+                                @for (dir, label, ico, off) in [("up", "Move up", Icon::Up, first), ("down", "Move down", Icon::Down, last)] {
+                                    form.inline method="post" action=(move_url) hx-post=(move_url) hx-target="#set-items" hx-swap="outerHTML" {
+                                        (ctx.csrf_input())
+                                        input type="hidden" name="dir" value=(dir);
+                                        button.icon-btn type="submit" title=(label) disabled[off] {
+                                            (icon(ico)) span.sr-only { (label) ": " (item.name) }
+                                        }
                                     }
                                 }
                             }
+                            a.button.icon-btn.danger href=(delete_url) hx-post=(delete_url)
+                                hx-confirm=(format!("Delete “{}” from this set?", item.name))
+                                hx-target="closest .card" hx-swap="delete" title="Delete" {
+                                (icon(Icon::Delete)) span.sr-only { "Delete " (item.name) }
+                            }
                         }
-                        a.button.small.danger href=(format!("/items/{}/delete", item.id))
-                            hx-post=(format!("/items/{}/delete", item.id))
-                            hx-confirm=(format!("Delete “{}” from this set?", item.name))
-                            hx-target="closest .card" hx-swap="delete" {
-                            "Delete" span.sr-only { " " (item.name) }
-                        }
+                    }
+                    // Opens the context menu; needs app.js, hidden without it.
+                    button.icon-btn.card-menu-btn type="button" hidden data-menu-button="" aria-haspopup="menu"
+                        aria-expanded="false" title="More actions" {
+                        (icon(Icon::More)) span.sr-only { "More actions for " (item.name) }
                     }
                 }
             }
@@ -441,7 +474,7 @@ pub async fn page(
                 }
                 p.badges { (kind_badge(m.kind, m.format)) " " (quality_badge(m.quality)) }
                 @if q.saved.is_some() { (layout::alert("success", "Saved.")) }
-                (copy_controls(&card, true))
+                (copy_controls(&card, true, false))
                 div.inline-row {
                     (like_form(&ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))
                     span.muted { (plural(item.copies, "copy", "copies")) }

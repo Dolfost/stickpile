@@ -275,6 +275,10 @@ pub struct SetQuery {
     sort: Option<String>,
     #[serde(default)]
     min_likes: Option<String>,
+    /// `compact`: the denser grid (thumbnails with a one-line caption).
+    /// app.js applies the same class instantly and remembers the choice.
+    #[serde(default)]
+    view: Option<String>,
 }
 
 /// Filter ("hide below N likes") and sort a set's items.
@@ -327,6 +331,7 @@ pub async fn page(
     let detail = sets::detail(&state, &ctx.user, &id).await?;
     let sort = Sort::parse(q.sort.as_deref());
     let min_likes: u64 = q.min_likes.as_deref().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let compact = q.view.as_deref() == Some("compact");
     let set = &detail.set;
     let is_owner = set.owner_id == ctx.id();
     let body = html! {
@@ -365,9 +370,13 @@ pub async fn page(
                 }
             }
         }
-        section aria-labelledby="items-head" {
+        // The view class sits on this wrapper, outside `#set-items`, so it
+        // survives the grid swaps after reordering and uploads.
+        section #items-section .items-section .compact[compact] aria-labelledby="items-head" {
             div.section-head {
                 h2 #items-head { "Items" }
+                // One GET form: Apply keeps the filter, the sort and the view
+                // together. With JavaScript the checkbox applies at once.
                 form.filters method="get" action=(set_url(&set.id)) {
                     label for="f-min-likes" { "Hide below" }
                     input #f-min-likes type="number" name="min_likes" min="0" value=(min_likes) class="narrow-num";
@@ -377,6 +386,11 @@ pub async fn page(
                         @for (s, key, label) in Sort::ALL {
                             option value=(key) selected[s == sort] { (label) }
                         }
+                    }
+                    label.check for="f-view" {
+                        input #f-view type="checkbox" name="view" value="compact" checked[compact]
+                            data-view-toggle="items-section";
+                        "Compact view"
                     }
                     button type="submit" { "Apply" }
                 }

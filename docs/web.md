@@ -4,8 +4,8 @@ The web UI is rendered on the server with [maud](https://maud.lambda.xyz)
 templates and enhanced with [htmx](https://htmx.org) 2 (vendored, no
 JavaScript toolchain). Every page works without JavaScript: forms post and
 redirect. When htmx is loaded, the same forms swap small fragments in place.
-A small hand-written script (`assets/app.js`) adds clipboard copy and
-drag-and-drop.
+A small hand-written script (`assets/app.js`) adds clipboard copy,
+drag-and-drop, the instant compact view and the item context menu.
 
 Code: `crates/stickpile-server/src/web/` (one module per area), static files
 in `crates/stickpile-server/assets/`, UI-only queries in
@@ -22,7 +22,7 @@ more than the API allows.
 | `/` | Search box, items you copied recently, your sets with covers. |
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
-| `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent), and the item editor grid. |
+| `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "Compact view" checkbox, and the item editor grid (see [Set page](#set-page)). |
 | `/sets/{id}/settings` | The set form plus "Delete this set…". Read-only git packs only offer deletion. |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
@@ -43,12 +43,68 @@ you in automatically. The top bar shows your name with a `tailnet` badge and
 no "Sign out" button (there is no session to end). `/login` redirects to the
 start page.
 
+## Set page
+
+The item editor grid shows one card per item: the thumbnail with its kind
+and quality badges, then the fields in a dense layout. The name is the
+card's title; keywords, vibe and tags have small uppercase labels;
+keywords and tags are chips (tags with `#`); emojis and the vibe share a
+line. A pencil after each field edits it in place (see below), "✓"
+confirms an AI suggestion. Below the fields one row of small buttons:
+like (♡/♥ with the count), Copy, Download (icon), and for editors ↑ and ↓
+(set order only) and Delete (icon). Every icon button has a text name for
+screen readers and a tooltip. On narrow screens (below 40rem) the cards
+become rows: a small thumbnail on the left, fields and buttons on the
+right.
+
+**Compact view.** The "Compact view" checkbox next to the sort switches to
+a denser grid: thumbnails with only the name and emojis on one line; the
+other fields and the button row are hidden (the context menu has the
+actions). With JavaScript the checkbox applies at once and is remembered in
+`localStorage` (`stickpile.setView`) for every set page; the address bar
+gets `?view=compact` (or loses it) so a reload shows the same thing. A
+`view` parameter in the URL always wins over the remembered choice and
+becomes the new remembered choice. Without JavaScript the checkbox is part
+of the filter form: "Apply" submits it together with the likes filter and
+the sort, and the server renders `?view=compact` with the compact class
+and the box checked. The class sits on the section around the grid, so it
+survives the grid refreshes after reordering and uploads.
+
+**Context menu.** Right-click an item card (either view) for its actions:
+
+| Entry | Shown when | Does |
+|---|---|---|
+| Copy image / Copy link | always | the card's copy button (same rules as [Copy to clipboard](#copy-to-clipboard)) |
+| Like / Unlike | always | the card's like button |
+| Open item page | always | link to `/items/{id}` (middle-click opens a tab) |
+| Download original | always | download link |
+| Rename | you can edit the set | inline edit of the name (also in the compact view) |
+| Edit all fields… | you can edit the set | `/items/{id}?edit=1` |
+| Move up, Move down, Move to top, Move to bottom | you can edit the set, set order, no likes filter | the set's move endpoint; the ends are disabled for the first and last item |
+| Delete… | you can edit the set | asks for confirmation, then removes the card |
+
+The menu is built by app.js from `data-*` attributes the server puts on the
+card only when the action is allowed (`data-edit-url`, `data-delete-url`,
+`data-move-url` with `data-first`/`data-last`), and it uses the same
+endpoints, htmx requests and CSRF header as the buttons. It also opens from
+the keyboard (the context-menu key or Shift+F10 while focus is in a card)
+and from the "⋯" button on each card (for touch screens and keyboards).
+Inside the menu: ↑/↓ move between entries (wrapping), Home/End jump,
+typing a letter jumps to the entry starting with it, Enter or Space
+activates, Escape or Tab closes and returns focus to where it was. A click
+outside, scrolling or resizing closes it. After a move from the keyboard,
+focus follows the item. Ctrl+ or Shift+right-click (and right-clicking a
+text field, e.g. while editing) keeps the browser's own menu. Without
+JavaScript there is no custom menu and no "⋯"; the browser's menu and the
+card buttons work as before.
+
 ## Keyboard and mouse
 
 - **Skip link**: the first Tab stop jumps to the main content.
 - **Search from anywhere**: the search field in the top bar. On the search page
   results refresh 0.4 s after you stop typing; Enter searches immediately.
-- **Inline editing** (set page and item page): activate "Edit" next to a field.
+- **Inline editing** (set page and item page): activate "Edit" next to a field
+  (the pencil on the set page).
   The field turns into a small form with the cursor in it. Enter saves,
   Escape (or "Cancel") restores the view. Lists are comma-separated (keywords,
   tags), emojis space-separated, an empty vibe clears it. Invalid input stays
@@ -57,10 +113,13 @@ start page.
 - **AI suggestions** are marked with an `AI` badge and a tinted row. "✓ Confirm"
   keeps the value and marks it as yours; editing it does the same with your
   value. AI values you leave alone stay marked (also in exports).
-- **Reorder**: ↑ and ↓ on each card move it by one place. They are only shown in
-  set order without the likes filter.
+- **Reorder**: ↑ and ↓ on each card move it by one place; the context menu
+  also moves to the top or bottom. They are only offered in set order
+  without the likes filter.
 - **Delete** asks for confirmation (a browser dialog with JavaScript, a
   confirmation page without).
+- **Context menu** on set page cards: right click, the context-menu key,
+  Shift+F10 or "⋯". See [Set page](#set-page).
 - **Likes**: the ♡/♥ button toggles your like (`aria-pressed` tells screen
   readers the state).
 - **Drag and drop**: drop files on the dashed upload area to upload them at
@@ -72,8 +131,8 @@ have the item name as alt text, and colours follow `prefers-color-scheme`.
 
 ## Copy to clipboard
 
-Copy buttons need JavaScript and stay hidden without it. "Download" always
-works.
+Copy buttons need JavaScript and stay hidden without it (the stylesheet
+enforces the `hidden` attribute). "Download" always works.
 
 | Media | Button | What happens |
 |---|---|---|
@@ -221,6 +280,10 @@ you cannot see; 403 for admin pages and others' sets; CSRF on urlencoded,
 htmx and multipart forms, and cross-site posts; the login flow and cookie
 flags; logout; the TOTP step; registration per policy; tailnet sign-in;
 htmx fragments without the document shell; escaping of `<script>` and quotes;
+the compact view (`?view=compact`, the checkbox in the filter form, other
+parameters kept) and the context-menu data per permission (no edit, delete
+or move entries for viewers, no move entries when sorted or filtered, the
+named "⋯" button);
 the CSP header and the absence of inline styles and scripts; static asset
 types; HTML error pages; and the flows end to end (sets, uploads with
 near-duplicate warnings, imports, editing, likes and filters, stats and

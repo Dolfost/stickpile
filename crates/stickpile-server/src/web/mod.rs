@@ -1,7 +1,8 @@
 //! Server-rendered web UI: maud templates plus htmx, no SPA and no
 //! JavaScript toolchain. Every page works without JavaScript (forms post and
 //! redirect); htmx swaps fragments in place when it is loaded, and
-//! `assets/app.js` adds clipboard copy and drag-and-drop.
+//! `assets/app.js` adds clipboard copy, drag-and-drop, the set page's instant
+//! compact view and the item context menu.
 //!
 //! How pages plug into the rest of the server:
 //!

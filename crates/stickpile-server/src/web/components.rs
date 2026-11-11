@@ -164,11 +164,42 @@ pub fn source_badge(s: SetSource) -> Markup {
     }
 }
 
+/// Small inline SVG icons (decorative: buttons carry their name as text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Icon {
+    Edit,
+    Download,
+    Delete,
+    Up,
+    Down,
+    More,
+}
+
+pub fn icon(i: Icon) -> Markup {
+    // 24×24 outlines drawn with the current text colour.
+    let paths: &[&str] = match i {
+        Icon::Edit => &["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"],
+        Icon::Download => &["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
+        Icon::Delete => &["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5", "M14 11v5"],
+        Icon::Up => &["M12 19V5", "M6 11l6-6 6 6"],
+        Icon::Down => &["M12 5v14", "M6 13l6 6 6-6"],
+        Icon::More => &["M5 12h.01", "M12 12h.01", "M19 12h.01"],
+    };
+    let width = if i == Icon::More { "3.2" } else { "2" };
+    html! {
+        svg.icon viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
+            stroke="currentColor" stroke-width=(width) stroke-linecap="round" stroke-linejoin="round" {
+            @for d in paths { path d=(d) {} }
+        }
+    }
+}
+
 /// Copy controls. Stills are copied as PNG image data; animations and videos
 /// get "Copy link" and "Download" (browsers cannot put GIF or video files on
 /// the clipboard in a form chat apps accept). The buttons need app.js and
-/// stay hidden without it; the download link always works.
-pub fn copy_controls(c: &Card<'_>, long: bool) -> Markup {
+/// stay hidden without it; the download link always works. `dense` (set
+/// editor cards) shows Download as an icon button.
+pub fn copy_controls(c: &Card<'_>, long: bool, dense: bool) -> Markup {
     let original = file_url(c.id, Variant::Original);
     html! {
         div.copy-controls {
@@ -180,7 +211,13 @@ pub fn copy_controls(c: &Card<'_>, long: bool) -> Markup {
                 button.copy type="button" hidden data-copy="link" data-item=(c.id) data-src=(original)
                     data-variant="original" { "Copy link" }
             }
-            a.button.download href=(original) download { "Download" }
+            @if dense {
+                a.button.download.icon-btn href=(original) download title="Download the original file" {
+                    (icon(Icon::Download)) span.sr-only { "Download" }
+                }
+            } @else {
+                a.button.download href=(original) download { "Download" }
+            }
             @if long && c.kind != MediaKind::Still {
                 p.hint {
                     "Browsers cannot put GIFs or videos on the clipboard in a form chat apps accept. "
@@ -240,7 +277,7 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
                     } @else {
                         span.likes title="Likes" { span aria-hidden="true" { "♥ " } (c.likes) span.sr-only { " likes" } }
                     }
-                    (copy_controls(c, false))
+                    (copy_controls(c, false, false))
                 }
             }
         }

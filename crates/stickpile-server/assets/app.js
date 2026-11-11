@@ -13,6 +13,12 @@
 //   input keeps working without this script.
 // * Escape cancels inline editing; dismiss buttons; copy buttons for
 //   one-time secrets (code.copyable).
+// * Set page: the "Compact view" checkbox applies at once and is remembered
+//   in localStorage (a `view` query parameter wins and is kept in sync);
+//   item cards ([data-menu]) get a context menu on right click, the
+//   context-menu key / Shift+F10 and their "⋯" button. Ctrl or Shift +
+//   right click keeps the browser's own menu. Without this script the
+//   checkbox works through its form and the browser menu stays.
 (function () {
   "use strict";
 
@@ -200,6 +206,473 @@
       code.insertAdjacentElement("afterend", b);
     });
     root.querySelectorAll("[data-dropzone]").forEach(setupDropzone);
+    root.querySelectorAll("button[data-menu-button][hidden]").forEach(function (b) {
+      b.hidden = false;
+    });
+  }
+
+  // ---- compact view (set page) -------------------------------------------
+
+  var VIEW_KEY = "stickpile.setView";
+
+  function storedView() {
+    try {
+      return window.localStorage.getItem(VIEW_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function storeView(view) {
+    try {
+      window.localStorage.setItem(VIEW_KEY, view);
+    } catch (e) {
+      /* private mode or storage disabled: the URL still carries it */
+    }
+  }
+
+  // Keep `?view=compact` in the address bar so a reload, the Apply button
+  // and htmx requests (HX-Current-URL) agree with what is shown.
+  function syncViewUrl(compact) {
+    if (!window.history || !history.replaceState) return;
+    var url = new URL(window.location.href);
+    if (compact) url.searchParams.set("view", "compact");
+    else url.searchParams.delete("view");
+    if (url.href !== window.location.href) history.replaceState(history.state, "", url.href);
+  }
+
+  function setupViewToggle() {
+    var box = document.querySelector("input[data-view-toggle]");
+    if (!box) return;
+    var section = document.getElementById(box.getAttribute("data-view-toggle"));
+    if (!section) return;
+    function apply(compact) {
+      section.classList.toggle("compact", compact);
+      box.checked = compact;
+    }
+    var param = new URLSearchParams(window.location.search).get("view");
+    var compact;
+    if (param !== null) {
+      // The query parameter wins (the server rendered it) and is remembered.
+      compact = param === "compact";
+      storeView(compact ? "compact" : "normal");
+    } else {
+      var saved = storedView();
+      compact = saved === null ? box.checked : saved === "compact";
+    }
+    apply(compact);
+    syncViewUrl(compact);
+    box.addEventListener("change", function () {
+      closeMenu(false);
+      apply(box.checked);
+      storeView(box.checked ? "compact" : "normal");
+      syncViewUrl(box.checked);
+    });
+  }
+
+  // ---- item context menu (set page) --------------------------------------
+
+  // Menu icons: 24×24 outlines, like the server's (web/components.rs).
+  var ICONS = {
+    copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+    like: ["M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"],
+    open: ["M14 4h6v6", "M20 4l-9 9", "M18 14v6H4V6h6"],
+    download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
+    edit: ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"],
+    fields: ["M9 6h11", "M9 12h11", "M9 18h11", "M4 6h.01", "M4 12h.01", "M4 18h.01"],
+    up: ["M12 19V5", "M6 11l6-6 6 6"],
+    down: ["M12 5v14", "M6 13l6 6 6-6"],
+    top: ["M5 4h14", "M12 20V9", "M7 14l5-5 5 5"],
+    bottom: ["M5 20h14", "M12 4v11", "M7 10l5 5 5-5"],
+    delete: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5", "M14 11v5"],
+  };
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  function svgIcon(name) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "icon menu-icon");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", name === "fields" ? "2.4" : "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    (ICONS[name] || []).forEach(function (d) {
+      var path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+
+  var menu = null; // the open menu element
+  var menuCard = null;
+  var menuButton = null; // the "⋯" button that opened it, if any
+  var menuReturn = null; // where focus goes back to
+  var menuByKeyboard = false; // focus follows a moved item only then
+  var keyboardOpenedAt = 0;
+  var typeahead = "";
+  var typeaheadTimer = null;
+
+  function cardName(card) {
+    var v = card.querySelector(".field-name .value");
+    if (v && v.textContent.trim()) return v.textContent.trim();
+    var img = card.querySelector(".thumb img");
+    return img ? img.getAttribute("alt") || "" : "";
+  }
+
+  function htmxReady() {
+    return !!(window.htmx && htmx.ajax);
+  }
+
+  // A plain form POST, for when htmx is not available.
+  function postForm(url, fields) {
+    var form = document.createElement("form");
+    form.method = "post";
+    form.action = url;
+    form.hidden = true;
+    var all = {};
+    var token = csrfToken();
+    if (token) all.csrf_token = token;
+    Object.keys(fields).forEach(function (k) {
+      all[k] = fields[k];
+    });
+    Object.keys(all).forEach(function (k) {
+      var input = document.createElement("input");
+      input.type = "hidden";
+      input.name = k;
+      input.value = all[k];
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  // After a move or delete the menu is gone: put focus on the item (and
+  // scroll to it) when the menu was used from the keyboard; otherwise keep
+  // the page where it is.
+  function focusCard(id, scroll) {
+    var card = document.getElementById(id);
+    if (!card) return;
+    var target = card.querySelector("button[data-menu-button]:not([hidden])") || card.querySelector(".thumb");
+    if (target) target.focus({ preventScroll: !scroll });
+  }
+
+  function moveItem(card, dir, byKeyboard) {
+    var url = card.getAttribute("data-move-url");
+    var id = card.id;
+    if (!htmxReady()) {
+      postForm(url, { dir: dir }); // the server redirects back to the item
+      return;
+    }
+    htmx
+      .ajax("POST", url, { source: card, target: "#set-items", swap: "outerHTML", values: { dir: dir } })
+      .then(function () {
+        setTimeout(function () {
+          focusCard(id, byKeyboard);
+        }, 30);
+      });
+  }
+
+  function deleteItem(card, byKeyboard) {
+    var url = card.getAttribute("data-delete-url");
+    if (!htmxReady()) {
+      window.location.href = url; // the confirmation page
+      return;
+    }
+    if (!window.confirm("Delete “" + cardName(card) + "” from this set?")) {
+      focusCard(card.id, false);
+      return;
+    }
+    var next = card.nextElementSibling || card.previousElementSibling;
+    var nextId = next ? next.id : null;
+    htmx.ajax("POST", url, { source: card, target: card, swap: "delete" }).then(function () {
+      setTimeout(function () {
+        if (nextId && document.getElementById(nextId)) focusCard(nextId, byKeyboard);
+        else {
+          var head = document.getElementById("items-head");
+          if (head) {
+            head.setAttribute("tabindex", "-1");
+            head.focus();
+          }
+        }
+      }, 30);
+    });
+  }
+
+  // The entries for one card: only what the server marked as allowed
+  // (data-* attributes) and what the card itself offers (like, copy).
+  function menuEntries(card) {
+    var groups = [];
+    var first = [];
+    var copy = card.querySelector("button[data-copy]");
+    if (copy) {
+      first.push({
+        label: copy.getAttribute("data-copy") === "image" ? "Copy image" : "Copy link",
+        icon: "copy",
+        run: function () {
+          copy.click();
+        },
+      });
+    }
+    var like = card.querySelector("form.like-form button.like");
+    if (like) {
+      var liked = like.getAttribute("aria-pressed") === "true";
+      first.push({
+        label: liked ? "Unlike" : "Like",
+        icon: "like",
+        run: function () {
+          like.click();
+        },
+      });
+    }
+    groups.push(first);
+    var open = [];
+    var page = card.getAttribute("data-item-url");
+    if (page) open.push({ label: "Open item page", icon: "open", href: page });
+    var download = card.getAttribute("data-download-url");
+    if (download) open.push({ label: "Download original", icon: "download", href: download, download: true });
+    groups.push(open);
+    var edit = [];
+    var rename = card.querySelector(".field-name a.edit");
+    if (rename && htmxReady()) {
+      edit.push({
+        label: "Rename",
+        icon: "edit",
+        run: function () {
+          rename.click();
+        },
+        keepFocus: true,
+      });
+    }
+    var editUrl = card.getAttribute("data-edit-url");
+    if (editUrl) edit.push({ label: "Edit all fields…", icon: "fields", href: editUrl });
+    groups.push(edit);
+    if (card.hasAttribute("data-move-url")) {
+      var isFirst = card.hasAttribute("data-first");
+      var isLast = card.hasAttribute("data-last");
+      groups.push(
+        [
+          ["up", "Move up", "up", isFirst],
+          ["down", "Move down", "down", isLast],
+          ["top", "Move to top", "top", isFirst],
+          ["bottom", "Move to bottom", "bottom", isLast],
+        ].map(function (m) {
+          return {
+            label: m[1],
+            icon: m[2],
+            disabled: m[3],
+            keepFocus: true,
+            run: function (byKeyboard) {
+              moveItem(card, m[0], byKeyboard);
+            },
+          };
+        })
+      );
+    }
+    if (card.hasAttribute("data-delete-url")) {
+      groups.push([
+        {
+          label: "Delete…",
+          icon: "delete",
+          danger: true,
+          keepFocus: true,
+          run: function (byKeyboard) {
+            deleteItem(card, byKeyboard);
+          },
+        },
+      ]);
+    }
+    return groups.filter(function (g) {
+      return g.length > 0;
+    });
+  }
+
+  function menuItemsOf(m) {
+    return Array.prototype.slice.call(m.querySelectorAll("[role=menuitem]")).filter(function (el) {
+      return !el.disabled;
+    });
+  }
+
+  function focusMenuItem(index) {
+    var items = menuItemsOf(menu);
+    if (!items.length) return;
+    var i = ((index % items.length) + items.length) % items.length;
+    items[i].focus({ preventScroll: true });
+  }
+
+  function closeMenu(restoreFocus) {
+    if (!menu) return;
+    var ret = menuReturn;
+    menu.remove();
+    menu = null;
+    menuCard = null;
+    if (menuButton) {
+      menuButton.setAttribute("aria-expanded", "false");
+      menuButton.removeAttribute("aria-controls");
+    }
+    menuButton = null;
+    menuReturn = null;
+    if (restoreFocus && ret && document.contains(ret)) ret.focus({ preventScroll: true });
+  }
+
+  // `at`: {x, y} for a pointer, or a DOMRect to open next to.
+  function openMenu(card, at, button, byKeyboard) {
+    closeMenu(false);
+    var name = cardName(card);
+    var m = document.createElement("div");
+    m.className = "ctx-menu";
+    m.id = "item-menu";
+    m.setAttribute("role", "menu");
+    m.setAttribute("aria-label", "Actions for " + name);
+    m.tabIndex = -1;
+    var head = document.createElement("div");
+    head.className = "menu-head";
+    head.setAttribute("aria-hidden", "true");
+    head.textContent = name;
+    m.appendChild(head);
+    menuEntries(card).forEach(function (group, gi) {
+      if (gi > 0) {
+        var sep = document.createElement("div");
+        sep.setAttribute("role", "separator");
+        m.appendChild(sep);
+      }
+      group.forEach(function (entry) {
+        var el;
+        if (entry.href) {
+          el = document.createElement("a");
+          el.href = entry.href;
+          if (entry.download) el.setAttribute("download", "");
+        } else {
+          el = document.createElement("button");
+          el.type = "button";
+          if (entry.disabled) el.disabled = true;
+        }
+        el.setAttribute("role", "menuitem");
+        el.tabIndex = -1;
+        if (entry.danger) el.className = "menu-danger";
+        el.setAttribute("data-label", entry.label.toLowerCase());
+        el.appendChild(svgIcon(entry.icon));
+        var label = document.createElement("span");
+        label.textContent = entry.label;
+        el.appendChild(label);
+        el.addEventListener("click", function (e) {
+          if (entry.href) {
+            // Links navigate (or download) by themselves; close afterwards.
+            setTimeout(function () {
+              closeMenu(false);
+            }, 0);
+            return;
+          }
+          e.preventDefault();
+          var byKeyboard = menuByKeyboard || e.detail === 0;
+          closeMenu(!entry.keepFocus);
+          entry.run(byKeyboard);
+        });
+        m.appendChild(el);
+      });
+    });
+    document.body.appendChild(m);
+    menu = m;
+    menuCard = card;
+    menuButton = button || null;
+    menuByKeyboard = !!byKeyboard;
+    var active = document.activeElement;
+    menuReturn =
+      button ||
+      (active && active !== card && card.contains(active) ? active : null) ||
+      card.querySelector("button[data-menu-button]:not([hidden])") ||
+      card.querySelector(".thumb");
+    if (menuButton) {
+      menuButton.setAttribute("aria-expanded", "true");
+      menuButton.setAttribute("aria-controls", m.id);
+    }
+    // Position inside the viewport (CSSOM properties are allowed by the CSP).
+    var w = m.offsetWidth;
+    var h = m.offsetHeight;
+    var vw = document.documentElement.clientWidth;
+    var vh = document.documentElement.clientHeight;
+    var x, y;
+    if (at && typeof at.bottom === "number") {
+      x = at.right - w;
+      if (x < 4) x = at.left;
+      y = at.bottom + 4;
+      if (y + h > vh - 4) y = at.top - h - 4;
+    } else {
+      x = at.x;
+      y = at.y;
+      if (x + w > vw - 4) x = x - w;
+      if (y + h > vh - 4) y = vh - h - 4;
+    }
+    x = Math.max(4, Math.min(x, vw - w - 4));
+    y = Math.max(4, Math.min(y, vh - h - 4));
+    m.style.left = x + "px";
+    m.style.top = y + "px";
+    focusMenuItem(0);
+  }
+
+  function menuKeydown(e) {
+    var items = menuItemsOf(menu);
+    var current = items.indexOf(document.activeElement);
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusMenuItem(current + 1);
+        return;
+      case "ArrowUp":
+        e.preventDefault();
+        focusMenuItem(current < 0 ? -1 : current - 1);
+        return;
+      case "Home":
+      case "PageUp":
+        e.preventDefault();
+        focusMenuItem(0);
+        return;
+      case "End":
+      case "PageDown":
+        e.preventDefault();
+        focusMenuItem(-1);
+        return;
+      case "Escape":
+        e.preventDefault();
+        closeMenu(true);
+        return;
+      case "Tab":
+        e.preventDefault();
+        closeMenu(true);
+        return;
+      case " ":
+      case "Enter":
+        if (document.activeElement && document.activeElement.tagName === "A") {
+          e.preventDefault();
+          document.activeElement.click();
+        }
+        return;
+    }
+    // Type-ahead: jump to the next entry starting with the typed letters.
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      typeahead += e.key.toLowerCase();
+      if (typeaheadTimer) clearTimeout(typeaheadTimer);
+      typeaheadTimer = setTimeout(function () {
+        typeahead = "";
+      }, 700);
+      // A repeated first letter cycles; more letters refine from here.
+      var start = typeahead.length > 1 ? Math.max(current, 0) : current + 1;
+      for (var k = 0; k < items.length; k++) {
+        var item = items[(start + k) % items.length];
+        if ((item.getAttribute("data-label") || "").indexOf(typeahead) === 0) {
+          item.focus({ preventScroll: true });
+          break;
+        }
+      }
+    }
+  }
+
+  function editableTarget(t) {
+    return !!t.closest("input, textarea, select, [contenteditable]");
   }
 
   function setupDropzone(zone) {
@@ -240,6 +713,15 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
     if (!(t instanceof Element)) return;
+    var menuBtn = t.closest("button[data-menu-button]");
+    if (menuBtn) {
+      var card = menuBtn.closest("[data-menu]");
+      if (!card) return;
+      e.preventDefault();
+      if (menu && menuCard === card) closeMenu(true);
+      else openMenu(card, menuBtn.getBoundingClientRect(), menuBtn, e.detail === 0);
+      return;
+    }
     var copy = t.closest("button[data-copy]");
     if (copy) {
       e.preventDefault();
@@ -254,10 +736,88 @@
     }
   });
 
-  document.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape") return;
+  document.addEventListener("contextmenu", function (e) {
     var t = e.target;
     if (!(t instanceof Element)) return;
+    if (menu && menu.contains(t)) {
+      e.preventDefault();
+      return;
+    }
+    // Just opened from the keyboard (some browsers still send the event).
+    if (Date.now() - keyboardOpenedAt < 800 && menu) {
+      e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.shiftKey || e.metaKey || e.altKey) return; // the browser's menu
+    var card = t.closest("[data-menu]");
+    if (!card || editableTarget(t)) return;
+    e.preventDefault();
+    if (e.clientX === 0 && e.clientY === 0) {
+      // Keyboard-triggered without a keydown we saw: open next to the focus.
+      openMenu(card, (document.activeElement || t).getBoundingClientRect(), null, true);
+    } else {
+      openMenu(card, { x: e.clientX, y: e.clientY }, null);
+    }
+  });
+
+  // Close on a press outside the menu, on scrolling and resizing.
+  document.addEventListener(
+    "pointerdown",
+    function (e) {
+      if (menu && !(e.target instanceof Element && menu.contains(e.target))) {
+        var onButton = e.target instanceof Element && e.target.closest("button[data-menu-button]");
+        if (!onButton || onButton !== menuButton) closeMenu(false);
+      }
+    },
+    true
+  );
+  window.addEventListener(
+    "scroll",
+    function () {
+      closeMenu(false);
+    },
+    true
+  );
+  window.addEventListener("resize", function () {
+    closeMenu(false);
+  });
+  window.addEventListener("blur", function () {
+    closeMenu(false);
+  });
+  document.addEventListener("htmx:beforeSwap", function (e) {
+    // The card the menu belongs to may be replaced.
+    if (menu && menuCard && e.detail && e.detail.target && e.detail.target.contains(menuCard)) closeMenu(false);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    if (menu && menu.contains(t)) {
+      menuKeydown(e);
+      return;
+    }
+    var menuKey = e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+    if (menuKey) {
+      var card = t.closest("[data-menu]");
+      if (card && !editableTarget(t)) {
+        e.preventDefault();
+        keyboardOpenedAt = Date.now();
+        var btn = t.closest("button[data-menu-button]");
+        openMenu(card, t.getBoundingClientRect(), btn, true);
+      }
+      return;
+    }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && t.matches("button[data-menu-button]")) {
+      // Menu button pattern: arrows open the menu on the first / last entry.
+      var c = t.closest("[data-menu]");
+      if (c) {
+        e.preventDefault();
+        openMenu(c, t.getBoundingClientRect(), t, true);
+        if (e.key === "ArrowUp") focusMenuItem(-1);
+      }
+      return;
+    }
+    if (e.key !== "Escape") return;
     var editing = t.closest(".field.editing");
     if (editing) {
       var cancel = editing.querySelector(".cancel");
@@ -280,4 +840,5 @@
   });
 
   enhance(document);
+  setupViewToggle();
 })();

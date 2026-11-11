@@ -85,6 +85,10 @@ async fn every_page_renders_for_its_user() {
     assert!(html.contains("enctype=\"multipart/form-data\""));
     assert!(html.contains("webkitdirectory"));
     assert!(html.contains(&format!("/api/v1/sets/{}/export.tar", set.id)));
+    // Compact view checkbox (unchecked by default) and the context menu.
+    assert!(html.contains("type=\"checkbox\" name=\"view\" value=\"compact\""));
+    assert!(html.contains("class=\"items-section\""));
+    assert!(html.contains("data-menu-button"));
     // Search finds by name; the job page polls while the job is queued.
     assert!(b
         .get("/search?q=cat")
@@ -101,6 +105,165 @@ async fn every_page_renders_for_its_user() {
         "polling stops when the job is finished: {}",
         r.text()
     );
+}
+
+/// The opening `<article>` tag of an item card on the set page.
+fn card_tag(html: &str, item_id: &str) -> String {
+    let marker = format!("id=\"item-{item_id}\"");
+    let at = html.find(&marker).unwrap_or_else(|| panic!("card {item_id} in {html}"));
+    let start = html[..at].rfind("<article").unwrap();
+    let end = html[at..].find('>').unwrap() + at;
+    html[start..=end].to_string()
+}
+
+/// The `<form class="filters">…</form>` of the set page.
+fn filters_form(html: &str) -> String {
+    let start = html.find("<form class=\"filters\"").expect("filters form");
+    let end = html[start..].find("</form>").unwrap() + start;
+    html[start..end].to_string()
+}
+
+#[tokio::test]
+async fn set_page_compact_view_and_context_menu() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let set = s.create_set(&alice, "cats", Visibility::Public).await;
+    let a = s.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b_item = s.upload_one(&alice, &set.id, "b.png", png(2)).await;
+    let c = s.upload_one(&alice, &set.id, "c.png", png(3)).await;
+    let owner = Browser::login(&s, &alice).await;
+    let page = format!("/sets/{}", set.id);
+
+    // Default view: the checkbox sits in the GET form with the filter and
+    // the sort (so Apply keeps all three), unchecked, no compact class.
+    let r = owner.get(&page).await;
+    assert_page(&r);
+    let html = r.text();
+    let form = filters_form(&html);
+    assert!(
+        form.contains(&format!("method=\"get\" action=\"/sets/{}\"", set.id)),
+        "{form}"
+    );
+    for field in ["name=\"min_likes\"", "name=\"sort\"", "name=\"view\" value=\"compact\""] {
+        assert!(form.contains(field), "{field} in {form}");
+    }
+    assert!(
+        form.contains("<label class=\"check\" for=\"f-view\">"),
+        "labelled checkbox"
+    );
+    assert!(form.contains("data-view-toggle=\"items-section\""));
+    assert!(!form.contains("checked"), "unchecked by default");
+    assert!(html.contains("<section class=\"items-section\" id=\"items-section\""));
+
+    // ?view=compact: compact class and a checked box; sort and filter stay.
+    let html = owner
+        .get(&format!("{page}?sort=likes&min_likes=0&view=compact"))
+        .await
+        .text();
+    assert!(html.contains("class=\"items-section compact\""), "compact class");
+    let form = filters_form(&html);
+    assert!(form.contains("value=\"compact\" checked"), "{form}");
+    assert!(form.contains("<option value=\"likes\" selected>"), "sort kept: {form}");
+    assert!(
+        form.contains("name=\"min_likes\" min=\"0\" value=\"0\""),
+        "filter kept: {form}"
+    );
+    // ...and the page's own links back (next fields) keep the view.
+    assert!(html.contains("name=\"next\" value=\"/sets/"));
+    assert!(html.contains("view=compact\""), "next fields carry the query");
+    let html = owner.get(&format!("{page}?view=grid")).await.text();
+    assert!(!html.contains("items-section compact"), "only view=compact is compact");
+
+    // Context menu data for the owner in set order: everything, with the
+    // ends marked for the move entries.
+    let html = owner.get(&page).await.text();
+    let first = card_tag(&html, &a.id);
+    let middle = card_tag(&html, &b_item.id);
+    let last = card_tag(&html, &c.id);
+    for tag in [&first, &middle, &last] {
+        assert!(tag.contains("data-menu=\"\""), "{tag}");
+        assert!(tag.contains("data-item-url=\"/items/"), "{tag}");
+        assert!(tag.contains("/file/original\""), "download url: {tag}");
+        assert!(tag.contains("?edit=1#edit\""), "edit url: {tag}");
+        assert!(tag.contains("data-delete-url=\"/items/"), "{tag}");
+        assert!(
+            tag.contains(&format!("data-move-url=\"/sets/{}/items/", set.id)),
+            "{tag}"
+        );
+    }
+    assert!(
+        first.contains(" data-first") && !first.contains(" data-last"),
+        "{first}"
+    );
+    assert!(
+        !middle.contains(" data-first") && !middle.contains(" data-last"),
+        "{middle}"
+    );
+    assert!(last.contains(" data-last") && !last.contains(" data-first"), "{last}");
+    // The "⋯" button: hidden without JS, a menu button with a name.
+    assert!(html.contains(
+        "<button class=\"icon-btn card-menu-btn\" type=\"button\" hidden data-menu-button=\"\" aria-haspopup=\"menu\" aria-expanded=\"false\" title=\"More actions\">"
+    ));
+    assert!(html.contains("<span class=\"sr-only\">More actions for a</span>"));
+    // Compact buttons keep their names for screen readers.
+    assert!(html.contains("<span class=\"sr-only\">Delete a</span>"));
+    assert!(html.contains("<span class=\"sr-only\">Download</span>"));
+    assert!(html.contains("<span class=\"edit-text\">Edit</span><span class=\"sr-only\"> keywords</span>"));
+    assert!(html.contains("class=\"field field-name\""), "per-field classes");
+    assert!(html.contains("class=\"field field-emojis empty\""));
+
+    // Sorted or filtered: no reordering, so no move entries.
+    for q in ["?sort=likes", "?min_likes=1", "?sort=position&min_likes=0&view=compact"] {
+        let html = owner.get(&format!("{page}{q}")).await.text();
+        let movable = q.ends_with("compact");
+        assert_eq!(html.contains("data-move-url"), movable, "{q}");
+        assert_eq!(html.contains("Move down"), movable, "{q}");
+        if !q.contains("min_likes=1") {
+            assert!(html.contains("data-delete-url"), "{q}: still deletable");
+            assert!(html.contains("data-edit-url"), "{q}");
+        }
+    }
+
+    // Another user: open, download, like and copy only.
+    let viewer = Browser::login(&s, &bob).await;
+    let html = viewer.get(&page).await.text();
+    let tag = card_tag(&html, &a.id);
+    assert!(tag.contains("data-menu") && tag.contains("data-item-url") && tag.contains("data-download-url"));
+    for attr in [
+        "data-edit-url",
+        "data-delete-url",
+        "data-move-url",
+        "data-first",
+        "data-last",
+    ] {
+        assert!(!tag.contains(attr), "{attr} for a non-editor: {tag}");
+    }
+    assert!(
+        html.contains("More actions for a"),
+        "the menu button is there for everyone"
+    );
+    assert!(!html.contains("Delete a"));
+    assert!(!html.contains("/field/name/edit"));
+
+    // The htmx grid after a move carries the menu data but not the wrapper
+    // (the view class lives outside the swapped grid).
+    let r = owner
+        .post_htmx(&format!("/sets/{}/items/{}/move", set.id, c.id), &[("dir", "top")])
+        .await;
+    assert_fragment(&r);
+    let html = r.text();
+    assert!(html.contains("id=\"set-items\""));
+    assert!(!html.contains("items-section"));
+    assert!(card_tag(&html, &c.id).contains(" data-first"));
+    assert!(card_tag(&html, &b_item.id).contains(" data-last"));
+    // Move to bottom works with the plain form too (the menu's no-htmx path).
+    let r = owner
+        .post_form(&format!("/sets/{}/items/{}/move", set.id, c.id), &[("dir", "bottom")])
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    let d = s.get(&alice, &routes::path(routes::SET, &[&set.id])).await.value();
+    assert_eq!(d["items"][2]["id"], c.id.as_str());
 }
 
 #[tokio::test]
@@ -493,6 +656,23 @@ async fn csp_and_static_assets() {
     let css = Browser::anonymous(&s).get("/static/app.css").await.text();
     assert!(css.contains("prefers-color-scheme: dark"));
     assert!(css.contains(":focus-visible"));
+    assert!(
+        css.contains("[hidden] { display: none !important; }"),
+        "JS-only buttons stay hidden"
+    );
+    assert!(css.contains(".items-section.compact .editor-grid"));
+    assert!(css.contains(".ctx-menu"));
+    let js = Browser::anonymous(&s).get("/static/app.js").await.text();
+    for needle in [
+        "\"contextmenu\"",
+        "role\", \"menu\"",
+        "\"menuitem\"",
+        "data-view-toggle",
+        "localStorage",
+        "F10",
+    ] {
+        assert!(js.contains(needle), "app.js: {needle}");
+    }
 }
 
 #[tokio::test]

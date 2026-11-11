@@ -149,6 +149,22 @@ async fn set_lifecycle_without_javascript() {
     assert!(!html.contains("alt=\"dog\""));
     assert!(html.contains("3 items are"), "hidden count shown");
     assert!(!html.contains("Move down"), "no reordering while filtered");
+    assert!(
+        !html.contains("data-move-url"),
+        "no move entries in the context menu either"
+    );
+    // The compact view survives the like round trip without JavaScript.
+    let compact = format!("/sets/{set_id}?min_likes=0&sort=position&view=compact");
+    let r = b
+        .post_form(&format!("/items/{first}/like"), &[("liked", "0"), ("next", &compact)])
+        .await;
+    assert_eq!(location(&r), compact);
+    let html = b.get(&compact).await.text();
+    assert!(html.contains("items-section compact"));
+    let r = b
+        .post_form(&format!("/items/{first}/like"), &[("liked", "1"), ("next", &compact)])
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
 
     // Settings.
     let r = b
