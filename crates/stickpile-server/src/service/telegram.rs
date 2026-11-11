@@ -30,6 +30,7 @@ use crate::config::read_secret;
 use crate::db::{self, VariantRow};
 use crate::error::{AppError, AppResult};
 use crate::files;
+use crate::ids;
 use crate::index;
 use crate::jobs::{self, JobError, JobResult, JobRow};
 use crate::service::hydrate;
@@ -230,18 +231,18 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
     }
     index::refresh_set(state, &row.id).await?;
     // A pack the bot created can be exported back: bind it and keep the
-    // stickers on the first export.
-    let bound = bot_username
+    // stickers on the first export. Only for its owner here, or for an admin
+    // adopting a pack made outside stickpile; anyone else gets a copy.
+    let own_bot_pack = bot_username
         .as_deref()
         .is_some_and(|b| stickpile_telegram::valid_pack_name(&pack.name, b));
+    let bound = own_bot_pack
+        && match pack_owner(state, &pack.name).await? {
+            Some(owner) => owner == user.id,
+            None => user.is_admin() && claim_pack(state, &pack.name, &user.id).await? == user.id,
+        };
     if bound {
-        sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ? WHERE id = ?")
-            .bind(&pack.name)
-            .bind(serde_json::to_string(&mapping).map_err(retry)?)
-            .bind(&row.id)
-            .execute(&state.db)
-            .await
-            .map_err(retry)?;
+        bind_pack(state, &row.id, &pack.name, &mapping).await?;
     }
     Ok(Some(json!({
         "set_id": row.id,
@@ -253,6 +254,92 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
         "skipped": skipped,
         "bound": bound,
     })))
+}
+
+// ---------------------------------------------------------------------------
+// Pack ownership
+// ---------------------------------------------------------------------------
+
+/// The bot can edit every pack it ever created, whoever asked for it, so
+/// stickpile decides who may: the user who created the pack through this
+/// server, or the admin who adopted one made elsewhere (`telegram_packs`).
+const PACK_TAKEN: &str = "belongs to another stickpile user; choose another pack name";
+
+/// Owner (stickpile user id) of pack `name`, if it was created or adopted
+/// here. Names compare case-insensitively, as on Telegram.
+async fn pack_owner(state: &AppState, name: &str) -> Result<Option<String>, JobError> {
+    sqlx::query_scalar("SELECT user_id FROM telegram_packs WHERE name = ?")
+        .bind(name)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(retry)
+}
+
+/// Record `user_id` as the owner of pack `name` unless someone already is,
+/// and return the owner afterwards: of two exports racing for a new name,
+/// the first claim wins.
+async fn claim_pack(state: &AppState, name: &str, user_id: &str) -> Result<String, JobError> {
+    sqlx::query("INSERT INTO telegram_packs (name, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT(name) DO NOTHING")
+        .bind(name)
+        .bind(user_id)
+        .bind(ids::now())
+        .execute(&state.db)
+        .await
+        .map_err(retry)?;
+    pack_owner(state, name)
+        .await?
+        .ok_or_else(|| JobError::Retry(format!("the claim on pack {name} vanished")))
+}
+
+/// Bind set `set_id` to pack `name`. A pack follows exactly one set: another
+/// set bound to it (necessarily the same user's) loses its binding.
+async fn bind_pack(state: &AppState, set_id: &str, name: &str, mapping: &PackMapping) -> Result<(), JobError> {
+    let mapping = serde_json::to_string(mapping).map_err(retry)?;
+    let mut tx = state.db.begin().await.map_err(retry)?;
+    sqlx::query(
+        "UPDATE sets SET telegram_pack = NULL, telegram_mapping = NULL \
+         WHERE telegram_pack = ? COLLATE NOCASE AND id <> ?",
+    )
+    .bind(name)
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(retry)?;
+    sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ? WHERE id = ?")
+        .bind(name)
+        .bind(mapping)
+        .bind(set_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(retry)?;
+    tx.commit().await.map_err(retry)
+}
+
+/// May `user` export to pack `name`? Claims the name for them when it is
+/// new. A pack that exists on Telegram but was not created through this
+/// server can only be taken over by an admin.
+async fn authorize_export(state: &AppState, api: &BotApi, user: &db::UserRow, name: &str) -> Result<(), JobError> {
+    match pack_owner(state, name).await? {
+        Some(owner) if owner == user.id => return Ok(()),
+        Some(_) => return Err(JobError::Fatal(format!("the pack {name} {PACK_TAKEN}"))),
+        None => {}
+    }
+    match api.get_sticker_set(name).await {
+        Err(e) if e.is_missing_sticker_set() => {}
+        Err(e) => return Err(tg_error(e)),
+        Ok(_) if user.is_admin() => {}
+        Ok(_) => {
+            return Err(JobError::Fatal(format!(
+                "a pack named {name} already exists but was not published through this server; \
+                 choose another pack name (an administrator can take it over)"
+            )))
+        }
+    }
+    if claim_pack(state, name, &user.id).await? == user.id {
+        Ok(())
+    } else {
+        Err(JobError::Fatal(format!("the pack {name} {PACK_TAKEN}")))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +420,7 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
              _by_…bot suffix), and a bot can only edit its own packs"
         )));
     }
+    authorize_export(state, &api, &user, &name).await?;
     let title = p["title"]
         .as_str()
         .map(str::to_string)
@@ -406,13 +494,7 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
     let report = stickpile_telegram::export_pack(&api, owner, &name, &title, &items, &previous)
         .await
         .map_err(tg_error)?;
-    sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ? WHERE id = ?")
-        .bind(&name)
-        .bind(serde_json::to_string(&report.mapping).map_err(retry)?)
-        .bind(&set.id)
-        .execute(&state.db)
-        .await
-        .map_err(retry)?;
+    bind_pack(state, &set.id, &name, &report.mapping).await?;
     Ok(Some(json!({
         "set_id": set.id,
         "pack_name": name,

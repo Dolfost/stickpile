@@ -103,12 +103,40 @@ Skipped stickers are listed in the job report with a reason:
 | Same file as an earlier sticker of the pack | `the same file as an earlier sticker of the pack` |
 | Rejected by ingest (sniffing, limits) | the ingest error, e.g. `unsupported or unrecognised file type` |
 
-If the imported pack belongs to your bot (its name ends in
-`_by_<bot username>`, checked with `getMe`), the set is **bound** to it
-(`Set.telegram_pack`). The export mapping is seeded from the import: each
+If the imported pack was made by your bot (its name ends in
+`_by_<bot username>`, checked with `getMe`) and you may publish to it (see
+[Pack ownership](#pack-ownership)), the set is **bound** to it
+(`Set.telegram_pack`). Anyone else gets an unbound copy. The export mapping is seeded from the import: each
 imported sticker's `file_unique_id`, together with the item's media hash,
 identifies the sticker. The first export then keeps the existing stickers
 instead of re-uploading them.
+
+## Pack ownership
+
+One bot serves every user, and Telegram lets a bot edit every pack it ever
+created, whoever asked for it. So stickpile itself decides who may publish
+to a pack, in the `telegram_packs` table (migration
+`0003_telegram_pack_owners.sql`):
+
+- The first export to a new pack name records the exporting user as its
+  owner. Only that user can export to it again or bind it on import. Pack
+  names compare case-insensitively, as on Telegram.
+- Another user's export to that name fails with "belongs to another
+  stickpile user; choose another pack name". Their import of the pack is an
+  unbound copy. The same applies when two users' sets share a slug and so
+  derive the same default pack name: the second one has to pick a name.
+- A pack that exists on Telegram but was not created through this server
+  (made with the bot elsewhere, or before the database was reset) can only
+  be adopted by an **admin**, by importing it or exporting to it. A regular
+  user gets "already exists but was not published through this server".
+- A pack follows exactly one set. Publishing another of your sets to the
+  same pack moves the binding to that set.
+- A name stays claimed even if the first export failed after the claim, or
+  the set was deleted, so nobody else can take over the pack. Deleting the
+  user releases their claims; only an admin can adopt the packs after that.
+
+The migration gives existing packs to the owner of the earliest set bound to
+each, and unbinds any later sets bound to the same pack.
 
 ## Export
 
@@ -188,15 +216,18 @@ The new mapping is returned in the job result and stored on the set.
   supported.
 - **Custom emoji and mask packs** can be imported like regular packs.
   Export always creates regular sticker packs.
-- **Ownership.** Packs belong to the owner user id that created them. The
-  bot can edit them, but stickpile cannot move a pack to a different owner.
+- **Ownership.** On Telegram, a pack belongs to the Telegram user id it was
+  created for. The bot can edit it, but stickpile cannot move it to a
+  different Telegram owner. Within stickpile, see
+  [Pack ownership](#pack-ownership).
 
 ## Testing
 
 `crates/stickpile-server/tests/integrations_telegram.rs` tests the server
 side (import with skipped `.tgs` and duplicates, binding and seeding,
 export create and update, ordering, emoji, titles, owner resolution, pack
-name validation, the disabled integration) against a compact mock in
+name validation, pack ownership between users and admin adoption, the
+ownership migration, the disabled integration) against a compact mock in
 `tests/integrations_support/mock_bot.rs`.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an

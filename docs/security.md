@@ -70,6 +70,10 @@ All rules live in `authz.rs` and implement the visibility table of
   read is a 404, never a 403, so IDs cannot be probed.
 - Search results and the client-cache feed are filtered by the same rule in
   SQL and checked again before they are returned.
+- Telegram packs: the shared bot can edit every pack it created, so the
+  server records which user created or adopted each pack and refuses exports
+  and import bindings by anyone else (`service/telegram.rs`,
+  [telegram.md](telegram.md#pack-ownership)).
 - Near-duplicate hints and "already in your library" only consider the
   caller's own items, so shared media storage is never observable.
 - Admin routes need the `admin` role (403 otherwise). Admins get no implicit
