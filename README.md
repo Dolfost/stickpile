@@ -1,5 +1,8 @@
 # stickpile
 
+[![CI](https://github.com/Dolfost/stickpile/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dolfost/stickpile/actions/workflows/ci.yml)
+[![Licence: AGPL-3.0-or-later](https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue.svg)](LICENSE)
+
 A self-hosted, platform-independent sticker and meme library. Keep your
 stickers, GIFs and short videos on your own server, find one from any device
 in a keystroke, and paste it into whatever chat app you are using: Telegram,
@@ -23,7 +26,7 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
 - **Multi-user**, with Tailscale login without passwords, local accounts with
   TOTP, revocable API tokens, an admin panel and an audit log.
 
-Licence: AGPL-3.0-or-later.
+Licence: [AGPL-3.0-or-later](LICENSE).
 
 ## Components
 
@@ -179,6 +182,9 @@ nix develop                 # toolchain, GTK, ffmpeg, onnxruntime, sccache
 cargo test --workspace
 nix flake check             # packages, tests, clippy, fmt, module checks, NixOS VM test
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and
+[SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 More documentation is in [docs/](docs/): [architecture and plan](docs/plan.md),
 [API](docs/api.md), [security](docs/security.md), [media

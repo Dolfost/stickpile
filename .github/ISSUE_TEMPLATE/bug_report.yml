@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, image tag or commit (`stickpile-server --version`).
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - server / web UI
+        - CLI
+        - desktop client
+        - Nix packages / modules
+        - container / quadlet
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        OS and how you run stickpile (NixOS module, container, from source).
+        For paste problems: the desktop session (Wayland compositor or X11)
+        and the target app.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines, with tokens and passwords removed.
+      render: text

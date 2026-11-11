@@ -4,6 +4,9 @@ description = "Shared client library: API client, token storage, offline cache, 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [features]
 default = ["wayland", "x11"]

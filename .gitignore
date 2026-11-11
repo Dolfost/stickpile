@@ -1,8 +1,29 @@
+# Build output (cargo, sccache and the dev shell's TMPDIR live in target/)
 /target
+# nix build out-links
 /result
 /result-*
+
+# Local server state and secrets (e.g. from the README's "From source" steps)
 *.db
 *.db-shm
 *.db-wal
-/.direnv
+*.db-journal
+/config.toml
+/pw.txt
+.env
+
+# CLIP models (scripts/fetch-models.sh)
 /models
+
+# Coverage reports (cargo llvm-cov)
+/lcov.info
+/coverage.txt
+
+# Tooling and editors
+/.direnv
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

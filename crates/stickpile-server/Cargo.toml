@@ -4,6 +4,9 @@ description = "stickpile server: REST API, web UI, media pipeline, search, impor
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [[bin]]
 name = "stickpile-server"

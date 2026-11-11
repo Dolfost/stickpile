@@ -132,7 +132,7 @@ document is turned into a sticker (sticker attribute added at upload).
 | T5 | GIF data + uri-list (gif) | uri wins: box → animation | **animation**, box | | |
 | T6 | uri-list only (gif) | box → animation | **animation**, box | | |
 | T7 | MP4 uri-list (mp4) | box → video | **video**, box | | |
-| T8 | 512 px WebP uri-list (webp) | **sticker** (the brief's open question) | | | |
+| T8 | 512 px WebP uri-list (webp) | **sticker** (the main open question) | | | |
 | T9 | 512 px WebP data + uri-list (webp) | uri wins → sticker | | | |
 | T10 | gnome-copied-files only (png) | nothing (Qt ignores it) | | | |
 | T11 | uri-list + gnome-copied-files (png) | same as T3 | | | |
@@ -216,7 +216,7 @@ replaced).
 
 ### 2.5 Questions this spike answers
 
-From the brief (§0), answered by the rows above:
+The questions the spike exists for, answered by the rows above:
 
 1. **Real Telegram sticker**: which path sends a 512 px WebP as a sticker
    rather than a photo or file? Paste of a file reference (T8, T9), drag

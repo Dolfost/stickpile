@@ -2,7 +2,7 @@
 
 stickpile is self-hosted and usually reached over a Tailscale network, but the
 server is built to be safe when exposed to the internet. This page describes
-the threat model and how each requirement of the brief (section 9) is met.
+the threat model and how each security requirement is met.
 Code references are to `crates/stickpile-server/src/`.
 
 ## Threat model

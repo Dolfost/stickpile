@@ -1,4 +1,4 @@
-//! Authentication (§6, §9).
+//! Authentication (docs/security.md).
 //!
 //! [`auth_middleware`] resolves the caller once per request and stores the
 //! outcome in the request extensions; the [`CurrentUser`], [`MaybeUser`] and

@@ -4,6 +4,9 @@ description = "Telegram Bot API client for sticker pack import and export"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
 reqwest.workspace = true

@@ -4,6 +4,9 @@ description = "Git repositories as stickpile sets: clone, pull, commit and push"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
 git2.workspace = true

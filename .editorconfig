@@ -1,0 +1,34 @@
+# https://editorconfig.org. Rust follows rustfmt.toml (max_width = 120), Nix
+# follows nixfmt (`nix fmt`).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.rs]
+max_line_length = 120
+
+[*.{nix,yml,yaml,sh,css,js,json}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+trim_trailing_whitespace = false
+
+[*.diff]
+indent_style = unset
+trim_trailing_whitespace = false
+
+# Vendored, minified.
+[*.min.js]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Follows the owner's dotfiles style (tabs); excluded from `nix fmt`.
+[deploy/aorus/*.nix]
+indent_style = tab

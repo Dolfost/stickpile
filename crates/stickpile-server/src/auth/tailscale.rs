@@ -1,4 +1,4 @@
-//! Tailnet identity from `tailscale serve` (§6). Only consulted for requests
+//! Tailnet identity from `tailscale serve` (docs/security.md). Only consulted for requests
 //! from the trusted proxy ([`crate::security::from_trusted_proxy`]); on every
 //! other request the `Tailscale-User-*` headers are ignored.
 

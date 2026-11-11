@@ -96,9 +96,8 @@ nix develop -c cargo llvm-cov --workspace --exclude stickpile-desktop --exclude 
 
 ## The drift guard
 
-Brief §7 asks that the server and client configs be "mirrored one-to-one in a
-Nix module … so the two never drift". Three layers enforce this, and each
-fails loudly.
+The server and client configs are mirrored one-to-one in Nix modules, and
+the two must never drift. Three layers enforce this, and each fails loudly.
 
 1. **`checks.config-drift`, from both sides.** `nix/drift-guard/` is a small
    Rust program that compiles the **real** config modules with `#[path]`

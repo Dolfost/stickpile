@@ -1,4 +1,4 @@
-# Module checks: the Nix side of the "Nix-to-TOML mirror" (brief §7, §10).
+# Module checks: the Nix side of the "Nix-to-TOML mirror" (docs/nix.md).
 #
 #   config-drift         module defaults == Rust defaults, key by key, both ways
 #   nixos-module         example NixOS config: evaluates, renders, the real

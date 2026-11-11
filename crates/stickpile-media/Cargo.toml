@@ -4,6 +4,9 @@ description = "Media sniffing, sanitising, variants, perceptual hashing and qual
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
 stickpile-api.workspace = true

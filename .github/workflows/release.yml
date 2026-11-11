@@ -6,7 +6,6 @@
 #   windows    CLI, built by cargo (best effort)
 #   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
 #              built by Nix and pushed with skopeo
-#   android    post-v1 placeholder (disabled)
 #   release    GitHub release with every artifact and SHA256SUMS
 #
 # Linux tarballs: Nix binaries point at /nix/store for their loader and
@@ -50,11 +49,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: Tag matches the workspace version
         run: |
           version="$(nix eval --raw .#stickpile-server.version)"
@@ -96,7 +95,7 @@ jobs:
           done
           cat "$name/README.txt"
           tar -czf "dist/$name.tar.gz" "$name"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}
           path: dist/*
@@ -109,18 +108,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             target: aarch64-apple-darwin
-          # macos-13 (the brief's choice) was retired in December 2025;
-          # macos-15-intel is GitHub's last x86_64 macOS image.
           - runner: macos-15-intel
             arch: x86_64
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
@@ -138,23 +135,23 @@ jobs:
           name="stickpile-${TAG}-${{ matrix.arch }}-macos"
           mkdir -p "$name" dist
           cp target/${{ matrix.target }}/release/stickpile target/${{ matrix.target }}/release/stickpile-server "$name/"
-          cp crates/stickpile-server/config.example.toml "$name/"
+          cp crates/stickpile-server/config.example.toml LICENSE README.md "$name/"
           printf 'Runtime: brew install ffmpeg (videos, animations), brew install onnxruntime (AI).\n' > "$name/README.txt"
           tar -czf "dist/$name.tar.gz" "$name"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: dist/*
 
   windows:
     name: windows (x86_64, CLI)
-    # Best effort: the CLI's Wayland/X11 clipboard backends must be gated to
-    # Linux before it builds on Windows.
+    # Best effort until the CLI is tested on Windows (its clipboard backends
+    # are Linux-only).
     continue-on-error: true
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
@@ -164,8 +161,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path target/release/stickpile.exe -DestinationPath "dist/stickpile-$env:TAG-x86_64-windows.zip"
-      - uses: actions/upload-artifact@v4
+          Compress-Archive -Path target/release/stickpile.exe, LICENSE, README.md -DestinationPath "dist/stickpile-$env:TAG-x86_64-windows.zip"
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
           path: dist/*
@@ -186,18 +183,21 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: Build image
         run: nix build -L --out-link image .#container
       - name: Push ${{ env.IMAGE }}:${{ env.TAG }}-${{ matrix.arch }}
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: ${{ matrix.arch }}
         run: |
           nix run --inputs-from . nixpkgs#skopeo -- copy \
-            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            docker-archive:image "docker://$IMAGE:${TAG#v}-${{ matrix.arch }}"
+            --dest-creds "$GITHUB_ACTOR:$REGISTRY_TOKEN" \
+            docker-archive:image "docker://$IMAGE:${TAG#v}-$ARCH"
 
   container-manifest:
     name: container (multi-arch tags)
@@ -207,7 +207,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -220,16 +220,10 @@ jobs:
             "$IMAGE:$v-amd64" "$IMAGE:$v-arm64"
           docker buildx imagetools inspect "$IMAGE:$v"
 
-  android:
-    name: android (post-v1)
-    # Post-v1: the Kotlin app over stickpile-core (UniFFI), a signed APK from a
-    # reproducible Gradle build without proprietary dependencies, and the
-    # F-Droid metadata directory (metadata/, fastlane/) for submission. The
-    # Unexpected Keyboard fork releases from its own repository.
-    if: false
-    runs-on: ubuntu-24.04
-    steps:
-      - run: echo "Android builds start after v1."
+  # android (post-v1): the Kotlin app over stickpile-core (UniFFI), a signed
+  # APK from a reproducible Gradle build without proprietary dependencies, and
+  # the F-Droid metadata directory (metadata/, fastlane/) for submission. The
+  # Unexpected Keyboard fork releases from its own repository.
 
   release:
     name: GitHub release
@@ -240,7 +234,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

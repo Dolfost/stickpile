@@ -1,4 +1,4 @@
-//! Per-window history (brief §5.4): which items were last copied while a
+//! Per-window history: which items were last copied while a
 //! given window class was focused. The popup lists those first among the
 //! recently used items, so Telegram opens on what you send in Telegram and
 //! Discord on what you send in Discord.

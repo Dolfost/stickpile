@@ -4,6 +4,9 @@ description = "In-memory hybrid (lexical + vector) search index shared by server
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
 stickpile-api.workspace = true

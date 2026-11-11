@@ -1,0 +1,25 @@
+# Weekly update PRs. Cargo updates arrive as one grouped PR (minor and patch
+# together, majors separately) so CI rebuilds the dependency tree at most
+# about once a week. Nix inputs (flake.lock) are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      cargo-major:
+        patterns: ["*"]
+        update-types: [major]

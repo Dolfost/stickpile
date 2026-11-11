@@ -4,6 +4,9 @@ description = "CLIP-based enrichment: embeddings, zero-shot keywords/emojis/vibe
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [features]
 default = ["clip"]

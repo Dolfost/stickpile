@@ -1,4 +1,4 @@
-# Build and test on every push and pull request.
+# Build and test on pushes to main and on pull requests.
 #
 #   flake-check  `nix flake check`: builds every package and the container
 #                image, runs the workspace tests (nextest + doctests), clippy
@@ -6,18 +6,22 @@
 #                home-manager module checks and (x86_64) the NixOS VM test.
 #   coverage     cargo llvm-cov over the workspace in the dev shell; lcov
 #                artifact + summary on the run page.
+#
+# Nix builds are cached in the GitHub Actions cache (Magic Nix Cache). Only
+# paths built here are stored; everything from cache.nixos.org is not. GitHub
+# evicts the least recently used entries once the repository passes 10 GB.
 name: CI
 
 on:
   push:
-    branches: ["**"]
-    tags-ignore: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded pull request runs are cancelled; every commit on main is checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -34,25 +38,40 @@ jobs:
           - runner: ubuntu-24.04-arm
             system: aarch64-linux
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 180
+    env:
+      SYSTEM: ${{ matrix.system }}
     steps:
-      - uses: actions/checkout@v4
-      # Determinate's installer enables flakes and KVM (for the VM test).
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: actions/checkout@v7
+      # Determinate's installer enables flakes and, where the runner exposes
+      # /dev/kvm, makes it usable for Nix builds and sets DETERMINATE_NIX_KVM=1.
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: Evaluate outputs
         run: nix flake show
+      # The NixOS VM test exists on x86_64-linux only and needs KVM.
       - name: nix flake check
+        if: env.DETERMINATE_NIX_KVM == '1' || matrix.system != 'x86_64-linux'
         run: nix flake check -L --keep-going
+      - name: nix flake check (without the NixOS VM test)
+        if: env.DETERMINATE_NIX_KVM != '1' && matrix.system == 'x86_64-linux'
+        run: |
+          echo "::warning::/dev/kvm is not available on this runner; the NixOS VM test (checks.$SYSTEM.nixos-vm) is skipped"
+          nix flake check --no-build
+          names=$(nix eval --raw ".#checks.$SYSTEM" \
+            --apply 'cs: toString (builtins.filter (n: n != "nixos-vm") (builtins.attrNames cs))')
+          targets=()
+          for n in $names; do targets+=(".#checks.$SYSTEM.$n"); done
+          nix build -L --keep-going --no-link "${targets[@]}"
 
   coverage:
     name: coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
       # The dev shell provides cargo-llvm-cov, LLVM_COV/LLVM_PROFDATA for
       # rustc's LLVM, ffmpeg, git and ORT_DYLIB_PATH. stickpile-desktop and the
       # clipboard spike are GTK shells without headless tests (their logic is
@@ -73,7 +92,7 @@ jobs:
             cat coverage.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: |

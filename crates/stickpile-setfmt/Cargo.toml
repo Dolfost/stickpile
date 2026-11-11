@@ -4,6 +4,9 @@ description = "set.toml and set directory/tar import-export format"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
 stickpile-api.workspace = true
