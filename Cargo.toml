@@ -85,7 +85,7 @@ gif = "0.13"
 webp = "0.3"
 
 # ai
-ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "0.16"
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 safetensors = "0.4"
