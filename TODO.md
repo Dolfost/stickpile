@@ -10,10 +10,9 @@ architecture and phase plan are in [docs/plan.md](docs/plan.md).
 - [ ] Turn on private vulnerability reporting (Settings → Code security).
       [SECURITY.md](SECURITY.md) sends reporters there, and it is off.
 - [ ] Turn on Dependabot alerts and secret scanning.
-- [ ] Tag `v0.1.0` (the tag must match the workspace version).
-      `release.yml` has not run yet, so the macOS, Windows and container
-      jobs are untested. Expect fixes on the first tag. A failed release can
-      be rebuilt for the same tag with `workflow_dispatch`.
+- [x] Tag the first release, `v0.2.0` (the tag must match the workspace
+      version). A failed release can be rebuilt for the same tag with
+      `workflow_dispatch`.
 - [ ] Make the `ghcr.io/dolfost/stickpile` package public once the first
       image is pushed.
 
