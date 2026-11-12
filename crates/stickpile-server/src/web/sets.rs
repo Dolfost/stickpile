@@ -363,7 +363,7 @@ pub async fn page(
         @if set.editable {
             section.uploader aria-labelledby="upload-head" {
                 h2 #upload-head { "Add items" }
-                (upload::upload_form(&ctx, Some(&set.id), &[]))
+                (upload::upload_form(&ctx, &set.id, set.aspect_ratio))
                 details.import-into {
                     summary { "Replace from a set directory" }
                     (upload::import_form(&ctx, Some(&set.id)))

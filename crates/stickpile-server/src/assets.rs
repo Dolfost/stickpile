@@ -17,6 +17,7 @@ use crate::state::AppState;
 pub const HTMX: &[u8] = include_bytes!("../assets/htmx.min.js");
 pub const APP_CSS: &[u8] = include_bytes!("../assets/app.css");
 pub const APP_JS: &[u8] = include_bytes!("../assets/app.js");
+pub const UPLOAD_JS: &[u8] = include_bytes!("../assets/upload.js");
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.svg");
 
 const JS: &str = "text/javascript; charset=utf-8";
@@ -24,10 +25,11 @@ const CSS: &str = "text/css; charset=utf-8";
 const SVG: &str = "image/svg+xml";
 
 /// (name, bytes, content type) of every asset.
-const ALL: [(&str, &[u8], &str); 4] = [
+const ALL: [(&str, &[u8], &str); 5] = [
     ("htmx.min.js", HTMX, JS),
     ("app.css", APP_CSS, CSS),
     ("app.js", APP_JS, JS),
+    ("upload.js", UPLOAD_JS, JS),
     ("favicon.svg", FAVICON, SVG),
 ];
 

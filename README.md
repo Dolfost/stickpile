@@ -91,10 +91,11 @@ file paths.
 
 ## Use it
 
-**Web UI**: open the server URL. Upload files or a whole set directory,
-edit keywords and emojis inline, confirm or override AI suggestions, copy
-stills to the clipboard, and see popular items and your stats. See
-[docs/web.md](docs/web.md).
+**Web UI**: open the server URL. Upload, drop or paste files (rename,
+crop, rotate and flip images before they are sent) or import a whole set
+directory, edit keywords and emojis inline, confirm or override AI
+suggestions, copy stills to the clipboard, and see popular items and your
+stats. See [docs/web.md](docs/web.md).
 
 <table>
   <tr>

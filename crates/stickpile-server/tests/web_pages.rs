@@ -639,6 +639,7 @@ async fn csp_and_static_assets() {
     for (name, ct) in [
         ("app.css", "text/css"),
         ("app.js", "text/javascript"),
+        ("upload.js", "text/javascript"),
         ("htmx.min.js", "text/javascript"),
         ("favicon.svg", "image/svg+xml"),
     ] {

@@ -69,6 +69,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                 link rel="stylesheet" href=(assets::url("app.css"));
                 script src=(assets::url("htmx.min.js")) defer {}
                 script src=(assets::url("app.js")) defer {}
+                script src=(assets::url("upload.js")) defer {}
                 (head)
             }
             body hx-headers=[hx_headers] data-csrf=[csrf] {

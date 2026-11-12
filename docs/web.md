@@ -4,8 +4,10 @@ The web UI is rendered on the server with [maud](https://maud.lambda.xyz)
 templates and enhanced with [htmx](https://htmx.org) 2 (vendored, no
 JavaScript toolchain). Every page works without JavaScript: forms post and
 redirect. When htmx is loaded, the same forms swap small fragments in place.
-A small hand-written script (`assets/app.js`) adds clipboard copy,
-drag-and-drop, the instant compact view and the item context menu.
+Two small hand-written scripts add the rest: `assets/app.js` clipboard copy,
+the instant compact view and the item context menu; `assets/upload.js`
+drag-and-drop, pasting and the upload tray, where files can be renamed and
+images rotated, flipped and cropped before they are uploaded.
 
 Code: `crates/stickpile-server/src/web/` (one module per area), static files
 in `crates/stickpile-server/assets/`, UI-only queries in
@@ -122,9 +124,10 @@ card buttons work as before.
   Shift+F10 or "⋯". See [Set page](#set-page).
 - **Likes**: the ♡/♥ button toggles your like (`aria-pressed` tells screen
   readers the state).
-- **Drag and drop**: drop files on the dashed upload area to upload them at
-  once; "Choose files" opens the file dialog. Folders go through "Set folder"
-  (the browser's directory picker).
+- **Drag and drop and paste**: drop files on the dashed upload area, or
+  paste an image anywhere on the page (Ctrl+V), to add them to the upload
+  tray; "Choose files" opens the file dialog. Folders go through "Set folder"
+  (the browser's directory picker). See [Upload and import](#upload-and-import).
 
 Focus is always visible (a 3 px outline), every input has a label, images
 have the item name as alt text, and colours follow `prefers-color-scheme`.
@@ -160,12 +163,35 @@ counts for popular items and your stats. Downloads are not counted.
 
 ## Upload and import
 
-- **Upload** takes many files at once (file picker or drag-and-drop). The
-  results list every file: added (with a link), already in the set, or the
-  error (unsupported type, too large, corrupt). Near-duplicates in your own
-  library are reported as "You already have this in set X: name" with links
-  to the set and the item. On the set page the item grid refreshes after an
-  upload.
+- **Upload** takes many files at once (file picker, drag-and-drop or
+  paste). The results list every file: added (with a link), already in the
+  set, or the error (unsupported type, too large, corrupt). Near-duplicates
+  in your own library are reported as "You already have this in set X: name"
+  with links to the set and the item. On the set page the item grid
+  refreshes after an upload.
+- **The upload tray** (with JavaScript): chosen, dropped and pasted files
+  are staged first, as a row of thumbnails, and nothing is sent until you
+  press "Upload N files". Select a thumbnail to edit that file; × removes it
+  from the upload, "Remove all" empties the tray.
+  - **Name**: the item name. It starts as the file name without the
+    extension and without a leading order number (`003-naahh.gif` is
+    "naahh"), the same rule the server applies. Pasted images are called
+    "pasted image" (then "pasted image 2", …) because browsers name every
+    pasted image `image.png`.
+  - **Image tools** for still images (PNG, JPEG, still WebP): rotate left or
+    right, flip horizontally or vertically, and crop. The crop area covers
+    the whole image at first; drag its corners to crop and its inside to
+    move it, or focus it and use the arrow keys (move) and Shift+arrow keys
+    (resize). "Free", "Square" and the set's recommended aspect ratio (when
+    it has one other than 1:1) set the crop's shape. "Reset" goes back to
+    the original. The line under the image says what will be uploaded.
+  - An edited image is rendered in the browser when you press Upload and
+    sent as a lossless PNG of the result. Files without image edits are sent
+    as their original bytes, so a JPEG is not re-encoded unless you edit it.
+  - GIFs, animated WebP and videos can only be renamed: the browser's canvas
+    keeps just the first frame of an animation.
+
+  Without JavaScript the form posts the chosen files as they are.
 - **Import a set directory as a new set** (upload page): pick the folder
   holding `set.toml` and the files, or an export `.tar`. The set gets the
   manifest's name, slug, visibility, metadata and AI markers.

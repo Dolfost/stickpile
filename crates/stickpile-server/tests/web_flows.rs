@@ -46,6 +46,11 @@ async fn set_lifecycle_without_javascript() {
     let set = s.get(&alice, &routes::path(routes::SET, &[&set_id])).await.value()["set"].clone();
     assert_eq!(set["slug"], "my-cats");
     assert_eq!(set["aspect_ratio"], json!([1, 1]));
+    // The upload form hands the set's aspect ratio to the editing tray
+    // (upload.js, a crop preset) and mentions pasting once the script runs.
+    let page = b.get(&format!("/sets/{set_id}")).await.text();
+    assert!(page.contains("data-aspect=\"1:1\""), "{page}");
+    assert!(page.contains("<span class=\"paste-hint\" hidden>"), "{page}");
     // Same slug again: the form comes back with the error.
     let r = b.post_form("/sets", &[("name", "My Cats")]).await;
     assert_eq!(r.status, StatusCode::CONFLICT);

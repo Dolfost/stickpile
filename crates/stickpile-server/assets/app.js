@@ -9,8 +9,8 @@
 //   A successful copy is reported as a usage event (POST /api/v1/usage,
 //   client "web"). The Clipboard API needs a secure context (https or
 //   localhost); elsewhere a message explains the alternatives.
-// * Drag-and-drop onto upload forms ([data-dropzone]); the plain file
-//   input keeps working without this script.
+// * Upload forms ([data-dropzone]) are handled by upload.js: drag-and-drop,
+//   paste and the tray for renaming and editing images before the upload.
 // * Escape cancels inline editing; dismiss buttons; copy buttons for
 //   one-time secrets (code.copyable).
 // * Set page: the "Compact view" checkbox applies at once and is remembered
@@ -205,7 +205,6 @@
       });
       code.insertAdjacentElement("afterend", b);
     });
-    root.querySelectorAll("[data-dropzone]").forEach(setupDropzone);
     root.querySelectorAll("button[data-menu-button][hidden]").forEach(function (b) {
       b.hidden = false;
     });
@@ -673,39 +672,6 @@
 
   function editableTarget(t) {
     return !!t.closest("input, textarea, select, [contenteditable]");
-  }
-
-  function setupDropzone(zone) {
-    if (zone.getAttribute("data-ready")) return;
-    zone.setAttribute("data-ready", "1");
-    var input = zone.querySelector("input[type=file]");
-    var form = zone.closest("form");
-    if (!input || !form) return;
-    zone.classList.add("js");
-    ["dragenter", "dragover"].forEach(function (t) {
-      zone.addEventListener(t, function (e) {
-        e.preventDefault();
-        zone.classList.add("over");
-      });
-    });
-    ["dragleave", "dragend"].forEach(function (t) {
-      zone.addEventListener(t, function () {
-        zone.classList.remove("over");
-      });
-    });
-    zone.addEventListener("drop", function (e) {
-      e.preventDefault();
-      zone.classList.remove("over");
-      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-      input.files = e.dataTransfer.files;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      if (form.requestSubmit) form.requestSubmit();
-      else form.submit();
-    });
-    input.addEventListener("change", function () {
-      var n = input.files ? input.files.length : 0;
-      zone.setAttribute("data-count", n ? n + (n === 1 ? " file selected" : " files selected") : "");
-    });
   }
 
   // ---- global listeners ------------------------------------------------

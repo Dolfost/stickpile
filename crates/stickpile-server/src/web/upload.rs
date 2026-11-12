@@ -1,6 +1,7 @@
-//! Bulk upload (file input, drag-and-drop via app.js) and set-directory
-//! import (folder input or tar), with results: errors per file and
-//! near-duplicate warnings ("You already have this in set X").
+//! Bulk upload (file input; drag-and-drop, paste and the editing tray via
+//! upload.js) and set-directory import (folder input or tar), with results:
+//! errors per file and near-duplicate warnings ("You already have this in
+//! set X").
 //!
 //! All forms are `multipart/form-data` with the CSRF token as the first
 //! field (see [`super::MultipartCaller`]); htmx submits them with the
@@ -24,23 +25,37 @@ use crate::state::AppState;
 const ACCEPT: &str =
     "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm";
 
-/// The upload form. `set_id` fixes the target set (set page); otherwise the
-/// form has a set selector over `sets`.
-pub fn upload_form(ctx: &Ctx, set_id: Option<&str>, sets: &[SetSummary]) -> Markup {
-    upload_form_selected(ctx, set_id, sets, None)
+/// The upload form of a set page. `aspect` is the set's recommended aspect
+/// ratio, offered as a crop preset by the upload tray (upload.js).
+pub fn upload_form(ctx: &Ctx, set_id: &str, aspect: Option<(u32, u32)>) -> Markup {
+    form(ctx, Some(set_id), aspect, &[], None)
 }
 
-fn upload_form_selected(ctx: &Ctx, set_id: Option<&str>, sets: &[SetSummary], selected: Option<&str>) -> Markup {
+/// The upload form. `set_id` fixes the target set (set page); otherwise the
+/// form has a set selector over `sets`.
+///
+/// With JavaScript, upload.js stages the chosen, dropped or pasted files in a
+/// tray where each one can be renamed and still images rotated, flipped and
+/// cropped before the upload. Without it the file input posts the files as
+/// they are.
+fn form(
+    ctx: &Ctx,
+    set_id: Option<&str>,
+    aspect: Option<(u32, u32)>,
+    sets: &[SetSummary],
+    selected: Option<&str>,
+) -> Markup {
     let action = match set_id {
         Some(id) => format!("/sets/{id}/upload"),
         None => "/upload".to_string(),
     };
     let key = set_id.unwrap_or("any");
     let results_id = format!("upload-results-{key}");
+    let aspect = aspect.map(|(w, h)| format!("{w}:{h}"));
     html! {
         form.upload-form method="post" enctype="multipart/form-data" action=(action)
             hx-post=(action) hx-encoding="multipart/form-data" hx-target=(format!("#{results_id}")) hx-swap="innerHTML"
-            hx-disabled-elt="find button[type=submit]" {
+            hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] {
             (ctx.csrf_input())
             @if set_id.is_none() {
                 div.field-row {
@@ -55,6 +70,8 @@ fn upload_form_selected(ctx: &Ctx, set_id: Option<&str>, sets: &[SetSummary], se
             div.dropzone data-dropzone="" {
                 label for=(format!("upload-files-{key}")) {
                     strong { "Choose files" } " or drop them here"
+                    // Shown by upload.js, which handles the paste.
+                    span.paste-hint hidden { ", or paste an image with Ctrl+V" }
                 }
                 input id=(format!("upload-files-{key}")) type="file" name="file" multiple required accept=(ACCEPT);
                 p.hint { "PNG, JPEG, WebP, GIF, MP4 or WebM. The type is detected from the content; metadata is stripped." }
@@ -129,7 +146,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
             @if sets.is_empty() {
                 p { "You need a set first. " a.button href="/sets/new" { "Create a set" } }
             } @else {
-                (upload_form_selected(&ctx, None, &sets, q.set.as_deref()))
+                (form(&ctx, None, None, &sets, q.set.as_deref()))
             }
         }
         section #import aria-labelledby="up-import" {
