@@ -95,6 +95,25 @@ pub struct ExportItem {
 /// between exports.
 pub type PackMapping = BTreeMap<String, (String, String)>;
 
+/// What stickpile left on a pack after an export: persisted by the server
+/// and passed to the next export of the same pack.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PackState {
+    pub mapping: PackMapping,
+    /// Key of the thumbnail stickpile set on the pack (None: none).
+    pub thumbnail: Option<String>,
+}
+
+/// The pack's thumbnail (the set's cover), already rendered.
+#[derive(Debug, Clone)]
+pub struct PackThumbnail {
+    /// Changes when the picture changes (e.g. cover item id + media sha256);
+    /// the thumbnail is uploaded only when it differs from the last export's.
+    pub key: String,
+    /// Static PNG, exactly 100×100, at most 128 KB.
+    pub png: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExportReport {
     pub created_pack: bool,
@@ -104,6 +123,22 @@ pub struct ExportReport {
     pub reordered: bool,
     /// New mapping to persist.
     pub mapping: PackMapping,
+    /// Key of the thumbnail stickpile has set on the pack after this export
+    /// (`None`: none, Telegram shows the first sticker). Persist it and pass
+    /// it back as `previous_thumbnail`.
+    pub thumbnail: Option<String>,
+    /// The thumbnail was set or dropped by this export.
+    pub thumbnail_changed: bool,
+}
+
+impl ExportReport {
+    /// What to persist and pass to the next export.
+    pub fn state(&self) -> PackState {
+        PackState {
+            mapping: self.mapping.clone(),
+            thumbnail: self.thumbnail.clone(),
+        }
+    }
 }
 
 /// Make pack `name` (owned by `owner_user_id`) match `items` in order.
@@ -119,7 +154,13 @@ pub struct ExportReport {
 ///   The pack is never emptied in between: with nothing to keep (e.g. a lost
 ///   mapping), the last old sticker is swapped via `replaceStickerInSet`.
 ///
-/// Items are sanitised for the Bot API: no emoji -> [`DEFAULT_EMOJI`], at most
+/// The thumbnail: `thumbnail` is set when its key differs from
+/// `previous.thumbnail` (what the last export set); with no `thumbnail` but a
+/// previous one, it is dropped so the first sticker shows again. A thumbnail
+/// stickpile did not set (no `previous.thumbnail`) is left alone.
+///
+/// Items are sanitised for the Bot API: entries that are not emoji (words
+/// typed into the field) are left out, no emoji -> [`DEFAULT_EMOJI`], at most
 /// 20 emoji, at most 20 keywords with at most 64 characters in total, title
 /// cut to 64 characters. An item whose `content_key` repeats an earlier item
 /// is not exported (Telegram would ignore the identical file) and gets no
@@ -131,7 +172,8 @@ pub async fn export_pack(
     name: &str,
     title: &str,
     items: &[ExportItem],
-    previous: &PackMapping,
+    previous: &PackState,
+    thumbnail: Option<&PackThumbnail>,
 ) -> Result<ExportReport, TelegramError> {
     let mut keys = HashSet::new();
     for it in items {
@@ -183,6 +225,7 @@ pub async fn export_pack(
                 .zip(&set.stickers)
                 .map(|(it, s)| (it.key.clone(), (it.content_key.clone(), s.file_unique_id.clone())))
                 .collect();
+            sync_thumbnail(api, owner_user_id, name, thumbnail, None, &mut report).await?;
             return Ok(report);
         }
         Err(e) => return Err(e),
@@ -193,7 +236,7 @@ pub async fn export_pack(
     let mut kept: HashMap<&str, String> = HashMap::new(); // item key -> file_unique_id
     let mut kept_fuids: HashSet<String> = HashSet::new();
     for it in &items {
-        if let Some((content_key, fuid)) = previous.get(&it.key) {
+        if let Some((content_key, fuid)) = previous.mapping.get(&it.key) {
             if *content_key == it.content_key && present.contains(fuid.as_str()) && kept_fuids.insert(fuid.clone()) {
                 kept.insert(it.key.as_str(), fuid.clone());
             }
@@ -293,6 +336,15 @@ pub async fn export_pack(
     if set.title != title {
         api.set_sticker_set_title(name, &title).await?;
     }
+    sync_thumbnail(
+        api,
+        owner_user_id,
+        name,
+        thumbnail,
+        previous.thumbnail.as_deref(),
+        &mut report,
+    )
+    .await?;
 
     report.mapping = items
         .iter()
@@ -304,6 +356,42 @@ pub async fn export_pack(
         })
         .collect();
     Ok(report)
+}
+
+async fn sync_thumbnail(
+    api: &BotApi,
+    owner_user_id: i64,
+    name: &str,
+    thumbnail: Option<&PackThumbnail>,
+    previous: Option<&str>,
+    report: &mut ExportReport,
+) -> Result<(), TelegramError> {
+    match thumbnail {
+        Some(t) if previous != Some(t.key.as_str()) => {
+            api.set_sticker_set_thumbnail(name, owner_user_id, Some(&t.png)).await?;
+            report.thumbnail_changed = true;
+        }
+        None if previous.is_some() => {
+            api.set_sticker_set_thumbnail(name, owner_user_id, None).await?;
+            report.thumbnail_changed = true;
+        }
+        _ => {}
+    }
+    report.thumbnail = thumbnail.map(|t| t.key.clone());
+    Ok(())
+}
+
+/// Can `s` be a sticker's emoji? Telegram refuses anything else and the
+/// whole export would fail, so words typed into the emoji field are left
+/// out: no letters (except enclosed ones like 🅰️ Ⓜ️), whitespace or
+/// controls, not plain ASCII, and digits only in keycaps (1️⃣).
+fn is_emoji(s: &str) -> bool {
+    let enclosed = |c: char| matches!(c, '\u{2460}'..='\u{24FF}' | '\u{1F100}'..='\u{1F1FF}');
+    !s.is_ascii()
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || (c.is_alphabetic() && !enclosed(c)))
+        && (s.contains('\u{20E3}') || !s.chars().any(|c| c.is_ascii_digit()))
 }
 
 fn input_sticker(it: &ExportItem) -> InputSticker {
@@ -328,7 +416,7 @@ fn emoji_list(it: &ExportItem) -> Vec<String> {
         .emojis
         .iter()
         .map(|e| e.trim())
-        .filter(|e| !e.is_empty() && seen.insert(*e))
+        .filter(|e| is_emoji(e) && seen.insert(*e))
         .take(MAX_EMOJIS)
         .map(str::to_string)
         .collect();
@@ -519,9 +607,22 @@ mod tests {
         assert_eq!(emoji_list(&item(&[], &[])), [DEFAULT_EMOJI]);
         assert_eq!(emoji_list(&item(&[" ", "😼", "😼", "🐱"], &[])), ["😼", "🐱"]);
         assert_eq!(emoji_list(&item(&["😀"; 30].map(|_| "x"), &[])).len(), 1);
-        let many: Vec<String> = (0..30).map(|i| format!("e{i}")).collect();
+        let many: Vec<String> = (0..30)
+            .map(|i| char::from_u32(0x1F600 + i).unwrap().to_string())
+            .collect();
         let many: Vec<&str> = many.iter().map(String::as_str).collect();
         assert_eq!(emoji_list(&item(&many, &[])).len(), 20);
+        // Words typed into the emoji field are left out; Telegram would
+        // refuse them and fail the export.
+        assert_eq!(emoji_list(&item(&["cat", "😺", "кіт", "lol😂", "12"], &[])), ["😺"]);
+        assert_eq!(emoji_list(&item(&["sad"], &[])), [DEFAULT_EMOJI]);
+        for e in ["😂", "❤️", "👨‍👩‍👧", "🇺🇦", "1️⃣", "#️⃣", "🅰️", "Ⓜ️", "™️", "🏳️‍🌈"]
+        {
+            assert!(is_emoji(e), "{e}");
+        }
+        for e in ["x", "cat", "кіт", "猫", "😂 😂", "12", "a😂", "\u{7}"] {
+            assert!(!is_emoji(e), "{e:?}");
+        }
 
         let kws = keyword_list(&item(&[], &["cat", " cat ", "", &"x".repeat(70), "stare"]));
         assert_eq!(kws, ["cat", "stare"]);

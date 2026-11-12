@@ -449,6 +449,39 @@ impl BotApi {
         .await
     }
 
+    /// Set the pack's thumbnail to `png` (a static PNG of exactly 100×100,
+    /// at most 128 KB), or drop it with `None`: Telegram then shows the first
+    /// sticker again. Only the pack's owner (`user_id`) may.
+    pub async fn set_sticker_set_thumbnail(
+        &self,
+        name: &str,
+        user_id: i64,
+        png: Option<&[u8]>,
+    ) -> Result<(), TelegramError> {
+        let params = [
+            ("name", json!(name)),
+            ("user_id", json!(user_id)),
+            ("format", json!("static")),
+        ];
+        let Some(bytes) = png else {
+            return self.call_true("setStickerSetThumbnail", &params, &[]).await;
+        };
+        // A plain InputFile parameter: the part itself is named `thumbnail`
+        // (attach:// is only for files inside JSON objects).
+        let file = InputSticker {
+            bytes: bytes.to_vec(),
+            filename: "thumbnail.png".into(),
+            format: StickerFormat::Static,
+            emoji_list: Vec::new(),
+            keywords: Vec::new(),
+        };
+        let upload = Upload {
+            field: "thumbnail".into(),
+            sticker: &file,
+        };
+        self.call_true("setStickerSetThumbnail", &params, &[upload]).await
+    }
+
     pub async fn set_sticker_set_title(&self, name: &str, title: &str) -> Result<(), TelegramError> {
         self.call_true(
             "setStickerSetTitle",

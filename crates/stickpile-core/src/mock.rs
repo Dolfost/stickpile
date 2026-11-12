@@ -252,6 +252,7 @@ impl MockState {
             source: SetSource::Local,
             git: None,
             telegram_pack: None,
+            cover_item_id: None,
             item_count: 0,
             editable: true,
             created_at: now,

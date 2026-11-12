@@ -16,5 +16,6 @@ pub mod sync;
 pub use api::{BotApi, BotUser, InputSticker, Sticker, StickerFormat, StickerSet, TelegramError, TgFile};
 pub use sync::{
     complete_pack_name, default_pack_name, export_pack, import_pack, valid_pack_name, ExportItem, ExportReport,
-    ImportedPack, ImportedSticker, PackMapping, DEFAULT_EMOJI, MAX_PACK_STICKERS, TGS_SKIP_REASON,
+    ImportedPack, ImportedSticker, PackMapping, PackState, PackThumbnail, DEFAULT_EMOJI, MAX_PACK_STICKERS,
+    TGS_SKIP_REASON,
 };

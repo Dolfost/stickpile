@@ -284,6 +284,7 @@
     top: ["M5 4h14", "M12 20V9", "M7 14l5-5 5 5"],
     bottom: ["M5 20h14", "M12 4v11", "M7 10l5 5 5-5"],
     delete: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5", "M14 11v5"],
+    cover: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"],
   };
   var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -375,6 +376,26 @@
       });
   }
 
+  // The set's cover: this item, or (`clear`) back to the first item. The
+  // grid comes back with the badge moved, in the page's sort.
+  function setCover(card, clear, byKeyboard) {
+    var url = card.getAttribute("data-cover-url");
+    var id = card.id;
+    var item = clear ? "" : id.replace(/^item-/, "");
+    if (!htmxReady()) {
+      postForm(url, { item: item });
+      return;
+    }
+    htmx.ajax("POST", url, { source: card, target: "#set-items", swap: "outerHTML", values: { item: item } }).then(
+      function () {
+        toast(clear ? "The first item is the cover again." : "“" + cardName(card) + "” is the cover now.");
+        setTimeout(function () {
+          focusCard(id, byKeyboard);
+        }, 30);
+      }
+    );
+  }
+
   function deleteItem(card, byKeyboard) {
     var url = card.getAttribute("data-delete-url");
     if (!htmxReady()) {
@@ -448,6 +469,17 @@
     }
     var editUrl = card.getAttribute("data-edit-url");
     if (editUrl) edit.push({ label: "Edit all fields…", icon: "fields", href: editUrl });
+    if (card.hasAttribute("data-cover-url")) {
+      var isCover = card.hasAttribute("data-cover");
+      edit.push({
+        label: isCover ? "Stop using as cover" : "Use as cover",
+        icon: "cover",
+        keepFocus: true,
+        run: function (byKeyboard) {
+          setCover(card, isCover, byKeyboard);
+        },
+      });
+    }
     groups.push(edit);
     if (card.hasAttribute("data-move-url")) {
       var isFirst = card.hasAttribute("data-first");

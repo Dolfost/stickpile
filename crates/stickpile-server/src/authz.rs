@@ -160,6 +160,7 @@ mod tests {
             git_last_pull_at: None,
             git_last_error: None,
             telegram_pack: None,
+            cover_item_id: None,
             extra_toml: None,
             created_at: 0,
             updated_at: 0,

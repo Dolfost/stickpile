@@ -133,6 +133,53 @@ async fn set_lifecycle_without_javascript() {
     assert_eq!(fox["vibe"], "smug");
     assert_eq!(fox["tags"], json!(["animals"]));
     assert_eq!(fox["keywords_source"], "user");
+
+    // The cover: "Use as cover" in the item menu posts here (htmx gets the
+    // grid back in the page's sort), and the settings form chooses too.
+    let dog = items.iter().find(|i| i["name"] == "dog").expect("dog")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let r = b
+        .post_htmx_from(
+            &format!("/sets/{set_id}/cover"),
+            &[("item", &dog)],
+            &format!("/sets/{set_id}?sort=likes"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let grid = r.text();
+    assert!(grid.contains("id=\"set-items\""), "{grid}");
+    assert!(grid.contains(&format!("id=\"item-{dog}\"")));
+    assert_eq!(
+        grid.matches(" data-cover>").count() + grid.matches(" data-cover ").count(),
+        1,
+        "{grid}"
+    );
+    assert_eq!(grid.matches("class=\"badge cover-badge\"").count(), 1, "{grid}");
+    assert!(grid.contains(&format!("data-cover-url=\"/sets/{set_id}/cover\"")));
+    let settings = b.get(&format!("/sets/{set_id}/settings")).await.text();
+    assert!(
+        settings.contains(&format!(
+            "<input type=\"radio\" name=\"cover\" value=\"{dog}\" checked>"
+        )),
+        "{settings}"
+    );
+    let r = b
+        .post_form(
+            &format!("/sets/{set_id}/settings"),
+            &[
+                ("name", "My Cats"),
+                ("slug", "my-cats"),
+                ("visibility", "private"),
+                ("aspect", "1:1"),
+                ("cover", ""),
+            ],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let d = s.get(&alice, &routes::path(routes::SET, &[&set_id])).await.value();
+    assert_eq!(d["set"]["cover_item_id"], serde_json::Value::Null);
     let first = items[0]["id"].as_str().unwrap().to_string();
 
     // Reorder with the plain form.

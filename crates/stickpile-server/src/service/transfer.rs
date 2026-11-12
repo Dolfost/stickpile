@@ -255,8 +255,11 @@ pub async fn import_bundle_into(
     let mut order: Vec<String> = Vec::new();
     let mut kept: HashSet<String> = HashSet::new();
     let mut changed = false;
+    // The item the manifest's `cover` file became (None: the first item).
+    let mut cover: Option<String> = None;
 
     for f in bundle.files {
+        let is_cover = m.cover.as_deref() == Some(f.filename.as_str());
         let input = match input_from_meta(&f.filename, &f.meta) {
             Ok(i) => i,
             Err(e) => {
@@ -283,6 +286,9 @@ pub async fn import_bundle_into(
             } else {
                 report.unchanged += 1;
             }
+            if is_cover {
+                cover = Some(cur.id.clone());
+            }
             order.push(cur.id.clone());
             continue;
         }
@@ -306,6 +312,9 @@ pub async fn import_bundle_into(
                 } else {
                     report.unchanged += 1;
                 }
+                if is_cover {
+                    cover = Some(added.item_id.clone());
+                }
                 order.push(added.item_id);
             }
             Ok(added) => {
@@ -314,6 +323,9 @@ pub async fn import_bundle_into(
                 report.near_duplicates.extend(near);
                 pool.push((added.item_id.clone(), added.media.id.clone(), phash));
                 kept.insert(added.item_id.clone());
+                if is_cover {
+                    cover = Some(added.item_id.clone());
+                }
                 order.push(added.item_id);
                 report.created += 1;
                 changed = true;
@@ -364,13 +376,29 @@ pub async fn import_bundle_into(
             .await?;
     }
     if is_new {
-        sqlx::query("UPDATE sets SET version = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE sets SET version = ?, cover_item_id = ?, updated_at = ? WHERE id = ?")
             .bind(m.version.clamp(1, i64::MAX as u64) as i64)
+            .bind(&cover)
             .bind(now())
             .bind(&set.id)
             .execute(&mut *tx)
             .await?;
     } else {
+        // The directory decides the cover too (no `cover`: the first item).
+        let old_cover: Option<String> = sqlx::query_scalar(
+            "SELECT (SELECT id FROM items WHERE id = s.cover_item_id AND set_id = s.id) FROM sets s WHERE s.id = ?",
+        )
+        .bind(&set.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if old_cover != cover {
+            sqlx::query("UPDATE sets SET cover_item_id = ? WHERE id = ?")
+                .bind(&cover)
+                .bind(&set.id)
+                .execute(&mut *tx)
+                .await?;
+            changed = true;
+        }
         let meta_changed = set.name != m.name
             || set.description != m.description
             || set.visibility() != m.visibility
@@ -436,6 +464,8 @@ pub async fn export_bundle(state: &AppState, viewer: &CurrentUser, set_id: &str)
 /// backup` on a database snapshot).
 pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set: &SetRow) -> AppResult<SetBundle> {
     let rows = hydrate::fetch_by_set(db, &set.id).await?;
+    let chosen_cover = sets::chosen_cover(db, &set.id).await?;
+    let mut cover = None;
     let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
     let variants = hydrate::variant_rows(db, &media_ids).await?;
     let total = rows.len();
@@ -448,6 +478,9 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         let abs = files::resolve(media_dir, &original.path).ok_or_else(|| AppError::internal("bad path"))?;
         let bytes = files::read(abs).await?;
         let filename = stickpile_setfmt::export_filename(i + 1, total, &r.filename, r.format().extension());
+        if chosen_cover.as_deref() == Some(r.id.as_str()) {
+            cover = Some(filename.clone());
+        }
         let meta = ItemMeta {
             name: r.name.clone(),
             name_source: source(&r.name_source),
@@ -470,6 +503,7 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         visibility: set.visibility(),
         aspect_ratio: set.aspect().map(|(w, h)| format!("{w}:{h}")),
         recommended_px: set.recommended_px.map(|v| v as u32),
+        cover,
         items: out_files
             .iter()
             .map(|f| (f.filename.clone(), f.meta.clone()))

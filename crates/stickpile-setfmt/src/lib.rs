@@ -117,6 +117,7 @@ const SET_KEYS: &[&str] = &[
     "visibility",
     "aspect_ratio",
     "recommended_px",
+    "cover",
     "items",
 ];
 
@@ -140,6 +141,10 @@ pub struct Manifest {
     pub aspect_ratio: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommended_px: Option<u32>,
+    /// Filename of the item that is the set's cover (Telegram: the pack's
+    /// thumbnail). Absent: the first item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover: Option<String>,
     /// Keyed by filename (not path).
     #[serde(default)]
     pub items: BTreeMap<String, ItemMeta>,
@@ -161,6 +166,7 @@ impl Manifest {
             visibility: Visibility::default(),
             aspect_ratio: None,
             recommended_px: None,
+            cover: None,
             items: BTreeMap::new(),
             extra: toml::Table::new(),
         }

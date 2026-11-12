@@ -102,6 +102,35 @@ pub(crate) fn webp_lossy(img: &RgbaImage, quality: f32) -> Result<Vec<u8>, Media
     encoded.map_err(|e| MediaError::Invalid(format!("webp encode: {e:?}")))
 }
 
+/// Side of a Telegram sticker set thumbnail (`setStickerSetThumbnail`).
+pub const PACK_THUMBNAIL_PX: u32 = 100;
+
+/// Telegram sticker set thumbnail: `frame` scaled so its longer side is
+/// exactly [`PACK_THUMBNAIL_PX`], centred on a transparent square of that
+/// size (Telegram wants exactly 100×100), as PNG (a few KB; the limit is 128).
+pub(crate) fn pack_thumbnail(frame: &RgbaImage) -> Result<Vec<u8>, MediaError> {
+    let side = PACK_THUMBNAIL_PX;
+    let (w, h) = fit_exact(frame.width().max(1), frame.height().max(1), side);
+    let (w, h) = (w.clamp(1, side), h.clamp(1, side));
+    let scaled = image::imageops::resize(frame, w, h, FilterType::Lanczos3);
+    let mut square = RgbaImage::new(side, side);
+    image::imageops::overlay(
+        &mut square,
+        &scaled,
+        i64::from((side - w) / 2),
+        i64::from((side - h) / 2),
+    );
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut out,
+        image::codecs::png::CompressionType::Best,
+        image::codecs::png::FilterType::Adaptive,
+    )
+    .write_image(square.as_raw(), side, side, image::ExtendedColorType::Rgba8)
+    .map_err(|e| MediaError::Invalid(format!("png encode: {e}")))?;
+    Ok(out)
+}
+
 fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, MediaError> {
     let mut out = Vec::new();
     let enc = image::codecs::png::PngEncoder::new_with_quality(
@@ -678,6 +707,23 @@ mod tests {
         assert_eq!(even_dims(300, 900, 512, true), (170, 512));
         assert_eq!(even_dims(101, 51, 1920, false), (100, 50));
         assert_eq!(even_dims(1, 1, 1920, false), (2, 2));
+    }
+
+    #[test]
+    fn pack_thumbnail_is_an_exact_square_png() {
+        for (w, h) in [(300, 150), (40, 90), (512, 512), (1, 1)] {
+            let frame = RgbaImage::from_pixel(w, h, image::Rgba([200, 30, 30, 255]));
+            let png = pack_thumbnail(&frame).unwrap();
+            assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+            assert!(png.len() <= 128 * 1024);
+            let back = image::load_from_memory(&png).unwrap().to_rgba8();
+            assert_eq!(back.dimensions(), (PACK_THUMBNAIL_PX, PACK_THUMBNAIL_PX));
+            // The image is centred; a wide one leaves transparent bands.
+            assert_eq!(back.get_pixel(50, 50)[3], 255);
+            if w == 300 {
+                assert_eq!(back.get_pixel(50, 2)[3], 0);
+            }
+        }
     }
 
     #[test]

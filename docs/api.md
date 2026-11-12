@@ -156,7 +156,7 @@ TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 | `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `public` (all users' public sets), `all` (own + others' public). Others' unlisted sets are never listed. |
 | `POST /api/v1/sets` | `CreateSet` -> `Set` (201) | Slug `[a-z0-9-]`, 1-64 characters, unique per owner (409). |
 | `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, unlisted or public sets. |
-| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. Bumps `version` when something changed. |
+| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` what lists show (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
 | `DELETE /api/v1/sets/{id}` | -> 204 | Owner only (also for read-only git packs). Audited. |
 | `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `item_ids` must list every item exactly once (else 400). |
 | `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below. |

@@ -8,9 +8,11 @@ use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
 use stickpile_api::routes as r;
-use stickpile_api::{CreateSet, Item, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Visibility};
+use stickpile_api::{CreateSet, Item, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Variant, Visibility};
 
-use super::components::{fmt_time, grid, opt_time, plural, set_card, set_url, source_badge, visibility_badge};
+use super::components::{
+    file_url, fmt_time, grid, opt_time, plural, set_card, set_url, source_badge, visibility_badge,
+};
 use super::layout::{self, Nav};
 use super::{integrations, items, upload, Ctx};
 use crate::error::{AppError, AppResult};
@@ -81,6 +83,9 @@ pub struct SetForm {
     aspect: String,
     #[serde(default)]
     recommended_px: String,
+    /// Item id of the cover; empty: the first item. Set settings only.
+    #[serde(default)]
+    cover: String,
 }
 
 impl SetForm {
@@ -91,6 +96,7 @@ impl SetForm {
             description: s.description.clone(),
             visibility: vis_str(s.visibility).into(),
             aspect: s.aspect_ratio.map(|(w, h)| format!("{w}:{h}")).unwrap_or_default(),
+            cover: s.cover_item_id.clone().unwrap_or_default(),
             recommended_px: s.recommended_px.map(|p| p.to_string()).unwrap_or_default(),
         }
     }
@@ -420,12 +426,68 @@ pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oo
                     // When movable, nothing is filtered or re-sorted, so the
                     // index is the item's place in the set.
                     @for (idx, item) in shown.iter().enumerate() {
-                        (items::editor_card(ctx, item, detail.set.editable, movable.then_some((idx == 0, idx >= last))))
+                        (items::editor_card(
+                            ctx,
+                            item,
+                            detail.set.editable,
+                            movable.then_some((idx == 0, idx >= last)),
+                            detail.set.cover_item_id.as_deref() == Some(item.id.as_str()),
+                        ))
                     }
                 }
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cover
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct CoverForm {
+    /// Item id; empty: back to the first item.
+    #[serde(default)]
+    item: String,
+}
+
+/// Sort and filter of the set page that sent an htmx request (its URL is
+/// `ctx.here`), so a swapped grid keeps them.
+fn view_of(here: &str) -> (Sort, u64) {
+    let query = here.split_once('?').map_or("", |(_, q)| q);
+    let mut sort = None;
+    let mut min_likes = 0;
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("sort", v)) => sort = Some(v),
+            Some(("min_likes", v)) => min_likes = v.trim().parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    (Sort::parse(sort), min_likes)
+}
+
+/// "Use as cover" from an item's menu (the settings form does the same).
+pub async fn set_cover(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    Path(id): Path<String>,
+    Form(f): Form<CoverForm>,
+) -> AppResult<Response> {
+    let item = f.item.trim().to_string();
+    let req = UpdateSet {
+        cover_item_id: Some(Some(item.clone()).filter(|i| !i.is_empty())),
+        ..Default::default()
+    };
+    sets::update(&state, &ctx.user, &id, req).await?;
+    let detail = sets::detail(&state, &ctx.user, &id).await?;
+    let (sort, min_likes) = view_of(&ctx.here);
+    let back = if item.is_empty() {
+        set_url(&id)
+    } else {
+        format!("{}#item-{item}", set_url(&id))
+    };
+    Ok(ctx.done(editor_grid(&ctx, &detail, sort, min_likes, false), None, &back))
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +535,34 @@ pub async fn move_item(
 // Settings and delete
 // ---------------------------------------------------------------------------
 
-fn settings_form(ctx: &Ctx, set: &Set, f: &SetForm, error: Option<&str>, saved: bool) -> Markup {
+/// The cover chooser of the settings form: the first item (default) or any
+/// item, as thumbnails. Works without JavaScript; the set page's item menu
+/// has "Use as cover" too.
+fn cover_choice(f: &SetForm, items: &[Item]) -> Markup {
+    html! {
+        fieldset.field-row.cover-choice aria-describedby="set-cover-hint" {
+            legend { "Cover" }
+            p.hint #set-cover-hint {
+                "Shown for the set in lists, and the pack's thumbnail when it is published to Telegram."
+            }
+            div.cover-grid {
+                label.cover-option {
+                    input type="radio" name="cover" value="" checked[f.cover.is_empty()];
+                    span.cover-default { "First item" }
+                }
+                @for item in items {
+                    label.cover-option {
+                        input type="radio" name="cover" value=(item.id) checked[f.cover == item.id];
+                        img src=(file_url(&item.id, Variant::Thumb)) alt="" loading="lazy" decoding="async";
+                        span.cover-name { (item.name) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, error: Option<&str>, saved: bool) -> Markup {
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
         h1 { "Set settings" }
@@ -483,6 +572,7 @@ fn settings_form(ctx: &Ctx, set: &Set, f: &SetForm, error: Option<&str>, saved: 
             form.stack.narrow method="post" action=(format!("/sets/{}/settings", set.id)) {
                 (ctx.csrf_input())
                 (set_fields(ctx, f, false))
+                @if !items.is_empty() { (cover_choice(f, items)) }
                 button.primary type="submit" { "Save" }
             }
         } @else {
@@ -497,12 +587,12 @@ fn settings_form(ctx: &Ctx, set: &Set, f: &SetForm, error: Option<&str>, saved: 
     ctx.page("Set settings", Nav::Sets, body)
 }
 
-async fn owned(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<Set> {
-    let set = sets::detail(state, &ctx.user, id).await?.set;
-    if set.owner_id != ctx.id() {
+async fn owned(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<SetDetail> {
+    let detail = sets::detail(state, &ctx.user, id).await?;
+    if detail.set.owner_id != ctx.id() {
         return Err(AppError::forbidden("only the owner can change this set"));
     }
-    Ok(set)
+    Ok(detail)
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -517,11 +607,12 @@ pub async fn settings_page(
     Path(id): Path<String>,
     Query(q): Query<SavedQuery>,
 ) -> AppResult<Markup> {
-    let set = owned(&state, &ctx, &id).await?;
+    let d = owned(&state, &ctx, &id).await?;
     Ok(settings_form(
         &ctx,
-        &set,
-        &SetForm::from_set(&set),
+        &d.set,
+        &d.items,
+        &SetForm::from_set(&d.set),
         None,
         q.saved.is_some(),
     ))
@@ -533,7 +624,7 @@ pub async fn settings_submit(
     Path(id): Path<String>,
     Form(f): Form<SetForm>,
 ) -> AppResult<Response> {
-    let set = owned(&state, &ctx, &id).await?;
+    let d = owned(&state, &ctx, &id).await?;
     let attempt = async {
         let req = UpdateSet {
             slug: Some(f.slug.trim().to_string()),
@@ -542,6 +633,7 @@ pub async fn settings_submit(
             visibility: Some(parse_visibility(&f.visibility)?),
             aspect_ratio: Some(parse_aspect(&f.aspect)?),
             recommended_px: Some(parse_px(&f.recommended_px)?),
+            cover_item_id: Some(Some(f.cover.trim().to_string()).filter(|c| !c.is_empty())),
         };
         sets::update(&state, &ctx.user, &id, req).await
     };
@@ -553,7 +645,7 @@ pub async fn settings_submit(
             } else {
                 e.status
             },
-            settings_form(&ctx, &set, &f, Some(&form_error(&e)), false),
+            settings_form(&ctx, &d.set, &d.items, &f, Some(&form_error(&e)), false),
         )
             .into_response()),
         Err(e) => Err(e),
@@ -561,7 +653,7 @@ pub async fn settings_submit(
 }
 
 pub async fn delete_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {
-    let set = owned(&state, &ctx, &id).await?;
+    let set = owned(&state, &ctx, &id).await?.set;
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
         h1 { "Delete “" (set.name) "”?" }

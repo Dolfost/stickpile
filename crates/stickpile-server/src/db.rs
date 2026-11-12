@@ -141,7 +141,7 @@ pub async fn user_by_username(db: &SqlitePool, username: &str) -> sqlx::Result<O
 
 pub const SET_COLUMNS: &str = "id, owner_id, slug, name, description, visibility, aspect_w, aspect_h, recommended_px, \
      version, source, git_url, git_branch, git_subdir, git_mode, git_last_commit, git_last_pull_at, git_last_error, \
-     telegram_pack, extra_toml, created_at, updated_at";
+     telegram_pack, cover_item_id, extra_toml, created_at, updated_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SetRow {
@@ -164,6 +164,9 @@ pub struct SetRow {
     pub git_last_pull_at: Option<i64>,
     pub git_last_error: Option<String>,
     pub telegram_pack: Option<String>,
+    /// Chosen cover; only valid while that item is in the set (see
+    /// `service::sets`).
+    pub cover_item_id: Option<String>,
     pub extra_toml: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,

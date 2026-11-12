@@ -387,6 +387,11 @@ pub struct Set {
     pub git: Option<GitBinding>,
     /// Telegram pack name this set is published as, if any.
     pub telegram_pack: Option<String>,
+    /// The item chosen as the cover: shown for the set in lists and sent to
+    /// Telegram as the pack's thumbnail. `None`: the first item is shown and
+    /// Telegram uses the first sticker.
+    #[serde(default)]
+    pub cover_item_id: Option<String>,
     pub item_count: u64,
     /// True if the caller may edit (owner, and not a read-only git pack).
     pub editable: bool,
@@ -404,7 +409,7 @@ pub struct SetSummary {
     pub visibility: Visibility,
     pub source: SetSource,
     pub item_count: u64,
-    /// Thumb URL path of the first item, if any.
+    /// The item shown for the set: the chosen cover, else the first item.
     pub cover_item_id: Option<String>,
     pub updated_at: i64,
 }
@@ -442,6 +447,9 @@ pub struct UpdateSet {
     pub aspect_ratio: Option<Option<(u32, u32)>>,
     #[serde(default, with = "double_option")]
     pub recommended_px: Option<Option<u32>>,
+    /// An item of this set as its cover; `null` goes back to the first item.
+    #[serde(default, with = "double_option")]
+    pub cover_item_id: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

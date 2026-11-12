@@ -84,8 +84,14 @@ struct SetListRow {
     set: SetRow,
     owner_username: String,
     item_count: i64,
-    cover_item_id: Option<String>,
+    /// The chosen cover while it is still in the set.
+    chosen_cover_id: Option<String>,
+    /// What lists show: the chosen cover, else the first item.
+    shown_cover_id: Option<String>,
 }
+
+/// SQL for the chosen cover of set `s` while that item is still in it.
+const CHOSEN_COVER_SQL: &str = "(SELECT id FROM items WHERE id = s.cover_item_id AND set_id = s.id)";
 
 fn list_select() -> String {
     let cols = SET_COLUMNS
@@ -96,12 +102,15 @@ fn list_select() -> String {
     format!(
         "SELECT {cols}, u.username AS owner_username, \
          (SELECT COUNT(*) FROM items WHERE set_id = s.id) AS item_count, \
-         (SELECT id FROM items WHERE set_id = s.id ORDER BY position, id LIMIT 1) AS cover_item_id \
+         {CHOSEN_COVER_SQL} AS chosen_cover_id, \
+         COALESCE({CHOSEN_COVER_SQL}, (SELECT id FROM items WHERE set_id = s.id ORDER BY position, id LIMIT 1)) \
+         AS shown_cover_id \
          FROM sets s JOIN users u ON u.id = s.owner_id"
     )
 }
 
-pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, viewer: &str) -> Set {
+/// `cover`: the chosen cover, already checked to be in the set.
+pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Option<String>, viewer: &str) -> Set {
     let git = (row.source == "git").then(|| GitBinding {
         url: row.git_url.clone().unwrap_or_default(),
         branch: row.git_branch.clone(),
@@ -132,6 +141,7 @@ pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, viewer: &str)
         source: parse_enum(&row.source).unwrap_or(SetSource::Local),
         git,
         telegram_pack: row.telegram_pack.clone(),
+        cover_item_id: cover,
         item_count,
         editable: authz::can_edit_set(viewer, row),
         created_at: row.created_at,
@@ -148,7 +158,7 @@ fn to_summary(r: &SetListRow) -> SetSummary {
         visibility: r.set.visibility(),
         source: parse_enum(&r.set.source).unwrap_or(SetSource::Local),
         item_count: r.item_count.max(0) as u64,
-        cover_item_id: r.cover_item_id.clone(),
+        cover_item_id: r.shown_cover_id.clone(),
         updated_at: r.set.updated_at,
     }
 }
@@ -159,7 +169,24 @@ pub async fn load_api(db: &SqlitePool, row: &SetRow, viewer: &str) -> AppResult<
         .bind(&row.id)
         .fetch_one(db)
         .await?;
-    Ok(to_api(&r.set, &r.owner_username, r.item_count.max(0) as u64, viewer))
+    Ok(to_api(
+        &r.set,
+        &r.owner_username,
+        r.item_count.max(0) as u64,
+        r.chosen_cover_id.clone(),
+        viewer,
+    ))
+}
+
+/// The chosen cover of a set while that item is still in it.
+pub async fn chosen_cover(db: &SqlitePool, set_id: &str) -> AppResult<Option<String>> {
+    Ok(
+        sqlx::query_scalar(&format!("SELECT {CHOSEN_COVER_SQL} FROM sets s WHERE s.id = ?"))
+            .bind(set_id)
+            .fetch_optional(db)
+            .await?
+            .flatten(),
+    )
 }
 
 /// Summary of one set (item detail pages).
@@ -261,7 +288,7 @@ pub async fn create(state: &AppState, viewer: &CurrentUser, req: CreateSet) -> A
         },
     )
     .await?;
-    Ok(to_api(&row, &viewer.user.username, 0, viewer.id()))
+    Ok(to_api(&row, &viewer.user.username, 0, None, viewer.id()))
 }
 
 pub async fn detail(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<SetDetail> {
@@ -396,6 +423,19 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
     if let Some(px) = req.recommended_px {
         validate_px(px)?;
     }
+    let old_cover = chosen_cover(&state.db, set_id).await?;
+    let new_cover = match req.cover_item_id.clone() {
+        None => old_cover.clone(),
+        Some(None) => None,
+        Some(Some(id)) => {
+            let in_set: Option<String> = sqlx::query_scalar("SELECT id FROM items WHERE id = ? AND set_id = ?")
+                .bind(&id)
+                .bind(set_id)
+                .fetch_optional(&state.db)
+                .await?;
+            Some(in_set.ok_or_else(|| AppError::bad_request("the cover must be an item of this set"))?)
+        }
+    };
     let mut tx = begin(&state.db).await?;
     let new_slug = req.slug.clone().unwrap_or_else(|| set.slug.clone());
     let new_name = name.unwrap_or_else(|| set.name.clone());
@@ -408,12 +448,13 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
         || new_desc != set.description
         || new_vis != set.visibility()
         || new_aspect != set.aspect()
-        || new_px != set.recommended_px.map(|v| v as u32);
+        || new_px != set.recommended_px.map(|v| v as u32)
+        || new_cover != old_cover;
     if changed {
         on_visibility_change(&mut tx, &set, new_vis).await?;
         let res = sqlx::query(
             "UPDATE sets SET slug = ?, name = ?, description = ?, visibility = ?, aspect_w = ?, aspect_h = ?, \
-             recommended_px = ? WHERE id = ?",
+             recommended_px = ?, cover_item_id = ? WHERE id = ?",
         )
         .bind(&new_slug)
         .bind(&new_name)
@@ -422,6 +463,7 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
         .bind(new_aspect.map(|a| a.0 as i64))
         .bind(new_aspect.map(|a| a.1 as i64))
         .bind(new_px.map(|v| v as i64))
+        .bind(&new_cover)
         .bind(set_id)
         .execute(&mut *tx)
         .await;

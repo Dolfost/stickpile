@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use mock_bot::{start, unique_id, BOT, BOT_ID, OWNER, TOKEN};
 use stickpile_telegram::{
-    export_pack, import_pack, BotApi, ExportItem, PackMapping, StickerFormat, TelegramError, DEFAULT_EMOJI,
-    TGS_SKIP_REASON,
+    export_pack, import_pack, BotApi, ExportItem, PackState, PackThumbnail, StickerFormat, TelegramError,
+    DEFAULT_EMOJI, TGS_SKIP_REASON,
 };
 
 const PACK: &str = "cats_by_stickpile_test_bot";
@@ -208,7 +208,7 @@ async fn first_export_creates_the_pack() {
         item("b", "B", StickerFormat::Video, &["🙅"], &[]),
         item("c", "C", StickerFormat::Static, &[], &["sigh"]),
     ];
-    let report = export_pack(&api(&base), OWNER, PACK, "Cats", &items, &PackMapping::new())
+    let report = export_pack(&api(&base), OWNER, PACK, "Cats", &items, &PackState::default(), None)
         .await
         .unwrap();
     assert!(report.created_pack);
@@ -237,6 +237,107 @@ async fn first_export_creates_the_pack() {
     );
 }
 
+/// A 100×100 PNG like stickpile_media::pack_thumbnail makes (only the size
+/// in IHDR matters to the mock).
+fn thumb_png(seed: u8) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend(100u32.to_be_bytes());
+    png.extend(100u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, seed]);
+    png
+}
+
+#[tokio::test]
+async fn the_cover_becomes_the_pack_thumbnail() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let items = vec![
+        item("a", "A", StickerFormat::Static, &["😼"], &[]),
+        item("b", "B", StickerFormat::Static, &["🐶"], &[]),
+    ];
+    let cover = PackThumbnail {
+        key: "b:sha".into(),
+        png: thumb_png(1),
+    };
+    // Created with the thumbnail.
+    let first = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "Cats",
+        &items,
+        &PackState::default(),
+        Some(&cover),
+    )
+    .await
+    .unwrap();
+    assert!(first.thumbnail_changed);
+    assert_eq!(first.thumbnail.as_deref(), Some("b:sha"));
+    assert_eq!(state.lock().unwrap().pack(PACK).thumbnail, Some(thumb_png(1)));
+    // Same cover again: no call.
+    let again = export_pack(&client, OWNER, PACK, "Cats", &items, &first.state(), Some(&cover))
+        .await
+        .unwrap();
+    assert!(!again.thumbnail_changed);
+    assert_eq!(state.lock().unwrap().count("setStickerSetThumbnail"), 1);
+    // Another cover: uploaded.
+    let other = PackThumbnail {
+        key: "a:sha".into(),
+        png: thumb_png(2),
+    };
+    let changed = export_pack(&client, OWNER, PACK, "Cats", &items, &again.state(), Some(&other))
+        .await
+        .unwrap();
+    assert!(changed.thumbnail_changed);
+    assert_eq!(state.lock().unwrap().pack(PACK).thumbnail, Some(thumb_png(2)));
+    // No cover any more: dropped, the first sticker shows again.
+    let dropped = export_pack(&client, OWNER, PACK, "Cats", &items, &changed.state(), None)
+        .await
+        .unwrap();
+    assert!(dropped.thumbnail_changed);
+    assert_eq!(dropped.thumbnail, None);
+    assert_eq!(state.lock().unwrap().pack(PACK).thumbnail, None);
+    // Nothing set by stickpile and no cover: a thumbnail made elsewhere stays.
+    state.lock().unwrap().packs.get_mut(PACK).unwrap().thumbnail = Some(thumb_png(9));
+    let calls = state.lock().unwrap().count("setStickerSetThumbnail");
+    export_pack(&client, OWNER, PACK, "Cats", &items, &dropped.state(), None)
+        .await
+        .unwrap();
+    assert_eq!(state.lock().unwrap().count("setStickerSetThumbnail"), calls);
+    assert_eq!(state.lock().unwrap().pack(PACK).thumbnail, Some(thumb_png(9)));
+}
+
+#[tokio::test]
+async fn words_in_the_emoji_field_do_not_break_the_export() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let a = item("a", "A", StickerFormat::Static, &["cat", "😼"], &[]);
+    let b = item("b", "B", StickerFormat::Static, &["sad"], &[]);
+    let first = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "Cats",
+        &[a.clone(), b.clone()],
+        &PackState::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    {
+        let st = state.lock().unwrap();
+        let pack = st.pack(PACK);
+        assert_eq!(pack.stickers[0].emoji_list, ["😼"]);
+        assert_eq!(pack.stickers[1].emoji_list, [DEFAULT_EMOJI]);
+    }
+    // Edited emoji reach kept stickers on the next export (setStickerEmojiList).
+    let a2 = item("a", "A", StickerFormat::Static, &["😾", "word", "🐱"], &[]);
+    export_pack(&client, OWNER, PACK, "Cats", &[a2, b], &first.state(), None)
+        .await
+        .unwrap();
+    assert_eq!(state.lock().unwrap().pack(PACK).stickers[0].emoji_list, ["😾", "🐱"]);
+}
+
 #[tokio::test]
 async fn re_export_adds_removes_replaces_reorders_and_updates() {
     let (base, state) = start().await;
@@ -251,7 +352,8 @@ async fn re_export_adds_removes_replaces_reorders_and_updates() {
         PACK,
         "Cats",
         &[a.clone(), b.clone(), c.clone(), d.clone()],
-        &PackMapping::new(),
+        &PackState::default(),
+        None,
     )
     .await
     .unwrap();
@@ -262,7 +364,7 @@ async fn re_export_adds_removes_replaces_reorders_and_updates() {
     let a2 = item("a", "A", StickerFormat::Static, &["😾", "🐱"], &["grumpy"]);
     let items = vec![e.clone(), c2.clone(), a2.clone(), d.clone()];
     state.lock().unwrap().calls.clear();
-    let report = export_pack(&client, OWNER, PACK, "Cats", &items, &first.mapping)
+    let report = export_pack(&client, OWNER, PACK, "Cats", &items, &first.state(), None)
         .await
         .unwrap();
     assert!(!report.created_pack);
@@ -294,7 +396,7 @@ async fn re_export_adds_removes_replaces_reorders_and_updates() {
 
     // Unchanged set: no uploads, no deletions, no moves; metadata re-sent.
     state.lock().unwrap().calls.clear();
-    let again = export_pack(&client, OWNER, PACK, "Cats", &items, &report.mapping)
+    let again = export_pack(&client, OWNER, PACK, "Cats", &items, &report.state(), None)
         .await
         .unwrap();
     assert_eq!(
@@ -310,7 +412,7 @@ async fn re_export_adds_removes_replaces_reorders_and_updates() {
     }
 
     // Title change.
-    export_pack(&client, OWNER, PACK, "Cats & co", &items, &again.mapping)
+    export_pack(&client, OWNER, PACK, "Cats & co", &items, &again.state(), None)
         .await
         .unwrap();
     let st = state.lock().unwrap();
@@ -324,7 +426,7 @@ async fn large_packs_are_created_in_batches() {
     let items: Vec<ExportItem> = (0..55)
         .map(|i| item(&format!("k{i}"), &format!("C{i}"), StickerFormat::Static, &["⭐"], &[]))
         .collect();
-    let report = export_pack(&api(&base), OWNER, PACK, "Many", &items, &PackMapping::new())
+    let report = export_pack(&api(&base), OWNER, PACK, "Many", &items, &PackState::default(), None)
         .await
         .unwrap();
     assert!(report.created_pack);
@@ -342,15 +444,23 @@ async fn lost_mapping_rebuilds_the_pack_without_emptying_it() {
     let client = api(&base);
     let a = item("a", "A", StickerFormat::Static, &["🅰️"], &[]);
     let b = item("b", "B", StickerFormat::Static, &["🅱️"], &[]);
-    export_pack(&client, OWNER, PACK, "AB", &[a.clone(), b.clone()], &PackMapping::new())
-        .await
-        .unwrap();
+    export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "AB",
+        &[a.clone(), b.clone()],
+        &PackState::default(),
+        None,
+    )
+    .await
+    .unwrap();
 
     // Same content, no mapping: everything is unknown and rebuilt. The last
     // old sticker (b) is identical to the first item; Telegram's dedup must
     // not lose it.
     for order in [vec![b.clone(), a.clone()], vec![a.clone(), b.clone()]] {
-        let report = export_pack(&client, OWNER, PACK, "AB", &order, &PackMapping::new())
+        let report = export_pack(&client, OWNER, PACK, "AB", &order, &PackState::default(), None)
             .await
             .unwrap();
         assert_eq!(report.mapping.len(), 2);
@@ -361,18 +471,37 @@ async fn lost_mapping_rebuilds_the_pack_without_emptying_it() {
 
     // A pack edited by hand (unknown sticker) is brought back in line.
     state.lock().unwrap().calls.clear();
-    let mapping = export_pack(&client, OWNER, PACK, "AB", &[a.clone(), b.clone()], &PackMapping::new())
-        .await
-        .unwrap()
-        .mapping;
+    let mapping = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "AB",
+        &[a.clone(), b.clone()],
+        &PackState::default(),
+        None,
+    )
+    .await
+    .unwrap()
+    .mapping;
     {
         let mut st = state.lock().unwrap();
         let stray = st.new_sticker(b"stray".to_vec(), "static", vec!["❓".into()], vec![]);
         st.packs.get_mut(PACK).unwrap().stickers.insert(1, stray);
     }
-    let report = export_pack(&client, OWNER, PACK, "AB", &[a.clone(), b.clone()], &mapping)
-        .await
-        .unwrap();
+    let report = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "AB",
+        &[a.clone(), b.clone()],
+        &PackState {
+            mapping: mapping.clone(),
+            thumbnail: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!((report.added, report.removed), (0, 1));
     let st = state.lock().unwrap();
     assert_eq!(st.pack(PACK).stickers.len(), 2);
@@ -387,7 +516,7 @@ async fn export_survives_rate_limits() {
         st.rate_limit.insert("createNewStickerSet".into(), 2);
     }
     let items = vec![item("a", "A", StickerFormat::Static, &["😼"], &[])];
-    let report = export_pack(&api(&base), OWNER, PACK, "Cats", &items, &PackMapping::new())
+    let report = export_pack(&api(&base), OWNER, PACK, "Cats", &items, &PackState::default(), None)
         .await
         .unwrap();
     assert!(report.created_pack);
@@ -403,7 +532,7 @@ async fn invalid_exports_make_no_calls() {
     let too_many: Vec<ExportItem> = (0..121)
         .map(|i| item(&format!("k{i}"), &format!("C{i}"), StickerFormat::Static, &["⭐"], &[]))
         .collect();
-    let err = export_pack(&client, OWNER, PACK, "T", &too_many, &PackMapping::new())
+    let err = export_pack(&client, OWNER, PACK, "T", &too_many, &PackState::default(), None)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("120"), "{err}");
@@ -412,10 +541,12 @@ async fn invalid_exports_make_no_calls() {
         item("a", "A", StickerFormat::Static, &[], &[]),
         item("a", "B", StickerFormat::Static, &[], &[]),
     ];
-    assert!(export_pack(&client, OWNER, PACK, "T", &dup, &PackMapping::new())
-        .await
-        .is_err());
-    assert!(export_pack(&client, OWNER, PACK, "T", &[], &PackMapping::new())
+    assert!(
+        export_pack(&client, OWNER, PACK, "T", &dup, &PackState::default(), None)
+            .await
+            .is_err()
+    );
+    assert!(export_pack(&client, OWNER, PACK, "T", &[], &PackState::default(), None)
         .await
         .is_err());
     assert!(state.lock().unwrap().calls.is_empty());
@@ -427,7 +558,7 @@ async fn identical_content_is_exported_once() {
     let a = item("a", "A", StickerFormat::Static, &["😼"], &[]);
     let mut twin = a.clone();
     twin.key = "twin".into();
-    let report = export_pack(&api(&base), OWNER, PACK, "T", &[a, twin], &PackMapping::new())
+    let report = export_pack(&api(&base), OWNER, PACK, "T", &[a, twin], &PackState::default(), None)
         .await
         .unwrap();
     assert_eq!(report.mapping.keys().collect::<Vec<_>>(), ["a"]);
@@ -444,7 +575,8 @@ async fn export_to_a_pack_of_another_bot_fails_cleanly() {
         "cats_by_other_bot",
         "T",
         &items,
-        &PackMapping::new(),
+        &PackState::default(),
+        None,
     )
     .await
     .unwrap_err();

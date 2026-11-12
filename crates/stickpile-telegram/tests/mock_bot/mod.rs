@@ -39,6 +39,8 @@ pub struct MockPack {
     pub title: String,
     pub owner: i64,
     pub stickers: Vec<MockSticker>,
+    /// Set with setStickerSetThumbnail (None: the first sticker is shown).
+    pub thumbnail: Option<Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -115,6 +117,7 @@ impl MockState {
                 title: title.to_string(),
                 owner,
                 stickers,
+                thumbnail: None,
             },
         );
     }
@@ -164,8 +167,8 @@ impl MockState {
             return bad("invalid sticker format");
         }
         let emoji_list = strings(&v["emoji_list"])?;
-        if emoji_list.is_empty() || emoji_list.len() > 20 {
-            return bad("invalid emoji list");
+        if !emoji_ok(&emoji_list) {
+            return bad("STICKER_EMOJI_INVALID");
         }
         let keywords = if v.get("keywords").is_some() {
             strings(&v["keywords"])?
@@ -222,6 +225,7 @@ impl MockState {
                     title,
                     owner: user,
                     stickers: vec![],
+                    thumbnail: None,
                 };
                 for v in &list {
                     let s = self.input_sticker(v, files)?;
@@ -281,8 +285,8 @@ impl MockState {
             "setStickerEmojiList" => {
                 let (name, i) = self.find(&text(p, "sticker")?)?;
                 let list = strings(&json_param(p, "emoji_list")?)?;
-                if list.is_empty() || list.len() > 20 {
-                    return bad("invalid emoji list");
+                if !emoji_ok(&list) {
+                    return bad("STICKER_EMOJI_INVALID");
                 }
                 self.packs.get_mut(&name).unwrap().stickers[i].emoji_list = list;
                 Ok(json!(true))
@@ -298,6 +302,18 @@ impl MockState {
                     return bad("invalid keywords");
                 }
                 self.packs.get_mut(&name).unwrap().stickers[i].keywords = list;
+                Ok(json!(true))
+            }
+            "setStickerSetThumbnail" => {
+                if text(p, "format")? != "static" {
+                    return bad("only static thumbnails here");
+                }
+                let thumbnail = match files.get("thumbnail") {
+                    Some(b) if valid_thumbnail(b) => Some(b.clone()),
+                    Some(_) => return bad("STICKERSET_THUMBNAIL_INVALID"),
+                    None => None,
+                };
+                self.owned_pack(p)?.thumbnail = thumbnail;
                 Ok(json!(true))
             }
             "setStickerSetTitle" => {
@@ -374,6 +390,22 @@ fn strings(v: &Value) -> MockResult<Vec<String>> {
                 .ok_or((400, "Bad Request: expected strings".into()))
         })
         .collect()
+}
+
+/// Telegram's rule for a static set thumbnail: PNG or WebP, exactly 100×100,
+/// at most 128 KB (the PNG size is read from its IHDR).
+fn valid_thumbnail(bytes: &[u8]) -> bool {
+    if bytes.len() > 128 * 1024 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.len() < 24 {
+        return false;
+    }
+    let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    (w, h) == (100, 100)
+}
+
+/// Telegram refuses words as sticker emoji (STICKER_EMOJI_INVALID).
+fn emoji_ok(list: &[String]) -> bool {
+    !list.is_empty() && list.len() <= 20 && list.iter().all(|e| !e.chars().any(|c| c.is_ascii_alphabetic()))
 }
 
 fn ok(v: Value) -> Response {

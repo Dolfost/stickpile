@@ -285,6 +285,63 @@ async fn export_creates_then_updates_the_pack() {
 }
 
 #[tokio::test]
+async fn the_cover_is_the_pack_thumbnail() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let alice = srv.user("alice").await;
+    srv.patch(&alice, routes::ME, json!({"telegram_user_id": 555}))
+        .await
+        .expect(200);
+    let set = srv.create_set(&alice, "covered", Visibility::Private).await;
+    srv.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b = srv.upload_one(&alice, &set.id, "b.png", png(2)).await;
+    let name = format!("covered_by_{BOT}");
+    let thumbnail = |tg: &Tg| tg.mock.lock().unwrap().packs[&name].thumbnail.clone();
+
+    // No cover: Telegram shows the first sticker, nothing is set.
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["thumbnail"], false);
+    assert_eq!(thumbnail(&tg), None);
+
+    // b as the cover: a 100×100 PNG of it on the next publish, once.
+    let s: Set = srv
+        .patch(
+            &alice,
+            &routes::path(routes::SET, &[&set.id]),
+            json!({"cover_item_id": b.id}),
+        )
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_item_id.as_deref(), Some(b.id.as_str()));
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    let r = j.result.unwrap();
+    assert_eq!(
+        (r["thumbnail"].clone(), r["thumbnail_changed"].clone()),
+        (json!(true), json!(true))
+    );
+    let png = thumbnail(&tg).expect("thumbnail set");
+    let img = image::load_from_memory(&png).unwrap();
+    assert_eq!((img.width(), img.height()), (100, 100));
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], false);
+    assert_eq!(tg.mock.lock().unwrap().count("setStickerSetThumbnail"), 1);
+
+    // Back to the first item: the thumbnail is dropped.
+    srv.patch(
+        &alice,
+        &routes::path(routes::SET, &[&set.id]),
+        json!({"cover_item_id": null}),
+    )
+    .await
+    .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
+    assert_eq!(thumbnail(&tg), None);
+}
+
+#[tokio::test]
 async fn export_validates_pack_names_and_uses_the_default_owner() {
     let tg = setup(|c| c.telegram.default_owner_user_id = Some(777)).await;
     let srv = &tg.srv;

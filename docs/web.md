@@ -26,7 +26,7 @@ more than the API allows.
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
 | `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "Compact view" checkbox, and the item editor grid (see [Set page](#set-page)). |
-| `/sets/{id}/settings` | The set form plus "Delete this set…". Read-only git packs only offer deletion. |
+| `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default), plus "Delete this set…". Read-only git packs only offer deletion. |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
 | `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet, and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
@@ -83,12 +83,14 @@ survives the grid refreshes after reordering and uploads.
 | Download original | always | download link |
 | Rename | you can edit the set | inline edit of the name (also in the compact view) |
 | Edit all fields… | you can edit the set | `/items/{id}?edit=1` |
+| Use as cover / Stop using as cover | you can edit the set | makes the item the set's cover (or goes back to the first item) through `POST /sets/{id}/cover`; the grid comes back in the page's sort with the "Cover" badge on that card |
 | Move up, Move down, Move to top, Move to bottom | you can edit the set, set order, no likes filter | the set's move endpoint; the ends are disabled for the first and last item |
 | Delete… | you can edit the set | asks for confirmation, then removes the card |
 
 The menu is built by app.js from `data-*` attributes the server puts on the
 card only when the action is allowed (`data-edit-url`, `data-delete-url`,
-`data-move-url` with `data-first`/`data-last`), and it uses the same
+`data-move-url` with `data-first`/`data-last`, `data-cover-url` with
+`data-cover` on the current cover), and it uses the same
 endpoints, htmx requests and CSRF header as the buttons. It also opens from
 the keyboard (the context-menu key or Shift+F10 while focus is in a card)
 and from the "⋯" button on each card (for touch screens and keyboards).

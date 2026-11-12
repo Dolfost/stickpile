@@ -71,6 +71,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/sets/{id}/delete", get(sets::delete_page).post(sets::delete_submit))
         .route("/sets/{id}/items/{item}/move", post(sets::move_item))
+        .route("/sets/{id}/cover", post(sets::set_cover))
         .route("/sets/{id}/upload", post(upload::upload_to_set).layer(big()))
         .route("/sets/{id}/import", post(upload::import_into).layer(big()))
         // items

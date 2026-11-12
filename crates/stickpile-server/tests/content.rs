@@ -1508,3 +1508,96 @@ async fn orphan_media_gc_removes_files() {
     assert!(dir.join("original.png").is_file());
     let _ = Method::GET;
 }
+
+#[tokio::test]
+async fn set_cover() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let set = srv.create_set(&alice, "covers", Visibility::Private).await;
+    let a = srv.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b = srv.upload_one(&alice, &set.id, "b.png", png(2)).await;
+    srv.upload_one(&alice, &set.id, "c.png", png(3)).await;
+    let other = srv.create_set(&alice, "other", Visibility::Private).await;
+    let x = srv.upload_one(&alice, &other.id, "x.png", png(4)).await;
+    let set_path = routes::path(routes::SET, &[&set.id]);
+    let shown = |list: &[SetSummary]| list.iter().find(|s| s.id == set.id).unwrap().cover_item_id.clone();
+
+    // No cover chosen: lists show the first item.
+    let d: SetDetail = srv.get(&alice, &set_path).await.expect(200).json();
+    assert_eq!(d.set.cover_item_id, None);
+    let mine: Vec<SetSummary> = srv.get(&alice, routes::SETS).await.expect(200).json();
+    assert_eq!(shown(&mine).as_deref(), Some(a.id.as_str()));
+
+    // Only an item of the set; bob cannot change it.
+    let r = srv
+        .patch(&alice, &set_path, json!({"cover_item_id": x.id}))
+        .await
+        .expect(400);
+    assert!(r.text().contains("item of this set"), "{}", r.text());
+    srv.patch(&bob, &set_path, json!({"cover_item_id": b.id}))
+        .await
+        .expect(404);
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"cover_item_id": b.id}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_item_id.as_deref(), Some(b.id.as_str()));
+    assert_eq!(s.version, d.set.version + 1, "a set.toml change");
+    let mine: Vec<SetSummary> = srv.get(&alice, routes::SETS).await.expect(200).json();
+    assert_eq!(shown(&mine).as_deref(), Some(b.id.as_str()));
+    // Other fields leave it alone.
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"name": "Covers"}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_item_id.as_deref(), Some(b.id.as_str()));
+
+    // set.toml names the cover's file; an import picks the same item.
+    let tar = srv
+        .get(&alice, &routes::path(routes::SET_EXPORT, &[&set.id]))
+        .await
+        .expect(200);
+    let files = untar(&tar.body);
+    let toml = files.iter().find(|f| f.0.ends_with("set.toml")).unwrap();
+    let m = stickpile_setfmt::Manifest::parse(std::str::from_utf8(&toml.1).unwrap()).unwrap();
+    assert_eq!(m.cover.as_deref(), Some("002-b.png"), "{m:?}");
+    let rep: ImportReport = import_tar(&srv, &bob, tar.body.clone(), None).await.expect(200).json();
+    let bob_set = rep.set.unwrap();
+    let bd: SetDetail = srv
+        .get(&bob, &routes::path(routes::SET, &[&bob_set.id]))
+        .await
+        .expect(200)
+        .json();
+    let cover = bd
+        .items
+        .iter()
+        .find(|i| Some(i.id.as_str()) == bob_set.cover_item_id.as_deref());
+    assert_eq!(cover.map(|i| i.name.as_str()), Some("b"));
+
+    // The cover item moved away or deleted: back to the first item.
+    srv.patch(
+        &alice,
+        &routes::path(routes::ITEM, &[&b.id]),
+        json!({"set_id": other.id}),
+    )
+    .await
+    .expect(200);
+    let d: SetDetail = srv.get(&alice, &set_path).await.expect(200).json();
+    assert_eq!(d.set.cover_item_id, None);
+    let mine: Vec<SetSummary> = srv.get(&alice, routes::SETS).await.expect(200).json();
+    assert_eq!(shown(&mine).as_deref(), Some(a.id.as_str()));
+
+    // null clears a chosen cover.
+    srv.patch(&alice, &set_path, json!({"cover_item_id": a.id}))
+        .await
+        .expect(200);
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"cover_item_id": null}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_item_id, None);
+}

@@ -49,6 +49,7 @@ description = "Cats, mostly staring."
 visibility = "unlisted"        # private (default) | unlisted | public
 aspect_ratio = "1:1"           # optional, "W:H"
 recommended_px = 512           # optional, longest side for new items
+cover = "001-cat.png"          # optional, the item that is the set's cover
 
 [items."001-cat.png"]
 name = "cat"
@@ -73,6 +74,7 @@ emojis = ["🙅"]
 | `visibility` | `private` / `unlisted` / `public` | `private` | |
 | `aspect_ratio` | `"W:H"` | none | Recommended aspect ratio for new items. If it does not parse, import warns and ignores it. |
 | `recommended_px` | integer | none | Recommended longest side in pixels. |
+| `cover` | filename | none (the first item) | The item shown for the set in lists and used as the Telegram pack's thumbnail. A name that matches no file is ignored. |
 | `items."<filename>"` | table | | One table per media file, keyed by the bare filename (no path). |
 
 Item keys:

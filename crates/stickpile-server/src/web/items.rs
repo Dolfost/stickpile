@@ -262,24 +262,30 @@ pub(super) fn vibes(state: &AppState) -> Vec<String> {
 /// The `data-*` attributes describe what app.js may offer in the item's
 /// context menu (right click, the context-menu key, or "⋯"): only actions
 /// this viewer can take here. Like and copy reuse the card's own buttons.
-pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>) -> Markup {
+/// `is_cover`: the item is the set's chosen cover (a badge for everyone).
+pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>, is_cover: bool) -> Markup {
     let card = Card::from_item(item);
     let page = item_url(&item.id);
     let move_url = format!("/sets/{}/items/{}/move", item.set_id, item.id);
     let delete_url = format!("/items/{}/delete", item.id);
+    let cover_url = format!("/sets/{}/cover", item.set_id);
     let (first, last) = movable.unwrap_or((false, false));
     html! {
         article.card.editor id=(format!("item-{}", item.id)) data-menu=""
             data-item-url=(page) data-download-url=(file_url(&item.id, Variant::Original))
             data-edit-url=[editable.then(|| format!("{page}?edit=1#edit"))]
             data-delete-url=[editable.then_some(&delete_url)]
-            data-move-url=[movable.map(|_| &move_url)] data-first[first] data-last[last] {
+            data-move-url=[movable.map(|_| &move_url)] data-first[first] data-last[last]
+            data-cover-url=[editable.then_some(&cover_url)] data-cover[is_cover] {
             a.thumb href=(page) {
                 (thumb(&item.id, &item.name, item.media.width, item.media.height))
             }
             div.badges {
                 (kind_badge(item.media.kind, item.media.format))
                 (quality_badge(item.media.quality))
+                @if is_cover {
+                    span.badge.cover-badge title="The set's cover: shown in set lists and on Telegram" { "Cover" }
+                }
             }
             div.card-body {
                 dl.fields {

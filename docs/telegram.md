@@ -161,7 +161,8 @@ A set with no exportable item fails the job.
 
 The job result has `pack_name`, `url` (`https://t.me/addstickers/<name>`),
 `title`, `created_pack`, `added`, `removed`, `updated`, `reordered`,
-`exported` and `skipped` (`[{item_id, name, reason}]`). The pack name and the
+`thumbnail` (the pack has the set's cover as its thumbnail),
+`thumbnail_changed`, `exported` and `skipped` (`[{item_id, name, reason}]`). The pack name and the
 new mapping are stored on the set (`sets.telegram_pack`,
 `sets.telegram_mapping`). Exporting under a different pack name starts that
 pack with an empty mapping.
@@ -184,15 +185,32 @@ server stored after the previous export
 4. `setStickerPositionInSet` fixes positions so the pack order matches the
    set order.
 5. The title is updated if it differs.
+6. The thumbnail follows the set's cover (below).
 
 The pack is never empty along the way. If nothing can be kept (for example
 the mapping was lost), the last old sticker is swapped with
 `replaceStickerInSet` instead of being deleted.
 
+**Thumbnail.** A set with a chosen cover (set settings, or "Use as cover" in
+an item's menu) gets it as the pack's thumbnail with
+`setStickerSetThumbnail`: the cover's grid thumbnail (a still frame for
+animations and videos) scaled to fit 100×100, centred on a transparent
+square of exactly that size, as PNG. The key of what was sent (cover item and
+its media hash) is stored on the set (`sets.telegram_thumbnail`), so the
+thumbnail is uploaded only when the cover changes. Going back to "First
+item" drops the thumbnail stickpile set, and Telegram shows the first sticker
+again. A thumbnail set outside stickpile is left alone while the set has no
+cover. Like everything else, it reaches Telegram on the next publish
+("Update Telegram pack"), not at once.
+
 Items are adapted to what Telegram accepts:
 
-- An item without emoji gets `🙂`, because Telegram requires at least one.
-  At most 20 emoji are sent.
+- Emoji are sent on every publish: with new stickers, and with
+  `setStickerEmojiList` for the ones that stay, so edits reach the pack.
+  Entries that are not emoji (a word typed into the field) are left out,
+  because Telegram would refuse them and fail the export. An item without
+  emoji gets `🙂`, because Telegram requires at least one. At most 20 emoji
+  are sent.
 - At most 20 keywords are sent, with no more than 64 characters in total.
 - Titles are cut to 64 characters.
 - Items with identical media are exported once, because Telegram ignores a

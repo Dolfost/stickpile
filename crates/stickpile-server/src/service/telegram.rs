@@ -22,7 +22,9 @@ use std::collections::HashSet;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use stickpile_api::{Job, JobKind, MediaKind, TelegramExport, TelegramImport, Variant, Visibility};
-use stickpile_telegram::{BotApi, ExportItem, PackMapping, StickerFormat, TelegramError, MAX_PACK_STICKERS};
+use stickpile_telegram::{
+    BotApi, ExportItem, PackMapping, PackState, PackThumbnail, StickerFormat, TelegramError, MAX_PACK_STICKERS,
+};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -242,7 +244,7 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
             None => user.is_admin() && claim_pack(state, &pack.name, &user.id).await? == user.id,
         };
     if bound {
-        bind_pack(state, &row.id, &pack.name, &mapping).await?;
+        bind_pack(state, &row.id, &pack.name, &mapping, None).await?;
     }
     Ok(Some(json!({
         "set_id": row.id,
@@ -293,11 +295,19 @@ async fn claim_pack(state: &AppState, name: &str, user_id: &str) -> Result<Strin
 
 /// Bind set `set_id` to pack `name`. A pack follows exactly one set: another
 /// set bound to it (necessarily the same user's) loses its binding.
-async fn bind_pack(state: &AppState, set_id: &str, name: &str, mapping: &PackMapping) -> Result<(), JobError> {
+/// Bind `set_id` to pack `name` with the sticker `mapping` and `thumbnail`,
+/// the key of the thumbnail stickpile set on the pack (None: none).
+async fn bind_pack(
+    state: &AppState,
+    set_id: &str,
+    name: &str,
+    mapping: &PackMapping,
+    thumbnail: Option<&str>,
+) -> Result<(), JobError> {
     let mapping = serde_json::to_string(mapping).map_err(retry)?;
     let mut tx = state.db.begin().await.map_err(retry)?;
     sqlx::query(
-        "UPDATE sets SET telegram_pack = NULL, telegram_mapping = NULL \
+        "UPDATE sets SET telegram_pack = NULL, telegram_mapping = NULL, telegram_thumbnail = NULL \
          WHERE telegram_pack = ? COLLATE NOCASE AND id <> ?",
     )
     .bind(name)
@@ -305,9 +315,10 @@ async fn bind_pack(state: &AppState, set_id: &str, name: &str, mapping: &PackMap
     .execute(&mut *tx)
     .await
     .map_err(retry)?;
-    sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ? WHERE id = ?")
+    sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ?, telegram_thumbnail = ? WHERE id = ?")
         .bind(name)
         .bind(mapping)
+        .bind(thumbnail)
         .bind(set_id)
         .execute(&mut *tx)
         .await
@@ -384,6 +395,51 @@ fn find_variant(rows: Option<&Vec<VariantRow>>, want: Variant) -> Option<Variant
     rows?.iter().find(|v| v.variant() == Some(want)).cloned()
 }
 
+/// The pack thumbnail for the set's chosen cover (None: no cover, Telegram
+/// shows the first sticker): the cover's grid thumbnail, which every kind of
+/// item has (a still frame for animations and videos), made 100×100.
+async fn cover_thumbnail(
+    state: &AppState,
+    set_id: &str,
+    rows: &[hydrate::ItemFull],
+    variants: &mut std::collections::HashMap<String, Vec<VariantRow>>,
+) -> Result<Option<PackThumbnail>, JobError> {
+    let Some(cover) = sets::chosen_cover(&state.db, set_id).await? else {
+        return Ok(None);
+    };
+    let Some(r) = rows.iter().find(|r| r.id == cover) else {
+        return Ok(None);
+    };
+    let mut thumb = find_variant(variants.get(&r.media_id), Variant::Thumb);
+    if thumb.is_none() {
+        jobs::media::generate_variants(state, &r.media_id)
+            .await
+            .map_err(|e| JobError::Fatal(format!("rendering the cover: {e}")))?;
+        let fresh = hydrate::variant_rows(&state.db, std::slice::from_ref(&r.media_id)).await?;
+        variants.extend(fresh);
+        thumb = find_variant(variants.get(&r.media_id), Variant::Thumb);
+    }
+    let Some(v) = thumb else {
+        return Err(JobError::Fatal(
+            "the cover has no thumbnail to make the pack's from".into(),
+        ));
+    };
+    let abs = files::resolve(&state.media_dir(), &v.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
+    let bytes = files::read(abs).await?;
+    let limits = state.media_limits();
+    let png = tokio::task::spawn_blocking(move || {
+        let frame = stickpile_media::decode_frame(&bytes, &limits)?;
+        stickpile_media::pack_thumbnail(&frame)
+    })
+    .await
+    .map_err(retry)?
+    .map_err(|e| JobError::Fatal(format!("rendering the cover: {e}")))?;
+    Ok(Some(PackThumbnail {
+        key: format!("{}:{}", r.id, r.sha256),
+        png,
+    }))
+}
+
 /// `TelegramExport` job.
 pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
     let p = job.payload();
@@ -426,17 +482,19 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
         .map(str::to_string)
         .unwrap_or_else(|| set.name.clone());
 
-    let (bound, mapping): (Option<String>, Option<String>) =
-        sqlx::query_as("SELECT telegram_pack, telegram_mapping FROM sets WHERE id = ?")
+    let (bound, mapping, thumbnail_key): (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT telegram_pack, telegram_mapping, telegram_thumbnail FROM sets WHERE id = ?")
             .bind(&set.id)
             .fetch_one(&state.db)
             .await
             .map_err(retry)?;
-    // The stored mapping belongs to the bound pack only.
-    let previous: PackMapping = match (bound.as_deref() == Some(name.as_str()), mapping) {
+    // The stored mapping and thumbnail belong to the bound pack only.
+    let same_pack = bound.as_deref() == Some(name.as_str());
+    let previous: PackMapping = match (same_pack, mapping) {
         (true, Some(m)) => serde_json::from_str(&m).unwrap_or_default(),
         _ => PackMapping::new(),
     };
+    let previous_thumbnail = thumbnail_key.filter(|_| same_pack);
 
     let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
     let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
@@ -491,10 +549,15 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
             items.len()
         )));
     }
-    let report = stickpile_telegram::export_pack(&api, owner, &name, &title, &items, &previous)
+    let thumbnail = cover_thumbnail(state, &set.id, &rows, &mut variants).await?;
+    let previous = PackState {
+        mapping: previous,
+        thumbnail: previous_thumbnail,
+    };
+    let report = stickpile_telegram::export_pack(&api, owner, &name, &title, &items, &previous, thumbnail.as_ref())
         .await
         .map_err(tg_error)?;
-    bind_pack(state, &set.id, &name, &report.mapping).await?;
+    bind_pack(state, &set.id, &name, &report.mapping, report.thumbnail.as_deref()).await?;
     Ok(Some(json!({
         "set_id": set.id,
         "pack_name": name,
@@ -505,6 +568,8 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
         "removed": report.removed,
         "updated": report.updated,
         "reordered": report.reordered,
+        "thumbnail": report.thumbnail.is_some(),
+        "thumbnail_changed": report.thumbnail_changed,
         "exported": items.len(),
         "skipped": skipped,
     })))

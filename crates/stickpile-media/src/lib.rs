@@ -196,6 +196,15 @@ pub fn generate_variants(
     variants::generate(original, probe, opts, tools)
 }
 
+pub use variants::PACK_THUMBNAIL_PX;
+
+/// A Telegram sticker set thumbnail from a decoded still (e.g. the cover
+/// item's grid thumbnail through [`decode_frame`]): exactly
+/// [`PACK_THUMBNAIL_PX`] square, transparent padding, PNG.
+pub fn pack_thumbnail(frame: &image::RgbaImage) -> Result<Vec<u8>, MediaError> {
+    variants::pack_thumbnail(frame)
+}
+
 /// Decode a still (or first frame) for re-processing (e.g. Telegram import of
 /// a WebP sticker). Enforces `limits` (`max_bytes`, `max_pixels`; the
 /// dimensions are read from the header before decoding). JPEG EXIF

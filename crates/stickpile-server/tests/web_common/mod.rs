@@ -97,6 +97,20 @@ impl Browser {
         read(rb.send().await.unwrap()).await
     }
 
+    /// [`Self::post_htmx`] from the page at `current` (`HX-Current-URL`).
+    pub async fn post_htmx_from(&self, path: &str, fields: &[(&str, &str)], current: &str) -> Resp {
+        let mut rb = self
+            .client
+            .post(self.url(path))
+            .header("HX-Request", "true")
+            .header("HX-Current-URL", self.url(current))
+            .form(fields);
+        if let Some(t) = &self.csrf {
+            rb = rb.header("X-CSRF-Token", t);
+        }
+        read(rb.send().await.unwrap()).await
+    }
+
     /// Multipart POST like a plain form: the CSRF token is the first field
     /// when `with_token`.
     pub async fn post_multipart(&self, path: &str, files: Vec<(&str, &str, Vec<u8>)>, with_token: bool) -> Resp {
