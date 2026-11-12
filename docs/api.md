@@ -359,10 +359,71 @@ default 20, max 100):
   before. An item trends when `c7 > c28 / 4`; ordered by
   `(c7 + 2) / (c28 / 4 + 2)`; `value` = `c7`.
 
+### Problems
+
+What is wrong, or worth a look, in a set: duplicates, Telegram blockers,
+broken media, loose metadata. Each kind is described in
+[web.md](web.md#problems). The report is computed on every request (only
+the thumbnails' pixel signatures are cached).
+
+| Method and path | Body -> response | Notes |
+|---|---|---|
+| `GET /api/v1/sets/{id}/problems?severity=&kind=&dismissed=` | -> `SetProblems` | The set's owner; admins read-only for any set. Other users: 403 on a set they can read, 404 otherwise. |
+| `GET /api/v1/problems?scope=&severity=&kind=&dismissed=` | -> `ProblemReport` | `scope=mine` (default): every set the caller owns. `scope=server`: every set on the server, admins only (403 for others). |
+| `PUT /api/v1/sets/{id}/problems/{problem}/dismissal` | -> 204 | Mark as "not a problem". Owner only (read-only git packs included); 403 / 404 as for edits. The id must be a current problem of the set (404 `not_found` otherwise: it changed or was fixed). Idempotent. |
+| `DELETE /api/v1/sets/{id}/problems/{problem}/dismissal` | -> 204 | Show it again. Owner only; idempotent. |
+
+Filters (they never change the counts):
+
+- `severity`: the least severe to list. `error` lists errors only,
+  `warning` errors and warnings, `info` (default) everything. Anything else
+  is 400.
+- `kind`: one `ProblemKind` (`exact_duplicate`, `near_duplicate`, `similar`,
+  `in_other_set`, `missing_files`, `processing_failed`, `git_failed`,
+  `telegram_failed`, `telegram_too_many`, `telegram_unsupported`,
+  `telegram_outdated`, `no_emoji`, `not_emoji`, `telegram_trimmed`,
+  `low_resolution`, `ai_unreviewed`, `empty_set`); unknown kinds are 400.
+  New kinds may be added; show unknown ones by their `message`.
+- `dismissed=true`: list dismissed problems too (`dismissed: true` on them).
+
+A `Problem` has an `id` (`<kind>-<16 hex>`), `kind`, `severity` (`error`,
+`warning`, `info`), a short `message` (never item names), the `set_id`, the
+affected `items` (`ProblemItem`: id, name, media kind, size, a per-item
+`detail` such as `"64×64 px"` or the entries that are not emoji), an
+optional suggested `action` (`delete_one`, `compare`, `open_item`,
+`edit_emojis`, `review_ai`, `find_better`, `publish_telegram`, `split_set`,
+`pull_git`, `add_items`), a `score` (`near_duplicate`: Hamming distance of
+the pHashes; `similar`: cosine similarity) and `dismissed`. Problems come
+worst first: by severity, then kind, then the position of the first item.
+
+`SetProblems` wraps one set: its `SetSummary`, `owner_id`, the filtered
+`problems`, `counts` (`error`, `warning`, `info` of the open problems,
+`dismissed` separately, all regardless of the filters), `can_dismiss` (the
+caller owns the set) and `can_edit` (owner, not a read-only git pack).
+`ProblemReport` lists the `sets` that have problems left after the filters
+(sets with errors first), total `counts`, `sets_checked`,
+`similar_available` (AI embeddings are loaded) and `generated_at`.
+
+**Ids and dismissals.** A problem's id hashes its kind and what makes it a
+problem: the items and their files, plus the emojis, the job, the set
+version, ... depending on the kind. It stays the same while nothing
+relevant changes, so a dismissal (stored per set, `problem_dismissals`)
+survives restarts and stops applying when the items change: the changed
+problem has a new id. A set keeps at most 500 dismissals.
+
+**Admins.** Admins see every set in `scope=server` and through the per-set
+endpoint, with the owner. For other users' private sets the items are
+`hidden: true` with an empty `name`, no `detail`, the set has an empty
+`description` and no `cover_item_id`, and the admin still cannot read the
+set or its files. `can_dismiss` and `can_edit` are false on other users'
+sets.
+
 ### Admin
 
 All admin routes need the `admin` role: anonymous callers get 401, other users
-403. Admins have no implicit access to other users' content.
+403. Admins have no implicit access to other users' content (the server-wide
+problems report shows set names and problems, not items of private sets;
+see [Problems](#problems)).
 
 | Method and path | Body -> response | Notes |
 |---|---|---|

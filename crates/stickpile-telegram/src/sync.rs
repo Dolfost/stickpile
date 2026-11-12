@@ -384,8 +384,9 @@ async fn sync_thumbnail(
 /// Can `s` be a sticker's emoji? Telegram refuses anything else and the
 /// whole export would fail, so words typed into the emoji field are left
 /// out: no letters (except enclosed ones like 🅰️ Ⓜ️), whitespace or
-/// controls, not plain ASCII, and digits only in keycaps (1️⃣).
-fn is_emoji(s: &str) -> bool {
+/// controls, not plain ASCII, and digits only in keycaps (1️⃣). The
+/// server's problems report uses it to point out entries an export drops.
+pub fn is_emoji(s: &str) -> bool {
     let enclosed = |c: char| matches!(c, '\u{2460}'..='\u{24FF}' | '\u{1F100}'..='\u{1F1FF}');
     !s.is_ascii()
         && !s

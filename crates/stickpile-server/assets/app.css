@@ -926,3 +926,75 @@ button.emoji-btn:focus-visible { outline: 2px solid var(--focus); outline-offset
   .emoji-tabs [role=tab][aria-selected="true"] { border-bottom-color: Highlight; }
   .emoji-option[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+/* ---- problems (begin) -------------------------------------------------- */
+
+/* The set page's "Problems" section and the Problems tab (web/problems.rs):
+   one card per problem with a coloured edge by severity; duplicate pairs
+   show both thumbnails side by side. */
+.problems-section { margin-top: 2.5rem; border-top: 1px solid var(--border); }
+.problems-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; }
+.problems-summary p { margin: 0.25rem 0; }
+.problems-none { color: var(--success); font-weight: 600; }
+.problem-counts .count { font-weight: 600; }
+.problem-counts .sev-error { color: var(--danger); }
+.problem-counts .sev-warning { color: var(--warn); }
+.problem-counts .sev-info { color: var(--accent); }
+.problem-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); align-items: start;
+  gap: 0.75rem; margin: 0.75rem 0;
+}
+.problem {
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border);
+  border-radius: var(--radius); padding: 0.55rem 0.9rem 0.7rem; box-shadow: var(--shadow); min-width: 0;
+}
+.problem.sev-error { border-left-color: var(--danger); }
+.problem.sev-warning { border-left-color: var(--warn); }
+.problem.sev-info { border-left-color: var(--accent); }
+.problem.dismissed { box-shadow: none; background: var(--bg); }
+.problem.dismissed .problem-msg, .problem.dismissed .problem-head strong { color: var(--text-2); }
+.problem-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; }
+.badge.sev-error { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.badge.sev-warning { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.badge.sev-info { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.problem-msg { margin: 0.3rem 0 0.45rem; max-width: 60rem; overflow-wrap: anywhere; }
+.problem .hint { margin: 0.2rem 0 0.4rem; }
+.problem-pair { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0.4rem 0; }
+.problem-pick { margin: 0; display: flex; flex-direction: column; gap: 0.35rem; width: 10rem; max-width: calc(50% - 0.375rem); }
+.problem-pick figcaption { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; font-size: 0.85rem; min-width: 0; }
+.problem-pick .name { overflow-wrap: anywhere; }
+.problem-pick .button { margin-top: 0.2rem; }
+.problem-thumb {
+  display: flex; align-items: center; justify-content: center; aspect-ratio: 1; width: 100%; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--checker);
+}
+.problem-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.problem-thumb.hidden-item { background: var(--surface-2); color: var(--muted); font-size: 0.7rem; }
+.problem-items {
+  list-style: none; margin: 0.4rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem;
+  max-height: 21rem; overflow-y: auto; overscroll-behavior: contain;
+}
+.problem-items li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; font-size: 0.9rem; min-width: 0; }
+.problem-items .problem-thumb { flex: none; width: 2.5rem; height: 2.5rem; border-radius: 6px; }
+.problem-items .name { overflow-wrap: anywhere; }
+.problem-items .detail, .problem-pick .detail { color: var(--text-2); overflow-wrap: anywhere; }
+.problem-items a.small, .problem-items .small { font-size: 0.85rem; }
+.problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.35rem; }
+.problem-actions .hint { margin: 0; }
+/* The Problems tab: filters, then one group per set. */
+.filters.problem-filters { margin: 0.25rem 0 0.75rem; justify-content: flex-start; }
+.problem-filters .filter-field { display: inline-flex; align-items: center; gap: 0.45rem; max-width: 100%; }
+.problem-filters select { max-width: 100%; min-width: 0; }
+.problems-total { margin: 0.5rem 0; }
+.problem-set { margin: 1.75rem 0; }
+.problem-set-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.75rem; }
+.problem-set-head h2 { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 40rem) {
+  .problem { padding: 0.5rem 0.65rem 0.6rem; }
+  .problem-pick { width: calc(50% - 0.375rem); }
+}
+@media (forced-colors: active) {
+  .problem { border-left: 4px solid CanvasText; }
+}
+
+/* ---- problems (end) ---------------------------------------------------- */

@@ -22,7 +22,7 @@ const MP4_MAX_SIDE: u32 = 1920;
 const MP4_MAX_FPS: u32 = 50;
 const TG_MAX_FPS: u32 = 30;
 /// Videos longer than this get no Discord GIF / Telegram video sticker.
-const SHORT_VIDEO_MS: u64 = 10_000;
+pub const SHORT_VIDEO_MS: u64 = 10_000;
 /// Discord GIF attempts: (longest side, fps cap), tried in order until one fits.
 const GIF_LADDER: [(u32, u32); 6] = [(640, 30), (480, 25), (400, 20), (320, 15), (240, 12), (160, 10)];
 /// Bitrate search attempts for the Telegram video sticker.

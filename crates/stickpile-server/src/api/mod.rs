@@ -9,6 +9,7 @@ pub mod integrations;
 pub mod items;
 pub mod misc;
 pub mod openapi;
+pub mod problems;
 pub mod sets;
 
 use axum::body::Body;
@@ -55,6 +56,13 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
         .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))
         .route(r::TELEGRAM_IMPORT, post(integrations::telegram_import))
+        // problems
+        .route(r::SET_PROBLEMS, get(problems::for_set))
+        .route(
+            r::SET_PROBLEM_DISMISSAL,
+            put(problems::dismiss).delete(problems::undismiss),
+        )
+        .route(r::PROBLEMS, get(problems::report))
         // items
         .route(r::ITEMS, get(items::sync))
         .route(r::ITEM, get(items::get).patch(items::update).delete(items::delete))

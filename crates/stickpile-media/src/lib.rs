@@ -21,6 +21,7 @@ pub use stickpile_api::{MediaFormat, MediaKind, QualityComponent, QualityReport,
 
 pub mod hash;
 pub mod quality;
+pub mod signature;
 
 mod grey;
 mod jpeg;
@@ -196,7 +197,7 @@ pub fn generate_variants(
     variants::generate(original, probe, opts, tools)
 }
 
-pub use variants::PACK_THUMBNAIL_PX;
+pub use variants::{PACK_THUMBNAIL_PX, SHORT_VIDEO_MS};
 
 /// A Telegram sticker set thumbnail from a decoded still (e.g. the cover
 /// item's grid thumbnail through [`decode_frame`]): exactly

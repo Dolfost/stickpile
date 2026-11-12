@@ -1049,6 +1049,251 @@ pub struct StorageUsage {
 }
 
 // ---------------------------------------------------------------------------
+// Problems (docs/api.md, "Problems")
+// ---------------------------------------------------------------------------
+
+/// How much a [`Problem`] matters. Ordered: `Error` < `Warning` < `Info`, so
+/// sorting puts the worst first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemSeverity {
+    /// Something is broken or will fail (a Telegram publish, missing files).
+    Error,
+    /// Probably a mistake worth fixing (duplicates, items Telegram skips).
+    Warning,
+    /// Not wrong, worth a look (AI hints, unreviewed AI fields).
+    Info,
+}
+
+impl ProblemSeverity {
+    pub const ALL: [ProblemSeverity; 3] = [ProblemSeverity::Error, ProblemSeverity::Warning, ProblemSeverity::Info];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProblemSeverity::Error => "error",
+            ProblemSeverity::Warning => "warning",
+            ProblemSeverity::Info => "info",
+        }
+    }
+    pub fn parse(s: &str) -> Option<ProblemSeverity> {
+        ProblemSeverity::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+}
+
+/// What a [`Problem`] is about. New kinds may be added; clients should show
+/// unknown kinds by their `message`. Declared (and sorted) most important
+/// first: lists order problems by severity, then by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemKind {
+    /// Two or more items of the set store the same file (same sanitised original).
+    ExactDuplicate,
+    /// Two items show the same picture: resized, recompressed or slightly cropped.
+    NearDuplicate,
+    /// Media files of an item are missing (no original or thumbnail).
+    MissingFiles,
+    /// Generating an item's variants failed or never finished.
+    ProcessingFailed,
+    /// The last git pull (or push) failed.
+    GitFailed,
+    /// The last publish to Telegram failed.
+    TelegramFailed,
+    /// More stickers than a Telegram pack holds.
+    TelegramTooMany,
+    /// Items the Telegram export skips (cannot become a sticker).
+    TelegramUnsupported,
+    /// The set changed after its last publish to Telegram.
+    TelegramOutdated,
+    /// Items without an emoji in a set published to Telegram (they get 🙂).
+    NoEmoji,
+    /// Emoji entries that are not emoji (Telegram drops them).
+    NotEmoji,
+    /// Animations and videos longer than a video sticker: only the start is sent.
+    TelegramTrimmed,
+    /// Items with a very small picture.
+    LowResolution,
+    /// Two items look alike to the AI (CLIP). A hint, often intentional.
+    Similar,
+    /// Items that are also in other sets of the same owner.
+    InOtherSet,
+    /// Items with AI-filled keywords, emojis, vibe or name nobody confirmed.
+    AiUnreviewed,
+    /// The set has no items.
+    EmptySet,
+}
+
+impl ProblemKind {
+    pub const ALL: [ProblemKind; 17] = [
+        ProblemKind::ExactDuplicate,
+        ProblemKind::NearDuplicate,
+        ProblemKind::MissingFiles,
+        ProblemKind::ProcessingFailed,
+        ProblemKind::GitFailed,
+        ProblemKind::TelegramFailed,
+        ProblemKind::TelegramTooMany,
+        ProblemKind::TelegramUnsupported,
+        ProblemKind::TelegramOutdated,
+        ProblemKind::NoEmoji,
+        ProblemKind::NotEmoji,
+        ProblemKind::TelegramTrimmed,
+        ProblemKind::LowResolution,
+        ProblemKind::Similar,
+        ProblemKind::InOtherSet,
+        ProblemKind::AiUnreviewed,
+        ProblemKind::EmptySet,
+    ];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProblemKind::ExactDuplicate => "exact_duplicate",
+            ProblemKind::NearDuplicate => "near_duplicate",
+            ProblemKind::Similar => "similar",
+            ProblemKind::InOtherSet => "in_other_set",
+            ProblemKind::MissingFiles => "missing_files",
+            ProblemKind::ProcessingFailed => "processing_failed",
+            ProblemKind::LowResolution => "low_resolution",
+            ProblemKind::AiUnreviewed => "ai_unreviewed",
+            ProblemKind::NotEmoji => "not_emoji",
+            ProblemKind::NoEmoji => "no_emoji",
+            ProblemKind::TelegramTooMany => "telegram_too_many",
+            ProblemKind::TelegramUnsupported => "telegram_unsupported",
+            ProblemKind::TelegramTrimmed => "telegram_trimmed",
+            ProblemKind::TelegramOutdated => "telegram_outdated",
+            ProblemKind::TelegramFailed => "telegram_failed",
+            ProblemKind::GitFailed => "git_failed",
+            ProblemKind::EmptySet => "empty_set",
+        }
+    }
+    pub fn parse(s: &str) -> Option<ProblemKind> {
+        ProblemKind::ALL.into_iter().find(|k| k.as_str() == s)
+    }
+}
+
+/// The fix a client should offer for a [`Problem`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemAction {
+    /// Look at the items side by side and delete the ones not wanted.
+    DeleteOne,
+    /// Look at the items side by side (nothing may need to change).
+    Compare,
+    /// Open the item(s).
+    OpenItem,
+    /// Edit the items' emojis.
+    EditEmojis,
+    /// Confirm or edit the AI-filled fields on the item pages.
+    ReviewAi,
+    /// Look for a better copy of the picture (`GET /items/{id}/better`).
+    FindBetter,
+    /// Publish the set to Telegram (again).
+    PublishTelegram,
+    /// Move items into another set.
+    SplitSet,
+    /// Pull the git pack again.
+    PullGit,
+    /// Upload items.
+    AddItems,
+}
+
+/// An item a [`Problem`] is about.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProblemItem {
+    pub item_id: String,
+    /// Empty when `hidden`.
+    pub name: String,
+    pub kind: MediaKind,
+    pub width: u32,
+    pub height: u32,
+    /// What is wrong with this item in particular, e.g. `"64×64 px"` or the
+    /// entries that are not emoji. `None` when `hidden`.
+    pub detail: Option<String>,
+    /// The caller cannot read the item (an admin looking at another user's
+    /// private set): name, detail and files are withheld.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+/// One problem of a set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Problem {
+    /// `<kind>-<16 hex>`: the kind plus a hash of what makes it a problem
+    /// (the affected items and their media, emojis, ...). Stable while
+    /// nothing relevant changes; dismissals are keyed by it.
+    pub id: String,
+    pub kind: ProblemKind,
+    pub severity: ProblemSeverity,
+    /// Short human-readable description (never contains item names).
+    pub message: String,
+    pub set_id: String,
+    /// Affected items in set order (pairs: the earlier item first).
+    pub items: Vec<ProblemItem>,
+    pub action: Option<ProblemAction>,
+    /// Kind-specific measure: Hamming distance of the perceptual hashes for
+    /// `near_duplicate`, cosine similarity for `similar`.
+    pub score: Option<f32>,
+    /// Marked as "not a problem" by the set's owner.
+    pub dismissed: bool,
+}
+
+/// Problems by severity. `dismissed` counts the dismissed ones separately
+/// (they are not in the other numbers).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProblemCounts {
+    pub error: u32,
+    pub warning: u32,
+    pub info: u32,
+    pub dismissed: u32,
+}
+
+impl ProblemCounts {
+    /// Problems that are not dismissed.
+    pub fn open(&self) -> u32 {
+        self.error + self.warning + self.info
+    }
+}
+
+/// The problems of one set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetProblems {
+    /// For other users' private sets (admins, server scope) the description
+    /// is empty and there is no cover.
+    pub set: SetSummary,
+    pub owner_id: String,
+    /// Worst first; filtered by the request (`severity`, `kind`, `dismissed`).
+    pub problems: Vec<Problem>,
+    /// Of every problem of the set, regardless of the filters.
+    pub counts: ProblemCounts,
+    /// The caller may dismiss problems of this set (its owner).
+    pub can_dismiss: bool,
+    /// The caller may change the set's items (its owner, unless the set is a
+    /// read-only git pack): clients offer deleting duplicates, editing emojis.
+    #[serde(default)]
+    pub can_edit: bool,
+}
+
+/// `GET /api/v1/problems`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProblemReport {
+    /// `mine` or `server`.
+    pub scope: String,
+    /// Sets with at least one problem left after the filters, worst first.
+    pub sets: Vec<SetProblems>,
+    /// Totals over every set in scope, regardless of the filters.
+    pub counts: ProblemCounts,
+    /// How many sets were checked.
+    pub sets_checked: u32,
+    /// AI embeddings were available, so `similar` hints could be made.
+    pub similar_available: bool,
+    pub generated_at: i64,
+}
+
+// ---------------------------------------------------------------------------
 
 /// serde helper: distinguishes "absent" (None) from "null" (Some(None)).
 pub mod double_option {
@@ -1087,6 +1332,19 @@ mod tests {
             let json = serde_json::to_string(&v).unwrap();
             assert_eq!(json, format!("\"{}\"", v.as_str()));
         }
+    }
+
+    #[test]
+    fn problem_names_round_trip() {
+        for k in ProblemKind::ALL {
+            assert_eq!(ProblemKind::parse(k.as_str()), Some(k));
+            assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{}\"", k.as_str()));
+        }
+        for s in ProblemSeverity::ALL {
+            assert_eq!(ProblemSeverity::parse(s.as_str()), Some(s));
+            assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{}\"", s.as_str()));
+        }
+        assert!(ProblemSeverity::Error < ProblemSeverity::Info);
     }
 
     #[test]

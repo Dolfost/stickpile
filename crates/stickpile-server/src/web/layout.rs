@@ -23,6 +23,7 @@ pub enum Nav {
     Search,
     Popular,
     Stats,
+    Problems,
     Settings,
     Admin,
     None,
@@ -109,6 +110,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                                 (nav_link("/search", "Search", Nav::Search, active))
                                 (nav_link("/popular", "Popular", Nav::Popular, active))
                                 (nav_link("/stats", "Stats", Nav::Stats, active))
+                                (nav_link("/problems", "Problems", Nav::Problems, active))
                                 (nav_link("/settings", "Settings", Nav::Settings, active))
                                 @if u.is_admin() {
                                     (nav_link("/admin", "Admin", Nav::Admin, active))

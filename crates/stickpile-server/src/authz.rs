@@ -8,7 +8,9 @@
 //! | edit                           | yes unless read-only git pack | no | no (403) | no (403)   |
 //! | like, report usage             | yes     | no (404)        | yes              | yes            |
 //!
-//! Admins get no implicit content access, only the admin API. Content the
+//! Admins get no implicit content access, only the admin API and the
+//! server-wide problems report (`service::problems`: set names and
+//! problems, never items of others' private sets). Content the
 //! caller cannot read is reported as 404, never 403, so ids cannot be probed.
 
 use stickpile_api::Visibility;

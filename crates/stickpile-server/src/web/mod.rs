@@ -30,6 +30,7 @@ mod integrations;
 mod items;
 mod layout;
 mod popular;
+mod problems;
 mod search;
 mod sets;
 mod settings;
@@ -76,6 +77,12 @@ pub fn routes() -> Router<AppState> {
         .route("/sets/{id}/cover/image/delete", post(sets::cover_image_remove))
         .route("/sets/{id}/upload", post(upload::upload_to_set).layer(big()))
         .route("/sets/{id}/import", post(upload::import_into).layer(big()))
+        // problems
+        .route("/problems", get(problems::tab))
+        .route("/sets/{id}/problems", get(problems::set_page))
+        .route("/sets/{id}/problems/{problem}/dismiss", post(problems::dismiss))
+        .route("/sets/{id}/problems/{problem}/restore", post(problems::restore))
+        .route("/sets/{id}/problems/remove/{item}", post(problems::remove_item))
         // items
         .route("/items/{id}", get(items::page).post(items::update_all))
         .route(

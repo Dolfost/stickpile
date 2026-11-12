@@ -70,6 +70,16 @@ pub const SET_TELEGRAM_EXPORT: &str = "/api/v1/sets/{id}/telegram/export";
 /// POST [`crate::model::TelegramImport`] -> [`crate::model::Job`]
 pub const TELEGRAM_IMPORT: &str = "/api/v1/telegram/import";
 
+// --- problems ------------------------------------------------------------------
+/// GET `?severity=error|warning|info&kind=<ProblemKind>&dismissed=true` ->
+/// [`crate::model::SetProblems`]. The set's owner (and admins, read-only).
+pub const SET_PROBLEMS: &str = "/api/v1/sets/{id}/problems";
+/// PUT: mark the problem as "not a problem" (204); DELETE: undo (204). Owner only.
+pub const SET_PROBLEM_DISMISSAL: &str = "/api/v1/sets/{id}/problems/{problem}/dismissal";
+/// GET `?scope=mine|server&severity=&kind=&dismissed=` -> [`crate::model::ProblemReport`].
+/// `server` (every set) is for admins only.
+pub const PROBLEMS: &str = "/api/v1/problems";
+
 // --- items -----------------------------------------------------------------------
 /// GET `?updated_since=<unix>&cursor=<opaque>&limit=<n>` -> [`crate::model::ItemPage`].
 /// Every item the caller may see in search (own + public; not unlisted), for client caches.

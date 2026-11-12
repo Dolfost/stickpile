@@ -11,6 +11,7 @@ pub mod cover;
 pub mod gitpack;
 pub mod hydrate;
 pub mod items;
+pub mod problems;
 pub mod search;
 pub mod sets;
 pub mod stats;

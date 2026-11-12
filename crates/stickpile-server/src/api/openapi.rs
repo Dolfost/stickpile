@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use super::{admin, ai, auth, integrations, items, misc, sets};
+use super::{admin, ai, auth, integrations, items, misc, problems, sets};
 
 struct SecuritySchemes;
 
@@ -76,6 +76,10 @@ impl Modify for SecuritySchemes {
         integrations::git_webhook,
         integrations::telegram_export,
         integrations::telegram_import,
+        problems::for_set,
+        problems::report,
+        problems::dismiss,
+        problems::undismiss,
         items::sync,
         items::get,
         items::update,
@@ -114,6 +118,7 @@ impl Modify for SecuritySchemes {
         (name = "stats", description = "Usage events, popular items, statistics"),
         (name = "admin", description = "Administration (role admin)"),
         (name = "integrations", description = "Git packs and Telegram import/export (background jobs)"),
+        (name = "problems", description = "Problems report: duplicates, Telegram blockers, media and metadata issues"),
         (name = "misc", description = "Health, profiles, jobs, this document"),
     )
 )]

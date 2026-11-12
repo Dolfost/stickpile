@@ -33,6 +33,7 @@ more than the API allows.
 | `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet, and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
 | `/popular` | Most copied, most liked and trending side by side, never blended. Scope: whole server, your items, or one set (`?scope=set&set=…`, linked from the set page). The window (day, week, month, all) applies to "most copied". |
 | `/stats` | Your totals, a bar chart of copies per day for 30 days (inline SVG with a hover title per bar and a screen-reader table), your most copied items and the apps you paste into. |
+| `/problems` | Problems in all your sets, grouped by set, with filters by severity and kind; admins also get "Whole server". The set page has the same list for one set at its bottom (`/sets/{id}/problems` without JavaScript). See [Problems](#problems). |
 | `/settings` | Username (shown as the owner of your sets and matched by `by:`; renaming keeps you signed in), display name and Telegram user id, the theme (System, Light, Dark), password change (current password required if you have one, except when you are signed in through the tailnet; at least `auth.min_password_length` characters), two-step verification setup (QR code and key, confirm with a code) and disabling, API tokens (create, the secret is shown once, revoke). |
 | `/admin` | Admins only. See [Admin panel](#admin-panel). |
 | `/jobs/{id}` | Status of a background job (yours, or any job for admins). |
@@ -520,6 +521,97 @@ polls itself every 2 seconds with htmx (`hx-trigger="every 2s"`) until the job
 is done or failed, then links to the result. Without JavaScript the job page
 refreshes itself while the job runs.
 
+<!-- ---- problems (begin) ---- -->
+
+## Problems
+
+What is wrong, or worth a look, in a set: duplicates, things that keep it
+from working on Telegram, broken media and loose metadata. The same report
+is in the API ([api.md](api.md#problems)); code in
+`src/service/problems.rs` (loading and permissions),
+`src/service/problems/detect.rs` (the checks) and `src/web/problems.rs`.
+
+**On the set page.** Owners find a "Problems" section at the bottom of
+their sets (others never see it). The page itself does not wait for it: the
+list is fetched with htmx right after the page has loaded, and again a
+moment after anything in the item grid or the upload form changed, so
+fixing an emoji in place or deleting a copy updates it. First a count
+("2 warnings · 5 info", or "No problems found"), then one card per problem,
+errors first. Without JavaScript the section links to
+`/sets/{id}/problems`, the same list as a page.
+
+**The Problems tab** (`/problems`, "Problems" in the top bar) lists the
+problems of every set you own, grouped by set, sets with errors first.
+Filters: "Show" (everything, errors and warnings, errors only), the kind,
+and "Show dismissed"; "Apply" submits them as a plain GET form. Admins get
+two tabs, "My sets" and "Whole server" (`?scope=server`): every set on the
+server with its owner. For other users' private sets the set name is not a
+link and items show as "Private item" without names or thumbnails (admins
+still cannot open those sets or files); only owners can dismiss or fix
+anything. The server refuses `scope=server` to everyone else with 403.
+
+**Cards.** Each card has a severity badge (Error, Warning, Info), a title,
+a sentence about what is wrong and the items concerned:
+
+- Duplicate and look-alike **pairs** show both thumbnails side by side with
+  their names, size and quality score (to pick which to keep) and, for
+  duplicates in a set you can edit, a "Delete" button under each: it asks
+  for confirmation, deletes that item, removes its card from the grid and
+  refreshes the list. Without JavaScript it is the item's delete
+  confirmation page.
+- **Lists** of items (no emoji, very small, ...) show a small thumbnail,
+  the name, what is wrong with it (the entries that are not emoji, "64×64
+  px", the reason Telegram skips it) and a link to fix it ("Edit emojis"
+  opens the item's edit form, "Review", "Find a better version").
+- Set-level fixes are buttons: "Publish to Telegram", "Pull again", "Add
+  items".
+- **"Not a problem"** dismisses the card (an intentional near-duplicate, a
+  sticker meant to be small). Dismissed problems are hidden and counted
+  ("Show 1 dismissed"); shown, they are greyed out with "Show again". A
+  dismissal is stored on the server (`problem_dismissals`) under the
+  problem's id, a hash of what makes it a problem: when those items change
+  (another file, other emojis, one more item without emoji) it is a new
+  problem and shows up again. The forms post to
+  `/sets/{id}/problems/{problem}/dismiss` and `/restore` (with
+  `csrf_token`); htmx gets the list back, plain forms are redirected to
+  where they came from.
+
+**What is checked** (severity in brackets):
+
+| Problem | When |
+|---|---|
+| Exact duplicates (warning) | Two or more items store the same file: different uploads that are identical after sanitising (e.g. the same PNG saved with other settings). The same upload twice is refused by the upload itself. |
+| Near-duplicates (warning) | The same picture resized, recompressed, blurred or cropped by a few percent. Candidates come from the perceptual hashes (pHash ≤ 20 or dHash ≤ 12 of 64 bits) or from the AI; each is then compared on the grid thumbnails: 48×48 grey, where the worst of 8×8 blocks may differ by at most 16 of 255, also after trimming transparent margins and with 3, 6 and 10 % centre crops, and the colours of a 4×4 grid by at most 12 (so the same drawing in another colour is not a copy). Only items of the same kind (still or moving), about the same shape and, for animations, length. The thresholds come from synthetic stickers: copies scored up to 10.5, the same face with other eyes 27 or more. |
+| Look alike (info, an AI hint) | CLIP similarity at least 0.95 between two items that are not near-duplicates; only with AI on. At most 30 pairs per set, the most similar first. Variations of one character often look alike on purpose. |
+| Missing files (error) | An item has no original or no thumbnail. |
+| Processing failed (warning) | Generating the variants failed (with the job's error) or never ran; still queued is fine. |
+| Git sync failed (error) | The git pack's last pull or push failed. |
+| Publishing to Telegram failed (error) | The set's newest Telegram export job failed (also before the first successful publish). |
+| Too many stickers for Telegram (error) | A published set has more stickers than a pack holds (120): publishing fails. |
+| Cannot become Telegram stickers (warning) | In a published set: videos longer than 10 s, animations and videos without ffmpeg, and items whose sticker rendition could not be made. Publishing leaves them out. |
+| Telegram pack out of date (warning or info) | In a published set: items not in the pack yet, items with a new file, stickers of deleted items (warning), or only metadata or order changed since the last successful publish (info). |
+| No emoji (warning) | In a published set: items without an emoji; Telegram gets 🙂 for them. |
+| Emoji entries that are not emoji (warning when published, else info) | Words typed into the emoji field; Telegram drops them. |
+| Cut short on Telegram (info) | In a published set: animations and videos longer than 3 s; the pack gets the first 3 s. |
+| Very small pictures (info, warning when published) | The longest side is under 128 px. |
+| Also in other sets (info) | The same file is in another of your sets that got it first (shown once, in the later set). Other users' copies are not your problem and never show. |
+| AI suggestions to review (info) | Items with AI-filled keywords, emojis, vibe or name nobody confirmed. One card per set. |
+| Empty set (info) | No items yet. |
+
+"Published" means bound to a Telegram pack while the Telegram integration is
+on; without the integration nothing about Telegram is checked.
+
+**Speed.** Nothing is cached but the thumbnails' signatures (by media id,
+which never changes). Within a set every pair is compared on the stored
+hashes and embeddings, and only candidates are checked pixel by pixel;
+across sets, the same file is found by grouping on its hash in SQL. In a
+debug build, a set of 200 items of one cartoon character (where nearly every
+pair is a candidate) takes 3 to 4 s the first time (computing 200 thumbnail
+signatures) and about 0.2 s afterwards; the Problems tab over 6 sets and
+220 items about 0.3 s. Release builds are faster.
+
+<!-- ---- problems (end) ---- -->
+
 ## Errors
 
 Browser requests get HTML error pages: 404 "Not found" (also for content you
@@ -657,3 +749,15 @@ write resolving with the right PNG. Headless WebKit in the nix sandbox
 crashes on any `<video>`, so video frames were checked in Chromium (MP4 and
 WebM at full size) and Firefox (WebM at full size, MP4 through the
 thumbnail fallback).
+
+`tests/problems.rs` covers the problems report through the API and the web
+UI: duplicates and filters, dismissals that come back when the items
+change, the same file in two sets, Telegram blockers, the set page's section
+(owner only, loaded lazily), dismiss / restore / delete with htmx and
+without, the Problems tab, and the permissions of owners, other users and
+admins on public and private sets. The checks themselves are unit-tested in
+`src/service/problems/tests.rs`, with real images through the media
+pipeline for the near-duplicate thresholds. The section and the tab
+(loading, dismissing, restoring, the refresh after editing an item in the
+grid, deleting one of a pair) were checked with Playwright in Chromium,
+Firefox and WebKit, in both themes at desktop and phone widths.

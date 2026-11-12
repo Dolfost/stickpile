@@ -16,7 +16,7 @@ use super::components::{
     file_url, fmt_time, opt_time, plural, set_list, set_list_view, set_url, source_badge, view_menu, visibility_badge,
 };
 use super::layout::{self, Nav};
-use super::{integrations, items, upload, Ctx, MultipartCaller};
+use super::{integrations, items, problems, upload, Ctx, MultipartCaller};
 use crate::assets;
 use crate::error::{AppError, AppResult};
 use crate::service::cover;
@@ -481,6 +481,8 @@ pub async fn page(
             }
             (editor_grid(&ctx, &detail, sort, min_likes, false))
         }
+        // Duplicates, Telegram blockers, ...: fetched after the page.
+        @if is_owner { (problems::set_section(&set.id)) }
     };
     Ok(ctx.page(&set.name, Nav::Sets, body))
 }
