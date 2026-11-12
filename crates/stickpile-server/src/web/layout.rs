@@ -119,22 +119,30 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                             label.sr-only for="topsearch-q" { "Search" }
                             input #topsearch-q type="search" name="q" placeholder="Search…" autocomplete="off";
                         }
-                        div.who {
-                            span.whoami title=(format!("Signed in as {}", u.user.username)) {
-                                (u.user.display_name)
-                                @if let AuthMethod::Tailscale { login } = &u.method {
-                                    " " span.badge.tailnet title=(format!("Signed in through the tailnet as {login}")) { "tailnet" }
+                    }
+                    // The right-hand group: the theme switch, then a divider
+                    // and the account, so the switch is not pressed for
+                    // "Sign out" (on narrow screens the switch moves up to
+                    // the brand's line).
+                    div.top-end {
+                        (theme_switch(user, csrf))
+                        @if let Some(u) = user {
+                            div.who {
+                                span.whoami title=(format!("Signed in as {}", u.user.username)) {
+                                    (u.user.display_name)
+                                    @if let AuthMethod::Tailscale { login } = &u.method {
+                                        " " span.badge.tailnet title=(format!("Signed in through the tailnet as {login}")) { "tailnet" }
+                                    }
                                 }
-                            }
-                            @if matches!(u.method, AuthMethod::Session { .. }) {
-                                form.inline method="post" action="/logout" {
-                                    (csrf_input(csrf))
-                                    button.link type="submit" { "Sign out" }
+                                @if matches!(u.method, AuthMethod::Session { .. }) {
+                                    form.inline method="post" action="/logout" {
+                                        (csrf_input(csrf))
+                                        button.link type="submit" { "Sign out" }
+                                    }
                                 }
                             }
                         }
                     }
-                    (theme_switch(user, csrf))
                 }
                 div #flash role="status" aria-live="polite" {}
                 main #main tabindex="-1" {

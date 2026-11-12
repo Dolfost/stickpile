@@ -14,7 +14,7 @@ pub struct AppError {
     /// Stable machine code (see [`ApiError::code`]).
     pub code: &'static str,
     pub message: String,
-    /// Seconds, for 429 responses.
+    /// Seconds (`Retry-After`), for 429 and `ai_loading` responses.
     pub retry_after: Option<u64>,
 }
 
@@ -67,6 +67,14 @@ impl AppError {
     }
     pub fn unavailable(message: impl Into<String>) -> AppError {
         AppError::new(StatusCode::SERVICE_UNAVAILABLE, "unavailable", message)
+    }
+    /// 503 while the AI model is still loading: "ask again later", unlike
+    /// `unavailable` (AI off or failed to load), which stays.
+    pub fn ai_loading(message: impl Into<String>, retry_after_secs: u64) -> AppError {
+        AppError {
+            retry_after: Some(retry_after_secs.max(1)),
+            ..AppError::new(StatusCode::SERVICE_UNAVAILABLE, "ai_loading", message)
+        }
     }
     pub fn not_implemented(message: impl Into<String>) -> AppError {
         AppError::new(StatusCode::NOT_IMPLEMENTED, "not_implemented", message)

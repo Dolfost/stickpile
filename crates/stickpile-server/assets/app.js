@@ -18,8 +18,9 @@
 // * Escape cancels inline editing; dismiss buttons; copy buttons for
 //   one-time secrets (code.copyable).
 // * Item cards ([data-menu]: set page, home, search) get a context menu on
-//   right click, the context-menu key / Shift+F10 and their "⋯" button.
-//   Ctrl or Shift + right click keeps the browser's own menu. Without this script the
+//   right click, the context-menu key / Shift+F10 and their "⋯" button
+//   (not in the grid view). Ctrl or Shift + right click keeps the browser's
+//   own menu. Without this script the
 //   browser menu stays. (The "View" options and the theme switch are in
 //   prefs.js.)
 (function () {
@@ -958,10 +959,13 @@
     menuButton = button || null;
     menuByKeyboard = !!byKeyboard;
     var active = document.activeElement;
+    // "⋯" if it is shown (the grid view has none), else the thumbnail.
+    var shownButton = card.querySelector("button[data-menu-button]:not([hidden])");
+    if (shownButton && !shownButton.getClientRects().length) shownButton = null;
     menuReturn =
       button ||
       (active && active !== card && card.contains(active) ? active : null) ||
-      card.querySelector("button[data-menu-button]:not([hidden])") ||
+      shownButton ||
       card.querySelector(".thumb");
     if (menuButton) {
       menuButton.setAttribute("aria-expanded", "true");

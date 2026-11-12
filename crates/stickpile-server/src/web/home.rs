@@ -3,13 +3,43 @@
 use axum::extract::State;
 use maud::{html, Markup};
 
-use super::components::{grid, item_card, set_list, set_list_view, Card};
+use super::components::{set_list, set_list_view, view_menu};
 use super::layout::Nav;
-use super::{auth, MaybeCtx};
+use super::{auth, items, sets as set_pages, MaybeCtx};
+use crate::assets;
 use crate::error::AppResult;
 use crate::service::sets::{self, SetScope};
 use crate::service::ui;
 use crate::state::AppState;
+
+// ---- display options (begin) ----------------------------------------------
+
+/// Show/hide toggles of the recently copied items (`hide-{key}` on their
+/// section): the set page's, plus the item's set. The name always shows.
+const RECENT_PARTS: [(&str, &str, &str); 6] = [
+    ("set", "Set", ""),
+    ("emojis", "Emojis", ""),
+    ("keywords", "Keywords", ""),
+    ("vibe", "Vibe", ""),
+    ("tags", "Tags", ""),
+    ("labels", "Labels", "kind, quality"),
+];
+
+/// The "View" control of the recently copied items: the set page's styles
+/// and toggles, remembered apart from them (`stickpile.home.*`). Not in the
+/// URL, so it needs JavaScript and is hidden without.
+fn recent_view_menu() -> Markup {
+    view_menu(
+        "home",
+        "home-view",
+        &set_pages::item_styles(),
+        "regular",
+        &RECENT_PARTS,
+        true,
+    )
+}
+
+// ---- display options (end) ------------------------------------------------
 
 /// The start page; anonymous visitors get the sign-in form here (every
 /// other page redirects them to `/login`).
@@ -31,14 +61,23 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
                 }
             }
         }
-        section {
+        // The set page's cards (read-only here, with their set), styled by
+        // the same classes; the script (first child) applies the remembered
+        // display options before the cards are parsed.
+        section #recent-section .items-section data-view-prefs="home" aria-labelledby="recent-head" {
+            script src=(assets::url("prefs.js")) {}
             div.section-head {
-                h2 { "Recently copied" }
+                h2 #recent-head { "Recently copied" }
+                @if !recent.is_empty() { (recent_view_menu()) }
             }
             @if recent.is_empty() {
                 p.muted { "Nothing copied yet. Copy an item and it shows up here." }
             } @else {
-                (grid(html! { @for s in &recent { (item_card(&ctx, &Card::from_summary(s), None)) } }))
+                div.grid.editor-grid {
+                    @for (item, set_name) in &recent {
+                        (items::editor_card_in(&ctx, item, Some((&item.set_id, set_name)), false, None, false))
+                    }
+                }
             }
         }
         section {

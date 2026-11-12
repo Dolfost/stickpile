@@ -94,7 +94,8 @@ Every non-2xx response has an `ApiError` body:
 | `unsupported_media` | 415 | Not an accepted media type (after content sniffing), corrupt file, or a non-JSON body |
 | `rate_limited` | 429 | Too many requests; `Retry-After` gives the seconds to wait |
 | `internal` | 500 | Server error (details only in the server log) |
-| `unavailable` | 503 | AI enrichment is off or the model is still loading (AI suggestions add `Retry-After` while it loads) |
+| `unavailable` | 503 | AI is off on this server, or its model failed to load (AI suggestions, re-running enrichment) |
+| `ai_loading` | 503 | The AI model is still loading: ask again after `Retry-After` seconds (2) |
 
 Content the caller may not read (other users' private sets, their items and
 files, jobs of other users) is reported as `404`, never `403`, so IDs cannot be
@@ -292,7 +293,7 @@ picture uploaded for the set that is not one of its items: it is never in
 | `PUT /api/v1/items/{id}/like` | -> `LikeState` | Idempotent; allowed on every item the caller can read. |
 | `DELETE /api/v1/items/{id}/like` | -> `LikeState` | Idempotent. |
 | `GET /api/v1/items/{id}/better` | -> `[ItemSummary]` | Searchable items (own + public) with a pHash within the near-duplicate distance and a higher quality score, best first. |
-| `POST /api/v1/items/{id}/enrich` | -> `Job` | Owner only; re-runs AI enrichment. 503 `unavailable` when AI is off or still loading. |
+| `POST /api/v1/items/{id}/enrich` | -> `Job` | Owner only; re-runs AI enrichment. 503 `unavailable` when AI is off, `ai_loading` (with `Retry-After`) while the model loads. |
 
 ### AI suggestions
 
@@ -317,9 +318,10 @@ the vibe `null` when the model is unsure.
 - Any authenticated caller; cookie sessions need `X-CSRF-Token` and the
   same-origin check like every unsafe request. Each request counts against
   `limits.ai_suggest_per_minute` per user (429 with `Retry-After`).
-- 503 `unavailable` when AI is off or failed to load, and with
-  `Retry-After` while the model is still loading. Decoding and inference run
-  on the blocking thread pool.
+- 503 `unavailable` when AI is off or failed to load ("not on this
+  server": do not ask again), 503 `ai_loading` with `Retry-After: 2` while
+  the model is still loading ("later": it takes seconds after a start).
+  Decoding and inference run on the blocking thread pool.
 - To keep suggestions, upload them in `meta`: approved ones as plain values,
   unapproved ones listed in `ai_fields` (see Uploads above). Tags are never
   suggested; they are the user's own labels.

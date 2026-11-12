@@ -352,8 +352,13 @@ const ITEM_PARTS: [(&str, &str, &str); 5] = [
 /// The set page's "View" control, inside the filter form: without
 /// JavaScript the style radios are submitted by "Apply" (`?view=`).
 fn items_view_menu(view: ItemsView) -> Markup {
-    let styles: Vec<(&str, &str, &str)> = ItemsView::ALL.iter().map(|(_, k, l, h)| (*k, *l, *h)).collect();
-    view_menu("items", "view", &styles, view.key(), &ITEM_PARTS, false)
+    view_menu("items", "view", &item_styles(), view.key(), &ITEM_PARTS, false)
+}
+
+/// The item card styles for a "View" control: (value, label, hint). The
+/// start page's recently copied items offer the same.
+pub(super) fn item_styles() -> Vec<(&'static str, &'static str, &'static str)> {
+    ItemsView::ALL.iter().map(|(_, k, l, h)| (*k, *l, *h)).collect()
 }
 
 // ---- display options (end) ------------------------------------------------

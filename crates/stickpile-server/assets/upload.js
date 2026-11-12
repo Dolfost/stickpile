@@ -36,7 +36,15 @@
 // value the user's; so does "Use for every file", for the selected file and
 // the others. Unapproved values are uploaded with `ai_fields`, so the item
 // keeps them marked AI (to confirm on the item page). Tags are never
-// suggested. Failures are quiet: the fields just stay as they are.
+// suggested, and a field the user typed in is never filled, even when the
+// answer arrives later. The selected file's AI line says what is going on:
+// suggesting (a spinner on each waiting thumbnail), waiting for the model
+// to load or for the server (503 `ai_loading` and 429 with Retry-After: the
+// tray asks again then), done, failed (with "Try again"), or AI off on
+// this server (the form's data-ai: "off" or "failed").
+//
+// Upload with nothing staged sends nothing: a line under the drop area
+// says to choose files (instead of the browser's bubble on the file input).
 (function () {
   "use strict";
 
@@ -75,7 +83,8 @@
   var THUMB = 176; // edited thumbnails, device pixels
   var SUGGEST_PX = 256; // longest side of the image sent for AI suggestions
   var SUGGEST_AT_ONCE = 2; // suggestion requests in flight per tray
-  var SUGGEST_TRIES = 3; // per file, when the server says "later" (429, 503 + Retry-After)
+  var SUGGEST_TRIES = 3; // per file, when the server is busy (429 + Retry-After)
+  var SUGGEST_LOAD_WAIT = 180000; // ms to keep asking while the model loads (503 ai_loading)
   // The details AI may suggest, with the names used in sentences.
   var AI_FIELDS = ["keywords", "emojis", "vibe"];
   // Orientation as a 2×2 matrix, to notice when edits cancel out.
@@ -313,12 +322,18 @@
     var commitTimer = null;
     var api;
     // AI suggestions: files waiting, requests in flight, a pause after the
-    // server said "later", and whether the server said "never" (503).
+    // server said "later" and why ("loading" the model, "busy"), since when
+    // the model has been loading, and why the tray stopped asking: "off" or
+    // "failed" (503 unavailable; "failed" when the model was loading
+    // before), "session" (signed out), "slow" (the model took too long to
+    // load).
     var aiQueue = [];
     var aiActive = 0;
     var aiPauseUntil = 0;
     var aiTimer = null;
-    var aiOff = false;
+    var aiWaitWhy = "";
+    var aiLoadingSince = 0;
+    var aiStop = "";
 
     // -- the tray markup
 
@@ -354,8 +369,13 @@
     var approveAllFor = el("span", "sr-only");
     approveAll.appendChild(approveAllFor);
     approveAll.hidden = true;
+    // After a failure: ask again for this file (or, after the model took
+    // too long to load, for every file).
+    var aiRetry = button("small", "Try again");
+    aiRetry.hidden = true;
     aiBar.appendChild(aiText);
     aiBar.appendChild(approveAll);
+    aiBar.appendChild(aiRetry);
     details.appendChild(aiBar);
     // Per field: the AI badge, the ✓ toggle and a description for screen readers.
     var aiUi = {};
@@ -530,6 +550,7 @@
       var n = entries.length;
       tray.hidden = n === 0;
       zone.classList.toggle("has-files", n > 0);
+      if (n) zone.classList.remove("needs-files");
       if (coverMode) title.textContent = n ? "The new cover image: crop it, then upload it." : "";
       else {
         title.textContent = n
@@ -592,10 +613,12 @@
           emojis: "",
           vibe: "",
           tags: "",
-          // AI suggestions: status "", "queued", "busy", "done" or "failed";
-          // fields[k] is "pending" (marked AI), "approved" or absent (the
-          // user's value); `filled` lists the fields AI filled.
-          ai: { status: "", fields: {}, filled: [], tries: 0, abort: null },
+          // AI suggestions: status "", "queued", "busy", "done" or "failed"
+          // (`error` says why); fields[k] is "pending" (marked AI),
+          // "approved" or absent (the user's value); `filled` lists the
+          // fields AI filled, `got` whether it suggested anything at all;
+          // `touched` the fields the user typed in, which AI never fills.
+          ai: { status: "", fields: {}, filled: [], got: false, touched: {}, error: "", tries: 0, abort: null },
         };
         if (KINDS[type] === "webp") {
           isAnimatedWebp(file).then(function (anim) {
@@ -655,11 +678,21 @@
       aiBadge.appendChild(aiMark);
       aiBadge.appendChild(el("span", "sr-only", ", AI suggestions to approve"));
       aiBadge.hidden = true;
+      // Shown while its suggestions are on the way.
+      var aiWait = el("span", "thumb-ai-wait");
+      aiWait.title = "AI is suggesting keywords, emojis and vibe";
+      var spin = el("span", "spinner");
+      spin.setAttribute("aria-hidden", "true");
+      aiWait.appendChild(spin);
+      aiWait.appendChild(el("span", "sr-only", ", AI suggestions on the way"));
+      aiWait.hidden = true;
       b.appendChild(media);
       b.appendChild(name);
       b.appendChild(badge);
       b.appendChild(aiBadge);
+      b.appendChild(aiWait);
       e.aiBadge = aiBadge;
+      e.aiWait = aiWait;
       var rm = button("tray-remove", "×", "Remove " + e.name + " from the upload");
       li.appendChild(b);
       li.appendChild(rm);
@@ -1056,10 +1089,23 @@
         : [];
     }
 
+    // Why this tray gets no suggestions at all: the server's AI is "off" or
+    // "failed" (the form has no data-ai-suggest), or the tray stopped
+    // asking (aiStop). "" while it can ask.
+    function aiUnavailable() {
+      if (aiStop) return aiStop;
+      if (!form.getAttribute("data-ai-suggest")) {
+        var s = form.getAttribute("data-ai");
+        return s === "off" || s === "failed" ? s : "none";
+      }
+      return window.fetch && window.FormData ? "" : "none";
+    }
+
     // Queue a file for suggestions when the server offers them.
     function askAi(e) {
-      if (aiOff || !form.getAttribute("data-ai-suggest") || !window.fetch || !window.FormData) return;
+      if (aiUnavailable() || e.ai.status === "done") return;
       e.ai.status = "queued";
+      e.ai.error = "";
       aiQueue.push(e);
       showAi(e);
       pumpAi();
@@ -1075,7 +1121,7 @@
         }, wait);
         return;
       }
-      while (aiActive < SUGGEST_AT_ONCE && aiQueue.length && !aiOff) {
+      while (aiActive < SUGGEST_AT_ONCE && aiQueue.length && !aiStop) {
         var e = aiQueue.shift();
         if (entries.indexOf(e) < 0 || e.ai.status !== "queued") continue;
         aiActive++;
@@ -1086,6 +1132,17 @@
       }
     }
 
+    // The server said "later" (Retry-After seconds): pause the queue and
+    // put this file first again. `why`: "loading" or "busy".
+    function retryLater(e, seconds, why) {
+      aiPauseUntil = Math.max(aiPauseUntil, Date.now() + Math.min(Math.max(seconds, 1), 60) * 1000);
+      aiWaitWhy = why;
+      e.ai.status = "queued";
+      aiQueue.unshift(e);
+      showAllAi();
+      pumpAi();
+    }
+
     // Ask the server about one file. Resolves when done, never rejects.
     function suggestFor(e) {
       var url = form.getAttribute("data-ai-suggest");
@@ -1094,46 +1151,77 @@
       e.ai.abort = ctrl;
       showAi(e);
       return smallStill(e)
-        .then(function (png) {
-          if (e.ai.abort !== ctrl) return null;
-          var body = new FormData();
-          body.append("file", png, "suggest.png");
-          var headers = {};
-          var token = document.body.getAttribute("data-csrf");
-          if (token) headers["X-CSRF-Token"] = token;
-          return fetch(url, {
-            method: "POST",
-            credentials: "same-origin",
-            headers: headers,
-            body: body,
-            signal: ctrl ? ctrl.signal : undefined,
-          });
-        })
-        .then(function (r) {
-          if (!r || e.ai.abort !== ctrl) return;
-          e.ai.abort = null;
-          if (r.ok) {
-            return r.json().then(function (s) {
-              fillAi(e, s);
+        .then(
+          function (png) {
+            if (e.ai.abort !== ctrl) return null;
+            var body = new FormData();
+            body.append("file", png, "suggest.png");
+            var headers = {};
+            var token = document.body.getAttribute("data-csrf");
+            if (token) headers["X-CSRF-Token"] = token;
+            return fetch(url, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: headers,
+              body: body,
+              signal: ctrl ? ctrl.signal : undefined,
+            }).then(answered, function () {
+              if (e.ai.abort === ctrl) failAi(e, "network");
             });
+          },
+          function () {
+            if (e.ai.abort === ctrl) failAi(e, "read");
           }
-          // "Later": pause the queue and try this file again.
-          var later = parseInt(r.headers.get("Retry-After") || "", 10);
-          if ((r.status === 429 || r.status === 503) && later > 0 && e.ai.tries < SUGGEST_TRIES) {
-            e.ai.tries++;
-            aiPauseUntil = Date.now() + Math.min(later, 60) * 1000;
-            e.ai.status = "queued";
-            aiQueue.unshift(e);
-            showAi(e);
-            return;
-          }
-          // AI is off, or the session is gone: stop asking.
-          if (r.status === 503 || r.status === 401 || r.status === 403) stopAi();
-          failAi(e);
-        })
+        )
         .catch(function () {
-          if (e.ai.abort === ctrl) failAi(e);
+          if (e.ai.status === "busy" && entries.indexOf(e) >= 0) failAi(e, "error");
         });
+
+      function answered(r) {
+        if (e.ai.abort !== ctrl) return;
+        e.ai.abort = null;
+        if (r.ok) {
+          aiWaitWhy = "";
+          aiLoadingSince = 0;
+          return r.json().then(function (s) {
+            fillAi(e, s);
+            showAllAi();
+          });
+        }
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (err) {
+            var code = err && err.code;
+            var later = parseInt(r.headers.get("Retry-After") || "", 10) || 0;
+            // The model is still loading: ask again as told, for a while.
+            if (r.status === 503 && (code === "ai_loading" || later > 0)) {
+              if (!aiLoadingSince) aiLoadingSince = Date.now();
+              if (Date.now() - aiLoadingSince < SUGGEST_LOAD_WAIT) return retryLater(e, later || 2, "loading");
+              e.ai.status = "";
+              return stopAi("slow");
+            }
+            // Too many requests: wait as told, a few times per file.
+            if (r.status === 429 && later > 0 && e.ai.tries < SUGGEST_TRIES) {
+              e.ai.tries++;
+              return retryLater(e, later, "busy");
+            }
+            aiWaitWhy = "";
+            // AI is off (after loading: the model failed to load), or the
+            // session is gone.
+            if (r.status === 503) {
+              e.ai.status = "";
+              return stopAi(aiLoadingSince || form.getAttribute("data-ai") === "loading" ? "failed" : "off");
+            }
+            if (r.status === 401 || r.status === 403) {
+              e.ai.status = "";
+              return stopAi("session");
+            }
+            failAi(e, r.status === 429 ? "busy" : "error");
+          });
+      }
     }
 
     // What the server's thumbnail shows, small: a PNG with the longest side
@@ -1197,7 +1285,8 @@
       });
     }
 
-    // Fill only the fields that are still empty; never what the user typed.
+    // Fill only the fields that are still empty and that the user has not
+    // typed in (also while the request was on its way).
     function fillAi(e, s) {
       if (entries.indexOf(e) < 0) return;
       e.ai.status = "done";
@@ -1207,7 +1296,9 @@
         vibe: s.vibe || "",
       };
       AI_FIELDS.forEach(function (k) {
-        if (!values[k] || e[k].trim()) return;
+        if (!values[k]) return;
+        e.ai.got = true;
+        if (e.ai.touched[k] || e[k].trim()) return;
         e[k] = values[k];
         e.ai.fields[k] = "pending";
         if (e.ai.filled.indexOf(k) < 0) e.ai.filled.push(k);
@@ -1216,16 +1307,40 @@
       showAi(e);
     }
 
-    function failAi(e) {
+    // `why`: "read" (the browser cannot read the file), "network", "busy"
+    // (429 too often) or "error".
+    function failAi(e, why) {
       e.ai.abort = null;
       e.ai.status = "failed";
+      e.ai.error = why;
       showAi(e);
     }
 
-    // The server has no AI (503 without Retry-After) or the session ended.
-    function stopAi() {
-      aiOff = true;
-      aiQueue.splice(0).forEach(failAi);
+    // No more requests from this tray (see aiStop); files waiting go back
+    // to "not asked", and the AI line says why.
+    function stopAi(why) {
+      aiStop = why;
+      aiWaitWhy = "";
+      aiQueue.splice(0).forEach(function (x) {
+        x.ai.status = "";
+      });
+      showAllAi();
+    }
+
+    // "Try again": after the model took too long to load, every file not
+    // done yet; else the selected file.
+    function retryAi() {
+      if (aiStop === "slow") {
+        aiStop = "";
+        aiLoadingSince = 0;
+        entries.forEach(function (x) {
+          if (x.ai.status === "" || x.ai.status === "failed") askAi(x);
+        });
+      } else if (current && current.ai.status === "failed") {
+        current.ai.tries = 0;
+        askAi(current);
+      }
+      showAllAi();
     }
 
     function forgetAi(e) {
@@ -1253,9 +1368,61 @@
 
     // After a change to `e` (or with null, the empty tray).
     function showAi(e) {
-      if (e) e.aiBadge.hidden = !pendingOf(e).length;
+      if (e) {
+        e.aiBadge.hidden = !pendingOf(e).length;
+        e.aiWait.hidden = !(e.ai.status === "queued" || e.ai.status === "busy");
+      }
       if (!e || e === current) showAiDetails();
       showAiAll();
+    }
+
+    // After a change that concerns every file (waiting, stopping).
+    function showAllAi() {
+      entries.forEach(function (x) {
+        if (x !== current) showAi(x);
+      });
+      showAi(current);
+    }
+
+    // What the AI line says about the selected file: [text, kind, retry].
+    // kind: "waiting" (dashed), "" (suggestions, tinted) or "note" (plain).
+    function aiLine(e) {
+      var ai = e.ai;
+      if (ai.status === "queued" || ai.status === "busy") {
+        if (aiWaitWhy === "loading") {
+          return ["The server is still loading its AI model; suggestions follow when it is ready…", "waiting"];
+        }
+        if (aiWaitWhy === "busy") return ["The server asked to wait a moment (many suggestions at once)…", "waiting"];
+        return ["Suggesting keywords, emojis and vibe…", "waiting"];
+      }
+      if (ai.status === "done") {
+        if (ai.filled.length) {
+          return [
+            "AI suggested the " +
+              sentence(ai.filled) +
+              (pendingOf(e).length
+                ? ai.filled.length > 1
+                  ? ". Approve or edit them; unapproved ones are uploaded marked AI."
+                  : ". Approve or edit it; unapproved, it is uploaded marked AI."
+                : ". Nothing left to approve."),
+            "",
+          ];
+        }
+        if (ai.got) return ["AI's suggestions were for fields you had filled in; your values stay.", "note"];
+        return ["AI had no confident suggestions for this file.", "note"];
+      }
+      if (ai.status === "failed") {
+        if (ai.error === "read") return ["No AI suggestions: this browser cannot read the file.", "note"];
+        if (ai.error === "busy") return ["No AI suggestions: the server is busy. Try again in a minute.", "note", true];
+        if (ai.error === "network") return ["No AI suggestions: the server could not be reached.", "note", true];
+        return ["No AI suggestions: something went wrong on the server.", "note", true];
+      }
+      var why = aiUnavailable();
+      if (why === "off") return ["AI suggestions are off on this server.", "note"];
+      if (why === "failed") return ["AI suggestions are not available: the server could not load its AI model.", "note"];
+      if (why === "session") return ["AI suggestions stopped: your session has ended. Sign in again.", "note"];
+      if (why === "slow") return ["The server's AI model is taking long to load; the fields stay as they are.", "note", true];
+      return ["", ""];
     }
 
     // The selected file's fields and AI bar.
@@ -1278,22 +1445,15 @@
         else ui.input.removeAttribute("aria-describedby");
       });
       var pending = pendingOf(e);
-      var text = "";
-      if (ai.status === "queued" || ai.status === "busy") {
-        text = "Suggesting keywords, emojis and vibe…";
-      } else if (ai.status === "done" && ai.filled.length) {
-        text =
-          "AI suggested the " +
-          sentence(ai.filled) +
-          (pending.length
-            ? ". Approve or edit them; unapproved ones are uploaded marked AI."
-            : ". Nothing left to approve.");
-      }
+      var line = e ? aiLine(e) : ["", ""];
+      var text = line[0];
       if (aiText.textContent !== text) aiText.textContent = text;
       aiBar.hidden = !text;
-      aiBar.classList.toggle("waiting", ai.status === "queued" || ai.status === "busy");
+      aiBar.classList.toggle("waiting", line[1] === "waiting");
+      aiBar.classList.toggle("note", line[1] === "note");
       approveAll.hidden = !(ai.status === "done" && ai.filled.length);
       approveAll.setAttribute("aria-disabled", pending.length ? "false" : "true");
+      aiRetry.hidden = !line[2];
     }
 
     // "Approve AI for all files": with several files once one has suggestions.
@@ -1333,6 +1493,9 @@
       detailInputs[k].addEventListener("input", function () {
         if (!current) return;
         current[k] = detailInputs[k].value;
+        // The user's field from now on, even if emptied again: a
+        // suggestion arriving later leaves it alone.
+        current.ai.touched[k] = true;
         // An edited suggestion is the user's value.
         if (current.ai.fields[k]) {
           delete current.ai.fields[k];
@@ -1346,6 +1509,20 @@
       if (!e || !pendingOf(e).length) return;
       approveFile(e);
       say("Approved the AI suggestions for " + displayName(e) + ".");
+    });
+
+    aiRetry.addEventListener("click", retryAi);
+
+    // Upload with nothing staged: the browser's own check stops it (the
+    // input is required) with a bubble on the file input; say it here
+    // instead. The submit listener below covers browsers without the check.
+    function nothingToUpload() {
+      zone.classList.add("needs-files");
+      say("Nothing to upload yet: choose files, drop them here or paste an image.", true);
+    }
+    input.addEventListener("invalid", function (ev) {
+      ev.preventDefault();
+      nothingToUpload();
     });
 
     approveEvery.addEventListener("click", function () {
@@ -1371,6 +1548,11 @@
       if (!e) return;
       approveFile(e);
       entries.forEach(function (x) {
+        // Chosen for every file, so suggestions still on their way do not
+        // replace them (nor fill what was copied empty).
+        AI_FIELDS.forEach(function (k) {
+          x.ai.touched[k] = true;
+        });
         if (x === e) return;
         Object.keys(detailInputs).forEach(function (k) {
           x[k] = e[k];
@@ -1491,6 +1673,7 @@
       },
       clear: clear,
       submitWith: submitWith,
+      nothingToUpload: nothingToUpload,
       visible: function () {
         return form.isConnected && form.getClientRects().length > 0;
       },
@@ -1586,14 +1769,16 @@
   });
 
   // Edited images are rendered before htmx (or the browser) sends the form.
+  // An empty tray sends nothing.
   document.addEventListener(
     "submit",
     function (e) {
       var tray = trayOf(e.target);
-      if (!tray || tray.passing || !tray.count()) return;
+      if (!tray || tray.passing) return;
       e.preventDefault();
       e.stopPropagation();
-      tray.submitWith(e.submitter);
+      if (tray.count()) tray.submitWith(e.submitter);
+      else tray.nothingToUpload();
     },
     true
   );

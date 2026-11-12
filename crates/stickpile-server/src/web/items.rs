@@ -266,6 +266,19 @@ pub(super) fn vibes(state: &AppState) -> Vec<String> {
 /// copy controls' `data-copy-*`.
 /// `is_cover`: the item is the set's chosen cover (a badge for everyone).
 pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>, is_cover: bool) -> Markup {
+    editor_card_in(ctx, item, None, editable, movable, is_cover)
+}
+
+/// [`editor_card`] shown outside its set (the start page's recently copied
+/// items): `set` (id, name) adds a "Set" field linking to it, after the name.
+pub fn editor_card_in(
+    ctx: &Ctx,
+    item: &Item,
+    set: Option<(&str, &str)>,
+    editable: bool,
+    movable: Option<(bool, bool)>,
+    is_cover: bool,
+) -> Markup {
     let card = Card::from_item(item);
     let page = item_url(&item.id);
     let move_url = format!("/sets/{}/items/{}/move", item.set_id, item.id);
@@ -292,7 +305,15 @@ pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool
             }
             div.card-body {
                 dl.fields {
-                    @for f in Field::ALL { (field_block(ctx, item, f, editable)) }
+                    @for f in Field::ALL {
+                        (field_block(ctx, item, f, editable))
+                        @if let (Field::Name, Some((sid, sname))) = (f, set) {
+                            div.field.field-set {
+                                dt { span.field-label { "Set" } }
+                                dd { a href=(set_url(sid)) { (sname) } }
+                            }
+                        }
+                    }
                 }
                 div.card-actions {
                     (like_form(ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))

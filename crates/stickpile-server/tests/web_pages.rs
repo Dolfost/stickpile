@@ -367,6 +367,99 @@ async fn set_lists_have_display_options() {
     assert!(!html.contains("sets-view") && !html.contains("set-list"));
 }
 
+#[tokio::test]
+async fn home_recently_copied_have_view_options() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let set = s.create_set(&alice, "cats", Visibility::Private).await;
+    let a = s.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let public = s.create_set(&bob, "dogs", Visibility::Public).await;
+    let d = s.upload_one(&bob, &public.id, "d.png", png(2)).await;
+    let b = Browser::login(&s, &alice).await;
+
+    // Nothing copied yet: nothing to arrange.
+    let html = b.get("/").await.text();
+    assert!(html.contains("Nothing copied yet"));
+    assert!(!html.contains("id=\"home-view\""));
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let events: Vec<_> = [(&a.id, "e-1"), (&d.id, "e-2")]
+        .iter()
+        .map(|(id, ev)| json!({"id": ev, "item_id": id, "copied_at": now, "client": "web"}))
+        .collect();
+    s.post(&alice, routes::USAGE, json!({ "events": events }))
+        .await
+        .expect(200);
+    s.put(&alice, &routes::path(routes::ITEM_LIKE, &[&d.id]), json!({}))
+        .await
+        .expect(200);
+
+    let r = b.get("/").await;
+    assert_page(&r);
+    let html = r.text();
+    // Its own wrapper and options (stickpile.home.*, prefs.js), applied by
+    // the script before the cards are parsed.
+    assert!(
+        html.contains(
+            "<section class=\"items-section\" id=\"recent-section\" data-view-prefs=\"home\" aria-labelledby=\"recent-head\"><script src=\"/static/prefs.js?v="
+        ),
+        "{html}"
+    );
+    // The set page's styles and toggles, plus the item's set; all of it
+    // needs JavaScript (not in the URL), so it is hidden without.
+    let menu = view_menu(&html, "home");
+    assert!(
+        menu.starts_with("<details class=\"view-menu\" id=\"home-view\" data-view-menu=\"home\" hidden>"),
+        "{menu}"
+    );
+    for style in ["regular\" checked>", "compact\">", "grid\">"] {
+        assert!(
+            menu.contains(&format!("<input type=\"radio\" name=\"home-view\" value=\"{style}")),
+            "{style}: {menu}"
+        );
+    }
+    for part in ["set", "emojis", "keywords", "vibe", "tags", "labels"] {
+        assert!(
+            menu.contains(&format!(
+                "<input type=\"checkbox\" value=\"{part}\" checked data-view-part=\"\">"
+            )),
+            "{part}: {menu}"
+        );
+    }
+    assert!(menu.contains("<span class=\"opt-name\"><span class=\"sr-only\">Show </span>Set</span>"));
+    assert!(!html.contains("id=\"items-view\""), "apart from the set page's control");
+
+    // The set page's cards, read-only (also for the viewer's own items),
+    // with their set and the context menu's data.
+    for (item, set_id, set_name) in [(&a, &set.id, "cats"), (&d, &public.id, "dogs")] {
+        let tag = card_tag(&html, &item.id);
+        assert!(tag.starts_with("<article class=\"card editor\""), "{tag}");
+        assert!(tag.contains("data-menu") && tag.contains("data-item-url") && tag.contains("data-download-url"));
+        for attr in ["data-edit-url", "data-delete-url", "data-move-url", "data-cover-url"] {
+            assert!(!tag.contains(attr), "{attr}: {tag}");
+        }
+        assert!(html.contains(&format!(
+            "<div class=\"field field-set\"><dt><span class=\"field-label\">Set</span></dt><dd><a href=\"/sets/{set_id}\">{set_name}</a></dd></div>"
+        )));
+    }
+    assert!(html.contains("class=\"field field-name\"") && html.contains("class=\"field field-emojis empty\""));
+    assert!(!html.contains("/field/name/edit"), "no inline editing here");
+    assert!(html.contains("<span class=\"sr-only\">More actions for a</span>"));
+    // The viewer's own like, as on the set page.
+    assert!(html.contains("aria-pressed=\"true\""), "{html}");
+    // The grid style has no "⋯" (the context menu still opens with a right
+    // click or the keyboard).
+    let css = b.get("/static/app.css").await.text();
+    assert!(
+        css.contains(".view-grid .card.editor dl.fields, .view-grid .card.editor .card-menu-btn { display: none; }")
+    );
+    assert!(css.contains(".items-section.hide-set .card.editor .field-set"));
+}
+
 /// The top bar's theme switch (its form or wrapper up to the button's end).
 fn theme_switch(html: &str) -> String {
     let at = html.find("class=\"theme-switch\"").expect("theme switch");
@@ -406,6 +499,11 @@ async fn theme_is_rendered_into_every_page() {
     );
     assert!(switch.contains("<span class=\"sr-only\">Dark theme</span>"));
     assert!(switch.contains("class=\"icon icon-moon\"") && switch.contains("class=\"icon icon-sun\""));
+    // Left of the account group (name, "Sign out"), not next to "Sign out".
+    let at = |m: &str| html.find(m).unwrap_or_else(|| panic!("{m}"));
+    assert!(at("class=\"topsearch\"") < at("<div class=\"top-end\"><form class=\"theme-switch\""));
+    assert!(at("class=\"theme-switch\"") < at("<div class=\"who\">"));
+    assert!(at("<div class=\"who\">") < at(">Sign out</button>"));
 
     // A chosen theme is rendered into every page, error pages included.
     for (theme, pressed, other) in [("dark", "true", "light"), ("light", "false", "dark")] {

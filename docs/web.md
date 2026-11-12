@@ -23,7 +23,7 @@ more than the API allows.
 |---|---|
 | `/login` | Username and password. Accounts with TOTP get a second step for the 6-digit code. Anonymous visitors to `/` see the same form. "Forgot your password?" lists the ways back in: the tailnet, an admin, or `stickpile-server reset-password` on the host (there is no email). |
 | `/register` | Self-service registration, following `auth.registration`: `closed` explains that and refuses, `invite` asks for the code (`/register?code=…` fills it in), `open` needs nothing. A successful registration signs you in. |
-| `/` | Search box, items you copied recently, your sets with covers (with the set lists' "View" control). |
+| `/` | Search box, items you copied recently (the set page's cards, read-only, each with its set, and a "View" control of their own), your sets with covers (with the set lists' "View" control). |
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. Each card shows the cover, name, description, item count, visibility and source labels, owner and slug; the "View" control arranges them (see [Display options and themes](#display-options-and-themes)). |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
 | `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
@@ -66,7 +66,8 @@ display options: the style **Regular** (every field and the button row),
 **Compact** (a denser grid of thumbnails with the name, and the emojis on a
 line of their own at the bottom of the card; the other fields and the
 button row are hidden, the context menu has the actions) or **Grid**
-(thumbnails only, with "⋯" on the thumbnail's corner), and which fields
+(thumbnails only, without "⋯": right-click a thumbnail, or focus it and
+press the context-menu key or Shift+F10, for the menu), and which fields
 show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
 "Cover" badges). See [Display options and themes](#display-options-and-themes).
 
@@ -97,7 +98,10 @@ card only when the action is allowed (`data-edit-url`, `data-delete-url`,
 set has a cover image), and it uses the same
 endpoints, htmx requests and CSRF header as the buttons. It also opens from
 the keyboard (the context-menu key or Shift+F10 while focus is in a card)
-and from the "⋯" button on each card (for touch screens and keyboards).
+and from the "⋯" button on each card (for touch screens and keyboards;
+not in the Grid style, where only the thumbnail shows: there a long press
+opens it on touch screens that send a context-menu event, such as Android,
+and the thumbnail link is the keyboard's way in).
 Inside the menu: ↑/↓ move between entries (wrapping), Home/End jump,
 typing a letter jumps to the entry starting with it, Enter or Space
 activates, Escape or Tab closes and returns focus to where it was. A click
@@ -152,8 +156,12 @@ search or counts.
 
 **"View" on the set page.** A disclosure button in the filter form. Its
 panel has the style (Regular, Compact, Grid) and the "Show" toggles for
-Emojis, Keywords, Vibe, Tags and Labels; the name always shows. Toggles a
-style has no room for are disabled with a note (Compact shows the name and
+Emojis, Keywords, Vibe, Tags and Labels; the name always shows. Each
+option is one tile: a press anywhere on it (the dot or box, the name, the
+hint, the padding) selects it, and the panel stays open for more changes,
+as with arrow keys and Space. The focus then sits on the chosen option.
+Tiles are at least 31 px tall, 44 px on touch screens (`pointer: coarse`).
+Toggles a style has no room for are disabled with a note (Compact shows the name and
 the emojis; Grid only thumbnails and labels). Everything applies at once:
 `assets/prefs.js` puts a style class (`compact`, `view-grid`) and
 `hide-<field>` classes on `#items-section`, outside the swapped grid, so
@@ -175,9 +183,16 @@ Item count, Labels (visibility and source), Owner and Slug. Kept apart from
 the set page's options (`stickpile.sets.view`, `stickpile.sets.hide`),
 applied as classes on the `.set-list` wrapper and shared by every set list.
 
+**"View" on the start page** (Recently copied). The set page's styles
+(Regular, Compact, Grid) and toggles, plus Set (the item's set, a line of
+the regular card); the cards are the set page's, read-only. Remembered
+apart from the set pages (`stickpile.home.view`, `stickpile.home.hide`),
+as classes on `#recent-section`. It needs JavaScript (no URL parameter),
+so it is hidden without.
+
 **Before the first paint.** prefs.js is loaded without `defer`: once in
-`<head>`, and once more as the first child of `#items-section` and of each
-`.set-list`, where it applies the remembered classes to its parent before
+`<head>`, and once more as the first child of `#items-section`,
+`#recent-section` and each `.set-list`, where it applies the remembered classes to its parent before
 the cards are parsed, so hidden fields never show up and vanish again.
 
 **Without JavaScript** every field and every part of a set card shows. The
@@ -198,7 +213,9 @@ controls and scrollbars match. Colours that differ between the themes are
 variables; nothing else depends on `prefers-color-scheme`.
 
 **The switch in the top bar** (a moon in the light theme, a sun in the
-dark one) is a toggle button named "Dark theme" whose `aria-pressed` says
+dark one) sits left of the account's name, a divider away from "Sign
+out" (on narrow screens it moves up to the brand's line). It is a toggle
+button named "Dark theme" whose `aria-pressed` says
 whether the page is dark. It flips from the theme in effect (also under
 System, where it follows the device and updates when the device changes),
 applies at once and saves it with `PATCH /api/v1/me` (session cookie and
@@ -412,10 +429,21 @@ enforces the `hidden` attribute); "Download" always works.
       they replace the other files' own suggestions in those fields.
     - Unapproved suggestions are uploaded too, marked AI (`ai_fields` in
       `meta`), so the item page shows them with "✓ Confirm".
-    - Failures are quiet: if the server has no AI, the browser cannot read
-      a file, or a request fails, the fields stay as they are. When the
-      server asks to wait (rate limit, model still loading) the tray waits
-      and tries again a few times.
+    - **What AI is doing** shows on the line above the fields, for the
+      selected file, and as a spinner on each thumbnail whose suggestions
+      are on their way: "Suggesting…"; waiting while the server loads its
+      model (503 `ai_loading`: the tray asks again after `Retry-After`, for
+      up to three minutes) or after "too many requests" (429, three tries
+      per file); a short note when it failed (the server could not be
+      reached or failed, too many requests, the browser cannot read the
+      file) with **Try again**; "AI had no confident suggestions"; or, from
+      the form's `data-ai` (`ready`, `loading`, `off`, `failed`) or a 503
+      `unavailable`, "AI suggestions are off on this server" (or "not
+      available: the server could not load its AI model"). The fields stay
+      as they are in every one of these cases.
+    - A field you typed in is never filled, also when the answer arrives
+      after you typed (or after you cleared it again), and "Use for every
+      file" protects the copied fields the same way.
     - Suggestions look at the file as it was added, before crops and turns.
       Clearing a suggested field leaves it empty, and empty fields are filled
       by enrichment after the upload, as before.
@@ -439,6 +467,12 @@ enforces the `hidden` attribute); "Download" always works.
     browser's canvas keeps just the first frame of an animation.
 
   Without JavaScript the form posts the chosen files as they are.
+- **Upload with nothing chosen** sends nothing: the drop area turns red and
+  a line under it says to choose, drop or paste files (in place of the
+  browser's bubble on the file input). A request without files (a browser
+  that skips the form's check) gets 400 with the message where the results
+  appear (htmx), or the upload form again with it above (without
+  JavaScript), not an error page.
 - **Import a set directory as a new set** (upload page): pick the folder
   holding `set.toml` and the files, or an export `.tar`. The set gets the
   manifest's name, slug, visibility, metadata and AI markers.
@@ -575,8 +609,11 @@ flags; logout; the TOTP step; registration per policy; tailnet sign-in;
 htmx fragments without the document shell; escaping of `<script>` and quotes;
 the set page's "View" control (in the filter form, `?view=compact` and
 `?view=grid`, other parameters kept, the JS-only toggles hidden), the set
-lists' control and card parts, themes (`<html data-theme>` per account,
-none for System, the top bar's switch, Settings → Appearance and
+lists' control and card parts, the start page's recently copied cards and
+their own control (`data-view-prefs="home"`, the Set field, read-only
+menu data, no "⋯" in the grid style's CSS), themes (`<html data-theme>` per
+account, none for System, the top bar's switch left of the account group,
+Settings → Appearance and
 `POST /settings/theme` with its validation and CSRF) and the context-menu data per permission (no edit, delete
 or move entries for viewers, no move entries when sorted or filtered, the
 named "⋯" button); copying (`web_copy_is_recorded_and_shows_in_recently_copied`:
@@ -588,18 +625,24 @@ the CSP header and the absence of inline styles and scripts; static asset
 types; the emoji picker's markers (the emojis inputs, the script order, the
 `:` suggestions' combobox, the `emoji.json` notice and contents, its terms
 column and `common` list); HTML error pages; and the flows end to end (sets, uploads with
-near-duplicate warnings, imports, editing, likes and filters, stats and
+near-duplicate warnings, uploads without files (the form again, or the
+inline message for htmx), imports, editing, likes and filters, stats and
 popular, settings, the admin panel, git pack and Telegram forms, job polling,
 the cover image in the set settings: upload, errors, replace by an item,
 remove).
 
 `tests/ai_admin.rs` covers the tray's AI side on the server: the
-`data-ai-suggest` attribute (present when AI is ready or loading, absent when
-off), the suggestion endpoint with a web session (CSRF header, same origin),
+`data-ai` and `data-ai-suggest` attributes (the URL when AI is ready or
+loading, absent when off or failed), the 503 codes (`unavailable` without
+`Retry-After`, `ai_loading` with it, also for re-running enrichment), the suggestion endpoint with a web session (CSRF header, same origin),
 and uploads with `ai_fields`. The tray itself (marking, approving, editing,
 "Approve all", what gets uploaded) was checked with Playwright in Chromium,
 Firefox and WebKit against a server without models: the test intercepts the
-suggestion endpoint in the page and adds the attribute.
+suggestion endpoint in the page and adds the attribute. The status line
+(suggesting, loading with retries, busy, failed with Try again, off,
+signed out) and typing during a request were checked the same way, against
+a server with AI on and the endpoint answered by the test, and the timing
+in [ai.md](ai.md#suggestions-before-an-upload) against the real models.
 
 Copying in the browser was checked with Playwright against a test server
 with a still PNG, JPEG and WebP, a GIF, an animated WebP, an MP4 and a WebM:

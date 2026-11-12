@@ -36,15 +36,32 @@ pub fn embed_and_suggest(ai: &Ai, cfg: &AiConfig, frame: &RgbaImage) -> Result<(
     Ok((embedding, suggestions))
 }
 
-/// 503 unless the AI backend is ready (with `Retry-After` while it loads).
+/// `Retry-After` while the model loads. Loading takes seconds (the
+/// vocabulary is embedded at startup), so clients ask again soon rather
+/// than wait long after it is ready.
+pub const LOADING_RETRY_SECS: u64 = 2;
+
+/// 503 unless the AI backend is ready (see [`not_ready`]).
 pub fn require_ready(state: &AppState) -> AppResult<()> {
     match state.ai_status() {
         AiStatus::Ready if state.ai().is_some() => Ok(()),
-        AiStatus::Loading => Err(AppError {
-            retry_after: Some(10),
-            ..AppError::unavailable("the AI model is still loading; try again shortly")
-        }),
-        _ => Err(AppError::unavailable("AI suggestions are not available on this server")),
+        // Published just before the status, so this is only a race.
+        AiStatus::Ready => Err(not_ready(AiStatus::Loading)),
+        s => Err(not_ready(s)),
+    }
+}
+
+/// Why AI cannot answer: `ai_loading` with `Retry-After` while the model
+/// loads ("later"), `unavailable` without when AI is off or failed to load
+/// ("not on this server").
+pub fn not_ready(status: AiStatus) -> AppError {
+    match status {
+        AiStatus::Loading | AiStatus::Ready => AppError::ai_loading(
+            "the AI model is still loading; try again in a few seconds",
+            LOADING_RETRY_SECS,
+        ),
+        AiStatus::Failed => AppError::unavailable("the AI model could not be loaded on this server"),
+        AiStatus::Off => AppError::unavailable("AI is turned off on this server"),
     }
 }
 
@@ -59,9 +76,7 @@ pub async fn suggest(state: &AppState, bytes: Vec<u8>) -> AppResult<AiSuggestion
     limits.max_bytes = SUGGEST_MAX_BYTES;
     limits.max_pixels = limits.max_pixels.min(SUGGEST_MAX_PIXELS);
     tokio::task::spawn_blocking(move || {
-        let ai = st
-            .ai()
-            .ok_or_else(|| AppError::unavailable("AI suggestions are not available on this server"))?;
+        let ai = st.ai().ok_or_else(|| not_ready(st.ai_status()))?;
         let frame = stickpile_media::decode_frame(&bytes, &limits)?;
         let (_, s) = embed_and_suggest(ai, &cfg, &frame).map_err(|e| AppError::internal(format!("AI: {e}")))?;
         let fill = AiFill::from_suggestions(&s);

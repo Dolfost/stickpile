@@ -1,7 +1,9 @@
 //! Queries only the web UI needs: recently copied items, upload targets, job
 //! queue overview and job lookup with the API's visibility rule.
 
-use stickpile_api::{ItemSummary, Job, JobStatus, SetSummary};
+use std::collections::HashMap;
+
+use stickpile_api::{Item, Job, JobStatus, SetSummary};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -12,8 +14,8 @@ use crate::service::{hydrate, sets};
 use crate::state::AppState;
 
 /// Items the viewer copied most recently (distinct, newest first), among
-/// items they can still read.
-pub async fn recently_copied(state: &AppState, viewer: &CurrentUser, limit: i64) -> AppResult<Vec<ItemSummary>> {
+/// items they can still read, with the viewer's like and their set's name.
+pub async fn recently_copied(state: &AppState, viewer: &CurrentUser, limit: i64) -> AppResult<Vec<(Item, String)>> {
     let ids: Vec<(String, i64)> = sqlx::query_as(
         "SELECT e.item_id, MAX(e.copied_at) AS last FROM usage_events e JOIN items i ON i.id = e.item_id \
          JOIN sets s ON s.id = i.set_id WHERE e.user_id = ? AND (s.owner_id = ? OR s.visibility != 'private') \
@@ -25,7 +27,13 @@ pub async fn recently_copied(state: &AppState, viewer: &CurrentUser, limit: i64)
     .fetch_all(&state.db)
     .await?;
     let ids: Vec<String> = ids.into_iter().map(|(id, _)| id).collect();
-    let mut map = hydrate::summaries_by_id(&state.db, &ids).await?;
+    let rows = hydrate::fetch_by_ids(&state.db, &ids).await?;
+    let items = hydrate::items(&state.db, viewer.id(), &rows).await?;
+    let mut map: HashMap<String, (Item, String)> = items
+        .into_iter()
+        .zip(&rows)
+        .map(|(i, r)| (i.id.clone(), (i, r.set_name.clone())))
+        .collect();
     Ok(ids.iter().filter_map(|id| map.remove(id)).collect())
 }
 

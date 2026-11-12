@@ -229,7 +229,8 @@ impl TargetApp {
 pub struct ApiError {
     /// Stable machine code: `unauthorized`, `forbidden`, `not_found`,
     /// `bad_request`, `conflict`, `too_large`, `unsupported_media`,
-    /// `rate_limited`, `csrf`, `internal`.
+    /// `rate_limited`, `csrf`, `internal`, `unavailable` (AI off),
+    /// `ai_loading` (the AI model is loading; see `Retry-After`).
     pub code: String,
     pub message: String,
 }

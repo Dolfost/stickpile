@@ -52,8 +52,20 @@ image in, `{keywords, emojis, vibe}` out, nothing stored. It runs the same
 code as the `Enrich` job (`service::ai::embed_and_suggest`: embed the image,
 then `ZeroShot::suggest` with `max_keywords`, `max_emojis` and the default
 thresholds), on the blocking thread pool, rate limited per user
-(`limits.ai_suggest_per_minute`), and answers 503 when AI is off (with
-`Retry-After` while the model loads).
+(`limits.ai_suggest_per_minute`). It answers 503 `unavailable` when AI is
+off or the model failed to load, and 503 `ai_loading` with `Retry-After: 2`
+while the model loads; the tray asks again then (for up to three minutes)
+and says it is waiting, and says when AI is off on the server.
+
+**Timing** (measured on a laptop CPU with `text_encoder = "multilingual"`,
+`threads = 2`, a debug build, Chromium): one request takes about 0.1 s on
+the server and the first one after startup is no slower, so the model needs
+no warm-up; from adding files to the fields being filled took 0.15 s for one
+file and 0.4 s for five (two requests at a time). Startup is the slow part:
+the model loads in under a second, embedding the vocabulary (about 1,400
+prompts) takes about 8 s, and until then suggestions answer `ai_loading`.
+Files added meanwhile are filled within 2 s of the model being ready (it
+was up to 10 s with the earlier `Retry-After: 10`).
 
 The browser renders what the server's thumbnail would show and sends that,
 not the file: a PNG with the longest side 256 px (the default

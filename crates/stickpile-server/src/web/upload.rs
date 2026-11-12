@@ -8,6 +8,7 @@
 //! `X-CSRF-Token` header and swaps the results in under the form.
 
 use axum::extract::{Path, Query, Request, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use maud::{html, Markup};
 use serde::Deserialize;
@@ -31,12 +32,21 @@ pub fn upload_form(ctx: &Ctx, state: &AppState, set_id: &str, aspect: Option<(u3
     form(ctx, state, Some(set_id), aspect, &[], None)
 }
 
-/// Where the tray asks for AI suggestions (`data-ai-suggest`): only when AI
-/// is ready, or still loading (the tray then gets 503 with `Retry-After` and
-/// asks again later).
-fn ai_suggest_url(state: &AppState) -> Option<&'static str> {
-    matches!(state.ai_status(), AiStatus::Ready | AiStatus::Loading).then_some(routes::AI_SUGGEST)
+/// The server's AI for the tray: its status (`data-ai`: "ready", "loading",
+/// "off" or "failed", which the tray reports when it cannot suggest) and
+/// where to ask (`data-ai-suggest`), only when AI is ready or still loading
+/// (the tray then gets 503 `ai_loading` with `Retry-After` and asks again).
+fn ai_attrs(state: &AppState) -> (&'static str, Option<&'static str>) {
+    match state.ai_status() {
+        AiStatus::Ready => ("ready", Some(routes::AI_SUGGEST)),
+        AiStatus::Loading => ("loading", Some(routes::AI_SUGGEST)),
+        AiStatus::Off => ("off", None),
+        AiStatus::Failed => ("failed", None),
+    }
 }
+
+/// What an upload without files gets, inline (htmx) or above the form.
+const NO_FILES: &str = "Choose at least one file to upload: pick them, drop them on the form or paste an image.";
 
 /// The upload form. `set_id` fixes the target set (set page); otherwise the
 /// form has a set selector over `sets`.
@@ -65,11 +75,12 @@ fn form(
     let results_id = format!("upload-results-{key}");
     let aspect = aspect.map(|(w, h)| format!("{w}:{h}"));
     let vibes_id = format!("upload-vibes-{key}");
+    let (ai, ai_suggest) = ai_attrs(state);
     html! {
         form.upload-form method="post" enctype="multipart/form-data" action=(action)
             hx-post=(action) hx-encoding="multipart/form-data" hx-target=(format!("#{results_id}")) hx-swap="innerHTML"
             hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] data-vibes=(vibes_id)
-            data-ai-suggest=[ai_suggest_url(state)] {
+            data-ai=(ai) data-ai-suggest=[ai_suggest] {
             (ctx.csrf_input())
             datalist id=(vibes_id) { @for v in &vibes { option value=(v) {} } }
             @if set_id.is_none() {
@@ -153,7 +164,12 @@ pub struct UploadPageQuery {
 }
 
 pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<UploadPageQuery>) -> AppResult<Markup> {
-    let sets = ui::editable_sets(&state, &ctx.user).await?;
+    upload_page(&state, &ctx, q.set.as_deref(), None).await
+}
+
+/// `/upload`, with `error` above the upload form.
+async fn upload_page(state: &AppState, ctx: &Ctx, selected: Option<&str>, error: Option<&str>) -> AppResult<Markup> {
+    let sets = ui::editable_sets(state, &ctx.user).await?;
     let body = html! {
         h1 { "Upload" }
         section aria-labelledby="up-files" {
@@ -161,16 +177,41 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
             @if sets.is_empty() {
                 p { "You need a set first. " a.button href="/sets/new" { "Create a set" } }
             } @else {
-                (form(&ctx, &state, None, None, &sets, q.set.as_deref()))
+                @if let Some(e) = error { (layout::alert("error", e)) }
+                (form(ctx, state, None, None, &sets, selected))
             }
         }
         section #import aria-labelledby="up-import" {
             h2 #up-import { "Import a set directory as a new set" }
-            (import_form(&ctx, None))
+            (import_form(ctx, None))
         }
-        (integrations::upload_page_links(&state))
+        (integrations::upload_page_links(state))
     };
     Ok(ctx.page("Upload", Nav::Upload, body))
+}
+
+/// An upload without files (the form requires them, so only a browser that
+/// skips that check, or a script, sends one): no error page, but the
+/// message where the results would appear (htmx) or above the form again.
+async fn no_files(state: &AppState, ctx: &Ctx, set_id: &str, path_set: Option<&str>) -> AppResult<Response> {
+    if ctx.htmx {
+        return Ok((StatusCode::BAD_REQUEST, layout::alert("error", NO_FILES)).into_response());
+    }
+    let page = match path_set {
+        Some(id) => {
+            authz::editable_set(state, ctx.id(), id).await?;
+            let set = sets::detail(state, &ctx.user, id).await?.set;
+            let body = html! {
+                p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
+                h1 { "Add items to “" (set.name) "”" }
+                (layout::alert("error", NO_FILES))
+                (upload_form(ctx, state, &set.id, set.aspect_ratio))
+            };
+            ctx.page("Upload", Nav::Upload, body)
+        }
+        None => upload_page(state, ctx, Some(set_id), Some(NO_FILES)).await?,
+    };
+    Ok((StatusCode::BAD_REQUEST, page).into_response())
 }
 
 /// Read an upload body: optional `set_id` text field (before the files),
@@ -212,9 +253,6 @@ async fn read_upload(
         }
     }
     let set_id = set_id.ok_or_else(|| AppError::bad_request("choose a set"))?;
-    if files.is_empty() {
-        return Err(AppError::bad_request("choose at least one file"));
-    }
     Ok((set_id, UploadParts { files, meta }))
 }
 
@@ -226,6 +264,9 @@ async fn do_upload(
 ) -> AppResult<Response> {
     let (set_id, parts) = read_upload(state, &caller, req, path_set).await?;
     let ctx = &caller.ctx;
+    if parts.files.is_empty() {
+        return no_files(state, ctx, &set_id, path_set).await;
+    }
     let single_name = (parts.files.len() == 1).then(|| upload::base_name(&parts.files[0].filename).to_string());
     let results = match upload::upload(state, &ctx.user, &set_id, parts).await {
         Ok(r) => r,

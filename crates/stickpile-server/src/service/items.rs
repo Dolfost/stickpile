@@ -327,12 +327,7 @@ pub async fn enrich(state: &AppState, viewer: &CurrentUser, item_id: &str) -> Ap
     let r = authz::editable_item(state, viewer.id(), item_id).await?;
     match state.ai_status() {
         crate::state::AiStatus::Ready => {}
-        crate::state::AiStatus::Loading => {
-            return Err(AppError::unavailable(
-                "the AI model is still loading; try again shortly",
-            ));
-        }
-        _ => return Err(AppError::unavailable("AI enrichment is not available on this server")),
+        s => return Err(crate::service::ai::not_ready(s)),
     }
     jobs::enqueue(
         state,

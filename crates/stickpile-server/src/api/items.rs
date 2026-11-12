@@ -162,7 +162,8 @@ pub async fn better(
     Ok(Json(svc::better(&state, &user, &id).await?))
 }
 
-/// Re-run AI enrichment (owner). 503 `unavailable` when AI is off.
+/// Re-run AI enrichment (owner). 503 `unavailable` when AI is off, `ai_loading`
+/// (with `Retry-After`) while the model loads.
 #[utoipa::path(post, path = r::ITEM_ENRICH, tag = "items", params(("id" = String, Path, description = "item id")),
     responses((status = 200, body = Job), (status = 404, body = ApiError), (status = 503, body = ApiError)),
     security(("bearer" = []), ("session" = [])))]

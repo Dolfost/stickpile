@@ -184,7 +184,10 @@ async fn suggestions_need_auth_and_csrf() {
     let set = srv.create_set(&u, "s", Visibility::Private).await;
     for page in ["/upload".to_string(), format!("/sets/{}", set.id)] {
         let html = b.get(&page).await.expect(200).text();
-        assert!(html.contains(r#"data-ai-suggest="/api/v1/ai/suggest""#), "{page}");
+        assert!(
+            html.contains(r#"data-ai="ready" data-ai-suggest="/api/v1/ai/suggest""#),
+            "{page}"
+        );
     }
 }
 
@@ -207,25 +210,52 @@ async fn suggestions_are_rate_limited() {
 
 #[tokio::test]
 async fn suggestions_without_ai() {
+    use stickpile_server::state::AiStatus;
     let srv = TestServer::start().await;
     let u = srv.user("alice").await;
     let r = suggest(&srv, &u, solid_png([230, 20, 20], 1)).await.expect(503);
     assert_eq!(r.code(), "unavailable");
+    assert!(
+        r.value()["message"].as_str().unwrap().contains("turned off"),
+        "{}",
+        r.text()
+    );
     assert!(r.header("retry-after").is_none(), "off is not \"later\"");
-    // No attribute, so the tray does not ask.
+    // No URL, so the tray does not ask; it says AI is off (data-ai).
     let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let item = srv.upload_one(&u, &set.id, "a.png", png(1)).await;
     let b = Browser::login(&srv, &u).await;
     for page in ["/upload".to_string(), format!("/sets/{}", set.id)] {
         let html = b.get(&page).await.expect(200).text();
         assert!(html.contains("data-dropzone"), "{page}");
+        assert!(html.contains("data-ai=\"off\""), "{page}");
         assert!(!html.contains("data-ai-suggest"), "{page}");
     }
-    // While the model loads: 503 with Retry-After, and the tray may ask.
-    srv.state.set_ai_status(stickpile_server::state::AiStatus::Loading);
+    // While the model loads: 503 `ai_loading` with a short Retry-After (the
+    // tray asks again then), for suggestions and re-running enrichment.
+    srv.state.set_ai_status(AiStatus::Loading);
+    let r = suggest(&srv, &u, solid_png([230, 20, 20], 1)).await.expect(503);
+    assert_eq!(r.code(), "ai_loading");
+    assert_eq!(r.header("retry-after").as_deref(), Some("2"));
+    let r = srv
+        .post(&u, &routes::path(routes::ITEM_ENRICH, &[&item.id]), json!({}))
+        .await
+        .expect(503);
+    assert_eq!(r.code(), "ai_loading");
+    assert_eq!(r.header("retry-after").as_deref(), Some("2"));
+    let html = b.get("/upload").await.expect(200).text();
+    assert!(
+        html.contains("data-ai=\"loading\" data-ai-suggest=\"/api/v1/ai/suggest\""),
+        "{html}"
+    );
+    // The model failed to load: "not here", like off, with its own message.
+    srv.state.set_ai_status(AiStatus::Failed);
     let r = suggest(&srv, &u, solid_png([230, 20, 20], 1)).await.expect(503);
     assert_eq!(r.code(), "unavailable");
-    assert_eq!(r.header("retry-after").as_deref(), Some("10"));
-    assert!(b.get("/upload").await.expect(200).text().contains("data-ai-suggest"));
+    assert!(r.value()["message"].as_str().unwrap().contains("could not be loaded"));
+    assert!(r.header("retry-after").is_none());
+    let html = b.get("/upload").await.expect(200).text();
+    assert!(html.contains("data-ai=\"failed\"") && !html.contains("data-ai-suggest"));
 }
 
 #[tokio::test]

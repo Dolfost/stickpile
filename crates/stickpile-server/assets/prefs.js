@@ -9,10 +9,11 @@
 //   choice is remembered in localStorage (stickpile.theme) and applied here
 //   on pages without a session, such as the sign-in page.
 // * As the first child of an element with data-view-prefs="items" (the set
-//   page's #items-section) or "sets" (set lists): the remembered display
-//   options become classes on that element (a style class, `hide-<part>`)
-//   before the rest of it is parsed, so nothing shows up and vanishes again.
-//   On the set page a `view` URL parameter wins and is remembered.
+//   page's #items-section), "home" (the start page's recently copied items)
+//   or "sets" (set lists): the remembered display options become classes on
+//   that element (a style class, `hide-<part>`) before the rest of it is
+//   parsed, so nothing shows up and vanishes again. On the set page a `view`
+//   URL parameter wins and is remembered.
 // * Once the document is parsed: the "View" controls
 //   (details[data-view-menu]) apply a change at once and remember it, and
 //   keep the set page's `?view=` in the address bar in sync; the top bar's
@@ -63,6 +64,20 @@
       off: {
         compact: { parts: ["keywords", "vibe", "tags"], note: "Compact shows the name and the emojis." },
         grid: { parts: ["emojis", "keywords", "vibe", "tags"], note: "Grid shows the thumbnails only." },
+      },
+    },
+    // The start page's recently copied items: the set page's cards with
+    // their set, remembered apart from the set pages.
+    home: {
+      styleKey: "stickpile.home.view",
+      legacyKey: null,
+      hideKey: "stickpile.home.hide",
+      styles: { regular: "", compact: "compact", grid: "view-grid" },
+      parts: ["set", "emojis", "keywords", "vibe", "tags", "labels"],
+      param: null,
+      off: {
+        compact: { parts: ["set", "keywords", "vibe", "tags"], note: "Compact shows the name and the emojis." },
+        grid: { parts: ["set", "emojis", "keywords", "vibe", "tags"], note: "Grid shows the thumbnails only." },
       },
     },
     sets: {
@@ -208,6 +223,26 @@
     menu.addEventListener("toggle", function () {
       if (menu.open) placePanel(menu);
     });
+    // A whole option is its label, so a press anywhere on it selects it.
+    // But a press on the text, the hint or the padding (nothing focusable)
+    // moves the focus to the closest focusable ancestor, <main>, before the
+    // label's click arrives: the panel took that for "focus left" and
+    // closed under the pointer, and the click landed on the page. Keep the
+    // focus where it is on a press inside the panel (the click still
+    // selects), then put it on the chosen option, so the keyboard carries
+    // on there and the panel stays open for more changes.
+    var panel = menu.querySelector(".view-panel");
+    if (panel) {
+      panel.addEventListener("mousedown", function (e) {
+        if (e.target instanceof Element && !e.target.closest("input")) e.preventDefault();
+      });
+      panel.addEventListener("click", function (e) {
+        var t = e.target instanceof Element ? e.target : null;
+        var label = t && t.closest("label");
+        var input = t && (t.closest("input") || (label && label.querySelector("input")));
+        if (input && !input.disabled && document.activeElement !== input) input.focus({ preventScroll: true });
+      });
+    }
     // Escape closes the panel and returns to its button.
     menu.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !menu.open) return;
@@ -217,9 +252,12 @@
       var summary = menu.querySelector("summary");
       if (summary) summary.focus();
     });
-    // Focus moving elsewhere closes it too.
+    // Focus moving elsewhere closes it too (Tab out of the panel); not to a
+    // container of the panel, which only means a press on something that
+    // takes no focus. Presses outside are handled on pointerdown (below).
     menu.addEventListener("focusout", function (e) {
-      if (menu.open && e.relatedTarget instanceof Element && !menu.contains(e.relatedTarget)) menu.open = false;
+      var to = e.relatedTarget;
+      if (menu.open && to instanceof Element && !menu.contains(to) && !to.contains(menu)) menu.open = false;
     });
   }
 

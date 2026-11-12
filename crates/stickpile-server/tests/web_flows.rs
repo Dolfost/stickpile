@@ -96,10 +96,53 @@ async fn set_lifecycle_without_javascript() {
     assert_page(&r);
     assert!(r.text().contains("0 files added"));
     assert!(r.text().contains("1 failed"));
-    // Empty file input.
-    let r = b.post_multipart(&upload, vec![], true).await;
+    // Nothing chosen (no file part, or the empty part browsers send): not an
+    // error page, but the upload form again with the message (400).
+    for files in [vec![], vec![("file", "", Vec::new())]] {
+        let r = b.post_multipart(&upload, files, true).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+        let html = r.text();
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert_clean_html(&html);
+        assert!(html.contains("Choose at least one file to upload"), "{html}");
+        assert!(!html.contains("Request failed"), "{html}");
+        assert!(
+            html.contains(&format!("action=\"/sets/{set_id}/upload\"")),
+            "the form again: {html}"
+        );
+        assert!(
+            html.contains(&format!("href=\"/sets/{set_id}\">← My Cats</a>")),
+            "{html}"
+        );
+    }
+    // htmx: the message where the results go (the form's target), not
+    // retargeted to the page's #flash.
+    let r = common::read(
+        b.client
+            .post(b.url(&upload))
+            .header("HX-Request", "true")
+            .header("X-CSRF-Token", b.csrf.clone().unwrap())
+            .multipart(reqwest::multipart::Form::new().text("csrf_token", b.csrf.clone().unwrap()))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    assert!(r.text().contains("choose at least one file"));
+    assert_fragment(&r);
+    assert!(r.header("hx-retarget").is_none());
+    assert!(r
+        .text()
+        .contains("<div class=\"alert error\" role=\"alert\">Choose at least one file to upload"));
+    // /upload: the page again, with the chosen set still selected.
+    let r = b.post_multipart_fields("/upload", &[("set_id", &set_id)], vec![]).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let html = r.text();
+    assert!(html.contains("Choose at least one file to upload"), "{html}");
+    assert!(
+        html.contains(&format!("<option value=\"{set_id}\" selected>")),
+        "{html}"
+    );
 
     // /upload with the set selector, and the tray's details for the file
     // (`meta`, one entry per file like the API).
@@ -546,13 +589,13 @@ async fn web_copy_is_recorded_and_shows_in_recently_copied() {
     let home = b.get("/").await.text();
     assert!(home.contains("Recently copied"));
     let (d, c) = (
-        home.find(&format!("id=\"card-{}\"", dance.id))
+        home.find(&format!("id=\"item-{}\"", dance.id))
             .expect("dance in recently copied"),
-        home.find(&format!("id=\"card-{}\"", cat.id))
+        home.find(&format!("id=\"item-{}\"", cat.id))
             .expect("cat in recently copied"),
     );
     assert!(d < c, "newest first");
-    let card = tag_with(&home, &format!("id=\"card-{}\"", cat.id));
+    let card = tag_with(&home, &format!("id=\"item-{}\"", cat.id));
     assert!(card.contains("data-menu"), "{card}");
     assert!(card.contains(&format!("data-item-url=\"/items/{}\"", cat.id)));
     assert!(card.contains(&format!("data-download-url=\"/api/v1/items/{}/file/original\"", cat.id)));
