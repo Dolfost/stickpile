@@ -21,8 +21,8 @@ async fn reload(state: &AppState, viewer: &CurrentUser) -> AppResult<db::UserRow
 }
 
 /// Update the caller's profile: username ([`crate::service::users::rename`]),
-/// display name (empty resets it to the username) and the Telegram user id
-/// that owns exported packs.
+/// display name (empty resets it to the username), the Telegram user id
+/// that owns exported packs and the web UI theme.
 pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) -> AppResult<User> {
     // Validate everything before the rename, so a bad field changes nothing.
     let display = req
@@ -67,6 +67,15 @@ pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) ->
             "telegram_user_id".into(),
             tg.map(Into::into).unwrap_or(serde_json::Value::Null),
         );
+    }
+    // A display preference: not audited (the top bar's switch would fill
+    // the log).
+    if let Some(theme) = req.theme {
+        sqlx::query("UPDATE users SET theme = ? WHERE id = ?")
+            .bind(theme.as_str())
+            .bind(viewer.id())
+            .execute(&state.db)
+            .await?;
     }
     if !changes.is_empty() {
         db::audit(

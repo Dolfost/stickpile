@@ -173,6 +173,12 @@ pub enum Icon {
     Up,
     Down,
     More,
+    /// The light/dark switch (shown in the light theme).
+    Moon,
+    /// The light/dark switch (shown in the dark theme).
+    Sun,
+    /// The "View" (display options) buttons.
+    View,
 }
 
 pub fn icon(i: Icon) -> Markup {
@@ -184,10 +190,28 @@ pub fn icon(i: Icon) -> Markup {
         Icon::Up => &["M12 19V5", "M6 11l6-6 6 6"],
         Icon::Down => &["M12 5v14", "M6 13l6 6 6-6"],
         Icon::More => &["M5 12h.01", "M12 12h.01", "M19 12h.01"],
+        Icon::Moon => &["M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"],
+        Icon::Sun => &[
+            "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8z",
+            "M12 2.5v2",
+            "M12 19.5v2",
+            "M2.5 12h2",
+            "M19.5 12h2",
+            "M5.3 5.3l1.4 1.4",
+            "M17.3 17.3l1.4 1.4",
+            "M5.3 18.7l1.4-1.4",
+            "M17.3 6.7l1.4-1.4",
+        ],
+        Icon::View => &["M4 6h16", "M4 12h16", "M4 18h16", "M15 3.5v5", "M9 9.5v5", "M17 15.5v5"],
     };
     let width = if i == Icon::More { "3.2" } else { "2" };
+    let class = match i {
+        Icon::Moon => "icon icon-moon",
+        Icon::Sun => "icon icon-sun",
+        _ => "icon",
+    };
     html! {
-        svg.icon viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
+        svg class=(class) viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none"
             stroke="currentColor" stroke-width=(width) stroke-linecap="round" stroke-linejoin="round" {
             @for d in paths { path d=(d) {} }
         }
@@ -284,6 +308,8 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
     }
 }
 
+/// A set in a list. Each part has a class of its own, so the list's display
+/// options (`hide-*` classes on [`set_list`]) can hide it without gaps.
 pub fn set_card(s: &SetSummary) -> Markup {
     html! {
         article.card.set-card {
@@ -296,10 +322,17 @@ pub fn set_card(s: &SetSummary) -> Markup {
             }
             div.card-body {
                 h3.name { a href=(set_url(&s.id)) { (s.name) } }
-                p.meta {
-                    (s.item_count) " items · " (visibility_badge(s.visibility)) " " (source_badge(s.source))
+                @if !s.description.is_empty() {
+                    p.set-desc { (s.description) }
                 }
-                p.meta.small { "by " (s.owner_username) " · " code { (s.slug) } }
+                p.meta.set-facts {
+                    span.set-count { (plural(s.item_count, "item", "items")) }
+                    span.set-badges { (visibility_badge(s.visibility)) " " (source_badge(s.source)) }
+                }
+                p.meta.small.set-facts {
+                    span.set-owner { "by " (s.owner_username) }
+                    span.set-slug { code { (s.slug) } }
+                }
             }
         }
     }
@@ -308,6 +341,89 @@ pub fn set_card(s: &SetSummary) -> Markup {
 pub fn grid(cards: Markup) -> Markup {
     html! { div.grid { (cards) } }
 }
+
+// ---- display options (begin) ----------------------------------------------
+
+/// Show/hide toggles of set lists: (key, label, hint). prefs.js puts
+/// `hide-{key}` on the list.
+pub const SET_PARTS: [(&str, &str, &str); 6] = [
+    ("cover", "Cover", ""),
+    ("description", "Description", ""),
+    ("count", "Item count", ""),
+    ("badges", "Labels", "visibility, source"),
+    ("owner", "Owner", ""),
+    ("slug", "Slug", ""),
+];
+
+/// Styles of set lists: (value, label, hint).
+const SET_STYLES: [(&str, &str, &str); 2] = [
+    ("regular", "Regular cards", "cover, name and details"),
+    ("compact", "Compact", "smaller cards, more per row"),
+];
+
+/// Set cards (`/sets`, home) in a wrapper that carries the list's display
+/// options. The script as its first child applies the remembered options
+/// before the cards are parsed, so they never show up and vanish again.
+pub fn set_list(sets: &[SetSummary]) -> Markup {
+    html! {
+        div.set-list data-view-prefs="sets" {
+            script src=(crate::assets::url("prefs.js")) {}
+            div.grid.set-grid { @for s in sets { (set_card(s)) } }
+        }
+    }
+}
+
+/// The "View" control of set lists. All of it needs JavaScript (the styles
+/// are not in the URL), so it is hidden without.
+pub fn set_list_view() -> Markup {
+    view_menu("sets", "sets-view", &SET_STYLES, "regular", &SET_PARTS, true)
+}
+
+/// A "View" disclosure: a style (radio buttons named `style_name`) and
+/// show/hide toggles. prefs.js applies a choice at once to the elements
+/// marked `data-view-prefs=(kind)` and remembers it in localStorage; the
+/// toggles need it and stay hidden without. `needs_js` hides the whole
+/// control without JavaScript (the set page's style instead works through
+/// its filter form).
+pub fn view_menu(
+    kind: &str,
+    style_name: &str,
+    styles: &[(&str, &str, &str)],
+    current: &str,
+    parts: &[(&str, &str, &str)],
+    needs_js: bool,
+) -> Markup {
+    html! {
+        details.view-menu id=(format!("{kind}-view")) data-view-menu=(kind) hidden[needs_js] {
+            summary.button { (icon(Icon::View)) "View" }
+            div.view-panel {
+                fieldset.view-style {
+                    legend { "Style" }
+                    @for (value, label, hint) in styles {
+                        label.radio {
+                            input type="radio" name=(style_name) value=(value) checked[*value == current];
+                            span.opt { span.opt-name { (label) } @if !hint.is_empty() { span.opt-hint { (hint) } } }
+                        }
+                    }
+                }
+                fieldset.view-show hidden data-view-show="" {
+                    legend { "Show" }
+                    @for (key, label, hint) in parts {
+                        label.check {
+                            input type="checkbox" value=(key) checked data-view-part="";
+                            // "Show emojis", not "Emojis": the upload tray on the
+                            // same page has fields with those names.
+                            span.opt { span.opt-name { span.sr-only { "Show " } (label) } @if !hint.is_empty() { span.opt-hint { (hint) } } }
+                        }
+                    }
+                    p.view-note hidden data-view-note="" {}
+                }
+            }
+        }
+    }
+}
+
+// ---- display options (end) ------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Formatting

@@ -148,6 +148,9 @@ pub struct LimitsConfig {
     pub login_per_minute: u32,
     /// Per user.
     pub upload_per_minute: u32,
+    /// AI suggestion requests (`POST /api/v1/ai/suggest`, the upload tray
+    /// asks once per staged file), per user.
+    pub ai_suggest_per_minute: u32,
 }
 
 impl Default for LimitsConfig {
@@ -160,6 +163,7 @@ impl Default for LimitsConfig {
             max_video_seconds: 120,
             login_per_minute: 10,
             upload_per_minute: 120,
+            ai_suggest_per_minute: 120,
         }
     }
 }
@@ -367,7 +371,10 @@ impl Config {
         if self.limits.max_upload_mb == 0 || self.limits.max_request_mb < self.limits.max_upload_mb {
             return bad("limits.max_request_mb must be >= limits.max_upload_mb > 0".into());
         }
-        if self.limits.login_per_minute == 0 || self.limits.upload_per_minute == 0 {
+        if self.limits.login_per_minute == 0
+            || self.limits.upload_per_minute == 0
+            || self.limits.ai_suggest_per_minute == 0
+        {
             return bad("rate limits must be > 0".into());
         }
         if self.media.workers == 0 {

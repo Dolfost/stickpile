@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use super::{admin, auth, integrations, items, misc, sets};
+use super::{admin, ai, auth, integrations, items, misc, sets};
 
 struct SecuritySchemes;
 
@@ -82,6 +82,7 @@ impl Modify for SecuritySchemes {
         items::unlike,
         items::better,
         items::enrich,
+        ai::suggest,
         misc::search,
         misc::usage,
         misc::popular,
@@ -105,6 +106,7 @@ impl Modify for SecuritySchemes {
         (name = "auth", description = "Login, registration, account, API tokens"),
         (name = "sets", description = "Sets, uploads, import/export"),
         (name = "items", description = "Items and their files"),
+        (name = "ai", description = "AI suggestions for images before they are uploaded"),
         (name = "search", description = "Hybrid search"),
         (name = "stats", description = "Usage events, popular items, statistics"),
         (name = "admin", description = "Administration (role admin)"),

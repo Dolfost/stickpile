@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::response::{IntoResponse, Response};
 use maud::{html, Markup};
 use serde::Deserialize;
-use stickpile_api::{ImportReport, NearDuplicate, SetSummary, UploadResult};
+use stickpile_api::{routes, ImportReport, NearDuplicate, SetSummary, UploadResult};
 
 use super::components::{item_url, plural, set_url, thumb};
 use super::layout::{self, Nav};
@@ -20,16 +20,22 @@ use crate::authz;
 use crate::error::{AppError, AppResult};
 use crate::service::upload::{self, field_text, field_to_file, multipart_error, UploadParts};
 use crate::service::{sets, transfer, ui};
-use crate::state::AppState;
+use crate::state::{AiStatus, AppState};
 
 const ACCEPT: &str =
     "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm";
 
 /// The upload form of a set page. `aspect` is the set's recommended aspect
-/// ratio, offered as a crop preset by the upload tray (upload.js); `vibes`
-/// are the suggestions for the tray's vibe field.
-pub fn upload_form(ctx: &Ctx, set_id: &str, aspect: Option<(u32, u32)>, vibes: &[String]) -> Markup {
-    form(ctx, Some(set_id), aspect, vibes, &[], None)
+/// ratio, offered as a crop preset by the upload tray (upload.js).
+pub fn upload_form(ctx: &Ctx, state: &AppState, set_id: &str, aspect: Option<(u32, u32)>) -> Markup {
+    form(ctx, state, Some(set_id), aspect, &[], None)
+}
+
+/// Where the tray asks for AI suggestions (`data-ai-suggest`): only when AI
+/// is ready, or still loading (the tray then gets 503 with `Retry-After` and
+/// asks again later).
+fn ai_suggest_url(state: &AppState) -> Option<&'static str> {
+    matches!(state.ai_status(), AiStatus::Ready | AiStatus::Loading).then_some(routes::AI_SUGGEST)
 }
 
 /// The upload form. `set_id` fixes the target set (set page); otherwise the
@@ -39,15 +45,18 @@ pub fn upload_form(ctx: &Ctx, set_id: &str, aspect: Option<(u32, u32)>, vibes: &
 /// tray where each one gets its name, keywords, emojis, vibe and tags, and
 /// still images can be rotated, flipped and cropped before the upload. The
 /// details go in a `meta` field (JSON, one entry per file, like the API).
+/// With `data-ai-suggest` the tray also asks for AI keywords, emojis and
+/// vibe for each file, to approve or edit before the upload.
 /// Without JavaScript the file input posts the files as they are.
 fn form(
     ctx: &Ctx,
+    state: &AppState,
     set_id: Option<&str>,
     aspect: Option<(u32, u32)>,
-    vibes: &[String],
     sets: &[SetSummary],
     selected: Option<&str>,
 ) -> Markup {
+    let vibes = super::items::vibes(state);
     let action = match set_id {
         Some(id) => format!("/sets/{id}/upload"),
         None => "/upload".to_string(),
@@ -59,9 +68,10 @@ fn form(
     html! {
         form.upload-form method="post" enctype="multipart/form-data" action=(action)
             hx-post=(action) hx-encoding="multipart/form-data" hx-target=(format!("#{results_id}")) hx-swap="innerHTML"
-            hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] data-vibes=(vibes_id) {
+            hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] data-vibes=(vibes_id)
+            data-ai-suggest=[ai_suggest_url(state)] {
             (ctx.csrf_input())
-            datalist id=(vibes_id) { @for v in vibes { option value=(v) {} } }
+            datalist id=(vibes_id) { @for v in &vibes { option value=(v) {} } }
             @if set_id.is_none() {
                 div.field-row {
                     label for="upload-set" { "Add to set" }
@@ -151,7 +161,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
             @if sets.is_empty() {
                 p { "You need a set first. " a.button href="/sets/new" { "Create a set" } }
             } @else {
-                (form(&ctx, None, None, &super::items::vibes(&state), &sets, q.set.as_deref()))
+                (form(&ctx, &state, None, None, &sets, q.set.as_deref()))
             }
         }
         section #import aria-labelledby="up-import" {

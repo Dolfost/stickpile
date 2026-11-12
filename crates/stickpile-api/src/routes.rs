@@ -80,6 +80,12 @@ pub const ITEM_BETTER: &str = "/api/v1/items/{id}/better";
 /// POST -> [`crate::model::Job`]: re-run AI enrichment.
 pub const ITEM_ENRICH: &str = "/api/v1/items/{id}/enrich";
 
+// --- AI ----------------------------------------------------------------------------
+/// POST multipart (one `file` part: a still image, at most 2 MiB; a small
+/// rendering is enough) -> [`crate::model::AiSuggestions`]. Stores nothing.
+/// 503 `unavailable` when AI is off or still loading.
+pub const AI_SUGGEST: &str = "/api/v1/ai/suggest";
+
 // --- search, usage, stats ----------------------------------------------------------
 /// GET `?q=<query>&limit=&offset=&target=<TargetApp>` -> [`crate::model::SearchResults`]
 pub const SEARCH: &str = "/api/v1/search";

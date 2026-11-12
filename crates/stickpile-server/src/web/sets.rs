@@ -11,10 +11,11 @@ use stickpile_api::routes as r;
 use stickpile_api::{CreateSet, Item, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Variant, Visibility};
 
 use super::components::{
-    file_url, fmt_time, grid, opt_time, plural, set_card, set_url, source_badge, visibility_badge,
+    file_url, fmt_time, opt_time, plural, set_list, set_list_view, set_url, source_badge, view_menu, visibility_badge,
 };
 use super::layout::{self, Nav};
 use super::{integrations, items, upload, Ctx};
+use crate::assets;
 use crate::error::{AppError, AppResult};
 use crate::service::sets::{self, SetScope};
 use crate::state::AppState;
@@ -49,17 +50,20 @@ pub async fn list(State(state): State<AppState>, ctx: Ctx, Query(q): Query<ListQ
                 a href="/sets?tab=public" { "Public" }
             }
         }
-        p.muted.small {
-            @if public {
-                "Public sets of every user on this server. Unlisted sets are only reachable by their link."
-            } @else {
-                "Your own sets, most recently changed first."
+        div.list-head {
+            p.muted.small {
+                @if public {
+                    "Public sets of every user on this server. Unlisted sets are only reachable by their link."
+                } @else {
+                    "Your own sets, most recently changed first."
+                }
             }
+            @if !list.is_empty() { (set_list_view()) }
         }
         @if list.is_empty() {
             p.muted { @if public { "No public sets yet." } @else { "You have no sets yet." } }
         } @else {
-            (grid(html! { @for s in &list { (set_card(s)) } }))
+            (set_list(&list))
         }
     };
     Ok(ctx.page("Sets", Nav::Sets, body))
@@ -281,11 +285,67 @@ pub struct SetQuery {
     sort: Option<String>,
     #[serde(default)]
     min_likes: Option<String>,
-    /// `compact`: the denser grid (thumbnails with a one-line caption).
-    /// app.js applies the same class instantly and remembers the choice.
+    /// The style of the items ([`ItemsView`]). prefs.js applies the same
+    /// class instantly and remembers the choice.
     #[serde(default)]
     view: Option<String>,
 }
+
+// ---- display options (begin) ----------------------------------------------
+
+/// Style of the set page's items (`?view=`): every field, the denser grid
+/// with the name and emojis, or thumbnails only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemsView {
+    Regular,
+    Compact,
+    Grid,
+}
+
+impl ItemsView {
+    /// (view, `view` value, label, hint).
+    const ALL: [(ItemsView, &'static str, &'static str, &'static str); 3] = [
+        (ItemsView::Regular, "regular", "Regular", "every field and button"),
+        (
+            ItemsView::Compact,
+            "compact",
+            "Compact",
+            "the name, emojis at the bottom",
+        ),
+        (ItemsView::Grid, "grid", "Grid", "thumbnails only"),
+    ];
+    fn parse(s: Option<&str>) -> ItemsView {
+        ItemsView::ALL
+            .iter()
+            .find(|(_, k, _, _)| Some(*k) == s)
+            .map_or(ItemsView::Regular, |(v, _, _, _)| *v)
+    }
+    fn key(self) -> &'static str {
+        ItemsView::ALL
+            .iter()
+            .find(|(v, _, _, _)| *v == self)
+            .map_or("regular", |(_, k, _, _)| k)
+    }
+}
+
+/// Show/hide toggles of the set page (`hide-{key}` on the items section).
+/// The name always shows; "Labels" are the badges on the thumbnail.
+const ITEM_PARTS: [(&str, &str, &str); 5] = [
+    ("emojis", "Emojis", ""),
+    ("keywords", "Keywords", ""),
+    ("vibe", "Vibe", ""),
+    ("tags", "Tags", ""),
+    ("labels", "Labels", "kind, quality, cover"),
+];
+
+/// The set page's "View" control, inside the filter form: without
+/// JavaScript the style radios are submitted by "Apply" (`?view=`).
+fn items_view_menu(view: ItemsView) -> Markup {
+    let styles: Vec<(&str, &str, &str)> = ItemsView::ALL.iter().map(|(_, k, l, h)| (*k, *l, *h)).collect();
+    view_menu("items", "view", &styles, view.key(), &ITEM_PARTS, false)
+}
+
+// ---- display options (end) ------------------------------------------------
 
 /// Filter ("hide below N likes") and sort a set's items.
 pub fn arrange(items: &[Item], sort: Sort, min_likes: u64) -> Vec<&Item> {
@@ -337,7 +397,7 @@ pub async fn page(
     let detail = sets::detail(&state, &ctx.user, &id).await?;
     let sort = Sort::parse(q.sort.as_deref());
     let min_likes: u64 = q.min_likes.as_deref().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-    let compact = q.view.as_deref() == Some("compact");
+    let view = ItemsView::parse(q.view.as_deref());
     let set = &detail.set;
     let is_owner = set.owner_id == ctx.id();
     let body = html! {
@@ -369,20 +429,25 @@ pub async fn page(
         @if set.editable {
             section.uploader aria-labelledby="upload-head" {
                 h2 #upload-head { "Add items" }
-                (upload::upload_form(&ctx, &set.id, set.aspect_ratio, &super::items::vibes(&state)))
+                (upload::upload_form(&ctx, &state, &set.id, set.aspect_ratio))
                 details.import-into {
                     summary { "Replace from a set directory" }
                     (upload::import_form(&ctx, Some(&set.id)))
                 }
             }
         }
-        // The view class sits on this wrapper, outside `#set-items`, so it
-        // survives the grid swaps after reordering and uploads.
-        section #items-section .items-section .compact[compact] aria-labelledby="items-head" {
+        // The view classes sit on this wrapper, outside `#set-items`, so they
+        // survive the grid swaps after reordering and uploads. The script
+        // (its first child) applies the remembered display options before
+        // the cards are parsed.
+        section #items-section .items-section .compact[view == ItemsView::Compact] .view-grid[view == ItemsView::Grid]
+            data-view-prefs="items" aria-labelledby="items-head" {
+            script src=(assets::url("prefs.js")) {}
             div.section-head {
                 h2 #items-head { "Items" }
                 // One GET form: Apply keeps the filter, the sort and the view
-                // together. With JavaScript the checkbox applies at once.
+                // style together. With JavaScript the View control applies
+                // at once.
                 form.filters method="get" action=(set_url(&set.id)) {
                     label for="f-min-likes" { "Hide below" }
                     input #f-min-likes type="number" name="min_likes" min="0" value=(min_likes) class="narrow-num";
@@ -393,11 +458,7 @@ pub async fn page(
                             option value=(key) selected[s == sort] { (label) }
                         }
                     }
-                    label.check for="f-view" {
-                        input #f-view type="checkbox" name="view" value="compact" checked[compact]
-                            data-view-toggle="items-section";
-                        "Compact view"
-                    }
+                    (items_view_menu(view))
                     button type="submit" { "Apply" }
                 }
             }

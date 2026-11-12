@@ -3,6 +3,7 @@
 //! carries a `#[utoipa::path]` and is listed in [`openapi::ApiDoc`].
 
 pub mod admin;
+pub mod ai;
 pub mod auth;
 pub mod integrations;
 pub mod items;
@@ -23,7 +24,8 @@ use crate::error::{code_for_status, AppError};
 use crate::state::AppState;
 
 /// Every API route. Upload and import routes get the request size limit
-/// `limits.max_request_mb`; everything else the default 2 MiB.
+/// `limits.max_request_mb`, AI suggestions their image limit plus room for
+/// the multipart framing; everything else the default 2 MiB.
 pub fn routes(state: &AppState) -> Router<AppState> {
     let big = DefaultBodyLimit::max((state.config.limits.max_request_mb * 1024 * 1024) as usize);
     Router::new()
@@ -58,6 +60,13 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::ITEM_LIKE, put(items::like).delete(items::unlike))
         .route(r::ITEM_BETTER, get(items::better))
         .route(r::ITEM_ENRICH, post(items::enrich))
+        // AI suggestions: one small image, nothing stored.
+        .route(
+            r::AI_SUGGEST,
+            post(ai::suggest).layer(DefaultBodyLimit::max(
+                (crate::service::ai::SUGGEST_MAX_BYTES + 64 * 1024) as usize,
+            )),
+        )
         // search, usage, stats
         .route(r::SEARCH, get(misc::search))
         .route(r::USAGE, post(misc::usage))

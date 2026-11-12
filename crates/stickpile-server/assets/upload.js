@@ -19,6 +19,19 @@
 //
 // The form's data-aspect ("4:3") adds the set's recommended aspect ratio as
 // a crop preset; data-vibes names the datalist of vibe suggestions.
+//
+// AI suggestions: when the form has data-ai-suggest (the server's AI is
+// ready or loading), every staged file is rendered small in the browser (a
+// PNG with the longest side 256 px, like the server's thumbnails: the image,
+// an animation's first frame, or a video frame at a tenth of its length) and
+// sent there, two at a time, in the background. The keywords, emojis and
+// vibe that come back fill only fields that are still empty and are marked
+// AI until approved: ✓ on a field (a toggle), "Approve all" for the file, or
+// "Approve AI for all files" in the tray head. Editing a field makes the
+// value the user's; so does "Use for every file", for the selected file and
+// the others. Unapproved values are uploaded with `ai_fields`, so the item
+// keeps them marked AI (to confirm on the item page). Tags are never
+// suggested. Failures are quiet: the fields just stay as they are.
 (function () {
   "use strict";
 
@@ -54,6 +67,11 @@
   var STAGE_VH = 0.7; // and up to this share of the window height
   var MAX_ZOOM = 3; // small images are shown at most this much larger
   var THUMB = 176; // edited thumbnails, device pixels
+  var SUGGEST_PX = 256; // longest side of the image sent for AI suggestions
+  var SUGGEST_AT_ONCE = 2; // suggestion requests in flight per tray
+  var SUGGEST_TRIES = 3; // per file, when the server says "later" (429, 503 + Retry-After)
+  // The details AI may suggest, with the names used in sentences.
+  var AI_FIELDS = ["keywords", "emojis", "vibe"];
   // Orientation as a 2×2 matrix, to notice when edits cancel out.
   var IDENTITY = [1, 0, 0, 1];
   var TURN = {
@@ -93,6 +111,12 @@
 
   function plural(n, one, many) {
     return n + " " + (n === 1 ? one : many);
+  }
+
+  // ["keywords", "emojis", "vibe"] -> "keywords, emojis and vibe"
+  function sentence(words) {
+    if (words.length < 2) return words.join("");
+    return words.slice(0, -1).join(", ") + " and " + words[words.length - 1];
   }
 
   function clamp(v, lo, hi) {
@@ -281,6 +305,13 @@
     var busy = false;
     var commitTimer = null;
     var api;
+    // AI suggestions: files waiting, requests in flight, a pause after the
+    // server said "later", and whether the server said "never" (503).
+    var aiQueue = [];
+    var aiActive = 0;
+    var aiPauseUntil = 0;
+    var aiTimer = null;
+    var aiOff = false;
 
     // -- the tray markup
 
@@ -289,8 +320,13 @@
     var head = el("div", "tray-head");
     var title = el("p", "tray-title");
     var clearAll = button("small", "Remove all");
+    var approveEvery = tool("✓", "Approve AI for all files");
+    approveEvery.hidden = true;
+    var headActions = el("div", "tray-head-actions");
+    headActions.appendChild(approveEvery);
+    headActions.appendChild(clearAll);
     head.appendChild(title);
-    head.appendChild(clearAll);
+    head.appendChild(headActions);
     var list = el("ul", "tray-list");
     list.setAttribute("aria-label", "Files to upload");
 
@@ -300,12 +336,27 @@
     // The selected file's details (sent as `meta`), then its image.
     var details = el("div", "tray-details");
     var nameInput = detailField("Name", "", 200);
-    var keywordsInput = detailField("Keywords", "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.", 0);
-    var emojisInput = detailField("Emojis", "Separate with spaces.", 0);
+    // AI suggestions of the selected file: progress, what was suggested,
+    // and "Approve all". The text is a live region, so it is announced.
+    var aiBar = el("div", "tray-ai");
+    aiBar.hidden = true;
+    var aiText = el("p", "tray-ai-text");
+    aiText.setAttribute("aria-live", "polite");
+    var approveAll = tool("✓", "Approve all");
+    var approveAllFor = el("span", "sr-only");
+    approveAll.appendChild(approveAllFor);
+    approveAll.hidden = true;
+    aiBar.appendChild(aiText);
+    aiBar.appendChild(approveAll);
+    details.appendChild(aiBar);
+    // Per field: the AI badge, the ✓ toggle and a description for screen readers.
+    var aiUi = {};
+    var keywordsInput = detailField("Keywords", "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.", 0, "keywords");
+    var emojisInput = detailField("Emojis", "Separate with spaces.", 0, "emojis");
     // The emoji picker (emoji.js, loaded first; else it finds the attribute).
     emojisInput.setAttribute("data-emoji-picker", "");
     if (window.stickpileEmoji) window.stickpileEmoji.attach(emojisInput);
-    var vibeInput = detailField("Vibe", "The mood in one word, e.g. tired or smug.", 50);
+    var vibeInput = detailField("Vibe", "The mood in one word, e.g. tired or smug.", 50, "vibe");
     if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
     var tagsInput = detailField("Tags", "Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.", 0);
     var copyRow = el("div", "tray-copy");
@@ -319,22 +370,50 @@
     details.appendChild(copyRow);
     var detailInputs = { keywords: keywordsInput, emojis: emojisInput, vibe: vibeInput, tags: tagsInput };
 
-    function detailField(label, hint, maxLength) {
+    // A labelled text field; `aiKey` adds the AI badge and the ✓ toggle on
+    // the label's line (outside the <label>, so the field's name stays).
+    function detailField(label, hint, maxLength, aiKey) {
       var row = el("div", "tray-field");
       var input = el("input");
       input.type = "text";
       input.id = "tray-" + label.toLowerCase() + "-" + nextId++;
       input.autocomplete = "off";
       if (maxLength) input.maxLength = maxLength;
+      var top = el("div", "tray-label");
       var l = el("label", null, label);
       l.htmlFor = input.id;
-      row.appendChild(l);
+      top.appendChild(l);
+      row.appendChild(top);
       row.appendChild(input);
       if (hint) {
         var h = el("span", "hint", hint);
         h.id = input.id + "-hint";
         input.setAttribute("aria-describedby", h.id);
         row.appendChild(h);
+      }
+      if (aiKey) {
+        var badge = el("abbr", "ai", "AI");
+        badge.title = "Suggested by AI: approve or edit it";
+        badge.setAttribute("aria-hidden", "true");
+        badge.hidden = true;
+        // The field's description while its value is an unapproved
+        // suggestion (hidden: only read through aria-describedby).
+        var note = el("span", null, "Suggested by AI, not approved.");
+        note.id = input.id + "-ai";
+        note.hidden = true;
+        // A toggle: pressed = approved. Its name stays "Approve <field>".
+        var ok = tool("✓", "Approve");
+        ok.classList.add("tray-approve");
+        ok.appendChild(el("span", "sr-only", " " + label.toLowerCase()));
+        ok.setAttribute("aria-pressed", "false");
+        ok.hidden = true;
+        ok.addEventListener("click", function () {
+          toggleApproval(aiKey);
+        });
+        top.appendChild(badge);
+        top.appendChild(ok);
+        row.appendChild(note);
+        aiUi[aiKey] = { row: row, input: input, badge: badge, toggle: ok, note: note.id };
       }
       details.appendChild(row);
       return input;
@@ -448,7 +527,11 @@
         : "";
       if (submit) submit.textContent = n ? "Upload " + plural(n, "file", "files") : submitLabel;
       copyRow.hidden = n < 2;
+      copyHint.textContent = form.getAttribute("data-ai-suggest")
+        ? "Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay."
+        : "Gives the other files these keywords, emojis, vibe and tags. Names stay.";
       if (!n) metaInput.value = "";
+      showAiAll();
     }
 
     function add(files, pasted) {
@@ -487,6 +570,10 @@
           emojis: "",
           vibe: "",
           tags: "",
+          // AI suggestions: status "", "queued", "busy", "done" or "failed";
+          // fields[k] is "pending" (marked AI), "approved" or absent (the
+          // user's value); `filled` lists the fields AI filled.
+          ai: { status: "", fields: {}, filled: [], tries: 0, abort: null },
         };
         if (KINDS[type] === "webp") {
           isAnimatedWebp(file).then(function (anim) {
@@ -502,6 +589,7 @@
       });
       sync();
       if (added.length) select(added[0]);
+      added.forEach(askAi);
       var parts = [];
       if (added.length) parts.push((pasted ? "Pasted " : "Added ") + plural(added.length, "file", "files") + ".");
       if (skipped.length) {
@@ -530,9 +618,19 @@
       var name = el("span", "thumb-name", e.name);
       var badge = el("span", "thumb-badge", "edited");
       badge.hidden = true;
+      // Shown while the file has AI suggestions that are not approved.
+      var aiBadge = el("span", "thumb-ai");
+      var aiMark = el("abbr", "ai", "AI");
+      aiMark.title = "AI suggestions to approve";
+      aiMark.setAttribute("aria-hidden", "true");
+      aiBadge.appendChild(aiMark);
+      aiBadge.appendChild(el("span", "sr-only", ", AI suggestions to approve"));
+      aiBadge.hidden = true;
       b.appendChild(media);
       b.appendChild(name);
       b.appendChild(badge);
+      b.appendChild(aiBadge);
+      e.aiBadge = aiBadge;
       var rm = button("tray-remove", "×", "Remove " + e.name + " from the upload");
       li.appendChild(b);
       li.appendChild(rm);
@@ -557,7 +655,10 @@
       e.thumbName.textContent = n;
       e.thumbButton.title = n;
       e.removeButton.setAttribute("aria-label", "Remove " + n + " from the upload");
-      if (current === e) editor.setAttribute("aria-label", "Edit " + n);
+      if (current === e) {
+        editor.setAttribute("aria-label", "Edit " + n);
+        approveAllFor.textContent = " suggestions for " + n;
+      }
     }
 
     // Free the decoded image of an entry without edits (it is decoded again
@@ -602,6 +703,11 @@
         detailInputs[k].value = e[k];
       });
       editor.setAttribute("aria-label", "Edit " + displayName(e));
+      approveAllFor.textContent = " suggestions for " + displayName(e);
+      // The file in view goes first among those waiting for suggestions.
+      var waiting = aiQueue.indexOf(e);
+      if (waiting > 0) aiQueue.unshift(aiQueue.splice(waiting, 1)[0]);
+      showAi(e);
       show(e);
     }
 
@@ -796,6 +902,7 @@
         }
       }
       release(e, true);
+      forgetAi(e);
       unload(e.thumbMedia);
       URL.revokeObjectURL(e.url);
       sync();
@@ -810,10 +917,12 @@
       list.textContent = "";
       old.forEach(function (e) {
         release(e, true);
+        forgetAi(e);
         unload(e.thumbMedia);
         URL.revokeObjectURL(e.url);
       });
       sync();
+      showAi(null);
     }
 
     // The file to send for an entry: the original bytes, renamed if needed,
@@ -846,6 +955,11 @@
       if (emojis.length) m.emojis = emojis;
       if (e.vibe.trim()) m.vibe = e.vibe.trim();
       if (tags.length) m.tags = tags;
+      // Unapproved suggestions stay marked AI on the item.
+      var ai = pendingOf(e).filter(function (k) {
+        return m[k] !== undefined;
+      });
+      if (ai.length) m.ai_fields = ai;
       return m;
     }
 
@@ -901,6 +1015,268 @@
       );
     }
 
+    // -- AI suggestions
+
+    function pendingOf(e) {
+      return e
+        ? AI_FIELDS.filter(function (k) {
+            return e.ai.fields[k] === "pending";
+          })
+        : [];
+    }
+
+    // Queue a file for suggestions when the server offers them.
+    function askAi(e) {
+      if (aiOff || !form.getAttribute("data-ai-suggest") || !window.fetch || !window.FormData) return;
+      e.ai.status = "queued";
+      aiQueue.push(e);
+      showAi(e);
+      pumpAi();
+    }
+
+    function pumpAi() {
+      if (aiTimer) return;
+      var wait = aiPauseUntil - Date.now();
+      if (wait > 0) {
+        aiTimer = setTimeout(function () {
+          aiTimer = null;
+          pumpAi();
+        }, wait);
+        return;
+      }
+      while (aiActive < SUGGEST_AT_ONCE && aiQueue.length && !aiOff) {
+        var e = aiQueue.shift();
+        if (entries.indexOf(e) < 0 || e.ai.status !== "queued") continue;
+        aiActive++;
+        suggestFor(e).then(function () {
+          aiActive--;
+          pumpAi();
+        });
+      }
+    }
+
+    // Ask the server about one file. Resolves when done, never rejects.
+    function suggestFor(e) {
+      var url = form.getAttribute("data-ai-suggest");
+      e.ai.status = "busy";
+      var ctrl = window.AbortController ? new AbortController() : null;
+      e.ai.abort = ctrl;
+      showAi(e);
+      return smallStill(e)
+        .then(function (png) {
+          if (e.ai.abort !== ctrl) return null;
+          var body = new FormData();
+          body.append("file", png, "suggest.png");
+          var headers = {};
+          var token = document.body.getAttribute("data-csrf");
+          if (token) headers["X-CSRF-Token"] = token;
+          return fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: headers,
+            body: body,
+            signal: ctrl ? ctrl.signal : undefined,
+          });
+        })
+        .then(function (r) {
+          if (!r || e.ai.abort !== ctrl) return;
+          e.ai.abort = null;
+          if (r.ok) {
+            return r.json().then(function (s) {
+              fillAi(e, s);
+            });
+          }
+          // "Later": pause the queue and try this file again.
+          var later = parseInt(r.headers.get("Retry-After") || "", 10);
+          if ((r.status === 429 || r.status === 503) && later > 0 && e.ai.tries < SUGGEST_TRIES) {
+            e.ai.tries++;
+            aiPauseUntil = Date.now() + Math.min(later, 60) * 1000;
+            e.ai.status = "queued";
+            aiQueue.unshift(e);
+            showAi(e);
+            return;
+          }
+          // AI is off, or the session is gone: stop asking.
+          if (r.status === 503 || r.status === 401 || r.status === 403) stopAi();
+          failAi(e);
+        })
+        .catch(function () {
+          if (e.ai.abort === ctrl) failAi(e);
+        });
+    }
+
+    // What the server's thumbnail shows, small: a PNG with the longest side
+    // SUGGEST_PX (never enlarged). Animations give their first frame,
+    // videos the frame at a tenth of their length (like the server).
+    function smallStill(e) {
+      var frame = e.kind === "video" ? videoFrame(e.url) : createImageBitmap(e.file);
+      return frame.then(function (img) {
+        var w = img.videoWidth || img.width;
+        var h = img.videoHeight || img.height;
+        var s = Math.min(1, SUGGEST_PX / Math.max(w, h, 1));
+        var c = canvas(Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)));
+        var g = c.getContext("2d");
+        g.imageSmoothingQuality = "high";
+        try {
+          g.drawImage(img, 0, 0, c.width, c.height);
+        } finally {
+          if (img.close) img.close();
+          if (img.tagName === "VIDEO") unload(img);
+        }
+        return new Promise(function (resolve, reject) {
+          c.toBlob(function (blob) {
+            if (blob) resolve(blob);
+            else reject(new Error("the browser could not encode the image"));
+          }, "image/png");
+        });
+      });
+    }
+
+    function videoFrame(url) {
+      return new Promise(function (resolve, reject) {
+        var v = el("video");
+        v.muted = true;
+        v.preload = "auto";
+        v.playsInline = true;
+        var timer = setTimeout(function () {
+          fail(new Error("the video took too long to load"));
+        }, 15000);
+        function fail(err) {
+          clearTimeout(timer);
+          unload(v);
+          reject(err);
+        }
+        function ready() {
+          clearTimeout(timer);
+          resolve(v);
+        }
+        v.addEventListener("error", function () {
+          fail(new Error("the browser cannot play the video"));
+        });
+        v.addEventListener("loadeddata", function () {
+          var at = isFinite(v.duration) && v.duration > 0 ? v.duration / 10 : 0;
+          if (at > 0) {
+            v.addEventListener("seeked", ready, { once: true });
+            v.currentTime = at;
+          } else {
+            ready();
+          }
+        }, { once: true });
+        v.src = url;
+      });
+    }
+
+    // Fill only the fields that are still empty; never what the user typed.
+    function fillAi(e, s) {
+      if (entries.indexOf(e) < 0) return;
+      e.ai.status = "done";
+      var values = {
+        keywords: (s.keywords || []).join(", "),
+        emojis: (s.emojis || []).join(" "),
+        vibe: s.vibe || "",
+      };
+      AI_FIELDS.forEach(function (k) {
+        if (!values[k] || e[k].trim()) return;
+        e[k] = values[k];
+        e.ai.fields[k] = "pending";
+        if (e.ai.filled.indexOf(k) < 0) e.ai.filled.push(k);
+        if (current === e) detailInputs[k].value = values[k];
+      });
+      showAi(e);
+    }
+
+    function failAi(e) {
+      e.ai.abort = null;
+      e.ai.status = "failed";
+      showAi(e);
+    }
+
+    // The server has no AI (503 without Retry-After) or the session ended.
+    function stopAi() {
+      aiOff = true;
+      aiQueue.splice(0).forEach(failAi);
+    }
+
+    function forgetAi(e) {
+      var ctrl = e.ai.abort;
+      e.ai.abort = null;
+      if (ctrl) ctrl.abort();
+      var i = aiQueue.indexOf(e);
+      if (i >= 0) aiQueue.splice(i, 1);
+    }
+
+    function approveFile(e) {
+      pendingOf(e).forEach(function (k) {
+        e.ai.fields[k] = "approved";
+      });
+      showAi(e);
+    }
+
+    // The ✓ of a field: approve, or mark it AI again.
+    function toggleApproval(k) {
+      var e = current;
+      if (!e || !e.ai.fields[k]) return;
+      e.ai.fields[k] = e.ai.fields[k] === "pending" ? "approved" : "pending";
+      showAi(e);
+    }
+
+    // After a change to `e` (or with null, the empty tray).
+    function showAi(e) {
+      if (e) e.aiBadge.hidden = !pendingOf(e).length;
+      if (!e || e === current) showAiDetails();
+      showAiAll();
+    }
+
+    // The selected file's fields and AI bar.
+    function showAiDetails() {
+      var e = current;
+      var ai = e ? e.ai : { status: "", fields: {}, filled: [] };
+      AI_FIELDS.forEach(function (k) {
+        var ui = aiUi[k];
+        var state = ai.fields[k];
+        ui.row.classList.toggle("ai-pending", state === "pending");
+        ui.badge.hidden = state !== "pending";
+        ui.toggle.hidden = !state;
+        ui.toggle.setAttribute("aria-pressed", state === "approved" ? "true" : "false");
+        // The note first, other descriptions (the hint) kept.
+        var ids = (ui.input.getAttribute("aria-describedby") || "").split(/\s+/).filter(function (id) {
+          return id && id !== ui.note;
+        });
+        if (state === "pending") ids.unshift(ui.note);
+        if (ids.length) ui.input.setAttribute("aria-describedby", ids.join(" "));
+        else ui.input.removeAttribute("aria-describedby");
+      });
+      var pending = pendingOf(e);
+      var text = "";
+      if (ai.status === "queued" || ai.status === "busy") {
+        text = "Suggesting keywords, emojis and vibe…";
+      } else if (ai.status === "done" && ai.filled.length) {
+        text =
+          "AI suggested the " +
+          sentence(ai.filled) +
+          (pending.length
+            ? ". Approve or edit them; unapproved ones are uploaded marked AI."
+            : ". Nothing left to approve.");
+      }
+      if (aiText.textContent !== text) aiText.textContent = text;
+      aiBar.hidden = !text;
+      aiBar.classList.toggle("waiting", ai.status === "queued" || ai.status === "busy");
+      approveAll.hidden = !(ai.status === "done" && ai.filled.length);
+      approveAll.setAttribute("aria-disabled", pending.length ? "false" : "true");
+    }
+
+    // "Approve AI for all files": with several files once one has suggestions.
+    function showAiAll() {
+      var any = entries.some(function (x) {
+        return x.ai.filled.length > 0;
+      });
+      var pending = entries.some(function (x) {
+        return pendingOf(x).length > 0;
+      });
+      approveEvery.hidden = !(any && entries.length > 1);
+      approveEvery.setAttribute("aria-disabled", pending ? "false" : "true");
+    }
+
     // -- events
 
     input.addEventListener("change", function () {
@@ -924,8 +1300,30 @@
 
     Object.keys(detailInputs).forEach(function (k) {
       detailInputs[k].addEventListener("input", function () {
-        if (current) current[k] = detailInputs[k].value;
+        if (!current) return;
+        current[k] = detailInputs[k].value;
+        // An edited suggestion is the user's value.
+        if (current.ai.fields[k]) {
+          delete current.ai.fields[k];
+          showAi(current);
+        }
       });
+    });
+
+    approveAll.addEventListener("click", function () {
+      var e = current;
+      if (!e || !pendingOf(e).length) return;
+      approveFile(e);
+      say("Approved the AI suggestions for " + displayName(e) + ".");
+    });
+
+    approveEvery.addEventListener("click", function () {
+      var files = entries.filter(function (x) {
+        return pendingOf(x).length > 0;
+      });
+      if (!files.length) return;
+      files.forEach(approveFile);
+      say("Approved the AI suggestions for " + plural(files.length, "file", "files") + ".");
     });
 
     // Enter in a detail field would submit the form, i.e. upload every file
@@ -934,14 +1332,21 @@
       if (ev.key === "Enter" && !ev.isComposing && ev.target.tagName === "INPUT") ev.preventDefault();
     });
 
+    // Copied values count as approved: the user chose them for every file,
+    // so the selected file's suggestions are approved too, and the others'
+    // own suggestions in these fields are replaced.
     copyAll.addEventListener("click", function () {
       var e = current;
       if (!e) return;
+      approveFile(e);
       entries.forEach(function (x) {
         if (x === e) return;
         Object.keys(detailInputs).forEach(function (k) {
           x[k] = e[k];
         });
+        x.ai.fields = {};
+        x.ai.filled = [];
+        showAi(x);
       });
       say(
         "The other " +

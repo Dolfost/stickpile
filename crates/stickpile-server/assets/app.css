@@ -1,9 +1,16 @@
 /* stickpile web UI. One hand-written stylesheet: no framework, no external
-   fonts. Light and dark follow prefers-color-scheme. Everything is
-   class-based because the CSP forbids inline styles. */
+   fonts. Everything is class-based because the CSP forbids inline styles.
+
+   Themes: colours are variables. `:root` holds the light palette; the dark
+   one applies to `[data-theme="dark"]` (the user chose dark) and, without
+   a data-theme (the "system" choice), under prefers-color-scheme: dark.
+   `[data-theme="light"]` keeps the light palette on a dark device. The two
+   dark blocks below must stay the same. Nothing else may depend on
+   prefers-color-scheme: give a colour that differs between the themes a
+   variable instead. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f6f6f4;
   --surface: #fcfcfb;
   --surface-2: #efeee9;
@@ -31,14 +38,58 @@
   --q-ok: #3f6b00;
   --q-meh: #8a5a00;
   --q-poor: #b3261e;
+  /* Text on the filled quality badges and on error toasts. */
+  --q-ink: #ffffff;
+  --danger-ink: #ffffff;
+  /* Behind the emojis strip and the "⋯" button over thumbnails. */
+  --overlay: rgb(252 252 251 / 0.88);
   --radius: 10px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 2px 8px rgb(0 0 0 / 0.04);
+  --popup-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.1);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
+/* Dark palette, 1 of 2: the dark theme. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211;
+  --surface: #1a1a19;
+  --surface-2: #242422;
+  --border: #3a3a37;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --muted: #a3a29a;
+  --accent: #6ea3f0;
+  --accent-ink: #0b1220;
+  --accent-soft: #1d2b44;
+  --danger: #f28b82;
+  --danger-soft: #3b1c1a;
+  --success: #81c995;
+  --success-soft: #16301c;
+  --warn: #f3c66b;
+  --warn-soft: #3a2e10;
+  --ai: #c3a6f5;
+  --ai-soft: #2e2346;
+  --focus: #8ab4f8;
+  --chart: #3987e5;
+  --grid: #2f2f2c;
+  --checker: repeating-conic-gradient(#2b2b29 0 25%, #363633 0 50%) 0 0 / 16px 16px;
+  --q-good: #81c995;
+  --q-ok: #b5d77a;
+  --q-meh: #f3c66b;
+  --q-poor: #f28b82;
+  --q-ink: #111111;
+  --danger-ink: #1b0b0a;
+  --overlay: rgb(26 26 25 / 0.86);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --popup-shadow: 0 6px 20px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+}
+
+/* Dark palette, 2 of 2: "system" on a dark device (same values). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
+    color-scheme: dark;
     --bg: #121211;
     --surface: #1a1a19;
     --surface-2: #242422;
@@ -65,7 +116,11 @@
     --q-ok: #b5d77a;
     --q-meh: #f3c66b;
     --q-poor: #f28b82;
+    --q-ink: #111111;
+    --danger-ink: #1b0b0a;
+    --overlay: rgb(26 26 25 / 0.86);
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    --popup-shadow: 0 6px 20px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
   }
 }
 
@@ -102,7 +157,7 @@ img, video, svg { max-width: 100%; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 [hidden] { display: none !important; }
 .sr-only, .card.editor .edit-text, .card.editor .confirm-text, .card.editor .field-name .field-label,
-.card.editor .field-emojis:not(.empty) .field-label, .compact .card.editor .field dt {
+.card.editor .field-emojis:not(.empty) .field-label, :is(.compact, .view-grid) .card.editor .field dt {
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
@@ -133,6 +188,16 @@ img, video, svg { max-width: 100%; }
 .topsearch input { width: 100%; }
 .who { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; color: var(--text-2); }
 .whoami { font-weight: 600; }
+/* The light/dark switch: the last thing in the bar (prefs.js). */
+.theme-switch { display: flex; align-items: center; margin: 0; }
+.topbar > .brand + .theme-switch { margin-left: auto; }
+button.theme-toggle {
+  width: 2.1rem; height: 2.1rem; min-height: 2.1rem; padding: 0; font-size: 1.25rem;
+  border-color: transparent; background: transparent; color: var(--text-2);
+}
+button.theme-toggle:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.theme-toggle .icon-sun, .theme-toggle[aria-pressed="true"] .icon-moon { display: none; }
+.theme-toggle[aria-pressed="true"] .icon-sun { display: inline-block; }
 
 .footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 1.5rem; border-top: 1px solid var(--border); }
 
@@ -199,19 +264,18 @@ form.inline { display: inline; margin: 0; }
   box-shadow: var(--shadow); transition: opacity 0.15s, transform 0.15s; z-index: 20;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
-.toast.error { background: var(--danger); color: #fff; }
+.toast.error { background: var(--danger); color: var(--danger-ink); }
 
 .badge {
   display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase;
   padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
   vertical-align: middle; line-height: 1.4;
 }
-.badge.quality { color: #fff; border-color: transparent; text-transform: none; }
+.badge.quality { color: var(--q-ink); border-color: transparent; text-transform: none; }
 .badge.q-good { background: var(--q-good); }
 .badge.q-ok { background: var(--q-ok); }
 .badge.q-meh { background: var(--q-meh); }
 .badge.q-poor { background: var(--q-poor); }
-@media (prefers-color-scheme: dark) { .badge.quality { color: #111; } }
 .badge.kind { background: var(--text); color: var(--bg); border-color: transparent; }
 .badge.vis-public { background: var(--success-soft); color: var(--success); border-color: var(--success); }
 .badge.vis-unlisted { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
@@ -253,7 +317,7 @@ abbr.ai {
 }
 .card:focus-within { border-color: var(--accent); }
 .card .thumb {
-  display: flex; align-items: center; justify-content: center; aspect-ratio: 1; overflow: hidden; background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center; aspect-ratio: 1; overflow: hidden; text-decoration: none; background: var(--surface-2);
   background-image: linear-gradient(45deg, var(--border) 25%, transparent 25%), linear-gradient(-45deg, var(--border) 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, var(--border) 75%), linear-gradient(-45deg, transparent 75%, var(--border) 75%);
   background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0;
@@ -305,9 +369,11 @@ button.confirm { color: var(--ai); }
 
 /* ---- set editor cards --------------------------------------------------
    Dense by default: the name as a title, tiny uppercase labels, chips,
-   pencil-only edit links and one row of small buttons. `.compact` on the
-   items section (the "Compact view" checkbox) leaves thumbnails with a
-   one-line caption; "⋯" and right click open the context menu (app.js). */
+   pencil-only edit links and one row of small buttons. The "View" control
+   (prefs.js) puts a style class on the items section, `.compact`
+   (thumbnails, the name, the emojis at the bottom) or `.view-grid`
+   (thumbnails only), and `hide-*` classes for fields; "⋯" and right click
+   open the context menu (app.js). */
 
 .icon { width: 1em; height: 1em; flex: none; vertical-align: -0.125em; }
 button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1.7rem; padding: 0; font-size: 0.95rem; }
@@ -358,42 +424,60 @@ button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1
 .card.editor .card-menu-btn:hover, .card.editor .card-menu-btn[aria-expanded="true"] { background: var(--surface-2); border-color: var(--border); }
 .card.editor:has(.card-menu-btn:not([hidden])) .field-name { padding-right: 1.6rem; }
 
-/* Compact view: mostly thumbnails, the name and emojis on one line. */
-.items-section.compact .editor-grid { grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 0.5rem; align-items: start; }
-.compact .card.editor .card-body { padding: 0.2rem 0.3rem 0.2rem 0.4rem; gap: 0; }
-.compact .card.editor:has(.card-menu-btn:not([hidden])) .card-body { padding-right: 1.75rem; }
-.compact .card.editor dl.fields { flex-wrap: nowrap; align-items: center; gap: 0.3rem; min-width: 0; }
+/* Hidden parts (the "Show" toggles). Hidden fields take no space; a field
+   being edited stays visible. The name is always shown. */
+.items-section.hide-emojis .card.editor .field-emojis:not(.editing),
+.items-section.hide-keywords .card.editor .field-keywords:not(.editing),
+.items-section.hide-vibe .card.editor .field-vibe:not(.editing),
+.items-section.hide-tags .card.editor .field-tags:not(.editing),
+.items-section.hide-labels .card.editor .badges { display: none; }
+
+/* Compact view: small thumbnails with the name, and the emojis on a line
+   of their own at the bottom. Cards in a row share their height, so the
+   emoji lines align. */
+.items-section.compact .editor-grid { grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 0.5rem; }
+.compact .card.editor .card-body { padding: 0.15rem 0.3rem 0.2rem 0.4rem; gap: 0; }
+.compact .card.editor dl.fields { flex: 1; flex-flow: column nowrap; gap: 0; min-width: 0; }
 .compact .card.editor .field { display: none; }
 .compact .card.editor .field-name, .compact .card.editor .field-emojis:not(.empty) {
   display: block; height: 1.35rem; line-height: 1.35rem; padding: 0; background: none; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.compact .card.editor .field-name { flex: 0 1 auto; padding: 0; }
-.compact .card.editor:has(.card-menu-btn:not([hidden])) .field-name { padding-right: 0; }
-.compact .card.editor .field-emojis { flex: 0 0 auto; max-width: 50%; text-overflow: clip; }
+.compact .card.editor:has(.card-menu-btn:not([hidden])) .field-name { padding-right: 1.45rem; }
+.compact .card.editor .field-emojis { margin-top: auto; text-overflow: clip; }
 .compact .card.editor .field-name .value { font-size: 0.8rem; font-weight: 600; }
-.compact .card.editor .emojis { font-size: 0.85rem; letter-spacing: 0; line-height: inherit; }
-.compact .card.editor .field-actions, .compact .card.editor .card-actions > :not(.card-menu-btn) { display: none; }
-.compact .card.editor .card-actions { margin: 0; }
-.compact .card.editor .card-menu-btn { top: 50%; right: 0.15rem; transform: translateY(-50%); }
-.compact .card .badges { top: 0.25rem; left: 0.25rem; right: 0.25rem; }
-.compact .card .badges .badge { font-size: 0.6rem; padding: 0 0.3rem; }
-/* Inline editing (Rename from the menu) inside the small card; its row
-   neighbours keep their height. */
-.compact .card.editor dl.fields:has(.editing) { flex-wrap: wrap; }
-.compact .card.editor dl.fields:has(.editing) .field:not(.editing) { display: none; }
-.compact .card.editor:has(.editing) .card-menu-btn { top: 0.15rem; transform: none; }
-.compact .card.editor:has(.editing) .card-body { padding-right: 0.3rem; }
-.compact .card.editor .field.editing .form-buttons { flex-wrap: wrap; gap: 0.25rem; }
-.compact .card.editor .field.editing .form-buttons .button, .compact .card.editor .field.editing .form-buttons button { min-height: 1.7rem; padding: 0 0.45rem; font-size: 0.8rem; }
-.compact .card.editor .field.editing { display: block; flex-basis: 100%; height: auto; line-height: 1.4; overflow: visible; white-space: normal; padding: 0.25rem 0; }
-.compact .card.editor .field.editing dt { position: static !important; width: auto; height: auto; margin: 0 0 0.2rem; clip: auto; overflow: visible; white-space: normal; }
-.compact .card.editor .field.editing input[type=text] { min-width: 0; width: 100%; }
+.compact .card.editor .emojis { font-size: 0.9rem; letter-spacing: 0.04em; line-height: inherit; }
+.compact .card.editor .field-actions,
+:is(.compact, .view-grid) .card.editor .card-actions > :not(.card-menu-btn) { display: none; }
+:is(.compact, .view-grid) .card.editor .card-actions { margin: 0; }
+.compact .card.editor .card-menu-btn { top: 0.1rem; right: 0.15rem; }
+:is(.compact, .view-grid) .card .badges { top: 0.25rem; left: 0.25rem; right: 0.25rem; }
+:is(.compact, .view-grid) .card .badges .badge { font-size: 0.6rem; padding: 0 0.3rem; }
+
+/* Grid view: thumbnails only (with the labels unless hidden); "⋯" sits on
+   the thumbnail's corner. */
+.items-section.view-grid .editor-grid { grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 0.4rem; }
+.view-grid .card.editor .card-body { position: static; flex: none; padding: 0; gap: 0; }
+.view-grid .card.editor dl.fields { display: none; }
+.view-grid .card.editor .card-menu-btn { top: auto; bottom: 0.25rem; right: 0.25rem; border-color: var(--border); background: var(--overlay); }
+
+/* Inline editing (Rename from the menu) inside the small cards: only the
+   form shows; the row neighbours keep their height. */
+:is(.compact, .view-grid) .card.editor:has(.editing) .card-body { position: relative; padding: 0.2rem 0.3rem 0.3rem; }
+.view-grid .card.editor:has(.editing) dl.fields { display: flex; }
+:is(.compact, .view-grid) .card.editor dl.fields:has(.editing) .field:not(.editing) { display: none; }
+:is(.compact, .view-grid) .card.editor:has(.editing) .card-menu-btn { top: 0.15rem; bottom: auto; }
+:is(.compact, .view-grid) .card.editor .field.editing .form-buttons { flex-wrap: wrap; gap: 0.25rem; }
+:is(.compact, .view-grid) .card.editor .field.editing .form-buttons .button,
+:is(.compact, .view-grid) .card.editor .field.editing .form-buttons button { min-height: 1.7rem; padding: 0 0.45rem; font-size: 0.8rem; }
+:is(.compact, .view-grid) .card.editor .field.editing { display: block; flex-basis: auto; height: auto; line-height: 1.4; overflow: visible; white-space: normal; padding: 0.25rem 0; }
+:is(.compact, .view-grid) .card.editor .field.editing dt { position: static !important; width: auto; height: auto; margin: 0 0 0.2rem; clip: auto; overflow: visible; white-space: normal; }
+:is(.compact, .view-grid) .card.editor .field.editing input[type=text] { min-width: 0; width: 100%; }
 
 /* Context menu of an item card. */
 .ctx-menu {
   position: fixed; z-index: 30; display: flex; flex-direction: column; min-width: 12.5rem; max-width: min(20rem, calc(100vw - 1rem));
   padding: 0.3rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.1); font-size: 0.9rem;
+  box-shadow: var(--popup-shadow); font-size: 0.9rem;
 }
 .ctx-menu:focus { outline: none; }
 .ctx-menu [role=menuitem] {
@@ -409,6 +493,67 @@ button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1
 .ctx-menu .menu-danger .menu-icon { color: inherit; }
 .ctx-menu [role=separator] { height: 1px; margin: 0.25rem 0.35rem; background: var(--border); }
 .ctx-menu .menu-head { padding: 0.2rem 0.6rem 0.3rem; color: var(--muted); font-size: 0.78rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* ---- display options ("View") -----------------------------------------
+   A <details> disclosure whose panel floats under its button (prefs.js
+   keeps it inside the window and closes it on Escape or a click outside). */
+
+.view-menu { position: relative; }
+.view-menu > summary { list-style: none; gap: 0.4rem; user-select: none; }
+.view-menu > summary::-webkit-details-marker { display: none; }
+.view-menu > summary::after {
+  content: ""; width: 0.4rem; height: 0.4rem; margin: -0.2rem 0.1rem 0 0.1rem;
+  border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); opacity: 0.7;
+}
+.view-menu[open] > summary { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.view-menu[open] > summary::after { margin-top: 0.2rem; transform: rotate(-135deg); }
+.view-panel {
+  position: absolute; z-index: 25; top: calc(100% + 0.3rem); right: 0; width: max-content; min-width: 14rem;
+  max-width: min(21rem, calc(100vw - 1rem)); display: flex; flex-direction: column; gap: 0.6rem;
+  padding: 0.55rem 0.6rem 0.65rem; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--popup-shadow); font-size: 0.9rem;
+}
+.view-panel fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.05rem; }
+.view-panel legend {
+  padding: 0 0.35rem 0.2rem; color: var(--muted); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.view-panel label.radio, .view-panel label.check {
+  display: flex; align-items: baseline; gap: 0.5rem; margin: 0; padding: 0.25rem 0.35rem; border-radius: 6px;
+  color: var(--text); font-weight: normal; cursor: pointer;
+}
+.view-panel label:hover { background: var(--surface-2); }
+.view-panel input[type=radio], .view-panel input[type=checkbox] {
+  flex: none; width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); transform: translateY(0.15rem);
+}
+.view-panel label:has(input:disabled) { color: var(--muted); cursor: default; }
+.view-panel label:has(input:disabled):hover { background: none; }
+.opt { display: flex; flex-direction: column; }
+.opt-hint { color: var(--muted); font-size: 0.78rem; line-height: 1.3; }
+.view-note { margin: 0.15rem 0.35rem 0; color: var(--muted); font-size: 0.78rem; }
+
+/* Set lists (`.set-list`, prefs.js): a style class and `hide-*` classes.
+   Every part of a card has its own top margin, so hidden ones leave no
+   gap. */
+.set-card .card-body { gap: 0; }
+.set-card .set-desc {
+  margin: 0.2rem 0 0; color: var(--text-2); font-size: 0.85rem; line-height: 1.4; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.set-card .set-facts { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.5rem; }
+.set-card .set-facts > * { margin-top: 0.3rem; }
+.set-card .set-badges { display: inline-flex; gap: 0.25rem; }
+.set-list.hide-cover .set-card .thumb, .set-list.hide-description .set-desc, .set-list.hide-count .set-count,
+.set-list.hide-badges .set-badges, .set-list.hide-owner .set-owner, .set-list.hide-slug .set-slug { display: none; }
+.set-list.compact .set-grid { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.6rem; }
+.set-list.compact .set-card .card-body { padding: 0.35rem 0.5rem 0.45rem; }
+.set-list.compact .set-card .name { font-size: 0.85rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.set-list.compact .set-card .set-desc { font-size: 0.78rem; -webkit-line-clamp: 1; }
+.set-list.compact .set-card .set-facts { column-gap: 0.35rem; font-size: 0.75rem; }
+.set-list.compact .set-card .set-facts > * { margin-top: 0.15rem; }
+.set-list.compact .set-card .badge { font-size: 0.6rem; padding: 0 0.3rem; }
+.list-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin: 0 0 0.75rem; }
+.list-head p { margin: 0; }
+.section-head .view-menu { margin-left: auto; }
 
 /* ---- set page --------------------------------------------------------- */
 
@@ -510,6 +655,23 @@ button.tray-remove:hover { color: var(--danger); border-color: var(--danger); ba
 .tray-status { margin: 0; color: var(--muted); }
 .tray-status:empty { display: none; }
 .tray-status.error { color: var(--danger); }
+/* AI suggestions in the tray (upload.js): marked like the item editor's
+   (abbr.ai, the AI tint) until approved with ✓ or edited. */
+.tray-head-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.tray-label { display: flex; align-items: center; gap: 0.4rem; min-height: 1.75rem; }
+.tray-label button.tray-approve { margin-left: auto; min-height: 1.75rem; padding: 0 0.5rem; font-size: 0.8rem; }
+.tray-label button.tray-approve[aria-pressed="true"] { border-color: var(--success); background: var(--success-soft); color: var(--success); font-weight: 600; }
+.tray-field.ai-pending > input, .tray-field.ai-pending .emoji-field > input { border-color: var(--ai); background: var(--ai-soft); }
+.tray-ai {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem;
+  padding: 0.45rem 0.6rem; border: 1px solid var(--ai); border-radius: 8px; background: var(--ai-soft);
+}
+.tray-ai.waiting { border-style: dashed; background: none; }
+.tray-ai-text { margin: 0; font-size: 0.875rem; }
+.tray-ai.waiting .tray-ai-text { color: var(--muted); }
+.tray button[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+button.tray-thumb { position: relative; }
+.tray-thumb .thumb-ai { position: absolute; top: 0.2rem; left: 0.2rem; line-height: 1; }
 .busy { display: none; color: var(--muted); }
 .htmx-request .busy, .htmx-request.busy { display: inline; }
 .htmx-request { cursor: progress; }
@@ -598,19 +760,23 @@ details.manage { position: relative; }
   main { padding: 0.75rem 0.75rem 2rem; }
   .topbar { padding: 0.5rem 0.75rem; }
   .who { margin-left: 0; }
+  /* The theme switch goes up to the brand line. */
+  .topbar > .brand { order: -2; }
+  .topbar > .theme-switch { order: -1; margin-left: auto; }
   .field { grid-template-columns: 1fr; gap: 0; }
   .filters { margin-left: 0; }
   /* Editor cards become rows: small thumb left, fields and buttons right. */
-  .items-section:not(.compact) .editor-grid { grid-template-columns: 1fr; gap: 0.5rem; }
-  .items-section:not(.compact) .card.editor { flex-direction: row; align-items: flex-start; }
-  .items-section:not(.compact) .card.editor .thumb { flex: 0 0 6.5rem; width: 6.5rem; }
-  .items-section:not(.compact) .card.editor .badges { right: auto; width: 5.7rem; }
-  .items-section:not(.compact) .card.editor .card-body { min-width: 0; align-self: stretch; }
+  .items-section:not(.compact):not(.view-grid) .editor-grid { grid-template-columns: 1fr; gap: 0.5rem; }
+  .items-section:not(.compact):not(.view-grid) .card.editor { flex-direction: row; align-items: flex-start; }
+  .items-section:not(.compact):not(.view-grid) .card.editor .thumb { flex: 0 0 6.5rem; width: 6.5rem; }
+  .items-section:not(.compact):not(.view-grid) .card.editor .badges { right: auto; width: 5.7rem; }
+  .items-section:not(.compact):not(.view-grid) .card.editor .card-body { min-width: 0; align-self: stretch; }
   .items-section.compact .editor-grid { grid-template-columns: repeat(auto-fill, minmax(6.25rem, 1fr)); }
+  .items-section.view-grid .editor-grid { grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr)); }
 }
 
 @media (forced-colors: active) {
-  .badge, abbr.ai, .chips li, .ctx-menu { border: 1px solid CanvasText; }
+  .badge, abbr.ai, .chips li, .ctx-menu, .view-panel { border: 1px solid CanvasText; }
   .ctx-menu [role=menuitem]:focus { outline: 2px solid Highlight; }
   .bar-chart .mark { fill: CanvasText; }
 }
@@ -648,7 +814,29 @@ button.emoji-btn { height: 2rem; min-height: 0; padding: 0; border: 0; border-ra
 button.emoji-btn:hover { background: var(--surface-2); }
 button.emoji-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--accent-soft); }
 .emoji-status { margin: 0; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+/* ":" suggestions: fixed and placed under the field by emoji.js, so a card's
+   overflow does not cut them; the field keeps the focus. */
+.emoji-suggest {
+  position: fixed; z-index: 30; width: max(17rem, var(--emoji-field-width, 0px)); max-width: calc(100vw - 0.5rem);
+  padding: 0.25rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.1); font-size: 0.9rem;
+}
+.emoji-suggest.offscreen { visibility: hidden; }
+.emoji-suggest-list { margin: 0; padding: 0; list-style: none; }
+.emoji-option {
+  display: flex; align-items: center; gap: 0.5rem; min-height: 2rem; padding: 0.15rem 0.5rem;
+  border-radius: 6px; cursor: pointer; line-height: 1.25;
+}
+.emoji-option[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.emoji-option-char {
+  flex: none; width: 1.6rem; text-align: center; font-size: 1.3rem; line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", var(--font);
+}
+.emoji-option-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.emoji-suggest-note { margin: 0; padding: 0.15rem 0.5rem 0.25rem; color: var(--muted); font-size: 0.78rem; }
+.emoji-suggest-keys { margin: 0.2rem 0 0; padding: 0.25rem 0.5rem 0.05rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.72rem; }
 @media (forced-colors: active) {
-  .emoji-panel { border: 1px solid CanvasText; }
+  .emoji-panel, .emoji-suggest { border: 1px solid CanvasText; }
   .emoji-tabs [role=tab][aria-selected="true"] { border-bottom-color: Highlight; }
+  .emoji-option[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
 }

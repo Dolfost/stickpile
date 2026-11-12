@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
-use stickpile_api::{FieldSource, Role, User, Visibility};
+use stickpile_api::{FieldSource, Role, Theme, User, Visibility};
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -81,7 +81,7 @@ pub fn i64_to_u64(v: i64) -> u64 {
 // ---------------------------------------------------------------------------
 
 pub const USER_COLUMNS: &str = "id, username, display_name, password_hash, totp_secret, totp_pending_secret, \
-     totp_last_step, role, tailscale_login, telegram_user_id, disabled, created_at, last_login_at";
+     totp_last_step, role, tailscale_login, telegram_user_id, disabled, created_at, last_login_at, theme";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRow {
@@ -98,6 +98,8 @@ pub struct UserRow {
     pub disabled: bool,
     pub created_at: i64,
     pub last_login_at: Option<i64>,
+    /// `system`, `light` or `dark` (see [`UserRow::theme`]).
+    pub theme: String,
 }
 
 impl UserRow {
@@ -111,6 +113,10 @@ impl UserRow {
     pub fn is_admin(&self) -> bool {
         self.role() == Role::Admin
     }
+    /// The web UI theme (`system` for anything unexpected).
+    pub fn theme(&self) -> Theme {
+        Theme::parse(&self.theme).unwrap_or_default()
+    }
     pub fn to_api(&self) -> User {
         User {
             id: self.id.clone(),
@@ -121,6 +127,7 @@ impl UserRow {
             tailscale_login: self.tailscale_login.clone(),
             created_at: self.created_at,
             telegram_user_id: self.telegram_user_id,
+            theme: self.theme(),
         }
     }
 }

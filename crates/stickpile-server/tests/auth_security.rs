@@ -7,7 +7,7 @@ use common::{read, Opts, TestServer};
 use reqwest::Method;
 use serde_json::json;
 use stickpile_api::{
-    routes, AdminUser, ApiToken, AuditEntry, InvitationCreated, Role, TokenCreated, TotpSetup, User, Visibility,
+    routes, AdminUser, ApiToken, AuditEntry, InvitationCreated, Role, Theme, TokenCreated, TotpSetup, User, Visibility,
 };
 use stickpile_server::config::Registration;
 
@@ -1368,6 +1368,74 @@ async fn username_rename() {
         "{audit:?}"
     );
     assert!(audit[0].1.contains("\"from\":\"alice\"") && audit[0].1.contains("\"to\":\"kitty\""));
+}
+
+#[tokio::test]
+async fn web_theme_in_the_profile() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let me: User = srv.get(&alice, routes::ME).await.expect(200).json();
+    assert_eq!(me.theme, Theme::System, "the default follows the device");
+    assert_eq!(srv.get(&alice, routes::ME).await.value()["theme"], "system");
+
+    for theme in [Theme::Dark, Theme::Light, Theme::System] {
+        let me: User = srv
+            .patch(&alice, routes::ME, json!({"theme": theme.as_str()}))
+            .await
+            .expect(200)
+            .json();
+        assert_eq!(me.theme, theme);
+        let again: User = srv.get(&alice, routes::ME).await.expect(200).json();
+        assert_eq!(again.theme, theme);
+    }
+    srv.patch(&alice, routes::ME, json!({"theme": "dark"}))
+        .await
+        .expect(200);
+    // Absent or null: unchanged; other fields leave it alone.
+    for body in [json!({}), json!({"theme": null}), json!({"display_name": "Alice"})] {
+        let me: User = srv.patch(&alice, routes::ME, body).await.expect(200).json();
+        assert_eq!(me.theme, Theme::Dark);
+    }
+    // Only the three lowercase names; invalid values change nothing, also
+    // next to a valid field. (axum's JSON rejection: 422 for an unknown
+    // name, 400 for a value that is not a string at all.)
+    for (bad, status) in [
+        (json!("purple"), 422),
+        (json!("Dark"), 422),
+        (json!(""), 422),
+        (json!(1), 400),
+        (json!(["dark"]), 400),
+    ] {
+        let r = srv
+            .patch(&alice, routes::ME, json!({"theme": bad, "display_name": "Mallory"}))
+            .await;
+        assert_eq!(r.status.as_u16(), status, "{bad}: {}", r.text());
+        assert_eq!(r.code(), "bad_request", "{bad}");
+    }
+    let r = srv.patch(&alice, routes::ME, json!({"theme": "purple"})).await;
+    assert!(r.value()["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown variant `purple`, expected one of `system`, `light`, `dark`"));
+    let me: User = srv.get(&alice, routes::ME).await.expect(200).json();
+    assert_eq!((me.theme, me.display_name.as_str()), (Theme::Dark, "Alice"));
+    // Per user.
+    let other: User = srv.get(&bob, routes::ME).await.expect(200).json();
+    assert_eq!(other.theme, Theme::System);
+    // The database refuses anything else too.
+    let bad = sqlx::query("UPDATE users SET theme = 'purple' WHERE id = ?")
+        .bind(&bob.id)
+        .execute(&srv.state.db)
+        .await;
+    assert!(bad.is_err(), "CHECK constraint");
+    // A display preference: not in the audit log (the display name is).
+    let audit: Vec<(String,)> = sqlx::query_as("SELECT details FROM audit_log WHERE action = 'user.update_self'")
+        .fetch_all(&srv.state.db)
+        .await
+        .unwrap();
+    assert!(audit.iter().all(|(d,)| !d.contains("theme")), "{audit:?}");
+    assert_eq!(audit.len(), 1, "{audit:?}");
 }
 
 #[tokio::test]

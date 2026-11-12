@@ -4,10 +4,11 @@ The web UI is rendered on the server with [maud](https://maud.lambda.xyz)
 templates and enhanced with [htmx](https://htmx.org) 2 (vendored, no
 JavaScript toolchain). Every page works without JavaScript: forms post and
 redirect. When htmx is loaded, the same forms swap small fragments in place.
-Small hand-written scripts add the rest: `assets/app.js` clipboard copy,
-the instant compact view and the item context menu; `assets/upload.js`
-drag-and-drop, pasting and the upload tray, where files can be renamed and
-images rotated, flipped and cropped before they are uploaded;
+Small hand-written scripts add the rest: `assets/app.js` clipboard copy
+and the item context menu; `assets/prefs.js` the display options ("View")
+and the theme switch; `assets/upload.js` drag-and-drop, pasting and the
+upload tray, where files can be renamed, described (with AI suggestions to
+approve) and images rotated, flipped and cropped before they are uploaded;
 `assets/emoji.js` the emoji picker of the Emojis fields.
 
 Code: `crates/stickpile-server/src/web/` (one module per area), static files
@@ -22,17 +23,17 @@ more than the API allows.
 |---|---|
 | `/login` | Username and password. Accounts with TOTP get a second step for the 6-digit code. Anonymous visitors to `/` see the same form. "Forgot your password?" lists the ways back in: the tailnet, an admin, or `stickpile-server reset-password` on the host (there is no email). |
 | `/register` | Self-service registration, following `auth.registration`: `closed` explains that and refuses, `invite` asks for the code (`/register?code=…` fills it in), `open` needs nothing. A successful registration signs you in. |
-| `/` | Search box, items you copied recently, your sets with covers. |
-| `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. |
+| `/` | Search box, items you copied recently, your sets with covers (with the set lists' "View" control). |
+| `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. Each card shows the cover, name, description, item count, visibility and source labels, owner and slug; the "View" control arranges them (see [Display options and themes](#display-options-and-themes)). |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
-| `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "Compact view" checkbox, and the item editor grid (see [Set page](#set-page)). |
+| `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
 | `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default), plus "Delete this set…". Read-only git packs only offer deletion. |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
 | `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet, and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
 | `/popular` | Most copied, most liked and trending side by side, never blended. Scope: whole server, your items, or one set (`?scope=set&set=…`, linked from the set page). The window (day, week, month, all) applies to "most copied". |
 | `/stats` | Your totals, a bar chart of copies per day for 30 days (inline SVG with a hover title per bar and a screen-reader table), your most copied items and the apps you paste into. |
-| `/settings` | Username (shown as the owner of your sets and matched by `by:`; renaming keeps you signed in), display name and Telegram user id, password change (current password required if you have one, except when you are signed in through the tailnet; at least `auth.min_password_length` characters), two-step verification setup (QR code and key, confirm with a code) and disabling, API tokens (create, the secret is shown once, revoke). |
+| `/settings` | Username (shown as the owner of your sets and matched by `by:`; renaming keeps you signed in), display name and Telegram user id, the theme (System, Light, Dark), password change (current password required if you have one, except when you are signed in through the tailnet; at least `auth.min_password_length` characters), two-step verification setup (QR code and key, confirm with a code) and disabling, API tokens (create, the secret is shown once, revoke). |
 | `/admin` | Admins only. See [Admin panel](#admin-panel). |
 | `/jobs/{id}` | Status of a background job (yours, or any job for admins). |
 
@@ -60,18 +61,14 @@ screen readers and a tooltip. On narrow screens (below 40rem) the cards
 become rows: a small thumbnail on the left, fields and buttons on the
 right.
 
-**Compact view.** The "Compact view" checkbox next to the sort switches to
-a denser grid: thumbnails with only the name and emojis on one line; the
-other fields and the button row are hidden (the context menu has the
-actions). With JavaScript the checkbox applies at once and is remembered in
-`localStorage` (`stickpile.setView`) for every set page; the address bar
-gets `?view=compact` (or loses it) so a reload shows the same thing. A
-`view` parameter in the URL always wins over the remembered choice and
-becomes the new remembered choice. Without JavaScript the checkbox is part
-of the filter form: "Apply" submits it together with the likes filter and
-the sort, and the server renders `?view=compact` with the compact class
-and the box checked. The class sits on the section around the grid, so it
-survives the grid refreshes after reordering and uploads.
+**Styles and shown fields.** The "View" button next to the sort opens the
+display options: the style **Regular** (every field and the button row),
+**Compact** (a denser grid of thumbnails with the name, and the emojis on a
+line of their own at the bottom of the card; the other fields and the
+button row are hidden, the context menu has the actions) or **Grid**
+(thumbnails only, with "⋯" on the thumbnail's corner), and which fields
+show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
+"Cover" badges). See [Display options and themes](#display-options-and-themes).
 
 **Context menu.** Right-click an item card (either view) for its actions:
 
@@ -81,7 +78,7 @@ survives the grid refreshes after reordering and uploads.
 | Like / Unlike | always | the card's like button |
 | Open item page | always | link to `/items/{id}` (middle-click opens a tab) |
 | Download original | always | download link |
-| Rename | you can edit the set | inline edit of the name (also in the compact view) |
+| Rename | you can edit the set | inline edit of the name (also in the compact and grid views, where the form opens inside the small card) |
 | Edit all fields… | you can edit the set | `/items/{id}?edit=1` |
 | Use as cover / Stop using as cover | you can edit the set | makes the item the set's cover (or goes back to the first item) through `POST /sets/{id}/cover`; the grid comes back in the page's sort with the "Cover" badge on that card |
 | Move up, Move down, Move to top, Move to bottom | you can edit the set, set order, no likes filter | the set's move endpoint; the ends are disabled for the first and last item |
@@ -102,6 +99,72 @@ focus follows the item. Ctrl+ or Shift+right-click (and right-clicking a
 text field, e.g. while editing) keeps the browser's own menu. Without
 JavaScript there is no custom menu and no "⋯"; the browser's menu and the
 card buttons work as before.
+
+<!-- ---- display options and themes (begin) ---- -->
+
+## Display options and themes
+
+**"View" on the set page.** A disclosure button in the filter form. Its
+panel has the style (Regular, Compact, Grid) and the "Show" toggles for
+Emojis, Keywords, Vibe, Tags and Labels; the name always shows. Toggles a
+style has no room for are disabled with a note (Compact shows the name and
+the emojis; Grid only thumbnails and labels). Everything applies at once:
+`assets/prefs.js` puts a style class (`compact`, `view-grid`) and
+`hide-<field>` classes on `#items-section`, outside the swapped grid, so
+they survive reordering and uploads, and CSS hides the fields without
+leaving gaps. A field being edited stays visible, and Rename from the
+context menu opens its form inside the card in every style. The choices
+are remembered in `localStorage` (`stickpile.items.view`,
+`stickpile.items.hide`; the old `stickpile.setView` of the "Compact view"
+checkbox is still read) for every set page. The address bar carries the
+style (`?view=compact` or `?view=grid`; none for Regular), so a reload,
+"Apply" and htmx requests agree with what is shown; a `view` parameter in
+the URL wins over the remembered style and becomes the remembered one.
+Escape or a click outside closes the panel.
+
+**"View" on set lists** (`/sets` and the start page's "Your sets"). The
+style **Regular cards** or **Compact** (smaller cards, one-line name and
+description), and toggles for the parts of a card: Cover, Description,
+Item count, Labels (visibility and source), Owner and Slug. Kept apart from
+the set page's options (`stickpile.sets.view`, `stickpile.sets.hide`),
+applied as classes on the `.set-list` wrapper and shared by every set list.
+
+**Before the first paint.** prefs.js is loaded without `defer`: once in
+`<head>`, and once more as the first child of `#items-section` and of each
+`.set-list`, where it applies the remembered classes to its parent before
+the cards are parsed, so hidden fields never show up and vanish again.
+
+**Without JavaScript** every field and every part of a set card shows. The
+set page's style radios are part of the filter form: "Apply" submits them
+with the likes filter and the sort, and the server renders the style class
+from `?view=`. The show/hide toggles and the set lists' control need
+JavaScript and are hidden without it.
+
+**Themes.** Settings → Appearance offers **System** (follow the device's
+light or dark setting, the default), **Light** and **Dark**, stored with
+the account (`users.theme`, `theme` in `PATCH /api/v1/me`). For Light and
+Dark the server renders `<html data-theme="light|dark">` and a matching
+`<meta name="color-scheme">`, so pages open in the right colours; System
+renders no `data-theme`. In app.css the light palette is on `:root`; the
+dark one applies to `[data-theme="dark"]` and, without a `data-theme`,
+under `prefers-color-scheme: dark`; `color-scheme` follows, so form
+controls and scrollbars match. Colours that differ between the themes are
+variables; nothing else depends on `prefers-color-scheme`.
+
+**The switch in the top bar** (a moon in the light theme, a sun in the
+dark one) is a toggle button named "Dark theme" whose `aria-pressed` says
+whether the page is dark. It flips from the theme in effect (also under
+System, where it follows the device and updates when the device changes),
+applies at once and saves it with `PATCH /api/v1/me` (session cookie and
+`X-CSRF-Token`); a failure is reported in the status region. Without
+JavaScript it is a form posting the other theme to `POST /settings/theme`
+(with `csrf_token`), which returns to the page it came from. The account's
+choice is also remembered in `localStorage` (`stickpile.theme`), and pages
+without a session (sign-in, registration) apply it in `<head>`; there the
+switch only changes that remembered value. Signing in, the account's theme
+wins.
+
+<!-- ---- display options and themes (end) ---- -->
 
 ## Keyboard and mouse
 
@@ -127,10 +190,30 @@ card buttons work as before.
   move inside them. Escape closes the panel and returns to the button (a
   second Escape cancels an inline edit), as does a click outside. Skin-tone
   and hair-style variants are not offered; type them if you need them. The
-  data (`/static/emoji.json`) is fetched the first time a panel opens.
+  data (`/static/emoji.json`) is fetched the first time a panel opens or a
+  `:` is typed.
+- **`:` suggestions**: typing `:` in an Emojis field searches without the
+  panel. `:cat` lists up to 8 matches with their names right under the field,
+  the best one highlighted (the same search as the panel; `_` joins words, as
+  in `:thumbs_up`); a bare `:` lists your recently used emojis (those not in
+  the field yet), or common ones if there are none. Space, Enter or Tab
+  replaces `:cat` with the highlighted emoji and a space, so the next `:` can
+  follow; a click on a suggestion does the same. ↑/↓ move the highlight
+  (wrapping around). Escape closes the list and keeps the text (it does not
+  cancel an inline edit); so do deleting the `:`, moving the caret away,
+  typing a character that is not part of a name, and leaving the field. With
+  no matches Space types a space and ends the search, and Enter does nothing:
+  while a search is open, Enter never submits (the inline editor saves on the
+  next Enter). Only a typed `:` starts a search, not a pasted one. Picks count
+  as recently used; an emoji already in the field is not added twice. The
+  field is an ARIA combobox (`aria-autocomplete="list"`, the highlighted
+  option as `aria-activedescendant`, the result count in a polite live
+  region), and keys are ignored while an input method is composing.
 - **AI suggestions** are marked with an `AI` badge and a tinted row. "✓ Confirm"
   keeps the value and marks it as yours; editing it does the same with your
-  value. AI values you leave alone stay marked (also in exports).
+  value. AI values you leave alone stay marked (also in exports). In the
+  upload tray the same is called "✓ Approve" (see [Upload and
+  import](#upload-and-import)).
 - **Reorder**: ↑ and ↓ on each card move it by one place; the context menu
   also moves to the top or bottom. They are only offered in set order
   without the likes filter.
@@ -146,7 +229,8 @@ card buttons work as before.
   (the browser's directory picker). See [Upload and import](#upload-and-import).
 
 Focus is always visible (a 3 px outline), every input has a label, images
-have the item name as alt text, and colours follow `prefers-color-scheme`.
+have the item name as alt text, and colours follow the theme (see
+[Display options and themes](#display-options-and-themes)).
 
 ## Copy to clipboard
 
@@ -202,12 +286,49 @@ counts for popular items and your stats. Downloads are not counted.
     keywords describe what is in the sticker and go to Telegram as its search
     words, the vibe is the mood in one word, and tags are your own labels for
     sorting and filtering (`tag:nsfw`, `-tag:nsfw`) that never go to
-    Telegram and that AI never fills. They are the item's from the start, so AI
-    enrichment fills only the fields left empty. "Use for every file" gives
+    Telegram and that AI never fills. What you type or approve is the item's
+    from the start, so AI enrichment fills only the fields left empty (and
+    unapproved suggestions, below). "Use for every file" gives
     the other files the selected file's keywords, emojis, vibe and tags (not
     its name). Enter in these fields does not upload. The details are sent
     in a `meta` field, the same JSON as the API's (one `UploadMeta` per
     file).
+  - **AI suggestions** (when the server's AI is ready or still loading; the
+    form then carries `data-ai-suggest`): as soon as files are staged, the
+    tray asks the server for keywords, emojis and a vibe for each one, two
+    files at a time, the selected file first
+    ([ai.md](ai.md#suggestions-before-an-upload)).
+    It sends a small PNG rendered in the browser, not the file. While it
+    waits, the selected file shows "Suggesting keywords, emojis and vibe…".
+    Suggestions fill only fields that are still empty, never what you typed,
+    and are marked like on the item page: the `AI` badge next to the label,
+    a tinted field, and an `AI` badge on the thumbnail while the file has
+    any left to review. A line above the fields says what AI suggested.
+    Suggestions are never made for tags or names.
+    - **✓ Approve** next to a field makes the value yours. It is a toggle
+      (`aria-pressed`), so pressing it again marks the value AI again.
+    - **Editing** a suggested field, including picking an emoji or a vibe
+      from the list, makes the value yours.
+    - **✓ Approve all** (above the fields) approves the selected file's
+      suggestions; **✓ Approve AI for all files** (next to "Remove all",
+      with several files) approves every file's.
+    - **Use for every file** counts as approval: the copied values are
+      yours on every file, the selected file's suggestions included, and
+      they replace the other files' own suggestions in those fields.
+    - Unapproved suggestions are uploaded too, marked AI (`ai_fields` in
+      `meta`), so the item page shows them with "✓ Confirm".
+    - Failures are quiet: if the server has no AI, the browser cannot read
+      a file, or a request fails, the fields stay as they are. When the
+      server asks to wait (rate limit, model still loading) the tray waits
+      and tries again a few times.
+    - Suggestions look at the file as it was added, before crops and turns.
+      Clearing a suggested field leaves it empty, and empty fields are filled
+      by enrichment after the upload, as before.
+    - Screen readers: each field's description says "Suggested by AI, not
+      approved." while it is; the ✓ buttons are named "Approve keywords"
+      (and so on), "Approve all suggestions for <file>"; the thumbnail
+      says "AI suggestions to approve"; the line above the fields is a
+      polite live region.
   - **Image tools** for still images (PNG, JPEG, still WebP): rotate left or
     right, flip horizontally or vertically, and crop. The crop area covers
     the whole image at first; drag its corners to crop and its inside to
@@ -323,19 +444,23 @@ errors re-render the form with your input and the message.
 
 ## Static assets
 
-`/static/app.css`, `/static/app.js`, `/static/upload.js`,
-`/static/emoji.js`, `/static/emoji.json`, `/static/htmx.min.js` and
-`/static/favicon.svg` are compiled into the binary and served with
+`/static/app.css`, `/static/app.js`, `/static/prefs.js`,
+`/static/upload.js`, `/static/emoji.js`, `/static/emoji.json`,
+`/static/htmx.min.js` and `/static/favicon.svg` are compiled into the binary and served with
 `Cache-Control: public, max-age=31536000, immutable`. Pages link them with a
 content hash (`?v=…`), so upgrades are picked up at once. emoji.js gets the
 versioned URL of `emoji.json` from its `<script data-emoji-data>` attribute.
 
-**Emoji data.** `assets/emoji.json` (about 107 kB, 34 kB gzipped; 1,902
+**Emoji data.** `assets/emoji.json` (about 110 kB, 35 kB gzipped; 1,902
 emojis) is generated by `scripts/gen-emoji-data.py` from Unicode
 `emoji-test.txt` 17.0 (order, categories, names; fully-qualified emojis only,
 without the Component group and skin-tone and hair-style variants) and the
 English CLDR 48.2 annotations (keywords), plus the slang in
-`crates/stickpile-search/src/emoji_names.rs`. The Unicode data is
+`crates/stickpile-search/src/emoji_names.rs`, kept apart from the CLDR
+keywords: the picker ranks those curated terms first (so "laugh" and "lol"
+find 😂 before 😀), then words of the name, then keywords; ties go to the
+order of `emoji_names.rs` (its emojis are also the `common` list, the
+suggestions before anything was used). The Unicode data is
 © Unicode, Inc., under the [Unicode License
 v3](https://www.unicode.org/license.txt); the file carries that notice and
 the versions. To regenerate it (for example after updating `flake.lock`, or
@@ -353,12 +478,24 @@ you cannot see; 403 for admin pages and others' sets; CSRF on urlencoded,
 htmx and multipart forms, and cross-site posts; the login flow and cookie
 flags; logout; the TOTP step; registration per policy; tailnet sign-in;
 htmx fragments without the document shell; escaping of `<script>` and quotes;
-the compact view (`?view=compact`, the checkbox in the filter form, other
-parameters kept) and the context-menu data per permission (no edit, delete
+the set page's "View" control (in the filter form, `?view=compact` and
+`?view=grid`, other parameters kept, the JS-only toggles hidden), the set
+lists' control and card parts, themes (`<html data-theme>` per account,
+none for System, the top bar's switch, Settings → Appearance and
+`POST /settings/theme` with its validation and CSRF) and the context-menu data per permission (no edit, delete
 or move entries for viewers, no move entries when sorted or filtered, the
 named "⋯" button);
 the CSP header and the absence of inline styles and scripts; static asset
 types; the emoji picker's markers (the emojis inputs, the script order, the
-`emoji.json` notice and contents); HTML error pages; and the flows end to end (sets, uploads with
+`:` suggestions' combobox, the `emoji.json` notice and contents, its terms
+column and `common` list); HTML error pages; and the flows end to end (sets, uploads with
 near-duplicate warnings, imports, editing, likes and filters, stats and
 popular, settings, the admin panel, git pack and Telegram forms, job polling).
+
+`tests/ai_admin.rs` covers the tray's AI side on the server: the
+`data-ai-suggest` attribute (present when AI is ready or loading, absent when
+off), the suggestion endpoint with a web session (CSRF header, same origin),
+and uploads with `ai_fields`. The tray itself (marking, approving, editing,
+"Approve all", what gets uploaded) was checked with Playwright in Chromium,
+Firefox and WebKit against a server without models: the test intercepts the
+suggestion endpoint in the page and adds the attribute.

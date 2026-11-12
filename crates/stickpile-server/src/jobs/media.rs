@@ -141,13 +141,7 @@ pub async fn enrich(state: &AppState, job: &JobRow) -> JobResult {
         let ai = st.ai().expect("checked");
         let frame =
             stickpile_media::decode_frame(&bytes, &st.media_limits()).map_err(|e| JobError::Fatal(e.to_string()))?;
-        let emb = ai
-            .enricher
-            .embed_image(&frame)
-            .map_err(|e| JobError::Retry(e.to_string()))?;
-        let sugg = ai
-            .zeroshot
-            .suggest(&emb, cfg.max_keywords as usize, cfg.max_emojis as usize);
+        let (emb, sugg) = ai_fill::embed_and_suggest(ai, &cfg, &frame).map_err(|e| JobError::Retry(e.to_string()))?;
         Ok::<_, JobError>((emb, sugg, ai.image_model_id().to_string()))
     })
     .await

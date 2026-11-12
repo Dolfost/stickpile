@@ -1,19 +1,19 @@
-//! Account settings: profile (display name, Telegram user id), password,
-//! TOTP enrolment (QR code as inline SVG) and API tokens.
+//! Account settings: profile (display name, Telegram user id), theme,
+//! password, TOTP enrolment (QR code as inline SVG) and API tokens.
 
 use std::fmt::Write as _;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
-use stickpile_api::{ChangePassword, UpdateMe};
+use stickpile_api::{ChangePassword, Theme, UpdateMe};
 
 use super::components::{opt_time, time_el, trusted};
 use super::layout::{self, Nav};
-use super::Ctx;
+use super::{safe_next, Ctx};
 use crate::auth::AuthMethod;
 use crate::db::UserRow;
 use crate::error::{AppError, AppResult};
@@ -46,6 +46,7 @@ pub fn qr_svg(data: &str) -> Option<String> {
 fn notice_for(done: Option<&str>) -> Option<&'static str> {
     Some(match done? {
         "profile" => "Profile saved.",
+        "theme" => "Theme saved.",
         "password" => "Password changed. Your other web sessions were signed out.",
         "totp-on" => "Two-step verification is on.",
         "totp-off" => "Two-step verification is off.",
@@ -64,6 +65,7 @@ pub struct DoneQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
     Profile,
+    Appearance,
     Password,
     Totp,
     Tokens,
@@ -120,6 +122,32 @@ async fn render(
                     }
                 }
                 button.primary type="submit" { "Save profile" }
+            }
+        }
+        section #appearance aria-labelledby="s-appearance" {
+            h2 #s-appearance { "Appearance" }
+            (err(Section::Appearance))
+            form.stack.narrow method="post" action="/settings/theme" {
+                (ctx.csrf_input())
+                input type="hidden" name="next" value="/settings?done=theme#appearance";
+                fieldset.field-row aria-describedby="s-theme-hint" {
+                    legend { "Theme" }
+                    @for (t, label, hint) in [
+                        (Theme::System, "System", "follow the light or dark setting of your device"),
+                        (Theme::Light, "Light", "always light"),
+                        (Theme::Dark, "Dark", "always dark"),
+                    ] {
+                        label.radio {
+                            input type="radio" name="theme" value=(t.as_str()) checked[me.theme() == t];
+                            " " strong { (label) } " — " (hint)
+                        }
+                    }
+                    p.hint #s-theme-hint {
+                        "Saved with your account, so it follows you to other devices. "
+                        "The moon or sun button in the top bar switches between light and dark at once."
+                    }
+                }
+                button.primary type="submit" { "Save theme" }
             }
         }
         section #password aria-labelledby="s-password" {
@@ -285,11 +313,55 @@ pub async fn profile(State(state): State<AppState>, ctx: Ctx, Form(f): Form<Prof
         username: (!username.is_empty()).then(|| username.to_string()),
         display_name: Some(f.display_name.trim().to_string()),
         telegram_user_id: Some(telegram_user_id),
+        theme: None,
     };
     match account::update_me(&state, &ctx.user, req).await {
         Ok(_) => Ok(ctx.redirect("/settings?done=profile")),
         Err(e) => failed(&state, &ctx, Section::Profile, e).await,
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ThemeForm {
+    #[serde(default)]
+    theme: String,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+/// Path and query of a same-site `Referer` (the page a form was sent from).
+fn referer_path(headers: &HeaderMap) -> Option<String> {
+    let referer = headers.get(header::REFERER)?.to_str().ok()?;
+    let (_, rest) = referer.split_once("://")?;
+    let path = &rest[rest.find('/')?..];
+    safe_next(Some(path.split('#').next().unwrap_or(path))).map(str::to_string)
+}
+
+/// The theme, from the settings form or the top bar's switch without
+/// JavaScript (with it, the switch saves through `PATCH /api/v1/me`). Goes
+/// back to `next`, else to the page the switch was on.
+pub async fn theme(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    headers: HeaderMap,
+    Form(f): Form<ThemeForm>,
+) -> AppResult<Response> {
+    let Some(theme) = Theme::parse(f.theme.trim()) else {
+        let e = AppError::bad_request("the theme must be system, light or dark");
+        return failed(&state, &ctx, Section::Appearance, e).await;
+    };
+    let req = UpdateMe {
+        theme: Some(theme),
+        ..Default::default()
+    };
+    if let Err(e) = account::update_me(&state, &ctx.user, req).await {
+        return failed(&state, &ctx, Section::Appearance, e).await;
+    }
+    let back = safe_next(f.next.as_deref())
+        .map(str::to_string)
+        .or_else(|| referer_path(&headers))
+        .unwrap_or_else(|| "/settings?done=theme#appearance".into());
+    Ok(ctx.redirect(&back))
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -154,6 +154,7 @@ fn to_summary(r: &SetListRow) -> SetSummary {
         id: r.set.id.clone(),
         slug: r.set.slug.clone(),
         name: r.set.name.clone(),
+        description: r.set.description.clone(),
         owner_username: r.owner_username.clone(),
         visibility: r.set.visibility(),
         source: parse_enum(&r.set.source).unwrap_or(SetSource::Local),

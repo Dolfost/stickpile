@@ -16,9 +16,14 @@ Sources:
 * crates/stickpile-search/src/emoji_names.rs: the slang the server's search
   knows ("lol", "sus"), so the picker finds what search finds.
 
-Output: {"notice", "license", "emoji", "cldr", "groups": [[group, tab
-emoji, [[emoji, name, keywords], ...]], ...]}. `keywords` is one string of
-lowercase words separated by spaces, leaving out the words of the name.
+Output: {"notice", "license", "emoji", "cldr", "common": [emoji, ...],
+"groups": [[group, tab emoji, [[emoji, name, keywords, terms?], ...]], ...]}.
+`terms` are the curated words of emoji_names.rs (left out when there are
+none), which the picker ranks above the CLDR `keywords`; both are one string
+of lowercase words separated by spaces, and `keywords` leaves out the words
+of the name and of `terms`. `common` lists the emojis of emoji_names.rs in
+its order (the ones used most on stickers, roughly most used first): the
+picker's tie-breaker and its suggestions before anything was used.
 """
 
 import argparse
@@ -114,9 +119,10 @@ def parse_annotations(*paths):
 
 
 def parse_slang(path):
+    """[(emoji without VS16, words), ...] in the file's order."""
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    return {e: words for e, words in re.findall(r'\("([^"]+)", "([^"]+)"\)', text)}
+    return re.findall(r'\("([^"]+)", "([^"]+)"\)', text)
 
 
 def norm(s):
@@ -152,28 +158,47 @@ def main():
     notes, years = parse_annotations(
         os.path.join(cldr, "annotations", "en.xml"), os.path.join(cldr, "annotationsDerived", "en.xml")
     )
-    slang = parse_slang(SLANG)
+    slang_list = parse_slang(SLANG)
+    slang = dict(slang_list)
 
     out_groups = []
     total = 0
+    qualified = {}  # emoji without VS16 -> as in emoji-test.txt
     for group, entries in groups:
         rows = []
         for emoji, name in entries:
             key = emoji.replace(VS16, "")
+            qualified.setdefault(key, emoji)
             kw, tts = notes.get(key, (None, None))
             name = norm(tts or name)
             extra = slang.get(key)
             if extra is None and ZWJ in key:
                 extra = slang.get(key[0])  # like the search: 🤷‍♂ -> 🤷
-            have = set(words(name))
+            # The curated terms stay whole (also words of the name: they
+            # rank higher); the keywords leave out what is said already.
+            terms = []
+            for w in words(extra or ""):
+                if w not in terms:
+                    terms.append(w)
+            have = set(words(name)) | set(terms)
             keywords = []
-            for w in words(" ".join(kw or [])) + words(extra or ""):
+            for w in words(" ".join(kw or [])):
                 if w not in have:
                     have.add(w)
                     keywords.append(w)
-            rows.append([emoji, name, " ".join(keywords)])
+            row = [emoji, name, " ".join(keywords)]
+            if terms:
+                row.append(" ".join(terms))
+            rows.append(row)
         total += len(rows)
         out_groups.append([group, TAB.get(group, entries[0][0]), rows])
+
+    common = []
+    for key, _ in slang_list:
+        if key not in qualified:
+            raise SystemExit("emoji_names.rs: {} is not in emoji-test.txt".format(key))
+        if qualified[key] not in common:
+            common.append(qualified[key])
 
     data = {
         "notice": (
@@ -185,11 +210,12 @@ def main():
         "license": "Unicode-3.0",
         "emoji": emoji_version,
         "cldr": cldr_version,
+        "common": common,
         "groups": out_groups,
     }
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    # One group per line keeps diffs of a regeneration readable.
-    text = text.replace(',["', ',\n["').replace('"groups":[[', '"groups":[\n[')
+    # One emoji per line keeps diffs of a regeneration readable.
+    text = text.replace(',["', ',\n["').replace('"groups":[[', '"groups":[\n[').replace('"common":[', '\n"common":[')
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(text + "\n")
     print("wrote {} ({} emojis, {} bytes)".format(args.out, total, len(text.encode("utf-8")) + 1), file=sys.stderr)

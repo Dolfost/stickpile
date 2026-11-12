@@ -38,6 +38,7 @@
         max_video_seconds = 120;
         login_per_minute = 10;
         upload_per_minute = 120;
+        ai_suggest_per_minute = 120;
       };
       media = {
         ffmpeg = "ffmpeg";

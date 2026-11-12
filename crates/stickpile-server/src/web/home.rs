@@ -3,7 +3,7 @@
 use axum::extract::State;
 use maud::{html, Markup};
 
-use super::components::{grid, item_card, set_card, Card};
+use super::components::{grid, item_card, set_list, set_list_view, Card};
 use super::layout::Nav;
 use super::{auth, MaybeCtx};
 use crate::error::AppResult;
@@ -46,6 +46,7 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
                 h2 { "Your sets" }
                 a.button href="/sets/new" { "New set" }
                 a.button href="/upload" { "Upload" }
+                @if !my_sets.is_empty() { (set_list_view()) }
             }
             @if my_sets.is_empty() {
                 p.muted {
@@ -55,7 +56,7 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
                     a href="/sets?tab=public" { "public sets" } "."
                 }
             } @else {
-                (grid(html! { @for s in &my_sets { (set_card(s)) } }))
+                (set_list(&my_sets))
             }
         }
     };

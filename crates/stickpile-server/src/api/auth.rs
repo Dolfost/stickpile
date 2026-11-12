@@ -69,7 +69,7 @@ pub async fn me(user: CurrentUser) -> Json<User> {
     Json(user.user.to_api())
 }
 
-/// Update the caller's profile (display name, Telegram user id for pack export).
+/// Update the caller's profile (username, display name, Telegram user id for pack export, web UI theme).
 #[utoipa::path(patch, path = r::ME, tag = "auth", request_body = UpdateMe,
     responses((status = 200, body = User), (status = 400, body = ApiError), (status = 401, body = ApiError)),
     security(("bearer" = []), ("session" = [])))]

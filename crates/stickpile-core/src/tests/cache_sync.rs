@@ -15,6 +15,7 @@ fn user(id: &str, name: &str) -> User {
         tailscale_login: None,
         created_at: 0,
         telegram_user_id: None,
+        theme: Default::default(),
     }
 }
 

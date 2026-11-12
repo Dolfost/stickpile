@@ -588,6 +588,113 @@ async fn account_settings() {
     b.refresh_csrf().await;
 }
 
+/// The account's theme as the API reports it.
+async fn theme_of(s: &TestServer, user: &common::TestUser) -> Value {
+    s.get(user, routes::ME).await.expect(200).value()["theme"].clone()
+}
+
+#[tokio::test]
+async fn theme_from_settings_and_the_top_bar() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let b = Browser::login(&s, &alice).await;
+    let theme = || theme_of(&s, &alice);
+    assert_eq!(theme().await, "system");
+
+    // Settings → Appearance: System, Light, Dark with the current one checked.
+    let r = b.get("/settings").await;
+    assert_page(&r);
+    let html = r.text();
+    assert!(html.contains("<section id=\"appearance\" aria-labelledby=\"s-appearance\">"));
+    assert!(html.contains("<form class=\"stack narrow\" method=\"post\" action=\"/settings/theme\">"));
+    for (value, checked) in [("system", true), ("light", false), ("dark", false)] {
+        let radio = format!("<input type=\"radio\" name=\"theme\" value=\"{value}\"");
+        assert!(html.contains(&radio), "{value}");
+        assert_eq!(html.contains(&format!("{radio} checked>")), checked, "{value}");
+    }
+
+    // Saving: stored, back to the settings page with a notice, rendered.
+    let r = b
+        .post_form(
+            "/settings/theme",
+            &[("theme", "dark"), ("next", "/settings?done=theme#appearance")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&r), "/settings?done=theme#appearance");
+    assert_eq!(theme().await, "dark");
+    let html = b.get("/settings?done=theme").await.text();
+    assert!(html.contains("Theme saved."));
+    assert!(html.contains("<html lang=\"en\" data-theme=\"dark\">"));
+    assert!(html.contains("<input type=\"radio\" name=\"theme\" value=\"dark\" checked>"));
+
+    // Anything but the three names is refused in the Appearance section and
+    // changes nothing.
+    for bad in ["purple", "Dark", " ", ""] {
+        let r = b.post_form("/settings/theme", &[("theme", bad)]).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad:?}");
+        let html = r.text();
+        let err = html.find("The theme must be system, light or dark").expect("message");
+        assert!(err > html.find("id=\"appearance\"").unwrap() && err < html.find("id=\"password\"").unwrap());
+    }
+    assert_eq!(theme().await, "dark");
+
+    // The top bar's switch without JavaScript: its form sends the other
+    // theme and returns to the page it was on (the Referer).
+    let set = s.create_set(&alice, "cats", Visibility::Private).await;
+    let from = format!("/sets/{}?view=compact", set.id);
+    let r = common::read(
+        b.client
+            .post(b.url("/settings/theme"))
+            .header("referer", b.url(&format!("{from}#items-head")))
+            .form(&[("csrf_token", b.csrf.as_deref().unwrap()), ("theme", "light")])
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&r), from);
+    assert_eq!(theme().await, "light");
+    assert!(b
+        .get(&from)
+        .await
+        .text()
+        .contains("<html lang=\"en\" data-theme=\"light\">"));
+    // No Referer and no (local) next: the settings page.
+    for next in [None, Some("//evil.example/x")] {
+        let mut fields = vec![("theme", "system")];
+        if let Some(n) = next {
+            fields.push(("next", n));
+        }
+        let r = b.post_form("/settings/theme", &fields).await;
+        assert_eq!(location(&r), "/settings?done=theme#appearance", "{next:?}");
+    }
+    assert_eq!(theme().await, "system");
+    assert!(b.get("/").await.text().contains("<html lang=\"en\">"));
+    // Without the CSRF token: refused.
+    let r = b.post_raw("/settings/theme", &[("theme", "dark")]).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(theme().await, "system");
+
+    // With JavaScript the switch saves through PATCH /api/v1/me with the
+    // session cookie and its CSRF header.
+    let patch = |token: Option<String>, body: Value| {
+        let mut rb = b.client.patch(b.url(routes::ME)).json(&body);
+        if let Some(t) = token {
+            rb = rb.header("X-CSRF-Token", t);
+        }
+        async move { common::read(rb.send().await.unwrap()).await }
+    };
+    let r = patch(b.csrf.clone(), json!({"theme": "dark"})).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.value()["theme"], "dark");
+    let r = patch(None, json!({"theme": "light"})).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.code(), "csrf");
+    assert_eq!(theme().await, "dark");
+}
+
 #[tokio::test]
 async fn admin_panel() {
     let s = TestServer::start().await;

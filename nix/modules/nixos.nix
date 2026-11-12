@@ -315,6 +315,10 @@ in
             max_video_seconds = opt u32 120 "Video duration.";
             login_per_minute = opt u32 10 "Login attempts per client IP and per username.";
             upload_per_minute = opt u32 120 "Uploads per user.";
+            ai_suggest_per_minute = opt u32 120 ''
+              AI suggestion requests per user (the upload tray asks once per
+              staged file).
+            '';
           };
 
           media = section "Media pipeline." {

@@ -42,6 +42,42 @@ vocabulary that produced a set of suggestions.
 | `clip` | `clip-vit-b32+clip-text` |
 | `multilingual` | `clip-vit-b32+mclip-v1` |
 
+## Suggestions before an upload
+
+The web upload tray asks for keywords, emojis and a vibe while files are
+staged, so they can be reviewed before anything is uploaded
+([web.md](web.md#upload-and-import)). The endpoint is
+`POST /api/v1/ai/suggest` ([api.md](api.md#ai-suggestions)): one small
+image in, `{keywords, emojis, vibe}` out, nothing stored. It runs the same
+code as the `Enrich` job (`service::ai::embed_and_suggest`: embed the image,
+then `ZeroShot::suggest` with `max_keywords`, `max_emojis` and the default
+thresholds), on the blocking thread pool, rate limited per user
+(`limits.ai_suggest_per_minute`), and answers 503 when AI is off (with
+`Retry-After` while the model loads).
+
+The browser renders what the server's thumbnail would show and sends that,
+not the file: a PNG with the longest side 256 px (the default
+`media.thumb_px`; CLIP looks at a 224 × 224 centre crop anyway). An
+animation sends its first frame and a video the frame at a tenth of its
+length, the frames the server's thumbnails use. So requests stay small (the
+endpoint takes at most 2 MiB), the server only ever decodes a still, and the
+suggestions match what enrichment picks from the thumbnail after the upload.
+
+Approval decides the source. The tray uploads approved or edited values as
+the user's (`*_source = user`) and lists unapproved ones in
+`UploadMeta.ai_fields`, which stores them with `*_source = ai`, like
+enrichment results. The item page then shows them with the AI badge and
+"✓ Confirm". Tags are never suggested: they are the user's own labels.
+
+After the upload the `Enrich` job still runs once per new picture, because
+it stores the image embedding that search needs. It fills fields by the
+usual rule (empty or still `ai`), so approved values are never touched and
+an item whose fields are all the user's is not written at all. Unapproved
+suggestions are AI values like any other and get the thumbnail's
+suggestions, which are normally the same ones. The only extra work is one
+inference per staged file in the tray (about 50 ms on the CPU with
+`clip`, threads = 2).
+
 ## Models and layout
 
 ```

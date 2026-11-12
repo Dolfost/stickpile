@@ -73,6 +73,7 @@ How `tailscale serve` reaches the server. See
 | `max_video_seconds` | integer | `120` | Video length. |
 | `login_per_minute` | integer > 0 | `10` | Password logins, token requests, registrations, password and TOTP changes, per client IP and per username. |
 | `upload_per_minute` | integer > 0 | `120` | Upload and import requests per user. |
+| `ai_suggest_per_minute` | integer > 0 | `120` | AI suggestion requests (`POST /api/v1/ai/suggest`) per user. The upload tray asks once per staged file. |
 
 ## `[media]`
 

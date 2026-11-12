@@ -186,6 +186,7 @@ impl MockState {
             tailscale_login: None,
             created_at: self.clock,
             telegram_user_id: None,
+            theme: Default::default(),
         };
         self.users.push(MockUser {
             user: user.clone(),
@@ -409,6 +410,7 @@ impl MockState {
             id: s.id.clone(),
             slug: s.slug.clone(),
             name: s.name.clone(),
+            description: s.description.clone(),
             owner_username: s.owner_username.clone(),
             visibility: s.visibility,
             source: s.source,

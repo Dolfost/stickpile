@@ -152,6 +152,7 @@ In-memory GCRA limiters (`governor`, `security.rs`):
 |---|---|---|
 | Password logins (`/auth/token`, web login), registrations, password changes, TOTP confirm/disable | client IP **and** lowercased username, both must pass | `limits.login_per_minute` |
 | Uploads and imports (also Telegram imports) | user | `limits.upload_per_minute` requests |
+| AI suggestions (`/api/v1/ai/suggest`, the upload tray) | user | `limits.ai_suggest_per_minute` requests |
 | Git webhook (`/api/v1/hooks/git/{id}`, unauthenticated) | client IP, checked before the signature | 60 per minute |
 
 Every attempt counts, successful or not. Over the limit: 429 `rate_limited`

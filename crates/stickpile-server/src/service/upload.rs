@@ -235,18 +235,44 @@ impl ItemInput {
             name
         };
         let source_url = meta.and_then(|m| m.source_url.clone()).filter(|u| u.len() <= 2048);
+        let ai_fields = meta.map(|m| m.ai_fields.as_slice()).unwrap_or(&[]);
+        for f in ai_fields {
+            if !AI_FIELDS.contains(&f.as_str()) {
+                return Err(AppError::bad_request(format!(
+                    "ai_fields: {f:?} cannot be an AI suggestion; use any of {AI_FIELDS:?}"
+                )));
+            }
+        }
+        // Unapproved AI suggestions keep their marker; given values are the user's.
+        let source = |field: &str, given: bool| {
+            if given && ai_fields.iter().any(|f| f == field) {
+                FieldSource::Ai
+            } else {
+                FieldSource::User
+            }
+        };
+        let keywords = clean_list(meta.and_then(|m| m.keywords.as_deref()).unwrap_or(&[]), "keywords")?;
+        let emojis = clean_list(meta.and_then(|m| m.emojis.as_deref()).unwrap_or(&[]), "emojis")?;
+        let vibe = clean_vibe(meta.and_then(|m| m.vibe.as_deref()))?;
         Ok(ItemInput {
             stem: stem_for(&name),
             name,
-            keywords: clean_list(meta.and_then(|m| m.keywords.as_deref()).unwrap_or(&[]), "keywords")?,
-            emojis: clean_list(meta.and_then(|m| m.emojis.as_deref()).unwrap_or(&[]), "emojis")?,
+            keywords_source: source("keywords", !keywords.is_empty()),
+            keywords,
+            emojis_source: source("emojis", !emojis.is_empty()),
+            emojis,
+            vibe_source: source("vibe", vibe.is_some()),
+            vibe,
             tags: clean_list(meta.and_then(|m| m.tags.as_deref()).unwrap_or(&[]), "tags")?,
-            vibe: clean_vibe(meta.and_then(|m| m.vibe.as_deref()))?,
             source_url,
             ..Default::default()
         })
     }
 }
+
+/// Fields an upload may mark as unapproved AI suggestions
+/// ([`UploadMeta::ai_fields`]). Names and tags are always the user's.
+pub const AI_FIELDS: [&str; 3] = ["keywords", "emojis", "vibe"];
 
 // ---------------------------------------------------------------------------
 // Media

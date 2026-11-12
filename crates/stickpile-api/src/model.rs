@@ -253,6 +253,36 @@ pub struct User {
     /// the server's `telegram.default_owner_user_id`).
     #[serde(default)]
     pub telegram_user_id: Option<i64>,
+    /// Colour theme of the web UI.
+    #[serde(default)]
+    pub theme: Theme,
+}
+
+/// Colour theme of the web UI, chosen per user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Follow the device's light or dark setting (`prefers-color-scheme`).
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub const ALL: [Theme; 3] = [Theme::System, Theme::Light, Theme::Dark];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+    /// Exact lowercase names only (`system`, `light`, `dark`).
+    pub fn parse(s: &str) -> Option<Theme> {
+        Theme::ALL.into_iter().find(|t| t.as_str() == s)
+    }
 }
 
 /// `PATCH /api/v1/me`: absent = unchanged; `telegram_user_id: null` clears it.
@@ -268,6 +298,9 @@ pub struct UpdateMe {
     pub display_name: Option<String>,
     #[serde(default, with = "double_option")]
     pub telegram_user_id: Option<Option<i64>>,
+    /// Colour theme of the web UI: `system`, `light` or `dark`.
+    #[serde(default)]
+    pub theme: Option<Theme>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,6 +438,8 @@ pub struct SetSummary {
     pub id: String,
     pub slug: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub owner_username: String,
     pub visibility: Visibility,
     pub source: SetSource,
@@ -686,6 +721,24 @@ pub struct UploadMeta {
     pub vibe: Option<String>,
     /// Source URL (browser extension, post-v1).
     pub source_url: Option<String>,
+    /// Given fields that hold AI suggestions the user has not approved (from
+    /// `POST /api/v1/ai/suggest`): any of `keywords`, `emojis`, `vibe`.
+    /// They are stored with `*_source: ai`, like enrichment results; every
+    /// other given field is the user's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ai_fields: Vec<String>,
+}
+
+/// Zero-shot suggestions for one image (`POST /api/v1/ai/suggest`), chosen
+/// like the ones enrichment stores. Nothing is stored.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AiSuggestions {
+    /// Best first; empty when nothing in the vocabulary fits.
+    pub keywords: Vec<String>,
+    pub emojis: Vec<String>,
+    /// `None` when the model is unsure.
+    pub vibe: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

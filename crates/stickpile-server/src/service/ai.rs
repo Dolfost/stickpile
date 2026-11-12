@@ -1,15 +1,78 @@
-//! Applying AI suggestions to items. AI values only fill fields that are
-//! empty or still AI-sourced; anything the user wrote or confirmed is never
-//! overwritten. Filled fields are marked `ai`.
+//! AI suggestions: the zero-shot path shared by the `Enrich` job and the
+//! upload tray's suggestions ([`suggest`]), and applying them to items. AI
+//! values only fill fields that are empty or still AI-sourced; anything the
+//! user wrote or confirmed is never overwritten. Filled fields are marked `ai`.
 
 use std::collections::HashSet;
 
-use stickpile_ai::Suggestions;
+use image::RgbaImage;
+use stickpile_ai::{AiError, Suggestions};
+use stickpile_api::AiSuggestions;
 
+use crate::config::AiConfig;
 use crate::db::{json_list, to_json_list, MediaRow};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::ids::now;
 use crate::service::sets;
+use crate::state::{Ai, AiStatus, AppState};
+
+/// Largest image `POST /api/v1/ai/suggest` takes. CLIP looks at 224 × 224
+/// pixels, so clients should send a small rendering (the upload tray sends
+/// a PNG with the longest side 256 px, like the grid thumbnails).
+pub const SUGGEST_MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// Decoded size limit for suggestions (below `limits.max_pixels` when that is
+/// larger), so a small compressed file cannot make the server decode a huge
+/// frame just to scale it down to 224 px.
+pub const SUGGEST_MAX_PIXELS: u64 = 4096 * 4096;
+
+/// Embed `frame` and pick keywords, emojis and a vibe with the configured
+/// limits and the zero-shot thresholds. The one path behind both the
+/// `Enrich` job and [`suggest`], so the tray suggests what enrichment would.
+pub fn embed_and_suggest(ai: &Ai, cfg: &AiConfig, frame: &RgbaImage) -> Result<(Vec<f32>, Suggestions), AiError> {
+    let embedding = ai.enricher.embed_image(frame)?;
+    let suggestions = ai
+        .zeroshot
+        .suggest(&embedding, cfg.max_keywords as usize, cfg.max_emojis as usize);
+    Ok((embedding, suggestions))
+}
+
+/// 503 unless the AI backend is ready (with `Retry-After` while it loads).
+pub fn require_ready(state: &AppState) -> AppResult<()> {
+    match state.ai_status() {
+        AiStatus::Ready if state.ai().is_some() => Ok(()),
+        AiStatus::Loading => Err(AppError {
+            retry_after: Some(10),
+            ..AppError::unavailable("the AI model is still loading; try again shortly")
+        }),
+        _ => Err(AppError::unavailable("AI suggestions are not available on this server")),
+    }
+}
+
+/// Suggestions for one still image (PNG, JPEG, WebP or GIF; animations give
+/// their first frame), without storing anything. Decoding and inference run
+/// on the blocking pool. Callers check [`require_ready`], authentication and
+/// the rate limit first.
+pub async fn suggest(state: &AppState, bytes: Vec<u8>) -> AppResult<AiSuggestions> {
+    let st = state.clone();
+    let cfg = state.config.ai.clone();
+    let mut limits = state.media_limits();
+    limits.max_bytes = SUGGEST_MAX_BYTES;
+    limits.max_pixels = limits.max_pixels.min(SUGGEST_MAX_PIXELS);
+    tokio::task::spawn_blocking(move || {
+        let ai = st
+            .ai()
+            .ok_or_else(|| AppError::unavailable("AI suggestions are not available on this server"))?;
+        let frame = stickpile_media::decode_frame(&bytes, &limits)?;
+        let (_, s) = embed_and_suggest(ai, &cfg, &frame).map_err(|e| AppError::internal(format!("AI: {e}")))?;
+        let fill = AiFill::from_suggestions(&s);
+        Ok(AiSuggestions {
+            keywords: fill.keywords,
+            emojis: fill.emojis,
+            vibe: fill.vibe,
+        })
+    })
+    .await?
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AiFill {

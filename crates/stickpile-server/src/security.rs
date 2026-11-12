@@ -112,6 +112,7 @@ pub struct RateLimiters {
     /// unix socket without `X-Forwarded-For`).
     login_unknown_ip: DefaultKeyedRateLimiter<String>,
     upload_user: DefaultKeyedRateLimiter<String>,
+    ai_suggest_user: DefaultKeyedRateLimiter<String>,
     webhook_ip: DefaultKeyedRateLimiter<String>,
 }
 
@@ -143,6 +144,7 @@ impl RateLimiters {
                 limits.login_per_minute.saturating_mul(UNKNOWN_IP_LOGIN_FACTOR),
             )),
             upload_user: RateLimiter::keyed(per_minute(limits.upload_per_minute)),
+            ai_suggest_user: RateLimiter::keyed(per_minute(limits.ai_suggest_per_minute)),
             webhook_ip: RateLimiter::keyed(per_minute(WEBHOOKS_PER_MINUTE)),
         }
     }
@@ -175,12 +177,18 @@ impl RateLimiters {
         check(&self.upload_user, user_id.to_string())
     }
 
+    /// One unit per AI suggestion request (`POST /api/v1/ai/suggest`).
+    pub fn check_ai_suggest(&self, user_id: &str) -> AppResult<()> {
+        check(&self.ai_suggest_user, user_id.to_string())
+    }
+
     /// Drop idle keys (called by the periodic cleanup).
     pub fn prune(&self) {
         self.login_ip.retain_recent();
         self.login_user.retain_recent();
         self.login_unknown_ip.retain_recent();
         self.upload_user.retain_recent();
+        self.ai_suggest_user.retain_recent();
         self.webhook_ip.retain_recent();
     }
 }

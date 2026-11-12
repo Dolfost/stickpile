@@ -2,7 +2,9 @@
 
 use axum::http::StatusCode;
 use maud::{html, Markup, DOCTYPE};
+use stickpile_api::Theme;
 
+use super::components::{icon, Icon};
 use crate::assets;
 use crate::auth::{AuthMethod, CurrentUser};
 
@@ -56,16 +58,35 @@ pub fn page(user: Option<&CurrentUser>, title: &str, active: Nav, body: Markup) 
 pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head: Markup, body: Markup) -> Markup {
     let csrf = user.and_then(|u| u.csrf_token());
     let hx_headers = csrf.map(|t| serde_json::json!({ "X-CSRF-Token": t }).to_string());
+    // ---- theme (begin) -------------------------------------------------
+    // The signed-in user's theme is rendered into the page, so it opens in
+    // the right colours; "system" leaves it to `prefers-color-scheme`.
+    // prefs.js applies a theme remembered in localStorage on signed-out
+    // pages.
+    let theme = user.map(|u| u.user.theme());
+    let data_theme = match theme {
+        Some(Theme::Light) => Some("light"),
+        Some(Theme::Dark) => Some("dark"),
+        _ => None,
+    };
+    let color_scheme = data_theme.unwrap_or("light dark");
+    // ---- theme (end) ---------------------------------------------------
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en" data-theme=[data_theme] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                meta name="color-scheme" content="light dark";
+                meta name="color-scheme" content=(color_scheme);
+                @if let Some(t) = theme {
+                    meta name="stickpile-theme" content=(t.as_str());
+                }
                 meta name="htmx-config" content=(HTMX_CONFIG);
                 title { (title) " · stickpile" }
                 link rel="icon" type="image/svg+xml" href=(assets::url("favicon.svg"));
+                // Not deferred: applies remembered display preferences before
+                // the first paint (and the theme on signed-out pages).
+                script src=(assets::url("prefs.js")) {}
                 link rel="stylesheet" href=(assets::url("app.css"));
                 script src=(assets::url("htmx.min.js")) defer {}
                 script src=(assets::url("app.js")) defer {}
@@ -113,6 +134,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                             }
                         }
                     }
+                    (theme_switch(user, csrf))
                 }
                 div #flash role="status" aria-live="polite" {}
                 main #main tabindex="-1" {
@@ -126,6 +148,38 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
         }
     }
 }
+
+// ---- theme switch (begin) -------------------------------------------------
+
+/// The top bar's light/dark switch: a toggle button named "Dark theme"
+/// (`aria-pressed`). Signed in, it is a form that saves the other theme
+/// (`POST /settings/theme`, then back to the page); with prefs.js it flips
+/// the theme in effect (also under "system") at once and saves it with
+/// `PATCH /api/v1/me`. Signed out it needs prefs.js (hidden without) and is
+/// remembered in localStorage only.
+fn theme_switch(user: Option<&CurrentUser>, csrf: Option<&str>) -> Markup {
+    let dark = user.is_some_and(|u| u.user.theme() == Theme::Dark);
+    let button = html! {
+        button.icon-btn.theme-toggle type=(if user.is_some() { "submit" } else { "button" }) hidden[user.is_none()]
+            data-theme-toggle="" aria-pressed=(if dark { "true" } else { "false" })
+            title=(if dark { "Switch to the light theme" } else { "Switch to the dark theme" }) {
+            (icon(Icon::Moon)) (icon(Icon::Sun)) span.sr-only { "Dark theme" }
+        }
+    };
+    html! {
+        @if user.is_some() {
+            form.theme-switch method="post" action="/settings/theme" {
+                (csrf_input(csrf))
+                input type="hidden" name="theme" value=(if dark { "light" } else { "dark" });
+                (button)
+            }
+        } @else {
+            div.theme-switch { (button) }
+        }
+    }
+}
+
+// ---- theme switch (end) ---------------------------------------------------
 
 /// A message for the `#flash` region (htmx errors).
 pub fn flash_error(message: &str) -> Markup {

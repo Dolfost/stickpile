@@ -13,12 +13,11 @@
 //   paste and the tray for renaming and editing images before the upload.
 // * Escape cancels inline editing; dismiss buttons; copy buttons for
 //   one-time secrets (code.copyable).
-// * Set page: the "Compact view" checkbox applies at once and is remembered
-//   in localStorage (a `view` query parameter wins and is kept in sync);
-//   item cards ([data-menu]) get a context menu on right click, the
-//   context-menu key / Shift+F10 and their "⋯" button. Ctrl or Shift +
+// * Set page: item cards ([data-menu]) get a context menu on right click,
+//   the context-menu key / Shift+F10 and their "⋯" button. Ctrl or Shift +
 //   right click keeps the browser's own menu. Without this script the
-//   checkbox works through its form and the browser menu stays.
+//   browser menu stays. (The "View" options and the theme switch are in
+//   prefs.js.)
 (function () {
   "use strict";
 
@@ -207,65 +206,6 @@
     });
     root.querySelectorAll("button[data-menu-button][hidden]").forEach(function (b) {
       b.hidden = false;
-    });
-  }
-
-  // ---- compact view (set page) -------------------------------------------
-
-  var VIEW_KEY = "stickpile.setView";
-
-  function storedView() {
-    try {
-      return window.localStorage.getItem(VIEW_KEY);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function storeView(view) {
-    try {
-      window.localStorage.setItem(VIEW_KEY, view);
-    } catch (e) {
-      /* private mode or storage disabled: the URL still carries it */
-    }
-  }
-
-  // Keep `?view=compact` in the address bar so a reload, the Apply button
-  // and htmx requests (HX-Current-URL) agree with what is shown.
-  function syncViewUrl(compact) {
-    if (!window.history || !history.replaceState) return;
-    var url = new URL(window.location.href);
-    if (compact) url.searchParams.set("view", "compact");
-    else url.searchParams.delete("view");
-    if (url.href !== window.location.href) history.replaceState(history.state, "", url.href);
-  }
-
-  function setupViewToggle() {
-    var box = document.querySelector("input[data-view-toggle]");
-    if (!box) return;
-    var section = document.getElementById(box.getAttribute("data-view-toggle"));
-    if (!section) return;
-    function apply(compact) {
-      section.classList.toggle("compact", compact);
-      box.checked = compact;
-    }
-    var param = new URLSearchParams(window.location.search).get("view");
-    var compact;
-    if (param !== null) {
-      // The query parameter wins (the server rendered it) and is remembered.
-      compact = param === "compact";
-      storeView(compact ? "compact" : "normal");
-    } else {
-      var saved = storedView();
-      compact = saved === null ? box.checked : saved === "compact";
-    }
-    apply(compact);
-    syncViewUrl(compact);
-    box.addEventListener("change", function () {
-      closeMenu(false);
-      apply(box.checked);
-      storeView(box.checked ? "compact" : "normal");
-      syncViewUrl(box.checked);
     });
   }
 
@@ -838,5 +778,4 @@
   });
 
   enhance(document);
-  setupViewToggle();
 })();

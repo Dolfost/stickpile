@@ -85,8 +85,8 @@ async fn every_page_renders_for_its_user() {
     assert!(html.contains("enctype=\"multipart/form-data\""));
     assert!(html.contains("webkitdirectory"));
     assert!(html.contains(&format!("/api/v1/sets/{}/export.tar", set.id)));
-    // Compact view checkbox (unchecked by default) and the context menu.
-    assert!(html.contains("type=\"checkbox\" name=\"view\" value=\"compact\""));
+    // The View control (Regular by default) and the context menu.
+    assert!(html.contains("type=\"radio\" name=\"view\" value=\"compact\""));
     assert!(html.contains("class=\"items-section\""));
     assert!(html.contains("data-menu-button"));
     // Search finds by name; the job page polls while the job is queued.
@@ -123,8 +123,17 @@ fn filters_form(html: &str) -> String {
     html[start..end].to_string()
 }
 
+/// The `<details>` "View" control of `kind` (`items` or `sets`).
+fn view_menu(html: &str, kind: &str) -> String {
+    let marker = format!("id=\"{kind}-view\"");
+    let at = html.find(&marker).unwrap_or_else(|| panic!("{kind} view control"));
+    let start = html[..at].rfind("<details").unwrap();
+    let end = html[at..].find("</details>").unwrap() + at;
+    html[start..end].to_string()
+}
+
 #[tokio::test]
-async fn set_page_compact_view_and_context_menu() {
+async fn set_page_view_options_and_context_menu() {
     let s = TestServer::start().await;
     let alice = s.user("alice").await;
     let bob = s.user("bob").await;
@@ -135,8 +144,10 @@ async fn set_page_compact_view_and_context_menu() {
     let owner = Browser::login(&s, &alice).await;
     let page = format!("/sets/{}", set.id);
 
-    // Default view: the checkbox sits in the GET form with the filter and
-    // the sort (so Apply keeps all three), unchecked, no compact class.
+    // Default view: the View control sits in the GET form with the filter
+    // and the sort (so Apply keeps all three), Regular checked, no style
+    // class. The section is marked for prefs.js, which (as its first child)
+    // applies the remembered options before the cards are parsed.
     let r = owner.get(&page).await;
     assert_page(&r);
     let html = r.text();
@@ -145,18 +156,43 @@ async fn set_page_compact_view_and_context_menu() {
         form.contains(&format!("method=\"get\" action=\"/sets/{}\"", set.id)),
         "{form}"
     );
-    for field in ["name=\"min_likes\"", "name=\"sort\"", "name=\"view\" value=\"compact\""] {
+    for field in ["name=\"min_likes\"", "name=\"sort\""] {
         assert!(form.contains(field), "{field} in {form}");
     }
+    let menu = view_menu(&html, "items");
+    assert!(form.contains(&menu), "the View control is part of the form");
     assert!(
-        form.contains("<label class=\"check\" for=\"f-view\">"),
-        "labelled checkbox"
+        menu.starts_with(
+            "<details class=\"view-menu\" id=\"items-view\" data-view-menu=\"items\"><summary class=\"button\">"
+        ),
+        "shown without JavaScript: {menu}"
     );
-    assert!(form.contains("data-view-toggle=\"items-section\""));
-    assert!(!form.contains("checked"), "unchecked by default");
-    assert!(html.contains("<section class=\"items-section\" id=\"items-section\""));
+    for (value, checked) in [("regular", true), ("compact", false), ("grid", false)] {
+        let radio = format!("<input type=\"radio\" name=\"view\" value=\"{value}\"");
+        assert!(menu.contains(&radio), "{value}: {menu}");
+        assert_eq!(menu.contains(&format!("{radio} checked>")), checked, "{value}");
+    }
+    // The show/hide toggles need JavaScript: hidden, and without a name
+    // (never submitted).
+    assert!(
+        menu.contains("<fieldset class=\"view-show\" hidden data-view-show=\"\"><legend>Show</legend>"),
+        "{menu}"
+    );
+    for part in ["emojis", "keywords", "vibe", "tags", "labels"] {
+        assert!(
+            menu.contains(&format!(
+                "<input type=\"checkbox\" value=\"{part}\" checked data-view-part=\"\">"
+            )),
+            "{part}: {menu}"
+        );
+    }
+    assert!(!menu.contains("type=\"checkbox\" name="), "{menu}");
+    assert!(menu.contains("<span class=\"opt-name\"><span class=\"sr-only\">Show </span>Labels</span><span class=\"opt-hint\">kind, quality, cover</span>"));
+    assert!(html.contains(
+        "<section class=\"items-section\" id=\"items-section\" data-view-prefs=\"items\" aria-labelledby=\"items-head\"><script src=\"/static/prefs.js?v="
+    ));
 
-    // ?view=compact: compact class and a checked box; sort and filter stay.
+    // ?view=compact: compact class and a checked radio; sort and filter stay.
     let html = owner
         .get(&format!("{page}?sort=likes&min_likes=0&view=compact"))
         .await
@@ -172,8 +208,15 @@ async fn set_page_compact_view_and_context_menu() {
     // ...and the page's own links back (next fields) keep the view.
     assert!(html.contains("name=\"next\" value=\"/sets/"));
     assert!(html.contains("view=compact\""), "next fields carry the query");
+    // ?view=grid: thumbnails only; anything else is the regular view.
     let html = owner.get(&format!("{page}?view=grid")).await.text();
-    assert!(!html.contains("items-section compact"), "only view=compact is compact");
+    assert!(html.contains("class=\"items-section view-grid\""), "grid class");
+    assert!(filters_form(&html).contains("value=\"grid\" checked"));
+    for q in ["?view=regular", "?view=bogus"] {
+        let html = owner.get(&format!("{page}{q}")).await.text();
+        assert!(html.contains("<section class=\"items-section\" id="), "{q}");
+        assert!(filters_form(&html).contains("value=\"regular\" checked"), "{q}");
+    }
 
     // Context menu data for the owner in set order: everything, with the
     // ends marked for the move entries.
@@ -264,6 +307,147 @@ async fn set_page_compact_view_and_context_menu() {
     assert_eq!(r.status, StatusCode::SEE_OTHER);
     let d = s.get(&alice, &routes::path(routes::SET, &[&set.id])).await.value();
     assert_eq!(d["items"][2]["id"], c.id.as_str());
+}
+
+#[tokio::test]
+async fn set_lists_have_display_options() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let set = s.create_set(&alice, "cats", Visibility::Public).await;
+    s.patch(
+        &alice,
+        &routes::path(routes::SET, &[&set.id]),
+        json!({"description": "Loafs & <b>stares</b>"}),
+    )
+    .await
+    .expect(200);
+    s.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b = Browser::login(&s, &alice).await;
+    for path in ["/sets", "/sets?tab=public", "/"] {
+        let r = b.get(path).await;
+        assert_page(&r);
+        let html = r.text();
+        // The list carries the options; prefs.js, its first child, applies
+        // the remembered ones before the cards are parsed.
+        assert!(
+            html.contains("<div class=\"set-list\" data-view-prefs=\"sets\"><script src=\"/static/prefs.js?v="),
+            "{path}"
+        );
+        // The control needs JavaScript (hidden without), its own radio
+        // group, and a toggle per part of a card.
+        let menu = view_menu(&html, "sets");
+        assert!(
+            menu.starts_with("<details class=\"view-menu\" id=\"sets-view\" data-view-menu=\"sets\" hidden>"),
+            "{path}: {menu}"
+        );
+        assert!(menu.contains("<input type=\"radio\" name=\"sets-view\" value=\"regular\" checked>"));
+        assert!(menu.contains("<input type=\"radio\" name=\"sets-view\" value=\"compact\">"));
+        for part in ["cover", "description", "count", "badges", "owner", "slug"] {
+            assert!(
+                menu.contains(&format!("value=\"{part}\" checked data-view-part=\"\"")),
+                "{part}: {menu}"
+            );
+        }
+        // Each part of a card has a class of its own (and the description,
+        // new on cards, is escaped).
+        for class in ["thumb", "set-desc", "set-count", "set-badges", "set-owner", "set-slug"] {
+            assert!(html.contains(&format!("class=\"{class}\"")), "{path}: {class}");
+        }
+        assert!(html.contains("<p class=\"set-desc\">Loafs &amp; &lt;b&gt;stares&lt;/b&gt;</p>"));
+        assert!(html.contains("<span class=\"set-count\">1 item</span>"));
+    }
+    // The API's set summaries carry the description too.
+    let list = s.get(&alice, routes::SETS).await.expect(200).value();
+    assert_eq!(list[0]["description"], "Loafs & <b>stares</b>");
+    // Without sets there is nothing to arrange.
+    let bob = s.user("bob").await;
+    let html = Browser::login(&s, &bob).await.get("/sets").await.text();
+    assert!(!html.contains("sets-view") && !html.contains("set-list"));
+}
+
+/// The top bar's theme switch (its form or wrapper up to the button's end).
+fn theme_switch(html: &str) -> String {
+    let at = html.find("class=\"theme-switch\"").expect("theme switch");
+    let start = html[..at].rfind('<').unwrap();
+    let end = html[at..].find("</button>").unwrap() + at + "</button>".len();
+    html[start..end].to_string()
+}
+
+#[tokio::test]
+async fn theme_is_rendered_into_every_page() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let set = s.create_set(&alice, "cats", Visibility::Private).await;
+    let b = Browser::login(&s, &alice).await;
+
+    // "system" (the default): no data-theme, the device decides. The
+    // switch is a toggle button named "Dark theme" in a form that saves the
+    // other theme without JavaScript.
+    let r = b.get("/").await;
+    assert_page(&r);
+    let html = r.text();
+    assert!(html.contains("<html lang=\"en\">"), "no data-theme");
+    assert!(html.contains("<meta name=\"color-scheme\" content=\"light dark\">"));
+    assert!(html.contains("<meta name=\"stickpile-theme\" content=\"system\">"));
+    let switch = theme_switch(&html);
+    assert!(
+        switch.starts_with("<form class=\"theme-switch\" method=\"post\" action=\"/settings/theme\">"),
+        "{switch}"
+    );
+    assert!(switch.contains("name=\"csrf_token\""), "{switch}");
+    assert!(switch.contains("<input type=\"hidden\" name=\"theme\" value=\"dark\">"));
+    assert!(
+        switch.contains(
+            "<button class=\"icon-btn theme-toggle\" type=\"submit\" data-theme-toggle=\"\" aria-pressed=\"false\" title=\"Switch to the dark theme\">"
+        ),
+        "{switch}"
+    );
+    assert!(switch.contains("<span class=\"sr-only\">Dark theme</span>"));
+    assert!(switch.contains("class=\"icon icon-moon\"") && switch.contains("class=\"icon icon-sun\""));
+
+    // A chosen theme is rendered into every page, error pages included.
+    for (theme, pressed, other) in [("dark", "true", "light"), ("light", "false", "dark")] {
+        s.patch(&alice, routes::ME, json!({"theme": theme})).await.expect(200);
+        for path in [
+            "/".to_string(),
+            "/sets".into(),
+            format!("/sets/{}", set.id),
+            "/settings".into(),
+            "/nope".into(),
+        ] {
+            let html = b.get(&path).await.text();
+            assert!(
+                html.contains(&format!("<html lang=\"en\" data-theme=\"{theme}\">")),
+                "{theme} {path}"
+            );
+            assert!(html.contains(&format!("<meta name=\"color-scheme\" content=\"{theme}\">")));
+            assert!(html.contains(&format!("<meta name=\"stickpile-theme\" content=\"{theme}\">")));
+        }
+        let r = b.get("/").await;
+        assert_page(&r);
+        let switch = theme_switch(&r.text());
+        assert!(switch.contains(&format!("aria-pressed=\"{pressed}\"")), "{switch}");
+        assert!(
+            switch.contains(&format!("name=\"theme\" value=\"{other}\"")),
+            "{switch}"
+        );
+    }
+
+    // Signed out there is no account: the page follows the device unless
+    // prefs.js finds a theme in localStorage; the switch needs it (hidden,
+    // a plain button, no form).
+    let r = Browser::anonymous(&s).get("/login").await;
+    assert_page(&r);
+    let html = r.text();
+    assert!(html.contains("<html lang=\"en\">"));
+    assert!(!html.contains("stickpile-theme"));
+    let switch = theme_switch(&html);
+    assert!(
+        switch.starts_with(
+            "<div class=\"theme-switch\"><button class=\"icon-btn theme-toggle\" type=\"button\" hidden data-theme-toggle=\"\" aria-pressed=\"false\""
+        ),
+        "{switch}"
+    );
 }
 
 #[tokio::test]
@@ -651,6 +835,7 @@ async fn csp_and_static_assets() {
         ("upload.js", "text/javascript"),
         ("emoji.js", "text/javascript"),
         ("emoji.json", "application/json"),
+        ("prefs.js", "text/javascript"),
         ("htmx.min.js", "text/javascript"),
         ("favicon.svg", "image/svg+xml"),
     ] {
@@ -666,25 +851,51 @@ async fn csp_and_static_assets() {
         assert!(!r.body.is_empty());
     }
     let css = Browser::anonymous(&s).get("/static/app.css").await.text();
-    assert!(css.contains("prefers-color-scheme: dark"));
     assert!(css.contains(":focus-visible"));
     assert!(
         css.contains("[hidden] { display: none !important; }"),
         "JS-only buttons stay hidden"
     );
     assert!(css.contains(".items-section.compact .editor-grid"));
+    assert!(css.contains(".items-section.view-grid .editor-grid"));
+    assert!(css.contains(".items-section.hide-emojis"));
+    assert!(css.contains(".set-list.hide-cover"));
     assert!(css.contains(".ctx-menu"));
+    // Themes: the dark palette for the dark theme, and for "system" (no
+    // data-theme) on a dark device; nothing else follows the device.
+    assert!(css.contains(":root[data-theme=\"dark\"] {\n  color-scheme: dark;"));
+    assert!(css.contains("@media (prefers-color-scheme: dark) {\n  :root:not([data-theme]) {\n    color-scheme: dark;"));
+    assert_eq!(
+        css.matches("@media (prefers-color-scheme").count(),
+        1,
+        "one media block"
+    );
+    assert!(css.contains(":root {\n  color-scheme: light;"));
     let js = Browser::anonymous(&s).get("/static/app.js").await.text();
-    for needle in [
-        "\"contextmenu\"",
-        "role\", \"menu\"",
-        "\"menuitem\"",
-        "data-view-toggle",
-        "localStorage",
-        "F10",
-    ] {
+    for needle in ["\"contextmenu\"", "role\", \"menu\"", "\"menuitem\"", "F10"] {
         assert!(js.contains(needle), "app.js: {needle}");
     }
+    let prefs = Browser::anonymous(&s).get("/static/prefs.js").await.text();
+    for needle in [
+        "document.currentScript",
+        "data-view-prefs",
+        "localStorage",
+        "stickpile.theme",
+        "stickpile.items.view",
+        "stickpile.setView",
+        "\"PATCH\"",
+        "X-CSRF-Token",
+        "prefers-color-scheme: dark",
+    ] {
+        assert!(prefs.contains(needle), "prefs.js: {needle}");
+    }
+    // prefs.js runs before the first paint: in <head>, not deferred.
+    let head = &html[..html.find("</head>").unwrap()];
+    let tag_start = head
+        .find("<script src=\"/static/prefs.js?v=")
+        .expect("prefs.js in <head>");
+    let tag = &head[tag_start..tag_start + head[tag_start..].find('>').unwrap()];
+    assert!(!tag.contains("defer") && !tag.contains("async"), "{tag}");
     // The emoji picker runs before upload.js (which attaches it to the tray)
     // and fetches its data, linked with a version, only when opened.
     let emoji_js = html.find("/static/emoji.js?v=").unwrap();
@@ -696,6 +907,12 @@ async fn csp_and_static_assets() {
         "htmx:load",
         "window.stickpileEmoji",
         "data-emoji-data",
+        // The ":" suggestions: a combobox on the field.
+        "\"combobox\"",
+        "aria-autocomplete",
+        "aria-activedescendant",
+        "\"listbox\"",
+        "isComposing",
     ] {
         assert!(js.contains(needle), "emoji.js: {needle}");
     }
@@ -718,10 +935,15 @@ async fn csp_and_static_assets() {
         .flat_map(|g| g[2].as_array().unwrap())
         .find(|e| e[0] == "😂")
         .unwrap();
-    assert!(
-        laugh[2].as_str().unwrap().split(' ').any(|w| w == "lol"),
-        "slang from stickpile-search"
-    );
+    // The slang from stickpile-search is its own column (ranked above the
+    // CLDR keywords, which do not repeat it).
+    let terms: Vec<&str> = laugh[3].as_str().unwrap().split(' ').collect();
+    assert!(terms.contains(&"lol") && terms.contains(&"laugh"), "{terms:?}");
+    assert!(!laugh[2].as_str().unwrap().split(' ').any(|w| w == "lol"));
+    assert_eq!(cat.as_array().unwrap().len(), 4, "🐱 has terms too");
+    let common = data["common"].as_array().unwrap();
+    assert_eq!(common[0], "😂", "emoji_names.rs order");
+    assert!(common.iter().any(|e| e == "❤️"), "fully qualified");
 }
 
 #[tokio::test]

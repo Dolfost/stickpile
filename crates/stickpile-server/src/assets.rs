@@ -19,6 +19,8 @@ pub const APP_CSS: &[u8] = include_bytes!("../assets/app.css");
 pub const APP_JS: &[u8] = include_bytes!("../assets/app.js");
 pub const UPLOAD_JS: &[u8] = include_bytes!("../assets/upload.js");
 pub const EMOJI_JS: &[u8] = include_bytes!("../assets/emoji.js");
+/// Display preferences (theme, view options); loaded without `defer`.
+pub const PREFS_JS: &[u8] = include_bytes!("../assets/prefs.js");
 /// The emoji picker's data, from Unicode emoji and CLDR files
 /// (`scripts/gen-emoji-data.py`, Unicode License v3).
 pub const EMOJI_JSON: &[u8] = include_bytes!("../assets/emoji.json");
@@ -30,13 +32,14 @@ const SVG: &str = "image/svg+xml";
 const JSON: &str = "application/json";
 
 /// (name, bytes, content type) of every asset.
-const ALL: [(&str, &[u8], &str); 7] = [
+const ALL: [(&str, &[u8], &str); 8] = [
     ("htmx.min.js", HTMX, JS),
     ("app.css", APP_CSS, CSS),
     ("app.js", APP_JS, JS),
     ("upload.js", UPLOAD_JS, JS),
     ("emoji.js", EMOJI_JS, JS),
     ("emoji.json", EMOJI_JSON, JSON),
+    ("prefs.js", PREFS_JS, JS),
     ("favicon.svg", FAVICON, SVG),
 ];
 

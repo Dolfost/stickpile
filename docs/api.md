@@ -94,7 +94,7 @@ Every non-2xx response has an `ApiError` body:
 | `unsupported_media` | 415 | Not an accepted media type (after content sniffing), corrupt file, or a non-JSON body |
 | `rate_limited` | 429 | Too many requests; `Retry-After` gives the seconds to wait |
 | `internal` | 500 | Server error (details only in the server log) |
-| `unavailable` | 503 | AI enrichment is off or the model is still loading |
+| `unavailable` | 503 | AI enrichment is off or the model is still loading (AI suggestions add `Retry-After` while it loads) |
 
 Content the caller may not read (other users' private sets, their items and
 files, jobs of other users) is reported as `404`, never `403`, so IDs cannot be
@@ -137,7 +137,7 @@ set's name, slug or visibility and new variants bump `updated_at` of its items.
 | `POST /api/v1/auth/token` | `TokenRequest` -> `TokenCreated` | Password login for API clients. `401 totp_required` if the account has TOTP and no code was sent. Rate limited per IP and per username. |
 | `POST /api/v1/auth/register` | `RegisterRequest` -> `User` (201) | Policy `auth.registration`: `closed` -> 403; `invite` -> `invite_code` required, the account gets the invitation's role, codes are single-use; `open` -> role `user`. Usernames: 2-32 of `A-Za-z0-9_.-`, starting alphanumeric; passwords at least 8 characters. Rate limited like login. |
 | `GET /api/v1/me` | -> `User` | |
-| `PATCH /api/v1/me` | `UpdateMe` -> `User` | `username` (2-32 of `A-Z a-z 0-9 _ . -`, starting with a letter or digit; taken ignoring case -> 409; a change of case is allowed), `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears). Absent fields stay; every field is validated before anything changes. A rename keeps sessions, tokens and the tailnet login (they are bound to the user id), takes a display name equal to the old username along, refreshes the `by:` search and touches the user's items so clients refetch them (`updated_since`). The old name becomes free for others. Audited as `user.update_self` with `username: {from, to}`. |
+| `PATCH /api/v1/me` | `UpdateMe` -> `User` | `username` (2-32 of `A-Z a-z 0-9 _ . -`, starting with a letter or digit; taken ignoring case -> 409; a change of case is allowed), `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears), `theme` (the web UI's colour theme: `system` follows the device, `light`, `dark`; any other value is refused with `bad_request`, 422 for an unknown name; `User.theme` reports it, `system` by default; not audited). Absent fields stay; every field is validated before anything changes. A rename keeps sessions, tokens and the tailnet login (they are bound to the user id), takes a display name equal to the old username along, refreshes the `by:` search and touches the user's items so clients refetch them (`updated_since`). The old name becomes free for others. Audited as `user.update_self` with `username: {from, to}`. |
 | `PUT /api/v1/me/password` | `ChangePassword` -> 204 | `current_password` required if the account has one, unless the request is signed in through the tailnet (`tailscale serve` has just vouched for the person). At least `auth.min_password_length` characters (default 8). Other web sessions of the user are revoked; API tokens are kept. |
 | `POST /api/v1/me/totp` | -> `TotpSetup` | Starts enrolment (secret + `otpauth://` URL); 409 if TOTP is already on. |
 | `POST /api/v1/me/totp/confirm` | `TotpCode` -> `User` | Enables TOTP with a current code. |
@@ -153,7 +153,7 @@ TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 
 | Method and path | Body -> response | Notes |
 |---|---|---|
-| `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `public` (all users' public sets), `all` (own + others' public). Others' unlisted sets are never listed. |
+| `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `public` (all users' public sets), `all` (own + others' public). Others' unlisted sets are never listed. Summaries carry the `description` too. |
 | `POST /api/v1/sets` | `CreateSet` -> `Set` (201) | Slug `[a-z0-9-]`, 1-64 characters, unique per owner (409). |
 | `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, unlisted or public sets. |
 | `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` what lists show (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
@@ -178,9 +178,24 @@ push. Read-only git packs refuse every edit with `403` (`editable: false`).
 
 - Every multipart part with a filename is a file. An optional part named
   `meta` holds a JSON array of `UploadMeta` (`name`, `keywords`, `emojis`,
-  `vibe`, `tags`, `source_url`, all optional), matched to the files by
-  index. Given values are the user's (`*_source: user`), so AI enrichment
-  never replaces them. The web upload form sends the same field.
+  `vibe`, `tags`, `source_url`, `ai_fields`, all optional), matched to the
+  files by index. Given values are the user's (`*_source: user`), so AI
+  enrichment never replaces them, except the fields listed in `ai_fields`:
+  any of `keywords`, `emojis`, `vibe` holding [AI suggestions](#ai-suggestions)
+  the user has not approved. Those are stored with `*_source: ai`, exactly
+  like enrichment results (the item page offers to confirm them, and a later
+  enrichment may replace them). `name`, `tags` or unknown names in
+  `ai_fields` are 400; a listed field without a value is ignored. Old
+  clients that never send `ai_fields` are unaffected. The web upload form
+  sends the same field:
+
+  ```json
+  [{"name": "cat stare", "keywords": ["cat", "stare"], "emojis": ["😾"],
+    "vibe": "smug", "tags": ["reaction"], "ai_fields": ["emojis", "vibe"]}]
+  ```
+
+  Here the keywords and tags are the user's, the emojis and vibe are
+  unapproved AI suggestions.
 - Limits: each file at most `limits.max_upload_mb`, the whole request at most
   `limits.max_request_mb` (413 `too_large`). Each request counts once against
   `limits.upload_per_minute` (429).
@@ -238,6 +253,36 @@ gives the same manifest data and byte-identical files.
 | `DELETE /api/v1/items/{id}/like` | -> `LikeState` | Idempotent. |
 | `GET /api/v1/items/{id}/better` | -> `[ItemSummary]` | Searchable items (own + public) with a pHash within the near-duplicate distance and a higher quality score, best first. |
 | `POST /api/v1/items/{id}/enrich` | -> `Job` | Owner only; re-runs AI enrichment. 503 `unavailable` when AI is off or still loading. |
+
+### AI suggestions
+
+| Method and path | Body -> response | Notes |
+|---|---|---|
+| `POST /api/v1/ai/suggest` | multipart, one file part -> `AiSuggestions` | Keywords, emojis and a vibe for an image that is not uploaded yet. Nothing is stored. |
+
+`AiSuggestions` is `{"keywords": [...], "emojis": [...], "vibe": "smug" | null}`,
+best first. The image goes through the same path as the `enrich` job (CLIP
+image embedding, then zero-shot over the vocabulary with
+`ai.max_keywords`, `ai.max_emojis` and the same thresholds), so a picture
+gets the suggestions enrichment would store for it. Lists can be empty and
+the vibe `null` when the model is unsure.
+
+- The first part with a filename is the image: PNG, JPEG, WebP or GIF (an
+  animation gives its first frame; videos are 415, send a frame instead).
+  At most 2 MiB (413 `too_large`) and 4096 × 4096 decoded pixels (or
+  `limits.max_pixels` if smaller). CLIP looks at 224 × 224 pixels, so send
+  a small rendering: the web upload tray sends a PNG with the longest side
+  256 px, like the server's thumbnails, which enrichment looks at. No file
+  part is 400, an unreadable file 415.
+- Any authenticated caller; cookie sessions need `X-CSRF-Token` and the
+  same-origin check like every unsafe request. Each request counts against
+  `limits.ai_suggest_per_minute` per user (429 with `Retry-After`).
+- 503 `unavailable` when AI is off or failed to load, and with
+  `Retry-After` while the model is still loading. Decoding and inference run
+  on the blocking thread pool.
+- To keep suggestions, upload them in `meta`: approved ones as plain values,
+  unapproved ones listed in `ai_fields` (see Uploads above). Tags are never
+  suggested; they are the user's own labels.
 
 **Files**: `{variant}` is one of `original`, `thumb`, `png`, `tg_sticker`,
 `tg_video_sticker`, `discord_gif`, `mp4`. A variant that does not exist (yet)

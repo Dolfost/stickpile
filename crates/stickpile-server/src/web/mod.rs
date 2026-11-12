@@ -1,8 +1,8 @@
 //! Server-rendered web UI: maud templates plus htmx, no SPA and no
 //! JavaScript toolchain. Every page works without JavaScript (forms post and
 //! redirect); htmx swaps fragments in place when it is loaded, and
-//! `assets/app.js` adds clipboard copy, drag-and-drop, the set page's instant
-//! compact view and the item context menu.
+//! `assets/app.js` adds clipboard copy, drag-and-drop and the item context
+//! menu, `assets/prefs.js` the display options and the theme switch.
 //!
 //! How pages plug into the rest of the server:
 //!
@@ -95,6 +95,7 @@ pub fn routes() -> Router<AppState> {
         .route("/stats", get(stats::page))
         // settings
         .route("/settings", get(settings::page).post(settings::profile))
+        .route("/settings/theme", post(settings::theme))
         .route("/settings/password", post(settings::password))
         .route("/settings/totp", post(settings::totp_begin))
         .route("/settings/totp/confirm", post(settings::totp_confirm))
