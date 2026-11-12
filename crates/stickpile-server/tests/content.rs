@@ -1145,7 +1145,11 @@ async fn likes_usage_popular_and_stats() {
     assert!(s.copies_last_7d >= 3);
     assert_eq!(s.likes_given, 2);
     assert_eq!(s.daily_copies.len(), 30);
-    assert!(s.daily_copies[29] >= 2);
+    // Days are UTC days: in the first hour after midnight the copy made an
+    // hour ago (e2) counts for yesterday.
+    let e2_today = t.rem_euclid(86400) >= 3600;
+    assert!(s.daily_copies[29] > u64::from(e2_today));
+    assert!(s.daily_copies[28] + s.daily_copies[29] >= 2);
     assert!(s
         .top_targets
         .iter()
