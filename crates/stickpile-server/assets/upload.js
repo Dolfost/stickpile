@@ -300,14 +300,14 @@
     // The selected file's details (sent as `meta`), then its image.
     var details = el("div", "tray-details");
     var nameInput = detailField("Name", "", 200);
-    var keywordsInput = detailField("Keywords", "Separate with commas.", 0);
+    var keywordsInput = detailField("Keywords", "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.", 0);
     var emojisInput = detailField("Emojis", "Separate with spaces.", 0);
     // The emoji picker (emoji.js, loaded first; else it finds the attribute).
     emojisInput.setAttribute("data-emoji-picker", "");
     if (window.stickpileEmoji) window.stickpileEmoji.attach(emojisInput);
-    var vibeInput = detailField("Vibe", "One word, e.g. tired.", 50);
+    var vibeInput = detailField("Vibe", "The mood in one word, e.g. tired or smug.", 50);
     if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
-    var tagsInput = detailField("Tags", "Separate with commas.", 0);
+    var tagsInput = detailField("Tags", "Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.", 0);
     var copyRow = el("div", "tray-copy");
     var copyAll = button("small", "Use for every file");
     copyAll.id = "tray-copy-" + nextId++;

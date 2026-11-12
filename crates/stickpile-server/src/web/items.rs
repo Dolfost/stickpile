@@ -68,10 +68,10 @@ impl Field {
     fn hint(self) -> &'static str {
         match self {
             Field::Name => "",
-            Field::Keywords => "Separate with commas.",
+            Field::Keywords => "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.",
             Field::Emojis => "Separate with spaces.",
-            Field::Vibe => "One word, e.g. tired. Empty clears it.",
-            Field::Tags => "Separate with commas.",
+            Field::Vibe => "The mood in one word, e.g. tired or smug. Empty clears it.",
+            Field::Tags => "Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.",
         }
     }
     fn source(self, item: &Item) -> FieldSource {

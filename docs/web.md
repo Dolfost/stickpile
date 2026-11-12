@@ -198,7 +198,11 @@ counts for popular items and your stats. Downloads are not counted.
   - **Keywords**, **Emojis**, **Vibe** and **Tags**, as in the item editor
     (keywords and tags separated by commas, emojis by spaces; the vibe field
     suggests the vocabulary; Emojis has the [emoji
-    picker](#keyboard-and-mouse)). They are the item's from the start, so AI
+    picker](#keyboard-and-mouse)). The hints say what each is for:
+    keywords describe what is in the sticker and go to Telegram as its search
+    words, the vibe is the mood in one word, and tags are your own labels for
+    sorting and filtering (`tag:nsfw`, `-tag:nsfw`) that never go to
+    Telegram and that AI never fills. They are the item's from the start, so AI
     enrichment fills only the fields left empty. "Use for every file" gives
     the other files the selected file's keywords, emojis, vibe and tags (not
     its name). Enter in these fields does not upload. The details are sent
