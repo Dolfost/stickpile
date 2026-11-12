@@ -254,6 +254,8 @@ impl MockState {
             git: None,
             telegram_pack: None,
             cover_item_id: None,
+            cover_image: None,
+            cover_url: None,
             item_count: 0,
             editable: true,
             created_at: now,
@@ -420,6 +422,7 @@ impl MockState {
                 .iter()
                 .find(|i| i.item.set_id == s.id)
                 .map(|i| i.item.id.clone()),
+            cover_url: None,
             updated_at: s.updated_at,
         }
     }
@@ -949,6 +952,7 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
     let bundle = stickpile_setfmt::SetBundle {
         manifest,
         files,
+        cover_image: None,
         warnings: vec![],
     };
     let tar = stickpile_setfmt::write_tar(&bundle, &set.slug).map_err(|e| api_err(500, "internal", &e.to_string()))?;

@@ -9,6 +9,7 @@
 //! visibility = "unlisted"
 //! aspect_ratio = "1:1"
 //! recommended_px = 512
+//! cover_image = "cover.png"
 //!
 //! [items."001-cat.png"]
 //! name = "cat"
@@ -28,7 +29,8 @@
 //! per-file metadata of a [`SetBundle`] lives in [`SetFile::meta`]; the
 //! writers ([`write_dir`], [`write_tar`]) rebuild `manifest.items` from the
 //! files, and the readers return a manifest whose `items` match the files
-//! exactly.
+//! exactly. The file `cover_image` names is the set's own cover image, not
+//! an item: it is kept apart in [`SetBundle::cover_image`].
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -118,6 +120,7 @@ const SET_KEYS: &[&str] = &[
     "aspect_ratio",
     "recommended_px",
     "cover",
+    "cover_image",
     "items",
 ];
 
@@ -145,6 +148,10 @@ pub struct Manifest {
     /// thumbnail). Absent: the first item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// Filename of the set's own cover image: a media file of the directory
+    /// that is not an item. It wins over `cover` (lists, Telegram thumbnail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_image: Option<String>,
     /// Keyed by filename (not path).
     #[serde(default)]
     pub items: BTreeMap<String, ItemMeta>,
@@ -167,6 +174,7 @@ impl Manifest {
             aspect_ratio: None,
             recommended_px: None,
             cover: None,
+            cover_image: None,
             items: BTreeMap::new(),
             extra: toml::Table::new(),
         }
@@ -222,19 +230,30 @@ pub struct SetFile {
     pub bytes: Vec<u8>,
 }
 
+/// The set's own cover image ([`Manifest::cover_image`]): a media file of
+/// the directory that is not an item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverFile {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+}
+
 /// A whole set in memory (import/export unit).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetBundle {
     pub manifest: Manifest,
     /// Lexical filename order.
     pub files: Vec<SetFile>,
+    /// The cover image, never among `files`.
+    pub cover_image: Option<CoverFile>,
     /// Non-fatal problems: files listed in the manifest but missing, unknown
     /// extensions skipped, ...
     pub warnings: Vec<String>,
 }
 
 impl SetBundle {
-    /// The manifest as written by the exporters: `items` rebuilt from `files`.
+    /// The manifest as written by the exporters: `items` rebuilt from
+    /// `files`, `cover_image` from [`SetBundle::cover_image`].
     pub fn export_manifest(&self) -> Manifest {
         let mut manifest = self.manifest.clone();
         manifest.items = self
@@ -242,19 +261,32 @@ impl SetBundle {
             .iter()
             .map(|f| (f.filename.clone(), f.meta.clone()))
             .collect();
+        manifest.cover_image = self.cover_image.as_ref().map(|c| c.filename.clone());
         manifest
+    }
+
+    /// Every file to write: the items, then the cover image.
+    fn all_files(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.files
+            .iter()
+            .map(|f| (f.filename.as_str(), f.bytes.as_slice()))
+            .chain(
+                self.cover_image
+                    .iter()
+                    .map(|c| (c.filename.as_str(), c.bytes.as_slice())),
+            )
     }
 
     /// Checks every filename (safe, media extension, unique under NFC).
     fn validate_files(&self) -> Result<(), SetFmtError> {
         let mut seen = HashSet::new();
-        for f in &self.files {
-            safe_filename(&f.filename)?;
-            if !is_media_filename(&f.filename) || f.filename == MANIFEST {
-                return Err(SetFmtError::BadFilename(f.filename.clone()));
+        for (filename, _) in self.all_files() {
+            safe_filename(filename)?;
+            if !is_media_filename(filename) || filename == MANIFEST {
+                return Err(SetFmtError::BadFilename(filename.to_string()));
             }
-            if !seen.insert(nfc(&f.filename)) {
-                return Err(SetFmtError::BadFilename(format!("{} (duplicate)", f.filename)));
+            if !seen.insert(nfc(filename)) {
+                return Err(SetFmtError::BadFilename(format!("{filename} (duplicate)")));
             }
         }
         Ok(())
@@ -383,9 +415,10 @@ fn manifest_from_bytes(bytes: Vec<u8>) -> Result<String, SetFmtError> {
     Ok(text)
 }
 
-/// Combine a manifest and loose media files into a bundle: sort, match
-/// manifest entries to files (exact name first, then NFC-equal name), give
-/// files without an entry default metadata, warn about missing files.
+/// Combine a manifest and loose media files into a bundle: sort, take out
+/// the cover image, match manifest entries to files (exact name first, then
+/// NFC-equal name), give files without an entry default metadata, warn about
+/// missing files.
 fn assemble(
     manifest_text: Option<&str>,
     default_name: &str,
@@ -406,7 +439,30 @@ fn assemble(
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
+    // The cover image is a file of the directory, but not an item.
+    let mut cover_image = None;
+    if let Some(name) = manifest.cover_image.take() {
+        let found = files
+            .iter()
+            .position(|(f, _)| *f == name)
+            .or_else(|| files.iter().position(|(f, _)| nfc(f) == nfc(&name)));
+        match found {
+            Some(i) => {
+                let (filename, bytes) = files.remove(i);
+                manifest.cover_image = Some(filename.clone());
+                cover_image = Some(CoverFile { filename, bytes });
+            }
+            None => warnings.push(format!(
+                "{MANIFEST} names the cover image {name:?} but the file is missing"
+            )),
+        }
+    }
+
     let mut listed = std::mem::take(&mut manifest.items);
+    if let Some(c) = &cover_image {
+        // An `[items]` table for the cover image describes no item.
+        listed.retain(|k, _| nfc(k) != nfc(&c.filename));
+    }
     let mut by_nfc: HashMap<String, String> = HashMap::new();
     for key in listed.keys() {
         by_nfc.entry(nfc(key)).or_insert_with(|| key.clone());
@@ -440,6 +496,7 @@ fn assemble(
     Ok(SetBundle {
         manifest,
         files: out,
+        cover_image,
         warnings,
     })
 }
@@ -657,10 +714,10 @@ pub fn write_dir(dir: &Path, bundle: &SetBundle) -> Result<(), SetFmtError> {
     bundle.validate_files()?;
     fs::create_dir_all(dir).map_err(io_err(dir))?;
     write_if_changed(dir, MANIFEST, bundle.export_manifest().to_toml().as_bytes())?;
-    for f in &bundle.files {
-        write_if_changed(dir, &f.filename, &f.bytes)?;
+    for (filename, bytes) in bundle.all_files() {
+        write_if_changed(dir, filename, bytes)?;
     }
-    let keep: HashSet<&str> = bundle.files.iter().map(|f| f.filename.as_str()).collect();
+    let keep: HashSet<&str> = bundle.all_files().map(|(f, _)| f).collect();
     for entry in fs::read_dir(dir).map_err(io_err(dir))? {
         let entry = entry.map_err(io_err(dir))?;
         let Ok(name) = entry.file_name().into_string() else {
@@ -709,7 +766,8 @@ fn write_if_changed(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), SetFmtEr
 
 /// Bundle as an uncompressed tar with a single top-level directory `<slug>/`.
 ///
-/// Deterministic: `set.toml` first, then files in set order; GNU headers with
+/// Deterministic: `set.toml` first, then the cover image, then the files in
+/// set order; GNU headers with
 /// mode 0644/0755, uid/gid 0, empty user/group names and mtime [`TAR_MTIME`].
 pub fn write_tar(bundle: &SetBundle, top_dir: &str) -> Result<Vec<u8>, SetFmtError> {
     safe_filename(top_dir)?;
@@ -735,6 +793,12 @@ pub fn write_tar(bundle: &SetBundle, top_dir: &str) -> Result<Vec<u8>, SetFmtErr
     builder
         .append_data(&mut h, format!("{top_dir}/{MANIFEST}"), manifest.as_bytes())
         .map_err(arch)?;
+    if let Some(c) = &bundle.cover_image {
+        let mut h = header(tar::EntryType::Regular, 0o644, c.bytes.len() as u64);
+        builder
+            .append_data(&mut h, format!("{top_dir}/{}", c.filename), c.bytes.as_slice())
+            .map_err(arch)?;
+    }
     let mut files: Vec<&SetFile> = bundle.files.iter().collect();
     files.sort_by(|a, b| a.filename.cmp(&b.filename));
     for f in files {

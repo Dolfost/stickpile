@@ -156,11 +156,14 @@ TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 | `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `public` (all users' public sets), `all` (own + others' public). Others' unlisted sets are never listed. Summaries carry the `description` too. |
 | `POST /api/v1/sets` | `CreateSet` -> `Set` (201) | Slug `[a-z0-9-]`, 1-64 characters, unique per owner (409). |
 | `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, unlisted or public sets. |
-| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` what lists show (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
+| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; either one also removes the set's [cover image](#cover-image) (the cover is what was chosen last), leaving it out keeps it. `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` the item lists show without a cover image (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
 | `DELETE /api/v1/sets/{id}` | -> 204 | Owner only (also for read-only git packs). Audited. |
 | `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `item_ids` must list every item exactly once (else 400). |
 | `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below. |
 | `GET /api/v1/sets/{id}/export.tar` | -> `application/x-tar` | Anyone who can read the set. |
+| `PUT /api/v1/sets/{id}/cover` | multipart, one file part -> `Set` | The set's own [cover image](#cover-image); owner only, not read-only git packs. |
+| `DELETE /api/v1/sets/{id}/cover` | -> `Set` | Removes the cover image (idempotent). |
+| `GET /api/v1/sets/{id}/cover/{variant}` | -> image bytes | `original` or `thumb` of the cover image; anyone who can read the set. |
 | `POST /api/v1/sets/import?into=` | multipart -> `ImportReport` | See below. |
 | `POST /api/v1/sets/gitpack` | `CreateGitPack` -> `GitPackCreated` (201) | Bind a new set to a git repository; the clone runs as a `git_pull` job. The webhook secret is only shown here. 400 for a URL outside `git.allowed_schemes` (or with credentials, a transport helper, ...), a bad branch, subdir or slug; 409 for a taken slug. See [git-packs.md](git-packs.md). |
 | `POST /api/v1/sets/{id}/pull` | -> `Job` | Owner only (read-only packs included); a queued pull is reused. 400 if the set is not a git pack. |
@@ -237,8 +240,45 @@ holding a tar. The format is described in [set-format.md](set-format.md).
   in `errors`; the import continues.
 
 **Export** returns `<slug>/set.toml` plus the stored originals named
-`001-<stem>.<ext>`. Importing an export into a new set and exporting it again
-gives the same manifest data and byte-identical files.
+`001-<stem>.<ext>`, and the cover image as `cover.<ext>` when the set has one
+(`cover_image` in set.toml; an import takes it back, never as an item).
+Importing an export into a new set and exporting it again gives the same
+manifest data and byte-identical files.
+
+#### Cover image
+
+The cover shown for a set is, in this order: its own **cover image**, the
+item chosen with `cover_item_id`, the first item. The cover image is a
+picture uploaded for the set that is not one of its items: it is never in
+`SetDetail.items`, the item feed, search or `item_count`.
+
+- `PUT /api/v1/sets/{id}/cover` with one multipart file part (any field
+  name; other fields are ignored) sets or replaces it. Only still PNG, JPEG
+  and WebP images: GIFs, animations and videos are 415 `unsupported_media`
+  ("a cover image must be a still PNG, JPEG or WebP image, not a video"),
+  a body without a file is 400. Limits and rate limiting as for uploads. The
+  file goes through the same sniffing and sanitising as an item's and is
+  stored once by content (the same bytes as an item share its media), with
+  its grid thumbnail and no other variants; it gets no AI enrichment.
+- `DELETE` removes it; the chosen item, else the first item, is the cover
+  again. Setting `cover_item_id` (PATCH) also removes it. Both bump the set's
+  `version` when something changed, so git packs in push mode push it.
+- `Set.cover_image` (`CoverImage`: `thumb_url`, `url`, `format`, `width`,
+  `height`, `sha256`) describes it. `Set.cover_url` and `SetSummary.cover_url`
+  are the URL path of the thumbnail to show for the set: the cover image's,
+  else the chosen or first item's (`null` for an empty set without one).
+  Older clients that only read `cover_item_id` show that item instead.
+- `GET /api/v1/sets/{id}/cover/{variant}` serves `original` or `thumb` (a
+  WebP thumbnail like an item's) to anyone who can read the set; private
+  sets stay 404 for others. The URLs in `CoverImage` carry `?v=<hash>`, which
+  changes with the image: with the current `v` the response is
+  `Cache-Control: private, max-age=31536000, immutable`, otherwise
+  `private, no-cache`. Strong `ETag`, `Range` and `HEAD` work as for item
+  files.
+- A replaced or removed cover image, or the image of a deleted set, is
+  deleted by the periodic orphan-media cleanup like a deleted item's media.
+- A Telegram publish sends it as the pack's thumbnail
+  ([telegram.md](telegram.md)).
 
 ### Items
 

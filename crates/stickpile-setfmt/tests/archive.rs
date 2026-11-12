@@ -1,8 +1,8 @@
 //! Tar and folder-upload import, tar export, and traversal attempts.
 
 use stickpile_setfmt::{
-    export_filename, from_files, read_tar, write_tar, FieldSource, ItemMeta, Manifest, SetBundle, SetFile, SetFmtError,
-    MANIFEST, TAR_MTIME,
+    export_filename, from_files, read_tar, write_tar, CoverFile, FieldSource, ItemMeta, Manifest, SetBundle, SetFile,
+    SetFmtError, MANIFEST, TAR_MTIME,
 };
 
 const LIMIT: u64 = 1 << 20;
@@ -29,10 +29,42 @@ fn bundle() -> SetBundle {
     let mut b = SetBundle {
         manifest,
         files,
+        cover_image: None,
         warnings: vec![],
     };
     b.manifest = b.export_manifest();
     b
+}
+
+#[test]
+fn the_cover_image_travels_apart_from_the_items() {
+    let mut b = bundle();
+    b.cover_image = Some(CoverFile {
+        filename: "cover.webp".into(),
+        bytes: b"RIFF-cover".to_vec(),
+    });
+    b.manifest = b.export_manifest();
+    assert_eq!(b.manifest.cover_image.as_deref(), Some("cover.webp"));
+    let tar = write_tar(&b, "tarred").unwrap();
+    assert_eq!(read_tar(&tar, LIMIT).unwrap(), b);
+    let mut archive = tar::Archive::new(&tar[..]);
+    let paths: Vec<String> = archive
+        .entries()
+        .unwrap()
+        .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(paths[1..3], ["tarred/set.toml", "tarred/cover.webp"]);
+    assert_eq!(paths.len(), 6);
+
+    // A folder upload too; the cover counts against no item.
+    let mut loose = vec![("tarred/cover.webp".to_string(), b"RIFF-cover".to_vec())];
+    for f in &b.files {
+        loose.push((format!("tarred/{}", f.filename), f.bytes.clone()));
+    }
+    let manifest = b.export_manifest().to_toml();
+    let back = from_files(Some(&manifest), loose).unwrap();
+    assert_eq!(back.files.len(), 3);
+    assert_eq!(back.cover_image, b.cover_image);
 }
 
 #[test]

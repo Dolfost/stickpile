@@ -7,6 +7,7 @@ pub mod account;
 pub mod admin;
 pub mod ai;
 pub mod backup;
+pub mod cover;
 pub mod gitpack;
 pub mod hydrate;
 pub mod items;

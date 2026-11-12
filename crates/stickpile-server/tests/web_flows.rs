@@ -906,3 +906,145 @@ async fn telegram_and_git_pack_ui() {
     assert_fragment(&r);
     assert!(r.text().contains("Git pull"));
 }
+
+#[tokio::test]
+async fn cover_image_in_the_settings() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let b = Browser::login(&s, &alice).await;
+    let set = s.create_set(&alice, "covered", Visibility::Public).await;
+    let cat = s.upload_one(&alice, &set.id, "cat.png", png(1)).await;
+    s.upload_one(&alice, &set.id, "dog.png", png(2)).await;
+    let settings = format!("/sets/{}/settings", set.id);
+    let upload = format!("/sets/{}/cover/image", set.id);
+    let api_set = || async { s.get(&alice, &routes::path(routes::SET, &[&set.id])).await.value()["set"].clone() };
+
+    // The chooser points to the cover image form: a plain multipart form
+    // that upload.js turns into its one-image tray.
+    let r = b.get(&settings).await;
+    assert_page(&r);
+    let html = r.text();
+    assert!(
+        html.contains("<a href=\"#cover-image\">upload a cover image</a>"),
+        "{html}"
+    );
+    assert!(html.contains(&format!(
+        "<form class=\"upload-form cover-upload\" method=\"post\" enctype=\"multipart/form-data\" action=\"{upload}#cover-image\" data-tray=\"cover\">"
+    )), "{html}");
+    assert!(html.contains("accept=\"image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp\""));
+    assert!(html.contains(">Upload image</button>"));
+    assert!(!html.contains("Remove image"));
+
+    // Upload without JavaScript: the token first, back to the settings.
+    let r = b
+        .post_multipart(&upload, vec![("file", "cover.png", png(9))], false)
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "the CSRF token is required");
+    let r = b
+        .post_multipart(&upload, vec![("file", "cover.png", png(9))], true)
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    assert_eq!(location(&r), format!("{settings}?saved=cover#cover-image"));
+    let set_json = api_set().await;
+    let thumb = set_json["cover_image"]["thumb_url"]
+        .as_str()
+        .expect("cover image")
+        .to_string();
+    let r = b.get(&format!("{settings}?saved=cover")).await;
+    assert_page(&r);
+    let html = r.text();
+    assert!(html.contains("The new cover image is in place."), "{html}");
+    assert!(
+        html.contains("<input type=\"radio\" name=\"cover\" value=\"image\" checked>"),
+        "{html}"
+    );
+    assert!(html.contains(&format!("src=\"{thumb}\"")));
+    assert!(html.contains("Choosing an item instead removes the cover image"));
+    assert!(html.contains(">Remove image</button>"));
+    assert!(html.contains(">Replace image</button>"));
+    assert!(html.contains("The cover goes back to the first item."), "{html}");
+
+    // Lists, the start page and the set page show it; no item is the cover.
+    for page in ["/sets", "/"] {
+        let html = b.get(page).await.text();
+        assert!(html.contains(&format!("<img src=\"{thumb}\"")), "{page}: {html}");
+    }
+    let html = b.get(&format!("/sets/{}", set.id)).await.text();
+    assert!(
+        html.contains(&format!("id=\"set-cover\"><img src=\"{thumb}\"")),
+        "{html}"
+    );
+    assert!(html.contains("<div id=\"set-items\" data-cover-image>"), "{html}");
+    assert!(!html.contains("cover-badge"));
+    // Bob sees it on the public set, but cannot change it.
+    let bob_b = Browser::login(&s, &bob).await;
+    assert!(bob_b.get(&format!("/sets/{}", set.id)).await.text().contains(&thumb));
+    let r = bob_b
+        .post_multipart(&upload, vec![("file", "x.png", png(3))], true)
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // Not an image for a cover: the page again, with the message there.
+    let r = b
+        .post_multipart(&upload, vec![("file", "anim.gif", common::gif_anim(1))], true)
+        .await;
+    assert_eq!(r.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let html = r.text();
+    assert!(
+        html.contains("A cover image must be a still PNG, JPEG or WebP image, not a GIF"),
+        "{html}"
+    );
+    assert!(html.contains("id=\"cover-image\""));
+    assert_clean_html(&html);
+
+    // Saving the set form with "Cover image" keeps it.
+    let r = b
+        .post_form(
+            &settings,
+            &[
+                ("name", "Covered"),
+                ("slug", "covered"),
+                ("visibility", "public"),
+                ("cover", "image"),
+            ],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    assert!(api_set().await["cover_image"].is_object());
+
+    // "Use as cover" from the item menu replaces it; htmx also gets the
+    // header's (now empty) cover.
+    let r = b
+        .post_htmx_from(
+            &format!("/sets/{}/cover", set.id),
+            &[("item", &cat.id)],
+            &format!("/sets/{}", set.id),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_fragment(&r);
+    let html = r.text();
+    assert!(html.contains("id=\"set-cover\" hx-swap-oob=\"true\"></span>"), "{html}");
+    assert!(html.contains("<div id=\"set-items\">"), "{html}");
+    assert_eq!(html.matches("class=\"badge cover-badge\"").count(), 1);
+    let set_json = api_set().await;
+    assert!(set_json["cover_image"].is_null());
+    assert_eq!(set_json["cover_item_id"], cat.id.as_str());
+
+    // Upload again, then "Remove image": the chosen item is the cover again.
+    b.post_multipart(&upload, vec![("file", "cover.png", png(9))], true)
+        .await;
+    assert!(b.get(&settings).await.text().contains("The cover goes back to “cat”."));
+    let r = b.post_form(&format!("/sets/{}/cover/image/delete", set.id), &[]).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&r), format!("{settings}?saved=nocover#cover-image"));
+    assert!(b
+        .get(&format!("{settings}?saved=nocover"))
+        .await
+        .text()
+        .contains("The cover image is removed."));
+    let set_json = api_set().await;
+    assert!(set_json["cover_image"].is_null());
+    assert_eq!(set_json["cover_item_id"], cat.id.as_str());
+}

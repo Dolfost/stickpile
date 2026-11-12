@@ -13,8 +13,8 @@
 //! the data directory of a fresh server: it copies the snapshot (newer
 //! migrations run on it), writes every stored original back from the set
 //! directories (verified by its sha256), regenerates thumbnails and queues
-//! the other variants. Accounts, tokens, likes, usage and AI data come back
-//! with the database.
+//! the other variants (cover images have none). Accounts, tokens, likes,
+//! usage and AI data come back with the database.
 //!
 //! The target must be empty, missing, or an earlier backup (it holds
 //! nothing but `stickpile.db`, `sets/` and `backup.json`), which is then
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 
-use stickpile_api::{JobKind, Variant};
+use stickpile_api::{JobKind, MediaFormat, Variant};
 
 use crate::config::Config;
 use crate::db::{SetRow, SET_COLUMNS};
@@ -179,7 +179,8 @@ pub async fn run(config: &Config, dir: &Path) -> anyhow::Result<BackupInfo> {
             }
         };
         let items = bundle.files.len() as u64;
-        let bytes: u64 = bundle.files.iter().map(|f| f.bytes.len() as u64).sum();
+        let bytes: u64 = bundle.files.iter().map(|f| f.bytes.len() as u64).sum::<u64>()
+            + bundle.cover_image.as_ref().map_or(0, |c| c.bytes.len() as u64);
         let written = tokio::task::spawn_blocking(move || stickpile_setfmt::write_dir(&out, &bundle)).await?;
         match written {
             Ok(()) => {
@@ -290,6 +291,11 @@ pub async fn restore(config: &Config, dir: &Path) -> anyhow::Result<RestoreInfo>
                 .entry(r.media_id.clone())
                 .or_insert_with(|| format!("{username}/{}/{}", set.slug, r.name));
         }
+        if let Some(media_id) = &set.cover_media_id {
+            wanted
+                .entry(media_id.clone())
+                .or_insert_with(|| format!("{username}/{}/cover image", set.slug));
+        }
         let set_dir = dir.join(SETS_DIR).join(&username).join(&set.slug);
         let bundle = match tokio::task::spawn_blocking(move || stickpile_setfmt::read_dir(&set_dir)).await? {
             Ok(b) => b,
@@ -309,42 +315,12 @@ pub async fn restore(config: &Config, dir: &Path) -> anyhow::Result<RestoreInfo>
             let Some(bytes) = by_sha.get(&r.original_sha256) else {
                 continue;
             };
-            let bytes = bytes.to_vec();
-            let format = r.format();
-            let orig = files::resolve(
-                &media_dir,
-                &files::variant_rel_path(&r.sha256, Variant::Original, format),
-            )
-            .ok_or_else(|| anyhow::anyhow!("bad media path"))?;
-            files::write_atomic(orig, bytes.clone()).await?;
-            let (o, t) = (opts.clone(), tools.clone());
-            let ing = tokio::task::spawn_blocking(move || stickpile_media::ingest(&bytes, &o, &t)).await?;
-            match ing {
-                Ok(ing) => {
-                    let rel = files::variant_rel_path(&r.sha256, Variant::Thumb, format);
-                    let abs = files::resolve(&media_dir, &rel).ok_or_else(|| anyhow::anyhow!("bad media path"))?;
-                    let thumb = ing.thumb;
-                    sqlx::query(
-                        "INSERT OR REPLACE INTO media_variants (media_id, variant, mime, width, height, size_bytes, \
-                         sha256, path) VALUES (?, 'thumb', ?, ?, ?, ?, ?, ?)",
-                    )
-                    .bind(&r.media_id)
-                    .bind(thumb.mime)
-                    .bind(i64::from(thumb.width))
-                    .bind(i64::from(thumb.height))
-                    .bind(thumb.bytes.len() as i64)
-                    .bind(sha256_hex(&thumb.bytes))
-                    .bind(&rel)
-                    .execute(&pool)
-                    .await?;
-                    files::write_atomic(abs, thumb.bytes).await?;
-                    info.media += 2;
-                }
-                Err(e) => {
-                    tracing::warn!("restoring the thumbnail of media {}: {e}", r.media_id);
-                    info.media += 1;
-                }
-            }
+            let media = Restored {
+                id: &r.media_id,
+                sha256: &r.sha256,
+                format: r.format(),
+            };
+            info.media += media.write(&pool, &media_dir, &opts, &tools, bytes.to_vec()).await?;
             sqlx::query("DELETE FROM media_variants WHERE media_id = ? AND variant NOT IN ('original', 'thumb')")
                 .bind(&r.media_id)
                 .execute(&pool)
@@ -364,6 +340,22 @@ pub async fn restore(config: &Config, dir: &Path) -> anyhow::Result<RestoreInfo>
             info.variant_jobs += 1;
             restored.insert(r.media_id.clone());
         }
+        // The cover image: the original and its thumbnail are all it has.
+        if let Some(media_id) = set.cover_media_id.as_deref().filter(|m| !restored.contains(*m)) {
+            let media = crate::db::media_by_id(&pool, media_id).await?;
+            let file = bundle.cover_image.as_ref();
+            if let (Some(m), Some(c)) = (media, file) {
+                if sha256_hex(&c.bytes) == m.original_sha256 {
+                    let target = Restored {
+                        id: media_id,
+                        sha256: &m.sha256,
+                        format: m.format(),
+                    };
+                    info.media += target.write(&pool, &media_dir, &opts, &tools, c.bytes.clone()).await?;
+                    restored.insert(media_id.to_string());
+                }
+            }
+        }
     }
     let mut missing: Vec<String> = wanted
         .into_iter()
@@ -374,6 +366,61 @@ pub async fn restore(config: &Config, dir: &Path) -> anyhow::Result<RestoreInfo>
     info.missing = missing;
     pool.close().await;
     Ok(info)
+}
+
+/// Media whose files [`restore`] writes back.
+struct Restored<'a> {
+    id: &'a str,
+    sha256: &'a str,
+    format: MediaFormat,
+}
+
+impl Restored<'_> {
+    /// Write the stored original `bytes` back and render its thumbnail
+    /// again; the number of files written.
+    async fn write(
+        &self,
+        pool: &SqlitePool,
+        media_dir: &Path,
+        opts: &stickpile_media::IngestOptions,
+        tools: &stickpile_media::Tools,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<u64> {
+        let orig = files::resolve(
+            media_dir,
+            &files::variant_rel_path(self.sha256, Variant::Original, self.format),
+        )
+        .ok_or_else(|| anyhow::anyhow!("bad media path"))?;
+        files::write_atomic(orig, bytes.clone()).await?;
+        let (o, t) = (opts.clone(), tools.clone());
+        let ing = tokio::task::spawn_blocking(move || stickpile_media::ingest(&bytes, &o, &t)).await?;
+        match ing {
+            Ok(ing) => {
+                let rel = files::variant_rel_path(self.sha256, Variant::Thumb, self.format);
+                let abs = files::resolve(media_dir, &rel).ok_or_else(|| anyhow::anyhow!("bad media path"))?;
+                let thumb = ing.thumb;
+                sqlx::query(
+                    "INSERT OR REPLACE INTO media_variants (media_id, variant, mime, width, height, size_bytes, \
+                     sha256, path) VALUES (?, 'thumb', ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(self.id)
+                .bind(thumb.mime)
+                .bind(i64::from(thumb.width))
+                .bind(i64::from(thumb.height))
+                .bind(thumb.bytes.len() as i64)
+                .bind(sha256_hex(&thumb.bytes))
+                .bind(&rel)
+                .execute(pool)
+                .await?;
+                files::write_atomic(abs, thumb.bytes).await?;
+                Ok(2)
+            }
+            Err(e) => {
+                tracing::warn!("restoring the thumbnail of media {}: {e}", self.id);
+                Ok(1)
+            }
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]

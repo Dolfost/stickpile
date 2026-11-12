@@ -246,6 +246,19 @@ impl TestServer {
         read(rb.multipart(form).send().await.expect("upload")).await
     }
 
+    /// PUT a set's cover image (multipart, one `file` part).
+    pub async fn put_cover(&self, user: &TestUser, set_id: &str, name: &str, bytes: Vec<u8>) -> Resp {
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()),
+        );
+        let rb = self
+            .client
+            .put(self.url(&routes::path(routes::SET_COVER, &[set_id])))
+            .bearer_auth(&user.token);
+        read(rb.multipart(form).send().await.expect("cover upload")).await
+    }
+
     /// Upload one file and return the created (or existing) item.
     pub async fn upload_one(&self, user: &TestUser, set_id: &str, name: &str, bytes: Vec<u8>) -> Item {
         let res: Vec<UploadResult> = self

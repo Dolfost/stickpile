@@ -647,3 +647,90 @@ async fn disabled_or_unconfigured_telegram_is_not_found() {
         .expect(404);
     assert!(r.text().contains("Telegram"));
 }
+
+#[tokio::test]
+async fn the_cover_image_is_the_pack_thumbnail() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let alice = srv.user("alice").await;
+    srv.patch(&alice, routes::ME, json!({"telegram_user_id": 555}))
+        .await
+        .expect(200);
+    let set = srv.create_set(&alice, "pictured", Visibility::Private).await;
+    srv.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b = srv.upload_one(&alice, &set.id, "b.png", png(2)).await;
+    let set_path = routes::path(routes::SET, &[&set.id]);
+    let cover_path = routes::path(routes::SET_COVER, &[&set.id]);
+    let name = format!("pictured_by_{BOT}");
+    let thumbnail = |tg: &Tg| tg.mock.lock().unwrap().packs[&name].thumbnail.clone();
+    let calls = |tg: &Tg| tg.mock.lock().unwrap().count("setStickerSetThumbnail");
+    // A wide red image: centred on the transparent square, red in the middle.
+    let red = common::encode(
+        &image::RgbaImage::from_pixel(300, 150, image::Rgba([220, 20, 20, 255])),
+        image::ImageFormat::Png,
+    );
+    let blue = common::encode(
+        &image::RgbaImage::from_pixel(120, 120, image::Rgba([20, 20, 220, 255])),
+        image::ImageFormat::Png,
+    );
+
+    // The image is the thumbnail; it is not a sticker.
+    srv.put_cover(&alice, &set.id, "red.png", red).await.expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    assert_eq!((r["thumbnail"].clone(), r["exported"].clone()), (json!(true), json!(2)));
+    let png_bytes = thumbnail(&tg).expect("thumbnail set");
+    let img = image::load_from_memory(&png_bytes).unwrap().to_rgba8();
+    assert_eq!(img.dimensions(), (100, 100));
+    let red_at = |img: &image::RgbaImage| {
+        let p = img.get_pixel(50, 50).0;
+        p[0] > 200 && p[1] < 60 && p[2] < 60 && p[3] == 255
+    };
+    let blue_at = |img: &image::RgbaImage| {
+        let p = img.get_pixel(50, 50).0;
+        p[0] < 60 && p[1] < 60 && p[2] > 200 && p[3] == 255
+    };
+    assert!(red_at(&img), "{:?}", img.get_pixel(50, 50));
+    assert_eq!(img.get_pixel(50, 2)[3], 0, "padded to a square");
+    assert_eq!(tg.mock.lock().unwrap().packs[&name].stickers.len(), 2);
+    // Unchanged: not uploaded again.
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], false);
+    assert_eq!(calls(&tg), 1);
+
+    // Another image: uploaded on the next publish.
+    srv.put_cover(&alice, &set.id, "blue.png", blue.clone())
+        .await
+        .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
+    let img = image::load_from_memory(&thumbnail(&tg).unwrap()).unwrap().to_rgba8();
+    assert!(blue_at(&img), "{:?}", img.get_pixel(50, 50));
+    assert_eq!(calls(&tg), 2);
+
+    // An item chosen as the cover replaces the image: its thumbnail now.
+    srv.patch(&alice, &set_path, json!({"cover_item_id": b.id}))
+        .await
+        .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
+    let img = image::load_from_memory(&thumbnail(&tg).unwrap()).unwrap().to_rgba8();
+    assert!(!blue_at(&img) && !red_at(&img));
+
+    // An image again, then removed: back to the chosen item (sent again,
+    // the key changed), then to the first item (dropped).
+    srv.put_cover(&alice, &set.id, "blue.png", blue).await.expect(200);
+    export(srv, &alice, &set.id, json!({})).await;
+    srv.delete(&alice, &cover_path).await.expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
+    assert!(thumbnail(&tg).is_some());
+    srv.patch(&alice, &set_path, json!({"cover_item_id": null}))
+        .await
+        .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
+    assert_eq!(thumbnail(&tg), None);
+    assert_eq!(tg.mock.lock().unwrap().packs[&name].stickers.len(), 2);
+}

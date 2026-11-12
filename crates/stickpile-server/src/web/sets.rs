@@ -1,22 +1,25 @@
 //! Sets: browse (mine / public), create, the set page with its item editor,
-//! settings, delete, reordering.
+//! settings (with the cover and the cover image), delete, reordering.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
 use stickpile_api::routes as r;
-use stickpile_api::{CreateSet, Item, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Variant, Visibility};
+use stickpile_api::{
+    CreateSet, Item, MediaFormat, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Variant, Visibility,
+};
 
 use super::components::{
     file_url, fmt_time, opt_time, plural, set_list, set_list_view, set_url, source_badge, view_menu, visibility_badge,
 };
 use super::layout::{self, Nav};
-use super::{integrations, items, upload, Ctx};
+use super::{integrations, items, upload, Ctx, MultipartCaller};
 use crate::assets;
 use crate::error::{AppError, AppResult};
+use crate::service::cover;
 use crate::service::sets::{self, SetScope};
 use crate::state::AppState;
 
@@ -87,10 +90,14 @@ pub struct SetForm {
     aspect: String,
     #[serde(default)]
     recommended_px: String,
-    /// Item id of the cover; empty: the first item. Set settings only.
+    /// Item id of the cover, empty for the first item, [`COVER_IMAGE`] to
+    /// keep the cover image; absent leaves the cover alone. Set settings only.
     #[serde(default)]
-    cover: String,
+    cover: Option<String>,
 }
+
+/// The settings form's cover choice for "the uploaded cover image".
+const COVER_IMAGE: &str = "image";
 
 impl SetForm {
     fn from_set(s: &Set) -> SetForm {
@@ -100,7 +107,11 @@ impl SetForm {
             description: s.description.clone(),
             visibility: vis_str(s.visibility).into(),
             aspect: s.aspect_ratio.map(|(w, h)| format!("{w}:{h}")).unwrap_or_default(),
-            cover: s.cover_item_id.clone().unwrap_or_default(),
+            cover: Some(if s.cover_image.is_some() {
+                COVER_IMAGE.to_string()
+            } else {
+                s.cover_item_id.clone().unwrap_or_default()
+            }),
             recommended_px: s.recommended_px.map(|p| p.to_string()).unwrap_or_default(),
         }
     }
@@ -403,6 +414,7 @@ pub async fn page(
     let body = html! {
         header.set-head {
             div.section-head {
+                (head_cover(set, false))
                 h1 { (set.name) }
                 (visibility_badge(set.visibility)) " " (source_badge(set.source))
             }
@@ -468,15 +480,31 @@ pub async fn page(
     Ok(ctx.page(&set.name, Nav::Sets, body))
 }
 
+/// The set's cover image before its name on the set page (empty without
+/// one; items show the "Cover" badge then). `oob` marks it for an htmx
+/// out-of-band swap: "Use as cover" removes the image.
+fn head_cover(set: &Set, oob: bool) -> Markup {
+    html! {
+        span #set-cover .set-cover hx-swap-oob=[oob.then_some("true")] {
+            @if let Some(img) = &set.cover_image {
+                img src=(img.thumb_url) alt="" title="The set's cover image" width="64" height="64" decoding="async";
+            }
+        }
+    }
+}
+
 /// The `#set-items` grid (swapped by reorder requests; `oob` marks it for
-/// an htmx out-of-band swap after uploads and imports).
+/// an htmx out-of-band swap after uploads and imports). With a cover image
+/// no item is the cover; `data-cover-image` lets the item menu say that
+/// "Use as cover" replaces the image.
 pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oob: bool) -> Markup {
     let shown = arrange(&detail.items, sort, min_likes);
     let movable = detail.set.editable && sort == Sort::Position && min_likes == 0;
     let last = detail.items.len().saturating_sub(1);
     let hidden = detail.items.len() - shown.len();
+    let has_image = detail.set.cover_image.is_some();
     html! {
-        div #set-items hx-swap-oob=[oob.then_some("true")] {
+        div #set-items hx-swap-oob=[oob.then_some("true")] data-cover-image[has_image] {
             @if detail.items.is_empty() {
                 p.muted { "This set is empty." @if detail.set.editable { " Upload files above." } }
             } @else {
@@ -492,7 +520,7 @@ pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oo
                             item,
                             detail.set.editable,
                             movable.then_some((idx == 0, idx >= last)),
-                            detail.set.cover_item_id.as_deref() == Some(item.id.as_str()),
+                            !has_image && detail.set.cover_item_id.as_deref() == Some(item.id.as_str()),
                         ))
                     }
                 }
@@ -528,7 +556,8 @@ fn view_of(here: &str) -> (Sort, u64) {
     (Sort::parse(sort), min_likes)
 }
 
-/// "Use as cover" from an item's menu (the settings form does the same).
+/// "Use as cover" from an item's menu (the settings form does the same). It
+/// replaces a cover image; htmx gets the grid and the header's cover.
 pub async fn set_cover(
     State(state): State<AppState>,
     ctx: Ctx,
@@ -548,7 +577,11 @@ pub async fn set_cover(
     } else {
         format!("{}#item-{item}", set_url(&id))
     };
-    Ok(ctx.done(editor_grid(&ctx, &detail, sort, min_likes, false), None, &back))
+    let fragment = html! {
+        (editor_grid(&ctx, &detail, sort, min_likes, false))
+        (head_cover(&detail.set, true))
+    };
+    Ok(ctx.done(fragment, None, &back))
 }
 
 // ---------------------------------------------------------------------------
@@ -596,46 +629,153 @@ pub async fn move_item(
 // Settings and delete
 // ---------------------------------------------------------------------------
 
-/// The cover chooser of the settings form: the first item (default) or any
-/// item, as thumbnails. Works without JavaScript; the set page's item menu
-/// has "Use as cover" too.
-fn cover_choice(f: &SetForm, items: &[Item]) -> Markup {
+/// The cover chooser of the settings form: the cover image (when there is
+/// one), the first item (default) or any item, as thumbnails. Choosing an
+/// item replaces the image. Works without JavaScript; the set page's item
+/// menu has "Use as cover" too, and the image is uploaded below the form.
+fn cover_choice(f: &SetForm, set: &Set, items: &[Item]) -> Markup {
+    let chosen = f.cover.as_deref().unwrap_or("");
     html! {
         fieldset.field-row.cover-choice aria-describedby="set-cover-hint" {
             legend { "Cover" }
             p.hint #set-cover-hint {
                 "Shown for the set in lists, and the pack's thumbnail when it is published to Telegram."
+                @if set.cover_image.is_some() {
+                    " Choosing an item instead removes the cover image when you save."
+                }
             }
             div.cover-grid {
+                @if let Some(img) = &set.cover_image {
+                    label.cover-option {
+                        input type="radio" name="cover" value=(COVER_IMAGE) checked[chosen == COVER_IMAGE];
+                        img src=(img.thumb_url) alt="" decoding="async";
+                        span.cover-name { "Cover image" }
+                    }
+                }
                 label.cover-option {
-                    input type="radio" name="cover" value="" checked[f.cover.is_empty()];
+                    input type="radio" name="cover" value="" checked[chosen.is_empty()];
                     span.cover-default { "First item" }
                 }
                 @for item in items {
                     label.cover-option {
-                        input type="radio" name="cover" value=(item.id) checked[f.cover == item.id];
+                        input type="radio" name="cover" value=(item.id) checked[chosen == item.id];
                         img src=(file_url(&item.id, Variant::Thumb)) alt="" loading="lazy" decoding="async";
                         span.cover-name { (item.name) }
                     }
+                }
+            }
+            @if set.cover_image.is_none() {
+                p.hint {
+                    "Or use a picture that is not one of the items: "
+                    a href="#cover-image" { "upload a cover image" } "."
                 }
             }
         }
     }
 }
 
-fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, error: Option<&str>, saved: bool) -> Markup {
+/// Accepted by the cover image's file input (the server checks the bytes).
+const COVER_ACCEPT: &str = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
+
+/// The settings page's cover image: the current one with "Remove image",
+/// and a form to upload or replace it. Plain multipart forms (the CSRF token
+/// first); with JavaScript upload.js stages the image in its tray
+/// (`data-tray="cover"`: one still image, cropped to a square at first).
+fn cover_image_section(ctx: &Ctx, set: &Set, items: &[Item], notice: Notice) -> Markup {
+    let image = set.cover_image.as_ref();
+    let fallback = set
+        .cover_item_id
+        .as_deref()
+        .and_then(|id| items.iter().find(|i| i.id == id))
+        .map(|i| i.name.as_str());
+    html! {
+        section.cover-image #cover-image aria-labelledby="cover-image-head" {
+            h2 #cover-image-head { "Cover image" }
+            @match notice {
+                Notice::Cover(m) => (layout::alert("success", m)),
+                Notice::CoverError(m) => (layout::alert("error", m)),
+                _ => {}
+            }
+            p.hint {
+                "A picture of its own for the cover, instead of one of the items. It is not an item: it is not "
+                "listed with the items, searched or counted. Telegram shows it at 100 × 100 px, so a square "
+                "works best."
+            }
+            @if let Some(img) = image {
+                div.cover-current {
+                    img.cover-preview src=(img.thumb_url) alt="The current cover image" width="128" height="128"
+                        decoding="async";
+                    div.cover-current-info {
+                        p.small.muted { (img.width) " × " (img.height) " px " (format_name(img.format)) }
+                        form method="post" action=(format!("/sets/{}/cover/image/delete#cover-image", set.id)) {
+                            (ctx.csrf_input())
+                            button.danger type="submit" aria-describedby="cover-remove-hint" { "Remove image" }
+                        }
+                        p.hint #cover-remove-hint {
+                            "The cover goes back to "
+                            @if let Some(name) = fallback { "“" (name) "”" } @else { "the first item" }
+                            "."
+                        }
+                    }
+                }
+            }
+            form.upload-form.cover-upload method="post" enctype="multipart/form-data"
+                action=(format!("/sets/{}/cover/image#cover-image", set.id)) data-tray="cover" {
+                (ctx.csrf_input())
+                div.dropzone data-dropzone="" {
+                    label for="cover-file" {
+                        strong { @if image.is_some() { "Choose another image" } @else { "Choose an image" } }
+                        " or drop it here"
+                        span.paste-hint hidden { ", or paste one with Ctrl+V" }
+                    }
+                    input #cover-file type="file" name="file" required accept=(COVER_ACCEPT)
+                        aria-describedby="cover-file-hint";
+                    p.hint #cover-file-hint { "A still PNG, JPEG or WebP; not an animation or a video." }
+                }
+                button.primary type="submit" { @if image.is_some() { "Replace image" } @else { "Upload image" } }
+            }
+        }
+    }
+}
+
+fn format_name(f: MediaFormat) -> &'static str {
+    match f {
+        MediaFormat::Png => "PNG",
+        MediaFormat::Jpeg => "JPEG",
+        MediaFormat::Webp => "WebP",
+        MediaFormat::Gif => "GIF",
+        MediaFormat::Mp4 => "MP4",
+        MediaFormat::Webm => "WebM",
+    }
+}
+
+/// A message on the settings page, shown next to the form it is about.
+#[derive(Debug, Clone, Copy)]
+enum Notice<'a> {
+    None,
+    Saved,
+    Error(&'a str),
+    Cover(&'a str),
+    CoverError(&'a str),
+}
+
+fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Notice) -> Markup {
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
         h1 { "Set settings" }
-        @if saved { (layout::alert("success", "Saved.")) }
-        @if let Some(e) = error { (layout::alert("error", e)) }
+        @match notice {
+            Notice::Saved => (layout::alert("success", "Saved.")),
+            Notice::Error(e) => (layout::alert("error", e)),
+            _ => {}
+        }
         @if set.editable {
             form.stack.narrow method="post" action=(format!("/sets/{}/settings", set.id)) {
                 (ctx.csrf_input())
                 (set_fields(ctx, f, false))
-                @if !items.is_empty() { (cover_choice(f, items)) }
+                @if !items.is_empty() || set.cover_image.is_some() { (cover_choice(f, set, items)) }
                 button.primary type="submit" { "Save" }
             }
+            (cover_image_section(ctx, set, items, notice))
         } @else {
             p { "This set is a read-only git pack: its metadata comes from the repository's set.toml." }
         }
@@ -669,13 +809,18 @@ pub async fn settings_page(
     Query(q): Query<SavedQuery>,
 ) -> AppResult<Markup> {
     let d = owned(&state, &ctx, &id).await?;
+    let notice = match q.saved.as_deref() {
+        None => Notice::None,
+        Some("cover") => Notice::Cover("The new cover image is in place."),
+        Some("nocover") => Notice::Cover("The cover image is removed."),
+        Some(_) => Notice::Saved,
+    };
     Ok(settings_form(
         &ctx,
         &d.set,
         &d.items,
         &SetForm::from_set(&d.set),
-        None,
-        q.saved.is_some(),
+        notice,
     ))
 }
 
@@ -694,7 +839,11 @@ pub async fn settings_submit(
             visibility: Some(parse_visibility(&f.visibility)?),
             aspect_ratio: Some(parse_aspect(&f.aspect)?),
             recommended_px: Some(parse_px(&f.recommended_px)?),
-            cover_item_id: Some(Some(f.cover.trim().to_string()).filter(|c| !c.is_empty())),
+            cover_item_id: match f.cover.as_deref().map(str::trim) {
+                None | Some(COVER_IMAGE) => None,
+                Some("") => Some(None),
+                Some(item) => Some(Some(item.to_string())),
+            },
         };
         sets::update(&state, &ctx.user, &id, req).await
     };
@@ -706,11 +855,60 @@ pub async fn settings_submit(
             } else {
                 e.status
             },
-            settings_form(&ctx, &d.set, &d.items, &f, Some(&form_error(&e)), false),
+            settings_form(&ctx, &d.set, &d.items, &f, Notice::Error(&form_error(&e))),
         )
             .into_response()),
         Err(e) => Err(e),
     }
+}
+
+/// The settings page after a cover image request: back to it on success,
+/// the page with the message on a client error.
+async fn cover_image_done(
+    state: &AppState,
+    ctx: &Ctx,
+    id: &str,
+    outcome: AppResult<Set>,
+    done: &str,
+) -> AppResult<Response> {
+    match outcome {
+        Ok(_) => Ok(ctx.redirect(&format!("/sets/{id}/settings?saved={done}#cover-image"))),
+        Err(e) if e.status.is_client_error() => {
+            let d = owned(state, ctx, id).await?;
+            let f = SetForm::from_set(&d.set);
+            let page = settings_form(ctx, &d.set, &d.items, &f, Notice::CoverError(&form_error(&e)));
+            Ok((e.status, page).into_response())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The settings page's cover image upload (multipart, CSRF token first).
+pub async fn cover_image_upload(
+    State(state): State<AppState>,
+    caller: MultipartCaller,
+    Path(id): Path<String>,
+    req: Request,
+) -> AppResult<Response> {
+    let ctx = &caller.ctx;
+    owned(&state, ctx, &id).await?;
+    let outcome = async {
+        let mp = caller.multipart(&state, req).await?;
+        cover::upload_multipart(&state, &ctx.user, &id, mp).await
+    }
+    .await;
+    cover_image_done(&state, ctx, &id, outcome, "cover").await
+}
+
+/// "Remove image" on the settings page.
+pub async fn cover_image_remove(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    owned(&state, &ctx, &id).await?;
+    let outcome = cover::remove(&state, &ctx.user, &id).await;
+    cover_image_done(&state, &ctx, &id, outcome, "nocover").await
 }
 
 pub async fn delete_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {

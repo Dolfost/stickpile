@@ -422,9 +422,18 @@ pub struct Set {
     pub telegram_pack: Option<String>,
     /// The item chosen as the cover: shown for the set in lists and sent to
     /// Telegram as the pack's thumbnail. `None`: the first item is shown and
-    /// Telegram uses the first sticker.
+    /// Telegram uses the first sticker. A [`Set::cover_image`] wins over it.
     #[serde(default)]
     pub cover_item_id: Option<String>,
+    /// The set's own cover image (not an item), if one was uploaded: shown
+    /// instead of any item and sent to Telegram as the pack's thumbnail.
+    #[serde(default)]
+    pub cover_image: Option<CoverImage>,
+    /// URL path of the thumbnail shown for the set: the cover image, else the
+    /// chosen cover item, else the first item. `None`: an empty set without
+    /// a cover image.
+    #[serde(default)]
+    pub cover_url: Option<String>,
     pub item_count: u64,
     /// True if the caller may edit (owner, and not a read-only git pack).
     pub editable: bool,
@@ -445,8 +454,30 @@ pub struct SetSummary {
     pub source: SetSource,
     pub item_count: u64,
     /// The item shown for the set: the chosen cover, else the first item.
+    /// A set with a cover image shows that instead (see `cover_url`).
     pub cover_item_id: Option<String>,
+    /// URL path of the thumbnail shown for the set (as [`Set::cover_url`]):
+    /// the cover image, else the item `cover_item_id`.
+    #[serde(default)]
+    pub cover_url: Option<String>,
     pub updated_at: i64,
+}
+
+/// A set's own cover image, uploaded with PUT [`crate::routes::SET_COVER`]. It
+/// is not an item: it is never in item lists, search or counts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CoverImage {
+    /// URL path of the grid thumbnail (WebP). Changes with the image, so it
+    /// may be cached for good.
+    pub thumb_url: String,
+    /// URL path of the stored image (sanitised original).
+    pub url: String,
+    pub format: MediaFormat,
+    pub width: u32,
+    pub height: u32,
+    /// sha256 (hex) of the image as uploaded.
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -483,7 +514,9 @@ pub struct UpdateSet {
     #[serde(default, with = "double_option")]
     pub recommended_px: Option<Option<u32>>,
     /// An item of this set as its cover; `null` goes back to the first item.
-    #[serde(default, with = "double_option")]
+    /// Either one also removes the set's cover image: the cover is what was
+    /// chosen last. Absent leaves both alone.
+    #[serde(default, with = "double_option", skip_serializing_if = "Option::is_none")]
     pub cover_item_id: Option<Option<String>>,
 }
 

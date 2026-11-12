@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use stickpile_setfmt::{
-    read_dir, write_dir, FieldSource, ItemMeta, Manifest, SetBundle, SetFile, SetFmtError, Visibility, MANIFEST,
+    read_dir, write_dir, CoverFile, FieldSource, ItemMeta, Manifest, SetBundle, SetFile, SetFmtError, Visibility,
+    MANIFEST,
 };
 
 fn put(dir: &Path, name: &str, bytes: &[u8]) {
@@ -189,10 +190,89 @@ fn sample_bundle() -> SetBundle {
     let mut b = SetBundle {
         manifest,
         files,
+        cover_image: None,
         warnings: vec![],
     };
     b.manifest = b.export_manifest();
     b
+}
+
+fn with_cover(mut b: SetBundle, filename: &str, bytes: &[u8]) -> SetBundle {
+    b.cover_image = Some(CoverFile {
+        filename: filename.into(),
+        bytes: bytes.to_vec(),
+    });
+    b.manifest = b.export_manifest();
+    b
+}
+
+#[test]
+fn the_cover_image_is_a_file_but_not_an_item() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("out");
+    let bundle = with_cover(sample_bundle(), "cover.png", b"cover-bytes");
+    write_dir(&dir, &bundle).unwrap();
+    assert_eq!(fs::read(dir.join("cover.png")).unwrap(), b"cover-bytes");
+    let text = fs::read_to_string(dir.join(MANIFEST)).unwrap();
+    assert!(text.contains("cover_image = \"cover.png\""), "{text}");
+    assert!(!text.contains("[items.\"cover.png\"]"), "{text}");
+    let back = read_dir(&dir).unwrap();
+    assert_eq!(back, bundle);
+    assert_eq!(back.files.len(), 3, "the cover is not an item");
+    assert!(back.warnings.is_empty(), "{:?}", back.warnings);
+
+    // No cover image any more: the file goes, like a removed item's.
+    let mut without = bundle.clone();
+    without.cover_image = None;
+    without.manifest = without.export_manifest();
+    write_dir(&dir, &without).unwrap();
+    assert!(!dir.join("cover.png").exists());
+    let back = read_dir(&dir).unwrap();
+    assert_eq!(back.manifest.cover_image, None);
+    assert_eq!(back, without);
+
+    // A cover image may not share a name with an item.
+    let clash = with_cover(sample_bundle(), "001-cat.png", b"x");
+    assert!(matches!(write_dir(&dir, &clash), Err(SetFmtError::BadFilename(_))));
+    for bad in ["../c.png", "cover.txt", ".cover.png", "set.toml"] {
+        let b = with_cover(sample_bundle(), bad, b"x");
+        assert!(write_dir(&dir, &b).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn reading_the_cover_image() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    put(
+        dir,
+        MANIFEST,
+        "name = \"C\"\ncover_image = \"Cafe\u{301}.webp\"\n[items.\"Caf\u{e9}.webp\"]\nname = \"x\"\n".as_bytes(),
+    );
+    // Matched by NFC like items; its [items] table is dropped silently.
+    put(dir, "Caf\u{e9}.webp", b"cover");
+    put(dir, "001-a.png", b"a");
+    let b = read_dir(dir).unwrap();
+    assert_eq!(b.files.len(), 1);
+    let cover = b.cover_image.as_ref().expect("cover image");
+    assert_eq!(
+        (cover.filename.as_str(), cover.bytes.as_slice()),
+        ("Caf\u{e9}.webp", &b"cover"[..])
+    );
+    assert_eq!(b.manifest.cover_image.as_deref(), Some("Caf\u{e9}.webp"));
+    assert!(!b.manifest.items.contains_key("Caf\u{e9}.webp"));
+    assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+
+    // A missing file is a warning; without `cover_image` every file is an item.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    put(dir, MANIFEST, b"name = \"C\"\ncover_image = \"gone.png\"\n");
+    put(dir, "cover.png", b"an item");
+    let b = read_dir(dir).unwrap();
+    assert_eq!(b.cover_image, None);
+    assert_eq!(b.manifest.cover_image, None);
+    assert_eq!(b.files.len(), 1);
+    assert!(b.warnings.iter().any(|w| w.contains("gone.png")), "{:?}", b.warnings);
 }
 
 #[test]

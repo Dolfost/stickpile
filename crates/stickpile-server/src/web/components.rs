@@ -309,13 +309,18 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
 }
 
 /// A set in a list. Each part has a class of its own, so the list's display
-/// options (`hide-*` classes on [`set_list`]) can hide it without gaps.
+/// options (`hide-*` classes on [`set_list`]) can hide it without gaps. The
+/// cover is the set's cover image, else its cover item (`cover_url`).
 pub fn set_card(s: &SetSummary) -> Markup {
+    let cover = s
+        .cover_url
+        .clone()
+        .or_else(|| s.cover_item_id.as_deref().map(|id| file_url(id, Variant::Thumb)));
     html! {
         article.card.set-card {
             a.thumb href=(set_url(&s.id)) {
-                @if let Some(cover) = &s.cover_item_id {
-                    img src=(file_url(cover, Variant::Thumb)) alt="" loading="lazy" decoding="async" width="256" height="256";
+                @if let Some(cover) = &cover {
+                    img src=(cover) alt="" loading="lazy" decoding="async" width="256" height="256";
                 } @else {
                     span.empty-cover aria-hidden="true" { "∅" }
                 }

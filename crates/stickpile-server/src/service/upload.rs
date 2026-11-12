@@ -292,7 +292,19 @@ pub async fn media_by_sha(db: &sqlx::SqlitePool, sha: &str) -> AppResult<Option<
 /// Existing media for `file`'s hash, or ingest and store new media. The
 /// caller must hold `state.media_lock` (shared) until the media is referenced.
 pub async fn media_for_file(state: &AppState, file: &UploadFile, recommended_px: u32) -> AppResult<(MediaRow, bool)> {
+    media_for_file_where(state, file, recommended_px, |_| Ok(())).await
+}
+
+/// [`media_for_file`] for media `accept` takes (e.g. stills only), checked
+/// on the existing media or on new media before anything is stored.
+pub async fn media_for_file_where(
+    state: &AppState,
+    file: &UploadFile,
+    recommended_px: u32,
+    accept: fn(&stickpile_media::Probe) -> AppResult<()>,
+) -> AppResult<(MediaRow, bool)> {
     if let Some(m) = media_by_sha(&state.db, &file.sha256).await? {
+        accept(&m.probe())?;
         return Ok((m, false));
     }
     let max = state.config.limits.max_upload_mb * 1024 * 1024;
@@ -310,6 +322,7 @@ pub async fn media_for_file(state: &AppState, file: &UploadFile, recommended_px:
     };
     let tools = state.tools.clone();
     let ing = tokio::task::spawn_blocking(move || stickpile_media::ingest(&bytes, &opts, &tools)).await??;
+    accept(&ing.probe)?;
 
     // Someone may have stored the same bytes meanwhile.
     if let Some(m) = media_by_sha(&state.db, &file.sha256).await? {

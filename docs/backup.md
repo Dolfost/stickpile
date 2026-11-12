@@ -35,7 +35,8 @@ tests are in `crates/stickpile-server/tests/integrations_backup.rs`.
   [set directory format](set-format.md), exactly what
   `GET /api/v1/sets/{id}/export.tar` or `stickpile export` would write:
   `set.toml` (with the AI source markers and unknown keys) and the stored
-  originals, named `NNN-<name>.<ext>` in set order.
+  originals, named `NNN-<name>.<ext>` in set order, plus `cover.<ext>` for
+  a set with a cover image.
 - **`backup.json`**:
 
   ```json
@@ -129,7 +130,8 @@ On a new machine, or after losing the data directory:
 migrations of a newer version run. It writes every stored original back to
 `<data_dir>/media` from the set directories, after checking it against the
 sha256 recorded in the database. It regenerates the thumbnails and queues a
-`Variants` job per media item, which runs as soon as the server is up.
+`Variants` job per media item, which runs as soon as the server is up (cover
+images need none: they only have the original and the thumbnail).
 Accounts, API tokens (clients stay logged in), likes, usage statistics, AI
 suggestions and embeddings, git-pack and Telegram bindings all come back. Git
 packs are cloned again on their next pull. Media that no set directory

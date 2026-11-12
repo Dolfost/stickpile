@@ -35,9 +35,9 @@ use crate::files;
 use crate::ids;
 use crate::index;
 use crate::jobs::{self, JobError, JobResult, JobRow};
-use crate::service::hydrate;
 use crate::service::sets::{self, NewSet};
 use crate::service::upload::{self, clean_list, stem_for, ItemInput, UploadFile};
+use crate::service::{cover, hydrate};
 use crate::state::AppState;
 
 const DISABLED: &str =
@@ -395,16 +395,33 @@ fn find_variant(rows: Option<&Vec<VariantRow>>, want: Variant) -> Option<Variant
     rows?.iter().find(|v| v.variant() == Some(want)).cloned()
 }
 
-/// The pack thumbnail for the set's chosen cover (None: no cover, Telegram
-/// shows the first sticker): the cover's grid thumbnail, which every kind of
-/// item has (a still frame for animations and videos), made 100×100.
+/// The pack thumbnail for the set's cover (None: neither a cover image nor a
+/// chosen item, Telegram shows the first sticker), made 100×100. A cover
+/// image is rendered from its stored original (always a still), a chosen
+/// item from its grid thumbnail, which every kind of item has (a still frame
+/// for animations and videos). The key says what was sent: `image:<sha256>`
+/// or `<item id>:<sha256>`, so a new image or item uploads it again.
 async fn cover_thumbnail(
     state: &AppState,
-    set_id: &str,
+    set: &db::SetRow,
     rows: &[hydrate::ItemFull],
     variants: &mut std::collections::HashMap<String, Vec<VariantRow>>,
 ) -> Result<Option<PackThumbnail>, JobError> {
-    let Some(cover) = sets::chosen_cover(&state.db, set_id).await? else {
+    if let Some(media_id) = &set.cover_media_id {
+        let missing = || JobError::Fatal("the set's cover image is missing".into());
+        let media = db::media_by_id(&state.db, media_id)
+            .await
+            .map_err(retry)?
+            .ok_or_else(missing)?;
+        let original = cover::variant_row(&state.db, media_id, Variant::Original)
+            .await?
+            .ok_or_else(missing)?;
+        return Ok(Some(PackThumbnail {
+            key: format!("image:{}", media.sha256),
+            png: render_thumbnail(state, &original.path).await?,
+        }));
+    }
+    let Some(cover) = sets::chosen_cover(&state.db, &set.id).await? else {
         return Ok(None);
     };
     let Some(r) = rows.iter().find(|r| r.id == cover) else {
@@ -424,20 +441,24 @@ async fn cover_thumbnail(
             "the cover has no thumbnail to make the pack's from".into(),
         ));
     };
-    let abs = files::resolve(&state.media_dir(), &v.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
+    Ok(Some(PackThumbnail {
+        key: format!("{}:{}", r.id, r.sha256),
+        png: render_thumbnail(state, &v.path).await?,
+    }))
+}
+
+/// A still media file (`path` under the media dir) as a pack thumbnail PNG.
+async fn render_thumbnail(state: &AppState, path: &str) -> Result<Vec<u8>, JobError> {
+    let abs = files::resolve(&state.media_dir(), path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
     let bytes = files::read(abs).await?;
     let limits = state.media_limits();
-    let png = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let frame = stickpile_media::decode_frame(&bytes, &limits)?;
         stickpile_media::pack_thumbnail(&frame)
     })
     .await
     .map_err(retry)?
-    .map_err(|e| JobError::Fatal(format!("rendering the cover: {e}")))?;
-    Ok(Some(PackThumbnail {
-        key: format!("{}:{}", r.id, r.sha256),
-        png,
-    }))
+    .map_err(|e| JobError::Fatal(format!("rendering the cover: {e}")))
 }
 
 /// `TelegramExport` job.
@@ -549,7 +570,7 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
             items.len()
         )));
     }
-    let thumbnail = cover_thumbnail(state, &set.id, &rows, &mut variants).await?;
+    let thumbnail = cover_thumbnail(state, &set, &rows, &mut variants).await?;
     let previous = PackState {
         mapping: previous,
         thumbnail: previous_thumbnail,

@@ -320,6 +320,8 @@ fn manifest(rng: &mut Rng) -> Manifest {
         .chance(50)
         .then(|| if rng.chance(80) { "16:9".into() } else { string(rng) });
     m.recommended_px = rng.chance(50).then(|| rng.next() as u32);
+    m.cover = rng.chance(30).then(|| string(rng));
+    m.cover_image = rng.chance(30).then(|| string(rng));
     m.extra = table(rng, 0);
     for _ in 0..rng.below(6) {
         let filename = format!(

@@ -49,6 +49,8 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::SET_ORDER, put(sets::reorder))
         .route(r::SET_ITEMS, post(sets::upload).layer(big))
         .route(r::SET_EXPORT, get(sets::export))
+        .route(r::SET_COVER, put(sets::put_cover).delete(sets::delete_cover).layer(big))
+        .route(r::SET_COVER_FILE, get(sets::cover_file))
         .route(r::SET_PULL, post(integrations::pull))
         .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
         .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))

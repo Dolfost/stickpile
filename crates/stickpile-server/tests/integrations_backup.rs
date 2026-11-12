@@ -17,6 +17,7 @@ description = "Cats, mostly staring."
 visibility = "public"
 aspect_ratio = "1:1"
 recommended_px = 512
+cover_image = "cover.png"
 author = "alice"
 
 [items."001-cat.png"]
@@ -86,6 +87,7 @@ async fn backup_while_running_round_trips() {
     std::fs::write(cats_dir.join("set.toml"), CATS_TOML).unwrap();
     std::fs::write(cats_dir.join("001-cat.png"), png(1)).unwrap();
     std::fs::write(cats_dir.join("002-dog.png"), png(2)).unwrap();
+    std::fs::write(cats_dir.join("cover.png"), png(4)).unwrap();
     let cats = import_dir(&srv, &alice, &cats_dir).await.set.unwrap();
     let dogs = srv.create_set(&bob, "dogs", Visibility::Private).await;
     srv.upload_one(&bob, &dogs.id, "rex.png", png(3)).await;
@@ -129,6 +131,7 @@ async fn backup_while_running_round_trips() {
     assert_eq!(written, info);
     for rel in [
         "sets/alice/cats/set.toml",
+        "sets/alice/cats/cover.png",
         "sets/bob/dogs/001-rex.png",
         "sets/bob/busy/set.toml",
     ] {
@@ -170,6 +173,8 @@ async fn backup_while_running_round_trips() {
     // Round trip: a backed-up directory imported into a fresh server
     // exports the same manifest data and identical files.
     let original = export(&srv, &alice, &cats.id).await;
+    assert_eq!(original.files.len(), 2);
+    assert!(original.cover_image.is_some(), "the cover image is no item");
     let fresh = TestServer::start().await;
     let carol = fresh.user("carol").await;
     let report = import_dir(&fresh, &carol, &target.join("sets/alice/cats")).await;
@@ -246,6 +251,8 @@ async fn backup_while_running_round_trips() {
         .get(&alice_again, &routes::path(routes::ITEM_FILE, &[first, "thumb"]))
         .await
         .expect(200);
+    let cover = d.set.cover_image.as_ref().expect("cover image");
+    restored.get(&alice_again, &cover.thumb_url).await.expect(200);
     // The other variants come from `variants` jobs on the restored server:
     // run them (retries made runnable at once) until the rendition exists.
     let sticker = routes::path(routes::ITEM_FILE, &[first, "tg_sticker"]);

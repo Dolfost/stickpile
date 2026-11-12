@@ -40,8 +40,9 @@ The job clones into `<data_dir>/gitpacks/<set id>` and imports the directory
   name (`…/cat-stickpile.git` becomes `cat-stickpile`). A slug you already
   use is `409`. The slug never changes on later pulls.
 - The set is named after the repository until the first import. From then
-  on name, description, **visibility**, aspect ratio, recommended size and
-  item metadata come from upstream's `set.toml`. A pack whose `set.toml` says
+  on name, description, **visibility**, aspect ratio, recommended size, the
+  cover (`cover`, and a cover image named by `cover_image`) and item
+  metadata come from upstream's `set.toml`. A pack whose `set.toml` says
   `visibility = "public"` is public on your server too.
 - `branch` must be a plain branch name (no options, revision syntax or
   whitespace). `subdir` must be a relative path inside the repository with
@@ -129,8 +130,9 @@ The job fetches upstream, exports the set into the checkout with
 
 - `write_dir` rewrites `set.toml` and the media files and leaves other files
   such as `README.md` or `LICENSE` alone. Media files are named
-  `NNN-<name>.<ext>` as in every export, so the first push renames upstream
-  files that follow another naming scheme.
+  `NNN-<name>.<ext>` as in every export, and a cover image `cover.<ext>`, so
+  the first push renames upstream files that follow another naming scheme.
+  Removing the cover image in stickpile deletes the file upstream.
 - `commit_and_push` stages everything, deletions included, and respects
   `.gitignore`. It commits as `git.author_name` / `git.author_email`, with
   the message `stickpile: update <set name> (version <n>)`, only if the

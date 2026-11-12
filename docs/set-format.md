@@ -18,6 +18,7 @@ my-cats/
   001-cat.png
   002-naahh.gif
   003-sigh.mp4
+  cover.png          # optional: the set's own cover image, not an item
 ```
 
 ## Media files
@@ -50,6 +51,7 @@ visibility = "unlisted"        # private (default) | unlisted | public
 aspect_ratio = "1:1"           # optional, "W:H"
 recommended_px = 512           # optional, longest side for new items
 cover = "001-cat.png"          # optional, the item that is the set's cover
+cover_image = "cover.png"      # optional, a cover image that is not an item
 
 [items."001-cat.png"]
 name = "cat"
@@ -75,6 +77,7 @@ emojis = ["🙅"]
 | `aspect_ratio` | `"W:H"` | none | Recommended aspect ratio for new items. If it does not parse, import warns and ignores it. |
 | `recommended_px` | integer | none | Recommended longest side in pixels. |
 | `cover` | filename | none (the first item) | The item shown for the set in lists and used as the Telegram pack's thumbnail. A name that matches no file is ignored. |
+| `cover_image` | filename | none | The set's own cover image: a media file of the directory that is **not an item**. It wins over `cover`. See [Cover image](#cover-image). |
 | `items."<filename>"` | table | | One table per media file, keyed by the bare filename (no path). |
 
 Item keys:
@@ -87,6 +90,29 @@ Item keys:
 | `vibe` | string | One label from the vibe vocabulary. |
 | `tags` | array of strings | Always user-set, never AI. |
 | `name_source`, `keywords_source`, `emojis_source`, `vibe_source` | `"user"` / `"ai"` | See below. |
+
+### Cover image
+
+`cover_image` names a file in the set directory that is the set's cover
+instead of one of its items. The readers keep it apart from the items
+(`SetBundle::cover_image`), so it gets no `[items]` table, no position and
+no item; an `[items."…"]` table for it is dropped. It is matched like an
+item file (exact name, then NFC), and a missing file is a warning. Like any
+media file it needs a media extension and a safe name, and it may not share
+a name with an item.
+
+- The server takes only still PNG, JPEG and WebP images. Anything else is
+  reported in the import's `errors`, and the set gets no cover image.
+- An export writes it as `cover.<ext>` (`cover.png`, `cover.jpg`,
+  `cover.webp`), right after `set.toml` in a tar. Item files are always
+  `NNN-…`, so the names cannot clash.
+- Importing into an existing set (and every git pull) makes the cover image
+  follow the directory: a new or changed file replaces it, no `cover_image`
+  removes it.
+- `cover` may still name an item: that item is the cover again when the
+  image is removed.
+- stickpile versions before `cover_image` existed keep the key as an unknown
+  key, but import the file as one more item.
 
 ### AI markers
 
@@ -192,12 +218,13 @@ normalisation count as the same file.
 
 ## Export behaviour
 
-- `write_dir` creates the directory and writes `set.toml` and the media
-  files. Each file is written to a temporary file and renamed into place, so
+- `write_dir` creates the directory and writes `set.toml`, the media
+  files and the cover image. Each file is written to a temporary file and renamed into place, so
   a symlink planted at a target path is replaced, not followed. Files whose
   content has not changed are left alone.
-- Media files in the directory that are not part of the export are deleted,
-  so the directory matches the set exactly. Only regular files and symlinks
+- Media files in the directory that are not part of the export (a removed
+  cover image included) are deleted, so the directory matches the set
+  exactly. Only regular files and symlinks
   with a media extension are deleted. `.git/`, other hidden files,
   subdirectories and non-media files such as `README.md` or `LICENSE` stay.
 - The `[items]` tables are rebuilt from the exported files. Metadata of items

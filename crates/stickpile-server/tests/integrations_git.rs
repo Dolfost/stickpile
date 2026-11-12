@@ -276,6 +276,11 @@ async fn read_only_packs_reject_every_edit() {
         "item DELETE",
     );
     forbidden(srv.upload(&alice, &id, vec![("n.png", png(13))], None).await, "upload");
+    forbidden(srv.put_cover(&alice, &id, "c.png", png(15)).await, "cover image");
+    forbidden(
+        srv.delete(&alice, &routes::path(routes::SET_COVER, &[&id])).await,
+        "cover image DELETE",
+    );
     let order: Vec<String> = d.items.iter().rev().map(|i| i.id.clone()).collect();
     forbidden(
         srv.put(
@@ -461,6 +466,78 @@ async fn push_mode_commits_edits_upstream() {
     .map(|s| serde_json::from_str(&s).unwrap())
     .unwrap();
     assert_eq!(r["skipped"], "nothing to push");
+}
+
+#[tokio::test]
+async fn git_packs_carry_the_cover_image() {
+    let srv = server().await;
+    let alice = srv.user("alice").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = tmp.path().join("covered.git");
+    bare_repo(&bare);
+    let maint = work_repo(&tmp.path().join("maintainer"));
+    let with_cover = manifest("Covered", 1, "private", "\"cat\"").replace(
+        "license = \"CC0\"\n",
+        "license = \"CC0\"\ncover_image = \"cover.png\"\n",
+    );
+    commit(
+        &maint,
+        &[
+            ("set.toml", with_cover.as_bytes()),
+            ("001-cat.png", &png(40)),
+            ("002-dog.png", &png(41)),
+            ("cover.png", &png(42)),
+        ],
+        &[],
+        "init",
+    );
+    push_main(&maint, &bare);
+    let created = create(&srv, &alice, json!({"url": file_url(&bare), "mode": "push"})).await;
+    let id = created.set.id.clone();
+    run_jobs_now(&srv).await;
+    let d = detail(&srv, &alice, &id).await;
+    assert_eq!(names(&d), ["cat", "dog"], "the cover image is not an item");
+    let first = d.set.cover_image.clone().expect("cover image from set.toml");
+
+    // A new image is pushed as cover.png; set.toml names it.
+    srv.put_cover(&alice, &id, "new.png", png(43)).await.expect(200);
+    run_jobs_now(&srv).await;
+    let files = tree_files(&bare, "main");
+    let m = stickpile_setfmt::Manifest::parse(std::str::from_utf8(&files["set.toml"]).unwrap()).unwrap();
+    assert_eq!(m.cover_image.as_deref(), Some("cover.png"));
+    assert_ne!(files["cover.png"], png(42));
+    assert!(!m.items.contains_key("cover.png"));
+    // Removed: the file goes too.
+    srv.delete(&alice, &routes::path(routes::SET_COVER, &[&id]))
+        .await
+        .expect(200);
+    run_jobs_now(&srv).await;
+    let files = tree_files(&bare, "main");
+    assert!(!files.contains_key("cover.png"), "{:?}", files.keys());
+    let m = stickpile_setfmt::Manifest::parse(std::str::from_utf8(&files["set.toml"]).unwrap()).unwrap();
+    assert_eq!(m.cover_image, None);
+
+    // Upstream brings one back with the next pull.
+    pull_main(&maint, &bare);
+    let text = std::str::from_utf8(&files["set.toml"]).unwrap().replacen(
+        "\n[items.",
+        "cover_image = \"cover.png\"\n\n[items.",
+        1,
+    );
+    commit(
+        &maint,
+        &[("set.toml", text.as_bytes()), ("cover.png", &png(42))],
+        &[],
+        "cover again",
+    );
+    push_main(&maint, &bare);
+    srv.post(&alice, &routes::path(routes::SET_PULL, &[&id]), json!({}))
+        .await
+        .expect(200);
+    run_jobs_now(&srv).await;
+    let d = detail(&srv, &alice, &id).await;
+    assert_eq!(names(&d), ["cat", "dog"]);
+    assert_eq!(d.set.cover_image.map(|c| c.sha256), Some(first.sha256));
 }
 
 #[tokio::test]

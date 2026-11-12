@@ -308,6 +308,67 @@ async fn the_cover_becomes_the_pack_thumbnail() {
 }
 
 #[tokio::test]
+async fn a_cover_image_is_only_the_thumbnail() {
+    // A set's own cover image (not one of its items) has a key of its own;
+    // changing or dropping it never touches the stickers.
+    let (base, state) = start().await;
+    let client = api(&base);
+    let items = vec![
+        item("a", "A", StickerFormat::Static, &["😼"], &[]),
+        item("b", "B", StickerFormat::Static, &["🐶"], &[]),
+    ];
+    let image = PackThumbnail {
+        key: "image:sha1".into(),
+        png: thumb_png(7),
+    };
+    let first = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "Cats",
+        &items,
+        &PackState::default(),
+        Some(&image),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.thumbnail.as_deref(), Some("image:sha1"));
+    {
+        let st = state.lock().unwrap();
+        let pack = st.pack(PACK);
+        assert_eq!(pack.thumbnail, Some(thumb_png(7)));
+        assert_eq!(pack.stickers.len(), 2, "the image is not a sticker");
+        assert!(pack.stickers.iter().all(|s| s.bytes != thumb_png(7)));
+    }
+    state.lock().unwrap().calls.clear();
+    // A new image: only the thumbnail is sent.
+    let other = PackThumbnail {
+        key: "image:sha2".into(),
+        png: thumb_png(8),
+    };
+    let changed = export_pack(&client, OWNER, PACK, "Cats", &items, &first.state(), Some(&other))
+        .await
+        .unwrap();
+    assert!(changed.thumbnail_changed);
+    assert_eq!((changed.added, changed.removed), (0, 0));
+    {
+        let st = state.lock().unwrap();
+        assert_eq!(st.pack(PACK).thumbnail, Some(thumb_png(8)));
+        assert_eq!(st.count("setStickerSetThumbnail"), 1);
+        assert_eq!(st.count("addStickerToSet") + st.count("deleteStickerFromSet"), 0);
+    }
+    // The image removed and no item chosen: dropped, stickers as they were.
+    let dropped = export_pack(&client, OWNER, PACK, "Cats", &items, &changed.state(), None)
+        .await
+        .unwrap();
+    assert!(dropped.thumbnail_changed);
+    assert_eq!(dropped.thumbnail, None);
+    let st = state.lock().unwrap();
+    assert_eq!(st.pack(PACK).thumbnail, None);
+    assert_eq!(st.pack(PACK).stickers.len(), 2);
+}
+
+#[tokio::test]
 async fn words_in_the_emoji_field_do_not_break_the_export() {
     let (base, state) = start().await;
     let client = api(&base);

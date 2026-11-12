@@ -191,17 +191,21 @@ The pack is never empty along the way. If nothing can be kept (for example
 the mapping was lost), the last old sticker is swapped with
 `replaceStickerInSet` instead of being deleted.
 
-**Thumbnail.** A set with a chosen cover (set settings, or "Use as cover" in
-an item's menu) gets it as the pack's thumbnail with
-`setStickerSetThumbnail`: the cover's grid thumbnail (a still frame for
-animations and videos) scaled to fit 100×100, centred on a transparent
-square of exactly that size, as PNG. The key of what was sent (cover item and
-its media hash) is stored on the set (`sets.telegram_thumbnail`), so the
-thumbnail is uploaded only when the cover changes. Going back to "First
-item" drops the thumbnail stickpile set, and Telegram shows the first sticker
-again. A thumbnail set outside stickpile is left alone while the set has no
-cover. Like everything else, it reaches Telegram on the next publish
-("Update Telegram pack"), not at once.
+**Thumbnail.** A set with a cover image of its own or a chosen cover item
+(set settings, or "Use as cover" in an item's menu) gets it as the pack's
+thumbnail with `setStickerSetThumbnail`, scaled to fit 100×100, centred on
+a transparent square of exactly that size, as PNG. A cover image (a still
+uploaded for the set, never a sticker of the pack) is rendered from its
+stored original, a cover item from its grid thumbnail (a still frame for
+animations and videos). The key of what was sent (`image:` and the image's
+hash, or the cover item and its media hash) is stored on the set
+(`sets.telegram_thumbnail`), so the thumbnail is uploaded only when the
+cover changes: a new image, another item, or the image removed (back to the
+chosen item). Going back to "First item" with no image drops the thumbnail
+stickpile set, and Telegram shows the first sticker again. A thumbnail set
+outside stickpile is left alone while the set has no cover. Like everything
+else, it reaches Telegram on the next publish ("Update Telegram pack"), not
+at once.
 
 Items are adapted to what Telegram accepts:
 

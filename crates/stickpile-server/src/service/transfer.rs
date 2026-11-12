@@ -10,12 +10,14 @@
 //! * Export writes `set.toml` + originals named with `export_filename` as a
 //!   tar; importing that tar into a fresh set and exporting again yields the
 //!   same manifest data and byte-identical files.
+//! * The set's cover image travels as `cover.<ext>` next to the items,
+//!   named by `cover_image` in set.toml, and is never imported as an item.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::extract::Multipart;
 use stickpile_api::{ImportError, ImportReport, Variant};
-use stickpile_setfmt::{ItemMeta, Manifest, SetBundle, SetFile};
+use stickpile_setfmt::{CoverFile, ItemMeta, Manifest, SetBundle, SetFile};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -24,6 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::files;
 use crate::ids::{now, sha256_hex};
 use crate::index;
+use crate::service::cover;
 use crate::service::hydrate::{self, ItemFull};
 use crate::service::sets::{self, Audience, NewSet};
 use crate::service::upload::{
@@ -337,6 +340,32 @@ pub async fn import_bundle_into(
         }
     }
 
+    // The directory decides the cover image too: none, or one that cannot
+    // be a cover (reported), leaves the set without one.
+    let stored = match bundle.cover_image {
+        Some(c) => {
+            let file = UploadFile::from_bytes(c.filename.clone(), c.bytes);
+            match cover::store(state, &set, &file, false).await {
+                Ok(new_image) => {
+                    changed |= new_image;
+                    true
+                }
+                Err(e) => {
+                    report.errors.push(ImportError {
+                        file: c.filename,
+                        message: e.message,
+                    });
+                    false
+                }
+            }
+        }
+        None => false,
+    };
+    if !stored {
+        let mut conn = state.db.acquire().await?;
+        changed |= cover::clear(&mut conn, &set.id).await?;
+    }
+
     let mut tx = sets::begin(&state.db).await?;
     // Remove items that are not in the directory.
     if !is_new {
@@ -495,6 +524,21 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         };
         out_files.push(SetFile { filename, meta, bytes });
     }
+    let cover_image = match &set.cover_media_id {
+        Some(media_id) => {
+            let missing = || AppError::internal(format!("cover image {media_id} missing"));
+            let media = db::media_by_id(db, media_id).await?.ok_or_else(missing)?;
+            let original = cover::variant_row(db, media_id, Variant::Original)
+                .await?
+                .ok_or_else(missing)?;
+            let abs = files::resolve(media_dir, &original.path).ok_or_else(|| AppError::internal("bad path"))?;
+            Some(CoverFile {
+                filename: format!("cover.{}", media.format().extension()),
+                bytes: files::read(abs).await?,
+            })
+        }
+        None => None,
+    };
     let manifest = Manifest {
         version: set.version.max(1) as u64,
         name: set.name.clone(),
@@ -504,6 +548,7 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         aspect_ratio: set.aspect().map(|(w, h)| format!("{w}:{h}")),
         recommended_px: set.recommended_px.map(|v| v as u32),
         cover,
+        cover_image: cover_image.as_ref().map(|c| c.filename.clone()),
         items: out_files
             .iter()
             .map(|f| (f.filename.clone(), f.meta.clone()))
@@ -513,6 +558,7 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
     Ok(SetBundle {
         manifest,
         files: out_files,
+        cover_image,
         warnings: Vec::new(),
     })
 }

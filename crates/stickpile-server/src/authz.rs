@@ -161,6 +161,7 @@ mod tests {
             git_last_error: None,
             telegram_pack: None,
             cover_item_id: None,
+            cover_media_id: None,
             extra_toml: None,
             created_at: 0,
             updated_at: 0,

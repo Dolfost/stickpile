@@ -20,6 +20,11 @@
 // The form's data-aspect ("4:3") adds the set's recommended aspect ratio as
 // a crop preset; data-vibes names the datalist of vibe suggestions.
 //
+// A form with data-tray="cover" (a set's cover image in the set settings)
+// takes one still image (PNG, JPEG, still WebP): a new one replaces it,
+// animations and videos are refused, the crop starts as a square, and there
+// are no details to fill in.
+//
 // AI suggestions: when the form has data-ai-suggest (the server's AI is
 // ready or loading), every staged file is rendered small in the browser (a
 // PNG with the longest side 256 px, like the server's thumbnails: the image,
@@ -62,6 +67,7 @@
     "video/webm": ".webm",
   };
   var ACCEPTED = "PNG, JPEG, WebP, GIF, MP4 or WebM";
+  var COVER_ACCEPTED = "a cover image is one still PNG, JPEG or WebP, not an animation or a video.";
   var MIN_CROP = 4; // smallest crop side, image pixels
   var STAGE_MIN_H = 320; // the editor preview may always be this tall, CSS pixels
   var STAGE_VH = 0.7; // and up to this share of the window height
@@ -299,6 +305,7 @@
     var submit = form.querySelector("button[type=submit]");
     var submitLabel = submit ? submit.textContent : "";
     var aspect = parseAspect(form.getAttribute("data-aspect"));
+    var coverMode = form.getAttribute("data-tray") === "cover";
     var entries = [];
     var current = null;
     var drag = null;
@@ -315,11 +322,12 @@
 
     // -- the tray markup
 
-    var tray = el("div", "tray");
+    var tray = el("div", coverMode ? "tray tray-cover" : "tray");
     tray.hidden = true;
     var head = el("div", "tray-head");
     var title = el("p", "tray-title");
     var clearAll = button("small", "Remove all");
+    clearAll.hidden = coverMode;
     var approveEvery = tool("✓", "Approve AI for all files");
     approveEvery.hidden = true;
     var headActions = el("div", "tray-head-actions");
@@ -423,7 +431,7 @@
     var metaInput = el("input");
     metaInput.type = "hidden";
     metaInput.name = "meta";
-    form.insertBefore(metaInput, zone);
+    if (!coverMode) form.insertBefore(metaInput, zone);
 
     var media = el("div", "tray-media");
     var tools = el("div", "tray-tools");
@@ -481,7 +489,7 @@
     [tools, stage, cropHint, preview, note, info].forEach(function (n) {
       media.appendChild(n);
     });
-    editor.appendChild(details);
+    if (!coverMode) editor.appendChild(details);
     editor.appendChild(media);
     var status = el("p", "tray-status");
     status.setAttribute("role", "status");
@@ -522,10 +530,13 @@
       var n = entries.length;
       tray.hidden = n === 0;
       zone.classList.toggle("has-files", n > 0);
-      title.textContent = n
-        ? plural(n, "file", "files") + " ready. Select one to describe it or edit the image."
-        : "";
-      if (submit) submit.textContent = n ? "Upload " + plural(n, "file", "files") : submitLabel;
+      if (coverMode) title.textContent = n ? "The new cover image: crop it, then upload it." : "";
+      else {
+        title.textContent = n
+          ? plural(n, "file", "files") + " ready. Select one to describe it or edit the image."
+          : "";
+      }
+      if (submit && !coverMode) submit.textContent = n ? "Upload " + plural(n, "file", "files") : submitLabel;
       copyRow.hidden = n < 2;
       copyHint.textContent = form.getAttribute("data-ai-suggest")
         ? "Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay."
@@ -537,6 +548,17 @@
     function add(files, pasted) {
       var added = [];
       var skipped = [];
+      if (coverMode) {
+        // One still image; it replaces the one staged before.
+        var picked = null;
+        Array.prototype.forEach.call(files, function (file) {
+          var t = typeOf(file);
+          if (!picked && t && KINDS[t] !== "anim" && KINDS[t] !== "video") picked = file;
+          else skipped.push(file.name || "the pasted item");
+        });
+        if (picked) clear();
+        files = picked ? [picked] : [];
+      }
       Array.prototype.forEach.call(files, function (file) {
         var type = typeOf(file);
         if (!type) {
@@ -560,7 +582,7 @@
           bitmap: null,
           work: null,
           crop: null,
-          ratio: null,
+          ratio: coverMode ? 1 : null,
           orient: IDENTITY,
           size: null,
           edited: false,
@@ -578,6 +600,11 @@
         if (KINDS[type] === "webp") {
           isAnimatedWebp(file).then(function (anim) {
             if (!anim || entries.indexOf(e) < 0) return;
+            if (coverMode) {
+              remove(e);
+              say("Skipped " + displayName(e) + ": " + COVER_ACCEPTED, true);
+              return;
+            }
             e.kind = "anim";
             release(e, true);
             if (current === e) show(e);
@@ -594,7 +621,9 @@
       if (added.length) parts.push((pasted ? "Pasted " : "Added ") + plural(added.length, "file", "files") + ".");
       if (skipped.length) {
         parts.push(
-          "Skipped " + skipped.join(", ") + ": only " + ACCEPTED + " files can be uploaded."
+          "Skipped " +
+            skipped.join(", ") +
+            (coverMode ? ": " + COVER_ACCEPTED : ": only " + ACCEPTED + " files can be uploaded.")
         );
       }
       say(parts.join(" "), skipped.length > 0);
@@ -761,6 +790,8 @@
           if (current === e) {
             stage.hidden = false;
             draw();
+            // A crop the tray starts with (a cover's square) is an edit.
+            if (isEdited(e)) commit(e);
           } else {
             release(e, false);
           }

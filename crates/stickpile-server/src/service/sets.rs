@@ -3,8 +3,10 @@
 
 use serde::Deserialize;
 use sqlx::{Sqlite, SqlitePool, Transaction};
+use stickpile_api::routes as r;
 use stickpile_api::{
-    CreateSet, GitBinding, GitMode, ReorderItems, Set, SetDetail, SetSource, SetSummary, UpdateSet, Visibility,
+    CoverImage, CreateSet, GitBinding, GitMode, MediaFormat, ReorderItems, Set, SetDetail, SetSource, SetSummary,
+    UpdateSet, Variant, Visibility,
 };
 
 use crate::auth::CurrentUser;
@@ -13,7 +15,7 @@ use crate::db::{self, enum_str, parse_enum, SetRow, SET_COLUMNS};
 use crate::error::{AppError, AppResult};
 use crate::ids::{new_id, now};
 use crate::index;
-use crate::service::hydrate;
+use crate::service::{cover, hydrate};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, utoipa::ToSchema)]
@@ -86,8 +88,59 @@ struct SetListRow {
     item_count: i64,
     /// The chosen cover while it is still in the set.
     chosen_cover_id: Option<String>,
-    /// What lists show: the chosen cover, else the first item.
+    /// What lists show without a cover image: the chosen cover, else the
+    /// first item.
     shown_cover_id: Option<String>,
+    /// The cover image's media (`s.cover_media_id`), if any.
+    cover_sha256: Option<String>,
+    cover_format: Option<String>,
+    cover_width: Option<i64>,
+    cover_height: Option<i64>,
+}
+
+impl SetListRow {
+    fn cover(&self) -> Cover {
+        let image = match (&self.set.cover_media_id, &self.cover_sha256) {
+            (Some(_), Some(sha)) => Some(cover::image_info(
+                &self.set.id,
+                sha,
+                self.cover_format
+                    .as_deref()
+                    .and_then(parse_enum)
+                    .unwrap_or(MediaFormat::Png),
+                self.cover_width.unwrap_or(0).max(0) as u32,
+                self.cover_height.unwrap_or(0).max(0) as u32,
+            )),
+            _ => None,
+        };
+        Cover {
+            item: self.chosen_cover_id.clone(),
+            shown_item: self.shown_cover_id.clone(),
+            image,
+        }
+    }
+}
+
+/// What a set shows as its cover (see [`crate::service::cover`]).
+#[derive(Debug, Clone, Default)]
+pub struct Cover {
+    /// The chosen cover item while it is still in the set.
+    pub item: Option<String>,
+    /// The item shown without a cover image: the chosen one, else the first.
+    pub shown_item: Option<String>,
+    /// The set's own cover image; it wins over the items.
+    pub image: Option<CoverImage>,
+}
+
+impl Cover {
+    /// URL path of the thumbnail shown for the set.
+    pub fn url(&self) -> Option<String> {
+        match (&self.image, &self.shown_item) {
+            (Some(image), _) => Some(image.thumb_url.clone()),
+            (None, Some(item)) => Some(r::path(r::ITEM_FILE, &[item, Variant::Thumb.as_str()])),
+            (None, None) => None,
+        }
+    }
 }
 
 /// SQL for the chosen cover of set `s` while that item is still in it.
@@ -104,13 +157,14 @@ fn list_select() -> String {
          (SELECT COUNT(*) FROM items WHERE set_id = s.id) AS item_count, \
          {CHOSEN_COVER_SQL} AS chosen_cover_id, \
          COALESCE({CHOSEN_COVER_SQL}, (SELECT id FROM items WHERE set_id = s.id ORDER BY position, id LIMIT 1)) \
-         AS shown_cover_id \
-         FROM sets s JOIN users u ON u.id = s.owner_id"
+         AS shown_cover_id, \
+         cm.sha256 AS cover_sha256, cm.format AS cover_format, cm.width AS cover_width, cm.height AS cover_height \
+         FROM sets s JOIN users u ON u.id = s.owner_id LEFT JOIN media cm ON cm.id = s.cover_media_id"
     )
 }
 
-/// `cover`: the chosen cover, already checked to be in the set.
-pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Option<String>, viewer: &str) -> Set {
+/// `cover`: the set's cover, its items already checked to be in the set.
+pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Cover, viewer: &str) -> Set {
     let git = (row.source == "git").then(|| GitBinding {
         url: row.git_url.clone().unwrap_or_default(),
         branch: row.git_branch.clone(),
@@ -141,7 +195,9 @@ pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Option
         source: parse_enum(&row.source).unwrap_or(SetSource::Local),
         git,
         telegram_pack: row.telegram_pack.clone(),
-        cover_item_id: cover,
+        cover_url: cover.url(),
+        cover_item_id: cover.item,
+        cover_image: cover.image,
         item_count,
         editable: authz::can_edit_set(viewer, row),
         created_at: row.created_at,
@@ -160,6 +216,7 @@ fn to_summary(r: &SetListRow) -> SetSummary {
         source: parse_enum(&r.set.source).unwrap_or(SetSource::Local),
         item_count: r.item_count.max(0) as u64,
         cover_item_id: r.shown_cover_id.clone(),
+        cover_url: r.cover().url(),
         updated_at: r.set.updated_at,
     }
 }
@@ -174,7 +231,7 @@ pub async fn load_api(db: &SqlitePool, row: &SetRow, viewer: &str) -> AppResult<
         &r.set,
         &r.owner_username,
         r.item_count.max(0) as u64,
-        r.chosen_cover_id.clone(),
+        r.cover(),
         viewer,
     ))
 }
@@ -289,7 +346,7 @@ pub async fn create(state: &AppState, viewer: &CurrentUser, req: CreateSet) -> A
         },
     )
     .await?;
-    Ok(to_api(&row, &viewer.user.username, 0, None, viewer.id()))
+    Ok(to_api(&row, &viewer.user.username, 0, Cover::default(), viewer.id()))
 }
 
 pub async fn detail(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<SetDetail> {
@@ -444,18 +501,25 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
     let new_vis = req.visibility.unwrap_or(set.visibility());
     let new_aspect = req.aspect_ratio.unwrap_or(set.aspect());
     let new_px = req.recommended_px.unwrap_or(set.recommended_px.map(|v| v as u32));
+    // Choosing an item (or the first item) replaces a cover image.
+    let new_cover_media = if req.cover_item_id.is_some() {
+        None
+    } else {
+        set.cover_media_id.clone()
+    };
     let changed = new_slug != set.slug
         || new_name != set.name
         || new_desc != set.description
         || new_vis != set.visibility()
         || new_aspect != set.aspect()
         || new_px != set.recommended_px.map(|v| v as u32)
-        || new_cover != old_cover;
+        || new_cover != old_cover
+        || new_cover_media != set.cover_media_id;
     if changed {
         on_visibility_change(&mut tx, &set, new_vis).await?;
         let res = sqlx::query(
             "UPDATE sets SET slug = ?, name = ?, description = ?, visibility = ?, aspect_w = ?, aspect_h = ?, \
-             recommended_px = ?, cover_item_id = ? WHERE id = ?",
+             recommended_px = ?, cover_item_id = ?, cover_media_id = ? WHERE id = ?",
         )
         .bind(&new_slug)
         .bind(&new_name)
@@ -465,6 +529,7 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
         .bind(new_aspect.map(|a| a.1 as i64))
         .bind(new_px.map(|v| v as i64))
         .bind(&new_cover)
+        .bind(&new_cover_media)
         .bind(set_id)
         .execute(&mut *tx)
         .await;
@@ -492,8 +557,8 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
     load_api(&state.db, &row, viewer.id()).await
 }
 
-/// Delete a set and its items (the owner only). Media files are removed later
-/// by the orphan-media GC.
+/// Delete a set and its items (the owner only). Media files, the cover
+/// image's included, are removed later by the orphan-media GC.
 pub async fn delete(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<()> {
     let set = authz::owned_set(state, viewer.id(), set_id).await?;
     delete_row(state, &set).await?;

@@ -26,8 +26,8 @@ more than the API allows.
 | `/` | Search box, items you copied recently, your sets with covers (with the set lists' "View" control). |
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. Each card shows the cover, name, description, item count, visibility and source labels, owner and slug; the "View" control arranges them (see [Display options and themes](#display-options-and-themes)). |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
-| `/sets/{id}` | Set header (owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
-| `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default), plus "Delete this set…". Read-only git packs only offer deletion. |
+| `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form, "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
+| `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default) or its own cover image, then the **Cover image** form (upload, crop, replace, remove; see [Set covers](#set-covers)), plus "Delete this set…". Read-only git packs only offer deletion. |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
 | `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet, and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
@@ -80,14 +80,15 @@ show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
 | Download original | always | download link |
 | Rename | you can edit the set | inline edit of the name (also in the compact and grid views, where the form opens inside the small card) |
 | Edit all fields… | you can edit the set | `/items/{id}?edit=1` |
-| Use as cover / Stop using as cover | you can edit the set | makes the item the set's cover (or goes back to the first item) through `POST /sets/{id}/cover`; the grid comes back in the page's sort with the "Cover" badge on that card |
+| Use as cover / Stop using as cover | you can edit the set | makes the item the set's cover (or goes back to the first item) through `POST /sets/{id}/cover`; the grid comes back in the page's sort with the "Cover" badge on that card. When the set has a cover image, it asks first: the item replaces the image |
 | Move up, Move down, Move to top, Move to bottom | you can edit the set, set order, no likes filter | the set's move endpoint; the ends are disabled for the first and last item |
 | Delete… | you can edit the set | asks for confirmation, then removes the card |
 
 The menu is built by app.js from `data-*` attributes the server puts on the
 card only when the action is allowed (`data-edit-url`, `data-delete-url`,
 `data-move-url` with `data-first`/`data-last`, `data-cover-url` with
-`data-cover` on the current cover), and it uses the same
+`data-cover` on the current cover, `data-cover-image` on the grid when the
+set has a cover image), and it uses the same
 endpoints, htmx requests and CSRF header as the buttons. It also opens from
 the keyboard (the context-menu key or Shift+F10 while focus is in a card)
 and from the "⋯" button on each card (for touch screens and keyboards).
@@ -99,6 +100,45 @@ focus follows the item. Ctrl+ or Shift+right-click (and right-clicking a
 text field, e.g. while editing) keeps the browser's own menu. Without
 JavaScript there is no custom menu and no "⋯"; the browser's menu and the
 card buttons work as before.
+
+## Set covers
+
+The cover shown for a set (set lists, the start page, the set page's
+header, the Telegram pack's thumbnail) is, in this order: the set's own
+**cover image**, the item chosen as the cover, the first item. The cover is
+what you chose last: choosing an item (in the settings or with "Use as
+cover") removes the cover image, and uploading an image keeps the chosen
+item, which is the cover again once the image is removed.
+
+**Set settings.** The set form's "Cover" chooser has a tile per item and
+"First item"; with a cover image, a "Cover image" tile comes first and is
+selected, and the hint says that saving another choice removes the image.
+Without one, a link leads to the **Cover image** section below the form:
+
+- the current image (thumbnail, size and format) with **Remove image** and a
+  note on what the cover becomes then (the chosen item, else the first);
+- the upload form, **Upload image** (or **Replace image**): a still PNG,
+  JPEG or WebP. GIFs, animations and videos are refused with "A cover image
+  must be a still PNG, JPEG or WebP image, not …", shown in the section.
+
+Both are plain forms (`POST /sets/{id}/cover/image`, multipart with the
+CSRF token first, and `POST /sets/{id}/cover/image/delete`) that come back
+to `/sets/{id}/settings#cover-image` with a message. With JavaScript,
+upload.js gives the upload form its tray in a cover mode
+(`data-tray="cover"`): one image at a time (a new one, chosen, dropped or
+pasted, replaces it), animations, animated WebP and videos are skipped with
+a message, no details to fill in, and the crop starts as the largest centred
+square, with rotate, flip, "Free" and "Reset" as for uploads. The cropped
+image is sent as a PNG. Without JavaScript the file is sent as it is, and
+an image that is not square is fitted into the Telegram thumbnail's square
+with transparent bands.
+
+**Elsewhere.** Set cards show the cover image instead of an item; the set
+page shows it before the set's name (`#set-cover`), and no item card has
+the "Cover" badge then. "Use as cover" from an item's menu answers htmx
+with the grid and an out-of-band `#set-cover`, so the header loses the
+image at once. The image is not an item: it never appears in the item grid,
+search or counts.
 
 <!-- ---- display options and themes (begin) ---- -->
 
@@ -490,7 +530,9 @@ types; the emoji picker's markers (the emojis inputs, the script order, the
 `:` suggestions' combobox, the `emoji.json` notice and contents, its terms
 column and `common` list); HTML error pages; and the flows end to end (sets, uploads with
 near-duplicate warnings, imports, editing, likes and filters, stats and
-popular, settings, the admin panel, git pack and Telegram forms, job polling).
+popular, settings, the admin panel, git pack and Telegram forms, job polling,
+the cover image in the set settings: upload, errors, replace by an item,
+remove).
 
 `tests/ai_admin.rs` covers the tray's AI side on the server: the
 `data-ai-suggest` attribute (present when AI is ready or loading, absent when

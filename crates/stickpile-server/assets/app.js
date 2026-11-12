@@ -317,11 +317,21 @@
   }
 
   // The set's cover: this item, or (`clear`) back to the first item. The
-  // grid comes back with the badge moved, in the page's sort.
+  // grid comes back with the badge moved, in the page's sort. An item
+  // replaces the set's cover image (`data-cover-image` on the grid), so
+  // that asks first.
   function setCover(card, clear, byKeyboard) {
     var url = card.getAttribute("data-cover-url");
     var id = card.id;
     var item = clear ? "" : id.replace(/^item-/, "");
+    if (
+      !clear &&
+      card.closest("[data-cover-image]") &&
+      !window.confirm("Use “" + cardName(card) + "” as the cover? This removes the set's cover image.")
+    ) {
+      focusCard(id, false);
+      return;
+    }
     if (!htmxReady()) {
       postForm(url, { item: item });
       return;

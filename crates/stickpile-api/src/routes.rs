@@ -46,6 +46,12 @@ pub const SET_ORDER: &str = "/api/v1/sets/{id}/order";
 pub const SET_ITEMS: &str = "/api/v1/sets/{id}/items";
 /// GET -> `application/x-tar` of the set directory (set.toml + numbered files).
 pub const SET_EXPORT: &str = "/api/v1/sets/{id}/export.tar";
+/// PUT multipart (one file part: a still PNG, JPEG or WebP) -> [`crate::model::Set`]:
+/// the set's own cover image, replacing an earlier one. DELETE -> Set: remove it.
+pub const SET_COVER: &str = "/api/v1/sets/{id}/cover";
+/// GET -> raw bytes of the set's cover image; `{variant}` is `original` or
+/// `thumb` ([`crate::model::CoverImage`] has both URLs).
+pub const SET_COVER_FILE: &str = "/api/v1/sets/{id}/cover/{variant}";
 /// POST multipart: a `set.toml` part plus file parts whose filename is the
 /// path relative to the set directory; or a single `archive` part with a tar.
 /// Optional query `?into=<set id>` re-imports into an existing own set.

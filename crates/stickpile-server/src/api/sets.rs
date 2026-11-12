@@ -1,6 +1,7 @@
-//! Set endpoints: CRUD, reorder, upload, import, export.
+//! Set endpoints: CRUD, reorder, upload, import, export, cover image.
 
-use axum::extract::{Multipart, Path, Query, State};
+use axum::body::Body;
+use axum::extract::{Multipart, Path, Query, Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -9,13 +10,15 @@ use stickpile_api::routes as r;
 use stickpile_api::{
     ApiError, CreateSet, ImportReport, ReorderItems, Set, SetDetail, SetSummary, UpdateSet, UploadResult,
 };
+use tower::ServiceExt;
 use utoipa::IntoParams;
 
 use super::{disposition, empty};
 use crate::auth::CurrentUser;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
+use crate::files;
 use crate::service::sets::{self as svc, SetScope};
-use crate::service::{transfer, upload as upload_svc};
+use crate::service::{cover, transfer, upload as upload_svc};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -153,4 +156,109 @@ pub async fn export(State(state): State<AppState>, user: CurrentUser, Path(id): 
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(resp)
+}
+
+/// Upload the set's own cover image (owner; not read-only git packs): one
+/// file part, a still PNG, JPEG or WebP (415 otherwise). It replaces an
+/// earlier one and wins over `cover_item_id`: lists show it and a Telegram
+/// publish makes it the pack's thumbnail. It is not an item. Counts as an
+/// upload for rate limiting.
+#[utoipa::path(put, path = r::SET_COVER, tag = "sets", params(("id" = String, Path, description = "set id")),
+    request_body(content_type = "multipart/form-data", description = "one file part"),
+    responses((status = 200, body = Set), (status = 400, body = ApiError), (status = 403, body = ApiError),
+              (status = 404, body = ApiError), (status = 413, body = ApiError), (status = 415, body = ApiError),
+              (status = 429, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn put_cover(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+    mp: Multipart,
+) -> AppResult<Json<Set>> {
+    Ok(Json(cover::upload_multipart(&state, &user, &id, mp).await?))
+}
+
+/// Remove the set's cover image (owner; idempotent): the chosen cover item,
+/// else the first item, is the cover again.
+#[utoipa::path(delete, path = r::SET_COVER, tag = "sets", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, body = Set), (status = 403, body = ApiError), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn delete_cover(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<Set>> {
+    Ok(Json(cover::remove(&state, &user, &id).await?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CoverFileQuery {
+    /// The version in `CoverImage` URLs; when it is the current one, the
+    /// response may be cached for good.
+    pub v: Option<String>,
+}
+
+/// The set's cover image, for anyone who can read the set: `original` (the
+/// sanitised upload) or `thumb` (WebP grid thumbnail). Strong `ETag`; cached
+/// for good when `v` matches the current image, revalidated otherwise.
+#[utoipa::path(get, path = r::SET_COVER_FILE, tag = "sets",
+    params(("id" = String, Path, description = "set id"), ("variant" = String, Path, description = "`original` or `thumb`"),
+           CoverFileQuery),
+    responses((status = 200, description = "image bytes", content_type = "application/octet-stream"),
+              (status = 304, description = "not modified"), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn cover_file(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path((id, variant)): Path<(String, String)>,
+    Query(q): Query<CoverFileQuery>,
+    req: Request,
+) -> AppResult<Response> {
+    let f = cover::file(&state, &user, &id, &variant).await?;
+    let current = q.v.as_deref().is_some_and(|v| v.len() >= 8 && f.sha256.starts_with(v));
+    let cache = if current {
+        "private, max-age=31536000, immutable"
+    } else {
+        "private, no-cache"
+    };
+    let ext = f.row.path.rsplit('.').next().unwrap_or("bin").to_string();
+    let filename = format!("{}-cover-{}.{ext}", f.slug, f.variant.as_str());
+    let etag = format!("\"{}\"", f.row.sha256);
+    let etag_hv = HeaderValue::from_str(&etag).map_err(AppError::internal)?;
+    let headers = |resp: &mut Response| {
+        let h = resp.headers_mut();
+        h.insert(header::ETAG, etag_hv.clone());
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+        h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+        h.insert(header::CONTENT_DISPOSITION, disposition("inline", &filename));
+    };
+    let inm = req.headers().get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok());
+    if inm.is_some_and(|v| v.split(',').any(|t| t.trim() == etag || t.trim() == "*")) {
+        let mut resp = empty(StatusCode::NOT_MODIFIED);
+        headers(&mut resp);
+        return Ok(resp);
+    }
+    let abs = files::resolve(&state.media_dir(), &f.row.path).ok_or_else(AppError::not_found)?;
+    if !abs.is_file() {
+        tracing::error!("cover image file missing on disk: {}", abs.display());
+        return Err(AppError::not_found());
+    }
+    // ServeFile handles Range / If-Range / HEAD; the body of `req` is unused.
+    let (parts, _) = req.into_parts();
+    let mut inner = Request::from_parts(parts, Body::empty());
+    inner.headers_mut().remove(header::IF_NONE_MATCH);
+    let mut resp = tower_http::services::ServeFile::new(&abs)
+        .oneshot(inner)
+        .await
+        .map_err(|e| AppError::internal(format!("serving file: {e}")))?
+        .map(Body::new);
+    if resp.status().is_success() || resp.status() == StatusCode::NOT_MODIFIED {
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&f.row.mime).map_err(AppError::internal)?,
+        );
+        headers(&mut resp);
+    }
+    Ok(resp.into_response())
 }

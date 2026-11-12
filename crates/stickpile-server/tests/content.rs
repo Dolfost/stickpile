@@ -1601,3 +1601,234 @@ async fn set_cover() {
         .json();
     assert_eq!(s.cover_item_id, None);
 }
+
+#[tokio::test]
+async fn set_cover_image() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let set = srv.create_set(&alice, "covers", Visibility::Private).await;
+    let a = srv.upload_one(&alice, &set.id, "a.png", png(1)).await;
+    let b = srv.upload_one(&alice, &set.id, "b.png", png(2)).await;
+    let set_path = routes::path(routes::SET, &[&set.id]);
+    let cover_path = routes::path(routes::SET_COVER, &[&set.id]);
+    let summary = |list: Vec<SetSummary>| list.into_iter().find(|s| s.id == set.id).unwrap();
+    let media_dir = |sha: &str| srv.state.config.media_dir().join(&sha[..2]).join(sha);
+
+    // Without an image the cover is an item's thumbnail.
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"cover_item_id": b.id}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_image, None);
+    let b_thumb = routes::path(routes::ITEM_FILE, &[&b.id, "thumb"]);
+    assert_eq!(s.cover_url.as_deref(), Some(b_thumb.as_str()));
+
+    // Upload: the image is the cover; the chosen item stays underneath.
+    let s: Set = srv
+        .put_cover(&alice, &set.id, "cover.png", png(9))
+        .await
+        .expect(200)
+        .json();
+    let image = s.cover_image.clone().expect("cover image");
+    assert_eq!(s.cover_item_id.as_deref(), Some(b.id.as_str()));
+    assert_eq!(s.cover_url.as_deref(), Some(image.thumb_url.as_str()));
+    assert_eq!((image.format, image.width, image.height), (MediaFormat::Png, 64, 64));
+    assert_eq!(s.item_count, 2, "not an item");
+    let v1 = s.version;
+    let list: Vec<SetSummary> = srv.get(&alice, routes::SETS).await.expect(200).json();
+    let sum = summary(list);
+    assert_eq!(sum.cover_url.as_deref(), Some(image.thumb_url.as_str()));
+    assert_eq!(
+        sum.cover_item_id.as_deref(),
+        Some(b.id.as_str()),
+        "old clients show the item"
+    );
+    assert_eq!(sum.item_count, 2);
+    // Not among the items, in the client cache feed or in search.
+    let d: SetDetail = srv.get(&alice, &set_path).await.expect(200).json();
+    assert_eq!(d.items.len(), 2);
+    assert_eq!(d.set.cover_image.as_ref(), Some(&image));
+    let page: ItemPage = srv.get(&alice, routes::ITEMS).await.expect(200).json();
+    assert_eq!(page.items.len(), 2);
+    let jobs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE subject = (SELECT cover_media_id FROM sets WHERE id = ?)")
+            .bind(&set.id)
+            .fetch_one(&srv.state.db)
+            .await
+            .unwrap();
+    assert_eq!(jobs, 0, "no variants, no AI enrichment");
+    // The same image again changes nothing.
+    let s: Set = srv
+        .put_cover(&alice, &set.id, "again.png", png(9))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.version, v1);
+
+    // Served like the set: cached for good with the current `v`.
+    let r = srv.get(&alice, &image.thumb_url).await.expect(200);
+    assert_eq!(r.header("content-type").as_deref(), Some("image/webp"));
+    assert!(r.header("cache-control").unwrap().contains("immutable"));
+    let etag = r.header("etag").unwrap();
+    let plain = routes::path(routes::SET_COVER_FILE, &[&set.id, "thumb"]);
+    let r = srv.get(&alice, &plain).await.expect(200);
+    assert_eq!(r.header("cache-control").as_deref(), Some("private, no-cache"));
+    let r = common::read(
+        srv.client
+            .get(srv.url(&plain))
+            .bearer_auth(&alice.token)
+            .header("if-none-match", &etag)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, 304);
+    let r = srv.get(&alice, &image.url).await.expect(200);
+    assert_eq!(r.header("content-type").as_deref(), Some("image/png"));
+    srv.get(&alice, &routes::path(routes::SET_COVER_FILE, &[&set.id, "png"]))
+        .await
+        .expect(404);
+    // Private sets stay private; others may look at unlisted ones, not edit.
+    srv.get(&bob, &image.thumb_url).await.expect(404);
+    srv.put_cover(&bob, &set.id, "x.png", png(3)).await.expect(404);
+    srv.patch(&alice, &set_path, json!({"visibility": "unlisted"}))
+        .await
+        .expect(200);
+    srv.get(&bob, &image.thumb_url).await.expect(200);
+    srv.put_cover(&bob, &set.id, "x.png", png(3)).await.expect(403);
+    srv.delete(&bob, &cover_path).await.expect(403);
+    srv.anon_get(&image.thumb_url).await.expect(401);
+
+    // Only still PNG, JPEG or WebP; the set keeps its image.
+    let r = srv
+        .put_cover(&alice, &set.id, "anim.gif", gif_anim(1))
+        .await
+        .expect(415);
+    assert!(r.text().contains("not a GIF"), "{}", r.text());
+    let mp4 = [&[0, 0, 0, 0x18][..], b"ftypisom", &[0, 0, 2, 0], b"isomiso2mp41"].concat();
+    let r = srv.put_cover(&alice, &set.id, "clip.mp4", mp4).await.expect(415);
+    assert!(r.text().contains("not a video"), "{}", r.text());
+    srv.put_cover(&alice, &set.id, "junk.png", b"not an image".to_vec())
+        .await
+        .expect(415);
+    let r = common::read(
+        srv.client
+            .put(srv.url(&cover_path))
+            .bearer_auth(&alice.token)
+            .multipart(reqwest::multipart::Form::new().text("meta", "[]"))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .expect(400);
+    assert!(r.text().contains("choose an image"), "{}", r.text());
+    let d: SetDetail = srv.get(&alice, &set_path).await.expect(200).json();
+    assert_eq!(d.set.cover_image.as_ref(), Some(&image));
+
+    // Replacing it leaves the old media to the GC.
+    let s: Set = srv
+        .put_cover(&alice, &set.id, "cover.jpg", jpeg(10))
+        .await
+        .expect(200)
+        .json();
+    let image2 = s.cover_image.clone().unwrap();
+    assert_eq!(image2.format, MediaFormat::Jpeg);
+    assert_ne!(image2.thumb_url, image.thumb_url);
+    assert!(s.version > v1);
+    stickpile_server::cleanup_once(&srv.state).await.unwrap();
+    assert!(!media_dir(&image.sha256).exists(), "the replaced image is reclaimed");
+    assert!(media_dir(&image2.sha256).join("original.jpg").is_file());
+    assert!(media_dir(&a.media.sha256).is_dir());
+
+    // Removing it: the chosen item is the cover again (idempotent).
+    let s: Set = srv.delete(&alice, &cover_path).await.expect(200).json();
+    assert_eq!(s.cover_image, None);
+    assert_eq!(s.cover_url.as_deref(), Some(b_thumb.as_str()));
+    let s2: Set = srv.delete(&alice, &cover_path).await.expect(200).json();
+    assert_eq!(s2.version, s.version);
+    stickpile_server::cleanup_once(&srv.state).await.unwrap();
+    assert!(!media_dir(&image2.sha256).exists());
+
+    // Choosing an item replaces an image (the cover is what was chosen last);
+    // other fields leave it alone.
+    srv.put_cover(&alice, &set.id, "cover.png", png(9)).await.expect(200);
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"name": "Covers"}))
+        .await
+        .expect(200)
+        .json();
+    assert!(s.cover_image.is_some());
+    let s: Set = srv
+        .patch(&alice, &set_path, json!({"cover_item_id": a.id}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(s.cover_image, None);
+    assert_eq!(s.cover_item_id.as_deref(), Some(a.id.as_str()));
+
+    // The same bytes as an item share its media; removing the cover keeps it.
+    srv.put_cover(&alice, &set.id, "a-again.png", png(1)).await.expect(200);
+    srv.delete(&alice, &cover_path).await.expect(200);
+    stickpile_server::cleanup_once(&srv.state).await.unwrap();
+    assert!(media_dir(&a.media.sha256).join("thumb.webp").is_file());
+
+    // Export and import: a file of its own, named in set.toml.
+    srv.put_cover(&alice, &set.id, "cover.png", png(9)).await.expect(200);
+    let tar = srv
+        .get(&alice, &routes::path(routes::SET_EXPORT, &[&set.id]))
+        .await
+        .expect(200);
+    let files = untar(&tar.body);
+    let names: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "covers/set.toml",
+            "covers/cover.png",
+            "covers/001-a.png",
+            "covers/002-b.png"
+        ]
+    );
+    let m = stickpile_setfmt::Manifest::parse(std::str::from_utf8(&files[0].1).unwrap()).unwrap();
+    assert_eq!(m.cover_image.as_deref(), Some("cover.png"));
+    assert_eq!(m.cover.as_deref(), Some("001-a.png"));
+    assert_eq!(m.items.len(), 2);
+    let rep: ImportReport = import_tar(&srv, &bob, tar.body.clone(), None).await.expect(200).json();
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    let bob_set = rep.set.unwrap();
+    assert_eq!(bob_set.item_count, 2);
+    assert_eq!(bob_set.cover_image.as_ref().map(|i| &i.sha256), Some(&image.sha256));
+    // Re-importing a directory without one removes the image.
+    let mut bundle = stickpile_setfmt::read_tar(&tar.body, 1 << 30).unwrap();
+    bundle.cover_image = None;
+    let plain_tar = stickpile_setfmt::write_tar(&bundle, "covers").unwrap();
+    let rep: ImportReport = import_tar(&srv, &bob, plain_tar, Some(&bob_set.id))
+        .await
+        .expect(200)
+        .json();
+    let again = rep.set.unwrap();
+    assert_eq!(again.cover_image, None);
+    assert!(again.version > bob_set.version);
+    // One that cannot be a cover is reported, and the set has none.
+    bundle.cover_image = Some(stickpile_setfmt::CoverFile {
+        filename: "cover.gif".into(),
+        bytes: gif_anim(2),
+    });
+    let gif_tar = stickpile_setfmt::write_tar(&bundle, "covers").unwrap();
+    let rep: ImportReport = import_tar(&srv, &bob, gif_tar, Some(&bob_set.id))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(rep.errors.len(), 1, "{:?}", rep.errors);
+    assert_eq!(rep.errors[0].file, "cover.gif");
+    assert_eq!(rep.set.unwrap().cover_image, None);
+
+    // Deleting the set leaves its image to the GC (bob's copy is gone too).
+    srv.delete(&alice, &set_path).await.expect(204);
+    stickpile_server::cleanup_once(&srv.state).await.unwrap();
+    assert!(!media_dir(&image.sha256).exists(), "a deleted set's image is reclaimed");
+}
