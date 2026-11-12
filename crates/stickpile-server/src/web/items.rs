@@ -248,7 +248,7 @@ fn field_form(ctx: &Ctx, vibes: &[String], item: &Item, f: Field, value: &str, e
     }
 }
 
-fn vibes(state: &AppState) -> Vec<String> {
+pub(super) fn vibes(state: &AppState) -> Vec<String> {
     state.vocab.vibes.iter().map(|v| v.label.clone()).collect()
 }
 

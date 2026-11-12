@@ -5,16 +5,19 @@
 // script the file input posts the chosen files as they are. With it, files
 // that are chosen, dropped on the form or pasted anywhere on the page
 // (Ctrl+V) are staged in a tray first, and nothing is sent until Upload is
-// pressed. Each staged file can be selected, renamed and removed. Still
-// images (PNG, JPEG, still WebP) can also be rotated, flipped and cropped.
+// pressed. Each staged file can be selected and removed, and gets its
+// details: name, keywords, emojis, vibe and tags. Still images (PNG, JPEG,
+// still WebP) can also be rotated, flipped and cropped.
 //
 // Edits are applied in the browser when the form is submitted and the
 // result is sent as a PNG (lossless). Files without image edits are sent as
-// their original bytes, renamed if needed. GIFs, animated WebP and videos can
-// only be renamed: a canvas keeps just their first frame.
+// their original bytes, renamed if needed. GIFs, animated WebP and videos
+// cannot be edited: a canvas keeps just their first frame. The details go
+// in a hidden `meta` field, a JSON array with one entry per file in the
+// files' order (stickpile_api::UploadMeta, as in the API).
 //
 // The form's data-aspect ("4:3") adds the set's recommended aspect ratio as
-// a crop preset.
+// a crop preset; data-vibes names the datalist of vibe suggestions.
 (function () {
   "use strict";
 
@@ -46,7 +49,8 @@
   };
   var ACCEPTED = "PNG, JPEG, WebP, GIF, MP4 or WebM";
   var MIN_CROP = 4; // smallest crop side, image pixels
-  var STAGE_MAX_H = 380; // largest editor preview height, CSS pixels
+  var STAGE_MIN_H = 320; // the editor preview may always be this tall, CSS pixels
+  var STAGE_VH = 0.7; // and up to this share of the window height
   var MAX_ZOOM = 3; // small images are shown at most this much larger
   var THUMB = 176; // edited thumbnails, device pixels
   // Orientation as a 2×2 matrix, to notice when edits cancel out.
@@ -291,17 +295,54 @@
 
     var editor = el("div", "tray-editor");
     editor.setAttribute("role", "group");
-    var nameRow = el("div", "tray-name");
-    var nameInput = el("input");
-    nameInput.type = "text";
-    nameInput.id = "tray-name-" + nextId++;
-    nameInput.maxLength = 200;
-    nameInput.autocomplete = "off";
-    var nameLabel = el("label", null, "Name");
-    nameLabel.htmlFor = nameInput.id;
-    nameRow.appendChild(nameLabel);
-    nameRow.appendChild(nameInput);
 
+    // The selected file's details (sent as `meta`), then its image.
+    var details = el("div", "tray-details");
+    var nameInput = detailField("Name", "", 200);
+    var keywordsInput = detailField("Keywords", "Separate with commas.", 0);
+    var emojisInput = detailField("Emojis", "Separate with spaces.", 0);
+    var vibeInput = detailField("Vibe", "One word, e.g. tired.", 50);
+    if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
+    var tagsInput = detailField("Tags", "Separate with commas.", 0);
+    var copyRow = el("div", "tray-copy");
+    var copyAll = button("small", "Use for every file");
+    copyAll.id = "tray-copy-" + nextId++;
+    var copyHint = el("p", "hint", "Gives the other files these keywords, emojis, vibe and tags. Names stay.");
+    copyHint.id = copyAll.id + "-hint";
+    copyAll.setAttribute("aria-describedby", copyHint.id);
+    copyRow.appendChild(copyAll);
+    copyRow.appendChild(copyHint);
+    details.appendChild(copyRow);
+    var detailInputs = { keywords: keywordsInput, emojis: emojisInput, vibe: vibeInput, tags: tagsInput };
+
+    function detailField(label, hint, maxLength) {
+      var row = el("div", "tray-field");
+      var input = el("input");
+      input.type = "text";
+      input.id = "tray-" + label.toLowerCase() + "-" + nextId++;
+      input.autocomplete = "off";
+      if (maxLength) input.maxLength = maxLength;
+      var l = el("label", null, label);
+      l.htmlFor = input.id;
+      row.appendChild(l);
+      row.appendChild(input);
+      if (hint) {
+        var h = el("span", "hint", hint);
+        h.id = input.id + "-hint";
+        input.setAttribute("aria-describedby", h.id);
+        row.appendChild(h);
+      }
+      details.appendChild(row);
+      return input;
+    }
+
+    // Sent with the files: one entry per file, in the files' order.
+    var metaInput = el("input");
+    metaInput.type = "hidden";
+    metaInput.name = "meta";
+    form.insertBefore(metaInput, zone);
+
+    var media = el("div", "tray-media");
     var tools = el("div", "tray-tools");
     tools.setAttribute("role", "group");
     tools.setAttribute("aria-label", "Image tools");
@@ -354,9 +395,11 @@
     var preview = el("div", "tray-preview");
     var note = el("p", "hint tray-note");
     var info = el("p", "tray-info");
-    [nameRow, tools, stage, cropHint, preview, note, info].forEach(function (n) {
-      editor.appendChild(n);
+    [tools, stage, cropHint, preview, note, info].forEach(function (n) {
+      media.appendChild(n);
     });
+    editor.appendChild(details);
+    editor.appendChild(media);
     var status = el("p", "tray-status");
     status.setAttribute("role", "status");
     tray.appendChild(head);
@@ -397,9 +440,11 @@
       tray.hidden = n === 0;
       zone.classList.toggle("has-files", n > 0);
       title.textContent = n
-        ? plural(n, "file", "files") + " ready. Select one to rename it or edit the image."
+        ? plural(n, "file", "files") + " ready. Select one to describe it or edit the image."
         : "";
       if (submit) submit.textContent = n ? "Upload " + plural(n, "file", "files") : submitLabel;
+      copyRow.hidden = n < 2;
+      if (!n) metaInput.value = "";
     }
 
     function add(files, pasted) {
@@ -433,6 +478,11 @@
           size: null,
           edited: false,
           failed: false,
+          // Details as typed; split into lists when sent (metaOf).
+          keywords: "",
+          emojis: "",
+          vibe: "",
+          tags: "",
         };
         if (KINDS[type] === "webp") {
           isAnimatedWebp(file).then(function (anim) {
@@ -544,6 +594,9 @@
         x.thumbButton.setAttribute("aria-pressed", x === e ? "true" : "false");
       });
       nameInput.value = e.name;
+      Object.keys(detailInputs).forEach(function (k) {
+        detailInputs[k].value = e[k];
+      });
       editor.setAttribute("aria-label", "Edit " + displayName(e));
       show(e);
     }
@@ -623,8 +676,9 @@
       if (!e || !e.work) return;
       var W = e.work.width;
       var H = e.work.height;
-      var room = Math.max(120, editor.clientWidth - 24);
-      var scale = Math.min(room / W, STAGE_MAX_H / H, MAX_ZOOM);
+      var room = Math.max(120, media.clientWidth - 24);
+      var tall = Math.max(STAGE_MIN_H, Math.round(window.innerHeight * STAGE_VH));
+      var scale = Math.min(room / W, tall / H, MAX_ZOOM);
       var cw = Math.max(1, Math.round(W * scale));
       var ch = Math.max(1, Math.round(H * scale));
       var dpr = window.devicePixelRatio || 1;
@@ -778,10 +832,33 @@
       return Promise.resolve(new File([e.file], filename, { type: e.file.type || e.type }));
     }
 
+    // The `meta` entry of a file (stickpile_api::UploadMeta).
+    function metaOf(e) {
+      var m = { name: displayName(e) };
+      var keywords = splitList(e.keywords);
+      var emojis = e.emojis.split(/[\s,]+/).filter(Boolean);
+      var tags = splitList(e.tags);
+      if (keywords.length) m.keywords = keywords;
+      if (emojis.length) m.emojis = emojis;
+      if (e.vibe.trim()) m.vibe = e.vibe.trim();
+      if (tags.length) m.tags = tags;
+      return m;
+    }
+
+    function splitList(text) {
+      return text
+        .split(/[,\n]/)
+        .map(function (s) {
+          return s.trim();
+        })
+        .filter(Boolean);
+    }
+
     function submitWith(submitter) {
       if (busy) return;
       busy = true;
       if (submit) submit.disabled = true;
+      var meta = JSON.stringify(entries.map(metaOf));
       var edited = entries.filter(function (e) {
         return e.edited;
       }).length;
@@ -799,6 +876,7 @@
               dt.items.add(f);
             });
             input.files = dt.files;
+            metaInput.value = meta;
             busy = false;
             if (submit) submit.disabled = false;
             say("");
@@ -838,6 +916,36 @@
       if (!current) return;
       current.name = nameInput.value;
       relabel(current);
+    });
+
+    Object.keys(detailInputs).forEach(function (k) {
+      detailInputs[k].addEventListener("input", function () {
+        if (current) current[k] = detailInputs[k].value;
+      });
+    });
+
+    // Enter in a detail field would submit the form, i.e. upload every file
+    // half described. (A datalist suggestion takes Enter before the page.)
+    details.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" && !ev.isComposing && ev.target.tagName === "INPUT") ev.preventDefault();
+    });
+
+    copyAll.addEventListener("click", function () {
+      var e = current;
+      if (!e) return;
+      entries.forEach(function (x) {
+        if (x === e) return;
+        Object.keys(detailInputs).forEach(function (k) {
+          x[k] = e[k];
+        });
+      });
+      say(
+        "The other " +
+          plural(entries.length - 1, "file has", "files have") +
+          " the keywords, emojis, vibe and tags of " +
+          displayName(e) +
+          " now."
+      );
     });
 
     nameInput.addEventListener("blur", function () {

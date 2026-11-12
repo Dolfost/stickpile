@@ -26,22 +26,25 @@ const ACCEPT: &str =
     "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm";
 
 /// The upload form of a set page. `aspect` is the set's recommended aspect
-/// ratio, offered as a crop preset by the upload tray (upload.js).
-pub fn upload_form(ctx: &Ctx, set_id: &str, aspect: Option<(u32, u32)>) -> Markup {
-    form(ctx, Some(set_id), aspect, &[], None)
+/// ratio, offered as a crop preset by the upload tray (upload.js); `vibes`
+/// are the suggestions for the tray's vibe field.
+pub fn upload_form(ctx: &Ctx, set_id: &str, aspect: Option<(u32, u32)>, vibes: &[String]) -> Markup {
+    form(ctx, Some(set_id), aspect, vibes, &[], None)
 }
 
 /// The upload form. `set_id` fixes the target set (set page); otherwise the
 /// form has a set selector over `sets`.
 ///
 /// With JavaScript, upload.js stages the chosen, dropped or pasted files in a
-/// tray where each one can be renamed and still images rotated, flipped and
-/// cropped before the upload. Without it the file input posts the files as
-/// they are.
+/// tray where each one gets its name, keywords, emojis, vibe and tags, and
+/// still images can be rotated, flipped and cropped before the upload. The
+/// details go in a `meta` field (JSON, one entry per file, like the API).
+/// Without JavaScript the file input posts the files as they are.
 fn form(
     ctx: &Ctx,
     set_id: Option<&str>,
     aspect: Option<(u32, u32)>,
+    vibes: &[String],
     sets: &[SetSummary],
     selected: Option<&str>,
 ) -> Markup {
@@ -52,11 +55,13 @@ fn form(
     let key = set_id.unwrap_or("any");
     let results_id = format!("upload-results-{key}");
     let aspect = aspect.map(|(w, h)| format!("{w}:{h}"));
+    let vibes_id = format!("upload-vibes-{key}");
     html! {
         form.upload-form method="post" enctype="multipart/form-data" action=(action)
             hx-post=(action) hx-encoding="multipart/form-data" hx-target=(format!("#{results_id}")) hx-swap="innerHTML"
-            hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] {
+            hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] data-vibes=(vibes_id) {
             (ctx.csrf_input())
+            datalist id=(vibes_id) { @for v in vibes { option value=(v) {} } }
             @if set_id.is_none() {
                 div.field-row {
                     label for="upload-set" { "Add to set" }
@@ -146,7 +151,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
             @if sets.is_empty() {
                 p { "You need a set first. " a.button href="/sets/new" { "Create a set" } }
             } @else {
-                (form(&ctx, None, None, &sets, q.set.as_deref()))
+                (form(&ctx, None, None, &super::items::vibes(&state), &sets, q.set.as_deref()))
             }
         }
         section #import aria-labelledby="up-import" {
@@ -159,7 +164,8 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
 }
 
 /// Read an upload body: optional `set_id` text field (before the files),
-/// file parts (empty file inputs are skipped).
+/// file parts (empty file inputs are skipped) and the tray's optional `meta`
+/// field (JSON, one [`stickpile_api::UploadMeta`] per file, by index).
 async fn read_upload(
     state: &AppState,
     caller: &MultipartCaller,
@@ -171,11 +177,15 @@ async fn read_upload(
     let mut set_id = path_set.map(str::to_string);
     let mut checked = false;
     let mut files = Vec::new();
+    let mut meta = Vec::new();
     while let Some(mut field) = mp.next_field().await.map_err(multipart_error)? {
         let filename = field.file_name().map(str::to_string);
         match (field.name(), filename) {
             (Some("set_id"), None) if path_set.is_none() => {
                 set_id = Some(field_text(&mut field, 64).await?.trim().to_string());
+            }
+            (Some("meta"), None) => {
+                meta = upload::parse_meta(&field_text(&mut field, upload::MAX_META_BYTES).await?)?;
             }
             (_, Some(name)) if !name.is_empty() => {
                 let sid = set_id
@@ -195,13 +205,7 @@ async fn read_upload(
     if files.is_empty() {
         return Err(AppError::bad_request("choose at least one file"));
     }
-    Ok((
-        set_id,
-        UploadParts {
-            files,
-            meta: Vec::new(),
-        },
-    ))
+    Ok((set_id, UploadParts { files, meta }))
 }
 
 async fn do_upload(

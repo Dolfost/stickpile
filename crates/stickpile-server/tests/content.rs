@@ -588,7 +588,7 @@ async fn uploads_sniff_sanitise_and_dedup() {
             &u,
             &set2.id,
             vec![("a.png", png(10)), ("bad.png", b"nope".to_vec()), ("anim.gif", gif_anim(20))],
-            Some(json!([{"name": "Alpha", "keywords": ["first", " first ", ""], "emojis": ["😀"], "tags": ["t"]}, {}, {"name": "Anim"}])),
+            Some(json!([{"name": "Alpha", "keywords": ["first", " first ", ""], "emojis": ["😀"], "tags": ["t"], "vibe": " Tired "}, {}, {"name": "Anim"}])),
         )
         .await
         .expect(200)
@@ -600,6 +600,9 @@ async fn uploads_sniff_sanitise_and_dedup() {
     assert_eq!(a.emojis, vec!["😀"]);
     assert_eq!(a.tags, vec!["t"]);
     assert_eq!(a.keywords_source, FieldSource::User);
+    // A vibe given at upload is the user's, trimmed and lowercased like an edit.
+    assert_eq!(a.vibe.as_deref(), Some("tired"));
+    assert_eq!(a.vibe_source, FieldSource::User);
     assert!(res[1].item.is_none() && res[1].error.is_some());
     let anim = res[2].item.as_ref().unwrap();
     assert_eq!(anim.media.kind, MediaKind::Animation);

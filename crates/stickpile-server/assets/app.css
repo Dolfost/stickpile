@@ -462,10 +462,20 @@ button.tray-remove {
   border-radius: 999px; font-size: 1.05rem; line-height: 1; background: var(--surface); box-shadow: var(--shadow);
 }
 button.tray-remove:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
-.tray-editor { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
-.tray-name { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; width: 100%; }
-.tray-name label { font-weight: 600; }
-.tray-name input { flex: 1 1 14rem; max-width: 28rem; }
+/* Details on the left, the image as large as the rest of the width and 70%
+   of the window height allow (upload.js sizes the canvas); stacked when
+   narrow. */
+.tray-editor {
+  display: grid; grid-template-columns: minmax(14rem, 19rem) minmax(0, 1fr); gap: 1rem 1.25rem; align-items: start;
+  border-top: 1px solid var(--border); padding-top: 0.75rem;
+}
+@media (max-width: 48rem) { .tray-editor { grid-template-columns: minmax(0, 1fr); } }
+.tray-details { display: flex; flex-direction: column; gap: 0.6rem; }
+.tray-field { display: flex; flex-direction: column; gap: 0.2rem; }
+.tray-field label { font-weight: 600; }
+.tray-field input { width: 100%; }
+.tray-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; padding-top: 0.25rem; }
+.tray-media { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; min-width: 0; }
 .tray-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
 .tray-tools .tool-label { margin-left: 0.6rem; color: var(--muted); font-size: 0.875rem; font-weight: 600; }
 .tray-tools button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
@@ -480,7 +490,7 @@ button.tray-remove:hover { color: var(--danger); border-color: var(--danger); ba
 .crop-box .ne { right: -8px; top: -8px; cursor: nesw-resize; }
 .crop-box .sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
 .crop-box .se { right: -8px; bottom: -8px; cursor: nwse-resize; }
-.tray-preview img, .tray-preview video { display: block; max-width: 100%; max-height: 380px; border-radius: 6px; background: var(--checker); }
+.tray-preview img, .tray-preview video { display: block; max-width: 100%; max-height: max(320px, 70vh); border-radius: 6px; background: var(--checker); }
 .tray-editor .hint, .tray-info { margin: 0; }
 .tray-info { font-size: 0.875rem; }
 .tray-status { margin: 0; color: var(--muted); }

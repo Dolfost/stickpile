@@ -26,7 +26,7 @@ use crate::service::ai::{self as ai_fill, AiFill};
 use crate::service::{hydrate, sets};
 use crate::state::AppState;
 
-const MAX_META_BYTES: usize = 1024 * 1024;
+pub const MAX_META_BYTES: usize = 1024 * 1024;
 const MAX_LIST: usize = 50;
 const MAX_ENTRY_CHARS: usize = 100;
 
@@ -125,8 +125,7 @@ pub async fn read_multipart(state: &AppState, mut mp: Multipart) -> AppResult<Up
     let mut meta = Vec::new();
     while let Some(mut field) = mp.next_field().await.map_err(multipart_error)? {
         if field.name() == Some("meta") {
-            let text = field_text(&mut field, MAX_META_BYTES).await?;
-            meta = serde_json::from_str(&text).map_err(|e| AppError::bad_request(format!("meta: {e}")))?;
+            meta = parse_meta(&field_text(&mut field, MAX_META_BYTES).await?)?;
         } else if field.file_name().is_some() {
             files.push(field_to_file(state, &mut field, max_file).await?);
         }
@@ -135,6 +134,15 @@ pub async fn read_multipart(state: &AppState, mut mp: Multipart) -> AppResult<Up
         return Err(AppError::bad_request("no file parts in the upload"));
     }
     Ok(UploadParts { files, meta })
+}
+
+/// The `meta` part: a JSON array of [`UploadMeta`], matched to the files by
+/// index. Empty text is no metadata.
+pub fn parse_meta(text: &str) -> AppResult<Vec<UploadMeta>> {
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(text).map_err(|e| AppError::bad_request(format!("meta: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +241,7 @@ impl ItemInput {
             keywords: clean_list(meta.and_then(|m| m.keywords.as_deref()).unwrap_or(&[]), "keywords")?,
             emojis: clean_list(meta.and_then(|m| m.emojis.as_deref()).unwrap_or(&[]), "emojis")?,
             tags: clean_list(meta.and_then(|m| m.tags.as_deref()).unwrap_or(&[]), "tags")?,
+            vibe: clean_vibe(meta.and_then(|m| m.vibe.as_deref()))?,
             source_url,
             ..Default::default()
         })

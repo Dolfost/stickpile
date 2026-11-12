@@ -673,6 +673,9 @@ pub struct UploadMeta {
     pub keywords: Option<Vec<String>>,
     pub emojis: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
+    /// One label, usually from the vibe vocabulary (`tired`, `sarcastic`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibe: Option<String>,
     /// Source URL (browser extension, post-v1).
     pub source_url: Option<String>,
 }

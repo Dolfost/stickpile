@@ -171,25 +171,35 @@ counts for popular items and your stats. Downloads are not counted.
   refreshes after an upload.
 - **The upload tray** (with JavaScript): chosen, dropped and pasted files
   are staged first, as a row of thumbnails, and nothing is sent until you
-  press "Upload N files". Select a thumbnail to edit that file; × removes it
-  from the upload, "Remove all" empties the tray.
+  press "Upload N files". Select a thumbnail to edit that file: its details
+  on the left, the image on the right (stacked on narrow screens). × removes
+  it from the upload, "Remove all" empties the tray.
   - **Name**: the item name. It starts as the file name without the
     extension and without a leading order number (`003-naahh.gif` is
     "naahh"), the same rule the server applies. Pasted images are called
     "pasted image" (then "pasted image 2", …) because browsers name every
     pasted image `image.png`.
+  - **Keywords**, **Emojis**, **Vibe** and **Tags**, as in the item editor
+    (keywords and tags separated by commas, emojis by spaces; the vibe field
+    suggests the vocabulary). They are the item's from the start, so AI
+    enrichment fills only the fields left empty. "Use for every file" gives
+    the other files the selected file's keywords, emojis, vibe and tags (not
+    its name). Enter in these fields does not upload. The details are sent
+    in a `meta` field, the same JSON as the API's (one `UploadMeta` per
+    file).
   - **Image tools** for still images (PNG, JPEG, still WebP): rotate left or
     right, flip horizontally or vertically, and crop. The crop area covers
     the whole image at first; drag its corners to crop and its inside to
     move it, or focus it and use the arrow keys (move) and Shift+arrow keys
-    (resize). "Free", "Square" and the set's recommended aspect ratio (when
+    (resize). The image is shown as large as the width and 70% of the window
+    height allow (small images up to 3×). "Free", "Square" and the set's recommended aspect ratio (when
     it has one other than 1:1) set the crop's shape. "Reset" goes back to
     the original. The line under the image says what will be uploaded.
   - An edited image is rendered in the browser when you press Upload and
     sent as a lossless PNG of the result. Files without image edits are sent
     as their original bytes, so a JPEG is not re-encoded unless you edit it.
-  - GIFs, animated WebP and videos can only be renamed: the browser's canvas
-    keeps just the first frame of an animation.
+  - GIFs, animated WebP and videos get details but no image tools: the
+    browser's canvas keeps just the first frame of an animation.
 
   Without JavaScript the form posts the chosen files as they are.
 - **Import a set directory as a new set** (upload page): pick the folder

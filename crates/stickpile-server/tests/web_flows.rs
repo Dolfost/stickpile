@@ -51,6 +51,15 @@ async fn set_lifecycle_without_javascript() {
     let page = b.get(&format!("/sets/{set_id}")).await.text();
     assert!(page.contains("data-aspect=\"1:1\""), "{page}");
     assert!(page.contains("<span class=\"paste-hint\" hidden>"), "{page}");
+    // The tray's vibe field suggests the vocabulary.
+    assert!(
+        page.contains(&format!("data-vibes=\"upload-vibes-{set_id}\"")),
+        "{page}"
+    );
+    assert!(
+        page.contains(&format!("<datalist id=\"upload-vibes-{set_id}\"><option value=")),
+        "{page}"
+    );
     // Same slug again: the form comes back with the error.
     let r = b.post_form("/sets", &[("name", "My Cats")]).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
@@ -92,16 +101,38 @@ async fn set_lifecycle_without_javascript() {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     assert!(r.text().contains("choose at least one file"));
 
-    // /upload with the set selector.
+    // /upload with the set selector, and the tray's details for the file
+    // (`meta`, one entry per file like the API).
+    let meta = json!([{"name": "Sly fox", "keywords": ["orange", "sly"], "emojis": ["🦊"], "vibe": "smug", "tags": ["animals"]}]);
     let r = b
-        .post_multipart_fields("/upload", &[("set_id", &set_id)], vec![("file", "fox.png", png(4))])
+        .post_multipart_fields(
+            "/upload",
+            &[("set_id", &set_id), ("meta", &meta.to_string())],
+            vec![("file", "fox.png", png(4))],
+        )
         .await;
     assert_page(&r);
     assert!(r.text().contains("1 file added"));
+    // Broken details are an error, not ignored.
+    let r = b
+        .post_multipart_fields(
+            "/upload",
+            &[("set_id", &set_id), ("meta", "{not json")],
+            vec![("file", "owl.png", png(5))],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert!(r.text().contains("meta:"), "{}", r.text());
 
     let d = s.get(&alice, &routes::path(routes::SET, &[&set_id])).await.value();
     let items = d["items"].as_array().unwrap().clone();
     assert_eq!(items.len(), 4);
+    let fox = items.iter().find(|i| i["name"] == "Sly fox").expect("fox item");
+    assert_eq!(fox["keywords"], json!(["orange", "sly"]));
+    assert_eq!(fox["emojis"], json!(["🦊"]));
+    assert_eq!(fox["vibe"], "smug");
+    assert_eq!(fox["tags"], json!(["animals"]));
+    assert_eq!(fox["keywords_source"], "user");
     let first = items[0]["id"].as_str().unwrap().to_string();
 
     // Reorder with the plain form.

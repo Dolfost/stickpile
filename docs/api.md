@@ -177,7 +177,10 @@ push. Read-only git packs refuse every edit with `403` (`editable: false`).
 **Uploads** (`POST /api/v1/sets/{id}/items`), owner only:
 
 - Every multipart part with a filename is a file. An optional part named
-  `meta` holds a JSON array of `UploadMeta`, matched to the files by index.
+  `meta` holds a JSON array of `UploadMeta` (`name`, `keywords`, `emojis`,
+  `vibe`, `tags`, `source_url`, all optional), matched to the files by
+  index. Given values are the user's (`*_source: user`), so AI enrichment
+  never replaces them. The web upload form sends the same field.
 - Limits: each file at most `limits.max_upload_mb`, the whole request at most
   `limits.max_request_mb` (413 `too_large`). Each request counts once against
   `limits.upload_per_minute` (429).
