@@ -69,6 +69,9 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                 link rel="stylesheet" href=(assets::url("app.css"));
                 script src=(assets::url("htmx.min.js")) defer {}
                 script src=(assets::url("app.js")) defer {}
+                // Before upload.js, which attaches the picker to the tray. The
+                // data is fetched on the first open.
+                script src=(assets::url("emoji.js")) data-emoji-data=(assets::url("emoji.json")) defer {}
                 script src=(assets::url("upload.js")) defer {}
                 (head)
             }

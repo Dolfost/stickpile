@@ -468,6 +468,15 @@ async fn htmx_requests_get_fragments() {
     let r = b.get_htmx(&format!("/items/{}/field/keywords/edit", a.id)).await;
     assert_fragment(&r);
     assert!(r.text().contains("<form") && r.text().contains("name=\"value\""));
+    assert!(!r.text().contains("data-emoji-picker"));
+    // The emojis field gets the emoji picker (emoji.js), inline and in the
+    // full form.
+    let r = b.get_htmx(&format!("/items/{}/field/emojis/edit", a.id)).await;
+    assert_fragment(&r);
+    assert!(r.text().contains("data-emoji-picker=\"\""), "{}", r.text());
+    let html = b.get(&format!("/items/{}?edit=1", a.id)).await.text();
+    assert!(html.contains("id=\"all-emojis\" type=\"text\" name=\"emojis\" value=\"\" data-emoji-picker=\"\""));
+    assert_eq!(html.matches("data-emoji-picker").count(), 1, "only the emojis field");
     let r = b
         .post_htmx(
             &format!("/items/{}/field/keywords", a.id),
@@ -640,6 +649,8 @@ async fn csp_and_static_assets() {
         ("app.css", "text/css"),
         ("app.js", "text/javascript"),
         ("upload.js", "text/javascript"),
+        ("emoji.js", "text/javascript"),
+        ("emoji.json", "application/json"),
         ("htmx.min.js", "text/javascript"),
         ("favicon.svg", "image/svg+xml"),
     ] {
@@ -674,6 +685,43 @@ async fn csp_and_static_assets() {
     ] {
         assert!(js.contains(needle), "app.js: {needle}");
     }
+    // The emoji picker runs before upload.js (which attaches it to the tray)
+    // and fetches its data, linked with a version, only when opened.
+    let emoji_js = html.find("/static/emoji.js?v=").unwrap();
+    assert!(emoji_js < html.find("/static/upload.js?v=").unwrap());
+    assert!(html.contains("data-emoji-data=\"/static/emoji.json?v="));
+    let js = Browser::anonymous(&s).get("/static/emoji.js").await.text();
+    for needle in [
+        "input[data-emoji-picker]",
+        "htmx:load",
+        "window.stickpileEmoji",
+        "data-emoji-data",
+    ] {
+        assert!(js.contains(needle), "emoji.js: {needle}");
+    }
+    let upload_js = Browser::anonymous(&s).get("/static/upload.js").await.text();
+    assert!(upload_js.contains("window.stickpileEmoji.attach(emojisInput)"));
+    let r = Browser::anonymous(&s).get("/static/emoji.json").await;
+    let data: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+    assert_eq!(data["license"], "Unicode-3.0");
+    assert!(data["notice"].as_str().unwrap().contains("Unicode License v3"));
+    let groups = data["groups"].as_array().unwrap();
+    assert!(groups.iter().all(|g| g[0] != "Component"));
+    let cat = groups
+        .iter()
+        .flat_map(|g| g[2].as_array().unwrap())
+        .find(|e| e[0] == "🐱")
+        .expect("🐱 in emoji.json");
+    assert_eq!(cat[1], "cat face");
+    let laugh = groups
+        .iter()
+        .flat_map(|g| g[2].as_array().unwrap())
+        .find(|e| e[0] == "😂")
+        .unwrap();
+    assert!(
+        laugh[2].as_str().unwrap().split(' ').any(|w| w == "lol"),
+        "slang from stickpile-search"
+    );
 }
 
 #[tokio::test]

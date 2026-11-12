@@ -217,6 +217,9 @@ fn field_input(ctx_vibes: &[String], item: &Item, f: Field, value: &str) -> Mark
                     autofocus aria-describedby=(hint_id);
                 datalist #vibe-list { @for v in ctx_vibes { option value=(v) {} } }
             },
+            // emoji.js adds its picker to fields marked data-emoji-picker.
+            Field::Emojis => input id=(input_id) type="text" name="value" value=(value) autofocus
+                aria-describedby=(hint_id) data-emoji-picker="";,
             _ => input id=(input_id) type="text" name="value" value=(value) autofocus aria-describedby=(hint_id);,
         }
         @if !f.hint().is_empty() { span.hint id=(hint_id) { (f.hint()) } }
@@ -357,7 +360,8 @@ fn full_form(ctx: &Ctx, vibes: &[String], item: &Item) -> Markup {
                         input id=(format!("all-{}", f.key())) type="text" name=(f.key()) value=(f.text(item)) list="vibe-list-all";
                         datalist #vibe-list-all { @for v in vibes { option value=(v) {} } }
                     } @else {
-                        input id=(format!("all-{}", f.key())) type="text" name=(f.key()) value=(f.text(item));
+                        input id=(format!("all-{}", f.key())) type="text" name=(f.key()) value=(f.text(item))
+                            data-emoji-picker=[(f == Field::Emojis).then_some("")];
                     }
                     @if !f.hint().is_empty() { p.hint { (f.hint()) } }
                 }

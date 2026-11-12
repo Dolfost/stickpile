@@ -6,8 +6,9 @@
 // that are chosen, dropped on the form or pasted anywhere on the page
 // (Ctrl+V) are staged in a tray first, and nothing is sent until Upload is
 // pressed. Each staged file can be selected and removed, and gets its
-// details: name, keywords, emojis, vibe and tags. Still images (PNG, JPEG,
-// still WebP) can also be rotated, flipped and cropped.
+// details: name, keywords, emojis (with emoji.js's picker), vibe and tags.
+// Still images (PNG, JPEG, still WebP) can also be rotated, flipped and
+// cropped.
 //
 // Edits are applied in the browser when the form is submitted and the
 // result is sent as a PNG (lossless). Files without image edits are sent as
@@ -301,6 +302,9 @@
     var nameInput = detailField("Name", "", 200);
     var keywordsInput = detailField("Keywords", "Separate with commas.", 0);
     var emojisInput = detailField("Emojis", "Separate with spaces.", 0);
+    // The emoji picker (emoji.js, loaded first; else it finds the attribute).
+    emojisInput.setAttribute("data-emoji-picker", "");
+    if (window.stickpileEmoji) window.stickpileEmoji.attach(emojisInput);
     var vibeInput = detailField("Vibe", "One word, e.g. tired.", 50);
     if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
     var tagsInput = detailField("Tags", "Separate with commas.", 0);

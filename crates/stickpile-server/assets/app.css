@@ -600,3 +600,41 @@ details.manage { position: relative; }
   .ctx-menu [role=menuitem]:focus { outline: 2px solid Highlight; }
   .bar-chart .mark { fill: CanvasText; }
 }
+
+/* ---- emoji picker (emoji.js) ------------------------------------------ */
+
+/* The field and its button share a line; the panel opens below them in the
+   page flow (the tray's details column is about 19rem wide). */
+.emoji-field { display: flex; align-items: stretch; gap: 0.3rem; width: 100%; min-width: 0; }
+.emoji-field input[type=text] { flex: 1 1 auto; width: auto; min-width: 0; }
+.inline-edit .emoji-field { flex: 1 1 10rem; width: auto; }
+button.emoji-toggle { flex: none; width: 2.4rem; min-height: 0; padding: 0; color: var(--text-2); font-size: 1.15rem; }
+.inline-edit button.emoji-toggle { width: 2.1rem; }
+button.emoji-toggle[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.emoji-panel {
+  width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 0.35rem;
+  padding: 0.4rem; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow);
+}
+.inline-edit .emoji-panel { flex: 1 1 100%; }
+.emoji-panel input.emoji-search { width: 100%; min-height: 2rem; padding: 0.2rem 0.5rem; }
+.emoji-tabs { display: flex; gap: 0.1rem; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+.emoji-tabs [role=tab] {
+  flex: 1 0 1.9rem; height: 1.9rem; min-height: 0; padding: 0; border: 0; border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0; background: none; font-size: 1.05rem; line-height: 1; opacity: 0.7;
+}
+.emoji-tabs [role=tab]:hover { background: var(--surface-2); opacity: 1; }
+.emoji-tabs [role=tab][aria-selected="true"] { border-bottom-color: var(--accent); background: var(--accent-soft); opacity: 1; }
+.emoji-tabs.searching [role=tab][aria-selected="true"] { border-bottom-color: transparent; background: none; opacity: 0.7; }
+.emoji-tabs [role=tab]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.emoji-label { display: block; color: var(--muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.emoji-row, .emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(2rem, 1fr)); gap: 0.1rem; }
+.emoji-grid { max-height: 12.6rem; overflow-y: auto; overscroll-behavior: contain; align-content: start; scrollbar-width: thin; }
+button.emoji-btn, .emoji-tabs [role=tab] { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", var(--font); }
+button.emoji-btn { height: 2rem; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; font-size: 1.3rem; line-height: 1; }
+button.emoji-btn:hover { background: var(--surface-2); }
+button.emoji-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--accent-soft); }
+.emoji-status { margin: 0; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+@media (forced-colors: active) {
+  .emoji-panel { border: 1px solid CanvasText; }
+  .emoji-tabs [role=tab][aria-selected="true"] { border-bottom-color: Highlight; }
+}

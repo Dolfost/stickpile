@@ -31,7 +31,11 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
 - **Multi-user**, with Tailscale login without passwords, local accounts with
   TOTP, revocable API tokens, an admin panel and an audit log.
 
-Licence: [AGPL-3.0-or-later](LICENSE).
+Licence: [AGPL-3.0-or-later](LICENSE). The web UI's emoji data
+(`crates/stickpile-server/assets/emoji.json`) is derived from Unicode emoji
+and CLDR files, © Unicode, Inc., under the [Unicode License
+v3](https://www.unicode.org/license.txt); see
+[docs/web.md](docs/web.md#static-assets).
 
 ## Components
 
