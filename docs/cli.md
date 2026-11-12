@@ -72,6 +72,8 @@ cache_max_mb = 512
 # telegram | discord | signal | whatsapp | slack | generic
 default_target = "generic"
 # For targets with real stickers (Telegram), copy the sticker rendition by default.
+# In the desktop popup this is the starting value: Ctrl+S or the footer toggle
+# change it until stickpile-desktop restarts.
 prefer_stickers = false
 # Request timeout before falling back to the offline cache.
 timeout_secs = 5

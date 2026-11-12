@@ -118,8 +118,16 @@ session, **macOS** = `NSPasteboard` with file URL + image representations
 Telegram Desktop's paste and drop handler (`confirmSendingFiles`) reads
 `QMimeData::urls()` first: when they are all local files it prepares them
 as attachments and only falls back to the image data (`QMimeData::imageData`)
-when there are no usable URLs. A `.webp` file of at most 512×512 sent as a
-document is turned into a sticker (sticker attribute added at upload).
+when there are no usable URLs. Whether a file goes out compressed (as a
+photo) or as a document follows the send box's "Send as a document"
+checkbox, which Telegram remembers; the default is compressed. Dropping on
+the "send without compression" area always sends a document. From the
+source (tdesktop `storage/localimageloader.cpp`, read on 2026-11-11, not yet
+observed): a compressed still becomes a JPEG photo and its transparency is
+blended onto **white** (`Images::Opaque`), WebP included; a `.webp` under
+2 MiB sent **as a document** becomes a sticker with its transparency (the
+client checks the area, not the 512 px side). A `.webm` is always sent as a
+video or a file, never as a sticker.
 `QMimeData::urls()` reads `text/uri-list` only; Qt does not parse
 `x-special/gnome-copied-files`.
 
@@ -132,12 +140,12 @@ document is turned into a sticker (sticker attribute added at upload).
 | T5 | GIF data + uri-list (gif) | uri wins: box → animation | **animation**, box | | |
 | T6 | uri-list only (gif) | box → animation | **animation**, box | | |
 | T7 | MP4 uri-list (mp4) | box → video | **video**, box | | |
-| T8 | 512 px WebP uri-list (webp) | **sticker** (the main open question) | | | |
-| T9 | 512 px WebP data + uri-list (webp) | uri wins → sticker | | | |
+| T8 | 512 px WebP uri-list (webp) | box → **sticker** with "Send as a document" ticked; photo on white when compressed (the default) | | | |
+| T9 | 512 px WebP data + uri-list (webp) | uri wins → same as T8 | | | |
 | T10 | gnome-copied-files only (png) | nothing (Qt ignores it) | | | |
 | T11 | uri-list + gnome-copied-files (png) | same as T3 | | | |
 | T12 | path as text/plain (png) | text: the path is inserted into the input | text (path inserted) | | |
-| T13 | drag: GdkFileList + uri-list (webp) | sticker | | | |
+| T13 | drag: GdkFileList + uri-list (webp) | sticker when dropped on "send without compression"; else as T8 | | | |
 | T14 | drag: GdkFileList + uri-list (gif / mp4) | animation / video | | | |
 | T15 | provisional *still* default on a 512 px WebP: PNG data + uri-list + gnome-copied-files (webp) | photo (not a sticker) | photo, box | | |
 

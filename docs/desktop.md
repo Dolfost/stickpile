@@ -162,7 +162,7 @@ grid, everything else edits the query.
 | Enter | copy the selected item for the current target, hide |
 | Shift+Enter | copy with sticker mode flipped for this copy (Telegram: send as a sticker) |
 | Ctrl+T / Ctrl+Shift+T | next / previous target app |
-| Ctrl+S | toggle sticker mode for this popup session |
+| Ctrl+S | toggle sticker mode; kept until stickpile-desktop restarts (the footer toggle does the same) |
 | Escape | hide |
 | Ctrl+←/→, Shift+Home/End | edit the query (word jump, select) |
 
@@ -175,11 +175,26 @@ ignores pasted file references). The search syntax of the server works in
 the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`.
 
 The footer shows the target app and how it was chosen (`auto: <window
-class>`, `default`, `chosen`), the sticker indicator (only for apps with
-stickers), and the status: searching, offline, "Copied cat for Telegram",
-warnings such as "Discord limit is 10 MiB", or errors. A ⚠ on a cell means
-the item cannot be sent to the current target as is (the tooltip says
-why); copying still uses the best available variant.
+class>`, `default`, `chosen`), the sticker toggle (only for apps with
+stickers; clicking it is Ctrl+S), and the status: searching, offline,
+"Copied cat for Telegram", warnings such as "Discord limit is 10 MiB", or
+errors. A ⚠ on a cell means the item cannot be sent to the current target
+as is (the tooltip says why); copying still uses the best available
+variant.
+
+**Sticker mode (Telegram).** Telegram sends a pasted still as a
+compressed photo, a JPEG, which fills transparent areas with white. In
+sticker mode the popup copies the item's 512 px WebP as a file instead.
+Telegram makes a sticker of it, transparency kept, only when it is sent as
+a document: tick "Send as a document" in Telegram's send box once
+(Telegram remembers it; other pasted images then go as files too), or drag
+the item from the popup onto Telegram's "send without compression" area.
+Sent compressed, the WebP becomes a photo on white as well. This is read
+from Telegram Desktop's source and not yet observed (row T8 in
+[clipboard.md](clipboard.md#21-telegram-desktop--ayugram-qt-6)). Sticker
+mode is off by default; `prefer_stickers = true` turns it on when
+stickpile-desktop starts, and Ctrl+S or the footer toggle changes it until
+the process restarts.
 
 ## Target detection
 

@@ -38,6 +38,7 @@ gridview.stickpile-grid > child { padding: 4px; border-radius: 10px; }
 .stickpile-badge { font-size: 0.7em; font-weight: bold; padding: 1px 5px; border-radius: 5px; margin: 6px; }
 .stickpile-warn { margin: 6px; color: @warning_color; }
 .stickpile-footer { padding: 4px 10px; }
+.stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
 "#;
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -81,7 +82,9 @@ struct Widgets {
     selection: gtk::SingleSelection,
     target: gtk::Label,
     target_hint: gtk::Label,
-    sticker: gtk::Label,
+    /// Footer sticker-mode toggle; clicking it is Ctrl+S.
+    sticker: gtk::ToggleButton,
+    sticker_label: gtk::Label,
     status: gtk::Label,
 }
 
@@ -317,13 +320,12 @@ impl Shell {
         match f.sticker {
             StickerMode::Unsupported => w.sticker.set_visible(false),
             mode => {
+                let on = mode == StickerMode::On;
                 w.sticker.set_visible(true);
-                w.sticker.set_label(if mode == StickerMode::On {
-                    "sticker: on"
-                } else {
-                    "sticker: off"
-                });
-                set_class(&w.sticker, "accent", mode == StickerMode::On);
+                w.sticker.set_active(on);
+                let label = if on { "sticker: on" } else { "sticker: off" };
+                w.sticker_label.set_label(label);
+                set_class(&w.sticker_label, "accent", on);
             }
         }
         w.status.set_label(&f.status);
@@ -681,6 +683,15 @@ impl Shell {
             }
         });
 
+        // Same as Ctrl+S. The button never takes the focus, so typing goes on
+        // in the search entry after a click.
+        let this = self.clone();
+        w.sticker.connect_toggled(move |_| {
+            if !this.rendering.get() {
+                this.dispatch(Event::ToggleSticker);
+            }
+        });
+
         let this = self.clone();
         w.grid.connect_activate(move |_, pos| {
             this.dispatch(Event::CopyAt {
@@ -849,8 +860,22 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
     let target_hint = gtk::Label::new(None);
     target_hint.add_css_class("dim-label");
     target_hint.add_css_class("caption");
-    let sticker = gtk::Label::new(None);
-    sticker.add_css_class("caption");
+    let sticker_label = gtk::Label::new(None);
+    sticker_label.add_css_class("caption");
+    // Not focusable, like the grid: the search entry keeps the focus and
+    // Ctrl+S is the keyboard route (advertised in the tooltip and to ATs).
+    let sticker = gtk::ToggleButton::builder()
+        .child(&sticker_label)
+        .can_focus(false)
+        .valign(gtk::Align::Center)
+        .tooltip_text("Send as sticker (Ctrl+S)")
+        .build();
+    sticker.add_css_class("flat");
+    sticker.add_css_class("stickpile-sticker");
+    sticker.update_property(&[
+        gtk::accessible::Property::Label("Send as sticker"),
+        gtk::accessible::Property::KeyShortcuts("Control+S"),
+    ]);
     let status = gtk::Label::builder()
         .hexpand(true)
         .xalign(1.0)
@@ -912,6 +937,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
         target,
         target_hint,
         sticker,
+        sticker_label,
         status,
     }
 }

@@ -31,6 +31,8 @@ pub struct ModelConfig {
     pub recent_count: usize,
     pub max_results: usize,
     pub default_target: TargetApp,
+    /// Starting value of the sticker preference; [`Event::ToggleSticker`]
+    /// changes it for the life of the model, not just one opening.
     pub prefer_stickers: bool,
     pub hide_on_copy: bool,
     pub debounce_ms: u64,
@@ -122,7 +124,9 @@ pub enum Event {
         backwards: bool,
     },
     SetTarget(TargetApp),
-    /// Ctrl+S: flip the persistent sticker preference.
+    /// Ctrl+S or the footer toggle: flip the sticker preference. It survives
+    /// hiding and reopening; only a new model (process restart) goes back to
+    /// `prefer_stickers`.
     ToggleSticker,
     Escape,
     /// The clipboard now holds the item (answer to [`Command::Copy`]).
@@ -386,6 +390,7 @@ pub struct Model {
     target: TargetApp,
     target_source: TargetSource,
     window: Option<WindowInfo>,
+    /// Sticker preference: starts as `prefer_stickers`, kept across openings.
     sticker: bool,
     status: Status,
     generation: u64,
@@ -612,7 +617,7 @@ impl Model {
         self.offline = false;
         self.copying = None;
         self.status = Status::Idle;
-        self.sticker = self.cfg.prefer_stickers;
+        // `sticker` is deliberately kept: the last Ctrl+S / footer toggle still holds.
         match (&info.window, info.detected) {
             (Some(w), Some(t)) => {
                 self.target = t;
@@ -1091,7 +1096,7 @@ pub(crate) mod tests {
         assert_eq!(m.query(), "");
         assert!(m.entries().is_empty(), "recent list not loaded yet");
         assert_eq!(m.target(), TargetApp::Generic);
-        assert!(!m.sticker());
+        assert!(m.sticker(), "the sticker preference is not reset on open");
         assert_eq!(m.status(), &Status::NoRecent);
     }
 
@@ -1785,6 +1790,82 @@ pub(crate) mod tests {
         m.handle(Event::SetTarget(TargetApp::Whatsapp));
         assert_eq!(m.sticker_mode(), StickerMode::Unsupported);
         assert!(m.sticker(), "preference kept for the next sticker-capable target");
+    }
+
+    #[test]
+    fn sticker_preference_starts_from_prefer_stickers() {
+        let m = opened(cfg(), Some(TargetApp::Telegram));
+        assert!(!m.sticker());
+        assert_eq!(m.footer().sticker, StickerMode::Off);
+        let m = opened(
+            ModelConfig {
+                prefer_stickers: true,
+                ..cfg()
+            },
+            Some(TargetApp::Telegram),
+        );
+        assert!(m.sticker());
+        assert_eq!(m.footer().sticker, StickerMode::On);
+    }
+
+    #[test]
+    fn sticker_toggle_survives_close_and_reopen() {
+        let telegram = || OpenInfo {
+            window: Some(window("com.ayugram.desktop")),
+            detected: Some(TargetApp::Telegram),
+        };
+        let mut m = opened(cfg(), Some(TargetApp::Telegram));
+        m.handle(Event::ToggleSticker);
+        // Escape, the shortcut again, and the WM close button all keep it.
+        m.handle(Event::Escape);
+        m.handle(Event::Open(telegram()));
+        assert_eq!(m.sticker_mode(), StickerMode::On);
+        m.handle(Event::Toggle {
+            popup_active: true,
+            open: OpenInfo::default(),
+        });
+        m.handle(Event::Toggle {
+            popup_active: false,
+            open: telegram(),
+        });
+        assert_eq!(m.sticker_mode(), StickerMode::On);
+        m.handle(Event::Hidden);
+        m.handle(Event::Open(telegram()));
+        assert_eq!(m.footer().sticker, StickerMode::On);
+        m.handle(Event::RecentLoaded(items(2)));
+        assert!(matches!(
+            &m.handle(Event::CopySelected { toggle_sticker: false })[..],
+            [Command::Copy { sticker: true, .. }]
+        ));
+
+        // Turning it off again also sticks, even against prefer_stickers.
+        let mut m = opened(
+            ModelConfig {
+                prefer_stickers: true,
+                ..cfg()
+            },
+            Some(TargetApp::Telegram),
+        );
+        m.handle(Event::ToggleSticker);
+        m.handle(Event::Escape);
+        m.handle(Event::Open(telegram()));
+        assert_eq!(m.sticker_mode(), StickerMode::Off);
+    }
+
+    #[test]
+    fn shift_enter_does_not_carry_over_to_the_next_opening() {
+        let mut m = opened(cfg(), Some(TargetApp::Telegram));
+        m.handle(Event::RecentLoaded(items(2)));
+        assert!(matches!(
+            &m.handle(Event::CopySelected { toggle_sticker: true })[..],
+            [Command::Copy { sticker: true, .. }]
+        ));
+        m.handle(Event::Escape);
+        m.handle(Event::Open(OpenInfo {
+            window: Some(window("com.ayugram.desktop")),
+            detected: Some(TargetApp::Telegram),
+        }));
+        assert_eq!(m.sticker_mode(), StickerMode::Off);
     }
 
     // -- compatibility & entries ---------------------------------------------------------
