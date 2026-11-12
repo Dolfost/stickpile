@@ -788,21 +788,28 @@
       if (edited) say("Preparing " + plural(edited, "edited image", "edited images") + "…");
       Promise.all(entries.map(fileFor)).then(
         function (files) {
-          var dt = new DataTransfer();
-          files.forEach(function (f) {
-            dt.items.add(f);
-          });
-          input.files = dt.files;
-          busy = false;
-          if (submit) submit.disabled = false;
-          say("");
-          api.passing = true;
-          try {
-            if (form.requestSubmit) form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
-            else form.submit();
-          } finally {
-            api.passing = false;
-          }
+          // Submit again in a task of its own. Without edits every promise
+          // is already settled, so this callback runs in the microtask
+          // checkpoint right after the submit listener, while the browser
+          // is still firing that submit event, and the HTML spec has
+          // requestSubmit() do nothing then: the upload never started.
+          setTimeout(function () {
+            var dt = new DataTransfer();
+            files.forEach(function (f) {
+              dt.items.add(f);
+            });
+            input.files = dt.files;
+            busy = false;
+            if (submit) submit.disabled = false;
+            say("");
+            api.passing = true;
+            try {
+              if (form.requestSubmit) form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
+              else form.submit();
+            } finally {
+              api.passing = false;
+            }
+          }, 0);
         },
         function (err) {
           busy = false;
