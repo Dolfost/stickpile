@@ -17,7 +17,7 @@ use stickpile_api::{FieldSource, Item, ItemDetail, MediaKind, UpdateItem, Varian
 
 use super::components::{
     ai_mark, copy_controls, file_url, fmt_bytes, grid, icon, item_card, item_url, kind_badge, like_form, plural,
-    quality_badge, quality_class, set_url, thumb, Card, Icon,
+    quality_badge, quality_class, quick_copy, set_url, thumb, Card, Icon,
 };
 use super::layout::{self, Nav};
 use super::{integrations, Ctx};
@@ -255,13 +255,15 @@ pub(super) fn vibes(state: &AppState) -> Vec<String> {
     state.vocab.vibes.iter().map(|v| v.label.clone()).collect()
 }
 
-/// An item in the set editor: thumb, badges, editable fields, and one row
-/// of small buttons (like, copy, download, reorder, delete, "⋯").
-/// `movable` = (is first, is last) when reordering is possible.
+/// An item in the set editor: thumb (with the quick copy button), badges,
+/// editable fields, and one row of small buttons (like, copy, download,
+/// reorder, delete, "⋯"). `movable` = (is first, is last) when reordering
+/// is possible.
 ///
 /// The `data-*` attributes describe what app.js may offer in the item's
 /// context menu (right click, the context-menu key, or "⋯"): only actions
-/// this viewer can take here. Like and copy reuse the card's own buttons.
+/// this viewer can take here. Like reuses the card's own button, copy the
+/// copy controls' `data-copy-*`.
 /// `is_cover`: the item is the set's chosen cover (a badge for everyone).
 pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>, is_cover: bool) -> Markup {
     let card = Card::from_item(item);
@@ -280,6 +282,7 @@ pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool
             a.thumb href=(page) {
                 (thumb(&item.id, &item.name, item.media.width, item.media.height))
             }
+            (quick_copy(&card))
             div.badges {
                 (kind_badge(item.media.kind, item.media.format))
                 (quality_badge(item.media.quality))

@@ -338,7 +338,7 @@ supported.
 | Method and path | Body -> response | Notes |
 |---|---|---|
 | `GET /api/v1/search?q=&limit=&offset=&target=` | -> `SearchResults` | Syntax in [search.md](search.md). Searches own and public items only. `limit` default 50, capped at 200; `q` at most 1000 bytes. With `target` (`telegram`, `discord`, `signal`, `whatsapp`, `slack`, `generic`) each hit gets `incompatible` when no current variant fits that app; unknown targets are 400. `semantic` is false when AI is off or not loaded yet. |
-| `POST /api/v1/usage` | `UsageBatch` -> `UsageAck` | At most 1000 events. Idempotent by event `id` (1-64 of `A-Za-z0-9_-`); repeats count as `duplicates`. Events for unknown items, items the caller cannot read, or malformed ids are listed in `rejected`. `copied_at` is clamped to [now - 1 year, now + 1 day]. |
+| `POST /api/v1/usage` | `UsageBatch` -> `UsageAck` | At most 1000 events. Idempotent by event `id` (1-64 of `A-Za-z0-9_-`); repeats count as `duplicates`. Events for unknown items, items the caller cannot read, or malformed ids are listed in `rejected`. `copied_at` is clamped to [now - 1 year, now + 1 day]. `client` names the reporter (`desktop/<version>`, `cli/<version>`, `web` for the web UI; 64 characters kept), `target` the profile the copy was prepared for (`generic` when the app is unknown) and `variant` the file it was made from. The web UI posts one event per image copy with its session cookie and `X-CSRF-Token`. |
 | `GET /api/v1/popular?scope=&set=&window=&limit=` | -> `Popular` | See below. |
 | `GET /api/v1/stats/me` | -> `UserStats` | The caller's own numbers. `likes_received` excludes own likes; `daily_copies` has 30 UTC days, oldest first. |
 | `GET /api/v1/profiles` | -> `[TargetProfile]` | What each chat app accepts. |

@@ -73,8 +73,10 @@ async fn every_page_renders_for_its_user() {
     assert!(html.contains("Find a better version"));
     assert!(html.contains(&format!("/api/v1/items/{}/file/thumb", cat.id)));
     let html = b.get(&format!("/items/{}", dance.id)).await.text();
-    assert!(html.contains("data-copy=\"link\""), "animations copy as a link");
-    assert!(html.contains("Browsers cannot put GIFs or videos on the clipboard"));
+    assert!(html.contains(">Copy still frame<"), "animations copy a still frame");
+    assert!(html.contains("data-copy=\"link\""), "and offer the link");
+    assert!(html.contains("Browsers can put only still images on the clipboard"));
+    assert!(html.contains("data-copy-insecure"), "the http:// note app.js shows");
     assert!(html.contains(">GIF<"), "kind badge");
     // Set page: lazy thumbs with alt text, inline editing, reorder, upload.
     let html = b.get(&format!("/sets/{}", set.id)).await.text();

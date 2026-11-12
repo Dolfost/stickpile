@@ -79,13 +79,44 @@ fn has_variant(variants: &[VariantInfo], v: Variant) -> bool {
     variants.iter().any(|x| x.variant == v)
 }
 
-/// The file a still is copied from: the original if it is a PNG, else the
-/// PNG variant if it exists, else the original (app.js converts it).
-pub fn still_copy_source(id: &str, format: MediaFormat, variants: &[VariantInfo]) -> (String, Variant) {
-    if format != MediaFormat::Png && has_variant(variants, Variant::Png) {
-        (file_url(id, Variant::Png), Variant::Png)
-    } else {
-        (file_url(id, Variant::Original), Variant::Original)
+/// What the browser copies for an item (docs/web.md, "Copy to clipboard").
+/// Browsers put only `image/png` on the clipboard, so every item becomes one
+/// PNG, like the desktop client's `image/png` offer for "Other / browser":
+///
+/// * stills: the original if it is a PNG, else the `png` variant (the
+///   server's lossless rendering of the original, nothing left to convert)
+///   once it exists; until then the original, which app.js converts;
+/// * animations and videos: a still frame that app.js decodes from the
+///   original at full size: the frame the thumbnail shows (the first frame,
+///   about 10 % into a video). The thumbnail is the fallback when the
+///   browser cannot decode the original (e.g. a codec it lacks).
+pub struct CopySource {
+    pub src: String,
+    pub variant: Variant,
+    /// A frame of an animation or video, not the whole item.
+    pub frame: bool,
+}
+
+pub fn copy_source(c: &Card<'_>) -> CopySource {
+    let (variant, frame) = match c.kind {
+        MediaKind::Still if c.format != MediaFormat::Png && has_variant(c.variants, Variant::Png) => {
+            (Variant::Png, false)
+        }
+        MediaKind::Still => (Variant::Original, false),
+        MediaKind::Animation | MediaKind::Video => (Variant::Original, true),
+    };
+    CopySource {
+        src: file_url(c.id, variant),
+        variant,
+        frame,
+    }
+}
+
+fn kind_key(kind: MediaKind) -> &'static str {
+    match kind {
+        MediaKind::Still => "still",
+        MediaKind::Animation => "animation",
+        MediaKind::Video => "video",
     }
 }
 
@@ -179,6 +210,10 @@ pub enum Icon {
     Sun,
     /// The "View" (display options) buttons.
     View,
+    /// Copy to the clipboard (the card's quick copy button).
+    Copy,
+    /// "Copied" (the quick copy button after a copy).
+    Check,
 }
 
 pub fn icon(i: Icon) -> Markup {
@@ -203,11 +238,20 @@ pub fn icon(i: Icon) -> Markup {
             "M17.3 6.7l1.4-1.4",
         ],
         Icon::View => &["M4 6h16", "M4 12h16", "M4 18h16", "M15 3.5v5", "M9 9.5v5", "M17 15.5v5"],
+        // The same outlines as app.js's menu icons.
+        Icon::Copy => &["M9 9h10v10H9z", "M5 15V5h10"],
+        Icon::Check => &["M5 12.5l4.5 4.5L19 7.5"],
     };
-    let width = if i == Icon::More { "3.2" } else { "2" };
+    let width = match i {
+        Icon::More => "3.2",
+        Icon::Check => "2.6",
+        _ => "2",
+    };
     let class = match i {
         Icon::Moon => "icon icon-moon",
         Icon::Sun => "icon icon-sun",
+        Icon::Copy => "icon icon-copy",
+        Icon::Check => "icon icon-check",
         _ => "icon",
     };
     html! {
@@ -218,22 +262,33 @@ pub fn icon(i: Icon) -> Markup {
     }
 }
 
-/// Copy controls. Stills are copied as PNG image data; animations and videos
-/// get "Copy link" and "Download" (browsers cannot put GIF or video files on
-/// the clipboard in a form chat apps accept). The buttons need app.js and
-/// stay hidden without it; the download link always works. `dense` (set
-/// editor cards) shows Download as an icon button.
+/// Copy controls: "Copy" puts a PNG on the clipboard ([`copy_source`]; for
+/// animations and videos a still frame, labelled so), plus "Download". The
+/// item page (`long`) also offers "Copy link" for animations and videos and
+/// explains the choice. The wrapper carries what app.js needs (`data-copy-*`)
+/// for these buttons, the card's quick copy button, its menu and Ctrl+C.
+/// The copy buttons need app.js and stay hidden without it; the download
+/// link always works. `dense` (set editor cards) shows Download as an icon
+/// button.
 pub fn copy_controls(c: &Card<'_>, long: bool, dense: bool) -> Markup {
     let original = file_url(c.id, Variant::Original);
+    let source = copy_source(c);
+    let label = match (source.frame, long) {
+        (false, false) => "Copy",
+        (false, true) => "Copy image",
+        (true, false) => "Copy frame",
+        (true, true) => "Copy still frame",
+    };
     html! {
-        div.copy-controls {
-            @if c.kind == MediaKind::Still {
-                @let (src, variant) = still_copy_source(c.id, c.format, c.variants);
-                button.copy.primary type="button" hidden data-copy="image" data-item=(c.id) data-src=(src)
-                    data-variant=(variant.as_str()) { "Copy" }
-            } @else {
-                button.copy type="button" hidden data-copy="link" data-item=(c.id) data-src=(original)
-                    data-variant="original" { "Copy link" }
+        div.copy-controls data-copy-item=(c.id) data-copy-name=(c.name) data-copy-kind=(kind_key(c.kind))
+            data-copy-src=(source.src) data-copy-variant=(source.variant.as_str())
+            data-copy-thumb=(file_url(c.id, Variant::Thumb)) data-copy-original=(original) data-copy-page[long] {
+            button.copy.primary[!source.frame] type="button" hidden data-copy="image"
+                title=[source.frame.then_some("Copy a still frame as a PNG: browsers cannot copy GIFs or videos")] {
+                (label)
+            }
+            @if long && source.frame {
+                button.copy type="button" hidden data-copy="link" title="Copy the address of the file" { "Copy link" }
             }
             @if dense {
                 a.button.download.icon-btn href=(original) download title="Download the original file" {
@@ -242,13 +297,42 @@ pub fn copy_controls(c: &Card<'_>, long: bool, dense: bool) -> Markup {
             } @else {
                 a.button.download href=(original) download { "Download" }
             }
-            @if long && c.kind != MediaKind::Still {
+            @if long && source.frame {
                 p.hint {
-                    "Browsers cannot put GIFs or videos on the clipboard in a form chat apps accept. "
-                    "Copy the link (it works for people signed in to this server) or download the file. "
-                    "The desktop client pastes them directly."
+                    "Browsers can put only still images on the clipboard, so “Copy still frame” copies the frame "
+                    "the thumbnail shows, as a PNG without motion. To send the "
+                    (if c.kind == MediaKind::Video { "video" } else { "animation" })
+                    ", download it and drag the file into the chat. “Copy link” copies the file's address, "
+                    "which opens only for people signed in to this server. The desktop client pastes GIFs "
+                    "and videos directly."
                 }
             }
+            @if long {
+                // Shown by app.js on plain http:// pages (no Clipboard API there).
+                p.warning.copy-insecure hidden data-copy-insecure="" {
+                    "Copying images needs HTTPS: this page was opened over plain http://, where browsers do not "
+                    "let pages put images on the clipboard. Open the image and use your browser's own "
+                    "“Copy Image”, or download it."
+                }
+            }
+        }
+    }
+}
+
+/// The card's quick copy button, on the thumbnail's corner: shown while the
+/// pointer is over the card or focus is in it (app.js unhides it; CSS hides
+/// it on touch screens). A shortcut for the mouse: keyboards have Ctrl+C on
+/// the card and the menu, and screen readers the card's Copy button and the
+/// menu, so it is out of the tab order and hidden from them.
+pub fn quick_copy(c: &Card<'_>) -> Markup {
+    let title = if c.kind == MediaKind::Still {
+        "Copy image"
+    } else {
+        "Copy a still frame"
+    };
+    html! {
+        button.quick-copy type="button" hidden data-copy="image" tabindex="-1" aria-hidden="true" title=(title) {
+            (icon(Icon::Copy)) (icon(Icon::Check))
         }
     }
 }
@@ -272,14 +356,19 @@ pub fn like_form(ctx: &Ctx, id: &str, liked: bool, likes: u64, next: &str) -> Ma
     }
 }
 
-/// Read-only grid card (home, search, popular): thumb, badges, name, like,
-/// copy. `extra` is shown under the name (e.g. "12 copies").
+/// Read-only grid card (home, search, better versions): thumb, badges,
+/// name, like, copy. `extra` is shown under the name (e.g. "12 copies").
+/// Like the set editor's cards it has a context menu (app.js: right click,
+/// the context-menu key, Shift+F10 or "⋯") with copy, like, open and
+/// download, and the quick copy button.
 pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
     html! {
-        article.card id=(format!("card-{}", c.id)) {
+        article.card id=(format!("card-{}", c.id)) data-menu="" data-item-url=(item_url(c.id))
+            data-download-url=(file_url(c.id, Variant::Original)) {
             a.thumb href=(item_url(c.id)) {
                 (thumb(c.id, c.name, c.width, c.height))
             }
+            (quick_copy(c))
             div.badges {
                 (kind_badge(c.kind, c.format))
                 (quality_badge(c.quality))
@@ -302,8 +391,19 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
                         span.likes title="Likes" { span aria-hidden="true" { "♥ " } (c.likes) span.sr-only { " likes" } }
                     }
                     (copy_controls(c, false, false))
+                    (menu_button(c.name))
                 }
             }
+        }
+    }
+}
+
+/// "⋯": opens the card's context menu. Needs app.js, hidden without it.
+pub fn menu_button(name: &str) -> Markup {
+    html! {
+        button.icon-btn.card-menu-btn type="button" hidden data-menu-button="" aria-haspopup="menu"
+            aria-expanded="false" title="More actions" {
+            (icon(Icon::More)) span.sr-only { "More actions for " (name) }
         }
     }
 }

@@ -1,21 +1,25 @@
 // stickpile web UI enhancements. Plain JavaScript, no build step, loaded
 // with `defer` from /static/app.js (the CSP allows no inline scripts).
 //
-// * Copy buttons (hidden until this script runs):
-//   - stills: fetch the PNG (or convert the original to PNG) and put it on
-//     the clipboard as image/png;
-//   - animations and videos: copy the absolute file URL (browsers cannot
-//     put GIF or video files on the clipboard in a form chat apps accept).
-//   A successful copy is reported as a usage event (POST /api/v1/usage,
-//   client "web"). The Clipboard API needs a secure context (https or
-//   localhost); elsewhere a message explains the alternatives.
+// * Copy to the clipboard (buttons hidden until this script runs): the
+//   Copy buttons, the quick copy button on card thumbnails, the cards'
+//   menus and Ctrl+C (⌘C) on a focused card or on an item page. Browsers
+//   only put image/png on the clipboard, so:
+//   - stills: the PNG the server chose (the original or the png variant),
+//     or the original converted to PNG on a canvas;
+//   - animations and videos: a PNG of a still frame (the thumbnail's frame,
+//     at full size), and the UI says so; "Copy link" copies the file URL.
+//   A successful image copy is reported as a usage event (POST
+//   /api/v1/usage, client "web", target "generic", the variant). The
+//   Clipboard API needs a secure context (https or localhost); elsewhere a
+//   dialog explains it and offers to open or download the image.
 // * Upload forms ([data-dropzone]) are handled by upload.js: drag-and-drop,
 //   paste and the tray for renaming and editing images before the upload.
 // * Escape cancels inline editing; dismiss buttons; copy buttons for
 //   one-time secrets (code.copyable).
-// * Set page: item cards ([data-menu]) get a context menu on right click,
-//   the context-menu key / Shift+F10 and their "⋯" button. Ctrl or Shift +
-//   right click keeps the browser's own menu. Without this script the
+// * Item cards ([data-menu]: set page, home, search) get a context menu on
+//   right click, the context-menu key / Shift+F10 and their "⋯" button.
+//   Ctrl or Shift + right click keeps the browser's own menu. Without this script the
 //   browser menu stays. (The "View" options and the theme switch are in
 //   prefs.js.)
 (function () {
@@ -27,25 +31,57 @@
 
   // ---- status messages -------------------------------------------------
 
-  var toastTimer = null;
-  function toast(message, isError) {
-    var el = document.getElementById("toast");
+  // Two live regions, made when the page loads so screen readers know them
+  // before the first message: #toast (polite status) and #toast-alert
+  // (role=alert, for errors). Only one shows at a time.
+  function toastRegion(isError) {
+    var id = isError ? "toast-alert" : "toast";
+    var el = document.getElementById(id);
     if (!el) {
       el = document.createElement("div");
-      el.id = "toast";
-      el.setAttribute("role", "status");
-      el.setAttribute("aria-live", "polite");
+      el.id = id;
+      el.className = "toast";
+      if (isError) {
+        el.setAttribute("role", "alert");
+      } else {
+        el.setAttribute("role", "status");
+        el.setAttribute("aria-live", "polite");
+      }
+      el.setAttribute("aria-atomic", "true");
       document.body.appendChild(el);
     }
-    el.textContent = message;
-    el.className = isError ? "toast show error" : "toast show";
+    return el;
+  }
+
+  var toastTimer = null;
+  var toastSeq = 0;
+  function toast(message, isError) {
+    var el = toastRegion(isError);
+    var other = toastRegion(!isError);
+    other.className = "toast";
+    other.textContent = "";
     if (toastTimer) clearTimeout(toastTimer);
+    // Emptied first, so the same message (a second copy) is read again.
+    el.textContent = "";
+    el.className = isError ? "toast show error" : "toast show";
+    var seq = ++toastSeq;
+    requestAnimationFrame(function () {
+      if (seq === toastSeq) el.textContent = message;
+    });
     toastTimer = setTimeout(function () {
       el.className = "toast";
-    }, isError ? 7000 : 2500);
+    }, isError ? 8000 : 3500);
   }
 
   function flashButton(btn, text) {
+    if (btn.classList.contains("quick-copy")) {
+      // An icon: the check mark shows for a moment (app.css).
+      btn.classList.add("done");
+      setTimeout(function () {
+        btn.classList.remove("done");
+      }, 1500);
+      return;
+    }
     var original = btn.getAttribute("data-label") || btn.textContent;
     btn.setAttribute("data-label", original);
     btn.textContent = text;
@@ -69,6 +105,9 @@
       .join("");
   }
 
+  // One event per image copy, like the desktop client's: `target` is the
+  // profile the PNG follows ("generic", Other / browser), `variant` the file
+  // it was made from. Link copies are not counted: no sticker was sent.
   function reportUsage(itemId, variant) {
     var headers = { "Content-Type": "application/json" };
     var token = csrfToken();
@@ -79,7 +118,7 @@
           id: eventId(),
           item_id: itemId,
           copied_at: Math.floor(Date.now() / 1000),
-          target: null,
+          target: "generic",
           variant: variant || null,
           client: "web",
         },
@@ -90,88 +129,418 @@
       credentials: "same-origin",
       headers: headers,
       body: JSON.stringify(body),
-    }).catch(function () {
-      /* statistics are best effort */
-    });
+    })
+      .then(function (r) {
+        if (!r.ok) console.warn("stickpile: the copy was not recorded (" + r.status + ")");
+      })
+      .catch(function () {
+        /* statistics are best effort */
+      });
   }
 
   // ---- clipboard -------------------------------------------------------
 
-  var INSECURE =
-    "Copying needs a secure connection (https:// or localhost). Use Download instead, " +
-    "or the stickpile desktop client, which pastes into chat apps directly.";
+  var MAC = /Mac|iPhone|iPad/.test(
+    (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ""
+  );
+  var COPY_KEYS = MAC ? "⌘C" : "Ctrl+C";
+  var COPY_KEYS_ARIA = MAC ? "Meta+C" : "Control+C";
 
-  function toPng(blob) {
-    if (blob.type === "image/png") return Promise.resolve(blob);
-    return createImageBitmap(blob).then(function (bitmap) {
-      var canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      canvas.getContext("2d").drawImage(bitmap, 0, 0);
-      return new Promise(function (resolve, reject) {
-        canvas.toBlob(function (png) {
-          if (png) resolve(png);
-          else reject(new Error("PNG conversion failed"));
-        }, "image/png");
+  // The item a copy control acts on: the nearest `.copy-controls`
+  // (data-copy-*: item id, name, kind, the file to copy and its variant,
+  // the thumbnail and the original), else the one in the control's card.
+  function copyScope(el) {
+    if (!el) return null;
+    var scope = el.closest("[data-copy-item]");
+    if (scope) return scope;
+    var card = el.closest(".card");
+    return card ? card.querySelector("[data-copy-item]") : null;
+  }
+
+  function copyInfo(scope) {
+    function a(name) {
+      return scope.getAttribute("data-copy-" + name) || "";
+    }
+    return {
+      item: a("item"),
+      name: a("name"),
+      kind: a("kind") || "still",
+      src: a("src"),
+      variant: a("variant"),
+      thumb: a("thumb"),
+      original: a("original"),
+    };
+  }
+
+  // "ok", or why this page cannot put images on the clipboard: "insecure"
+  // (plain http://: browsers offer the Clipboard API only on https:// and
+  // localhost) or "unsupported" (no ClipboardItem, or no image/png).
+  function imageClipboard() {
+    if (!window.isSecureContext) return "insecure";
+    if (!navigator.clipboard || !navigator.clipboard.write || typeof window.ClipboardItem !== "function") {
+      return "unsupported";
+    }
+    if (typeof ClipboardItem.supports === "function" && !ClipboardItem.supports("image/png")) return "unsupported";
+    return "ok";
+  }
+
+  function fetchBlob(src) {
+    return fetch(src, { credentials: "same-origin" }).then(function (r) {
+      if (!r.ok) throw new Error("the download failed (HTTP " + r.status + ")");
+      return r.blob();
+    });
+  }
+
+  function canvasPng(source, width, height) {
+    if (!width || !height) return Promise.reject(new Error("the image has no size"));
+    var canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+    return new Promise(function (resolve, reject) {
+      canvas.toBlob(function (png) {
+        if (png) resolve(png);
+        else reject(new Error("the PNG conversion failed"));
+      }, "image/png");
+    });
+  }
+
+  // Decoding with an <img>, for browsers whose createImageBitmap refuses
+  // the format.
+  function imgPng(blob) {
+    var url = URL.createObjectURL(blob);
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        resolve(canvasPng(img, img.naturalWidth, img.naturalHeight));
+      };
+      img.onerror = function () {
+        reject(new Error("the browser cannot decode this image"));
+      };
+      img.src = url;
+    }).finally(function () {
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // `blob` as a PNG: a PNG as it is (unless `redraw`), anything else
+  // decoded (an animation: its first frame) and encoded on a canvas.
+  function imagePng(blob, redraw) {
+    if (blob.type === "image/png" && !redraw) return Promise.resolve(blob);
+    if (!window.createImageBitmap) return imgPng(blob);
+    return createImageBitmap(blob, { imageOrientation: "from-image" })
+      .catch(function () {
+        return createImageBitmap(blob);
+      })
+      .then(
+        function (bitmap) {
+          return canvasPng(bitmap, bitmap.width, bitmap.height).finally(function () {
+            if (bitmap.close) bitmap.close();
+          });
+        },
+        function () {
+          return imgPng(blob);
+        }
+      );
+  }
+
+  // The frame the thumbnail shows (10 % into the video), at full size.
+  function videoPng(src) {
+    return new Promise(function (resolve, reject) {
+      var v = document.createElement("video");
+      var finished = false;
+      var timer = setTimeout(function () {
+        finish(new Error("the video took too long to load"));
+      }, 20000);
+      function finish(err) {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (err) reject(err);
+        else resolve(canvasPng(v, v.videoWidth, v.videoHeight));
+        setTimeout(function () {
+          v.removeAttribute("src");
+          v.load();
+        }, 0);
+      }
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.addEventListener("loadedmetadata", function () {
+        var d = v.duration;
+        v.currentTime = isFinite(d) && d > 0 ? d * 0.1 : 0;
+      });
+      v.addEventListener("seeked", function () {
+        finish(null);
+      });
+      v.addEventListener("error", function () {
+        finish(new Error("the browser cannot play this video"));
+      });
+      v.src = src;
+    });
+  }
+
+  // A still frame of an animation or video. If the browser cannot decode
+  // the original, the thumbnail (the same frame, at most 256 px) is used,
+  // and `used` says so.
+  function framePng(info, used) {
+    var full =
+      info.kind === "video"
+        ? videoPng(info.src)
+        : fetchBlob(info.src).then(function (blob) {
+            return imagePng(blob, true);
+          });
+    return full.catch(function () {
+      used.variant = "thumb";
+      used.small = true;
+      return fetchBlob(info.thumb).then(function (blob) {
+        return imagePng(blob, true);
       });
     });
   }
 
-  function fetchPng(src) {
-    return fetch(src, { credentials: "same-origin" })
-      .then(function (r) {
-        if (!r.ok) throw new Error("download failed (" + r.status + ")");
-        return r.blob();
-      })
-      .then(toPng);
+  function copyFailed(info, err) {
+    var why = err && err.message ? err.message.replace(/\.$/, "") : String(err);
+    if (err && err.name === "NotAllowedError") {
+      why = "the browser did not allow it (the window must have focus, and the site needs clipboard access)";
+    }
+    return "Could not copy “" + info.name + "”: " + why + ". Try again, or use Download.";
   }
 
-  function copyImage(btn) {
-    var src = btn.getAttribute("data-src");
-    if (!window.isSecureContext || !navigator.clipboard || !window.ClipboardItem) {
-      toast(INSECURE, true);
+  function copiedMessage(info, used) {
+    var name = "“" + info.name + "”";
+    if (info.kind === "still") return "Copied " + name + ". Paste it into your chat.";
+    var what = info.kind === "video" ? "video" : "animation";
+    if (used.small) {
+      return (
+        "Copied a small still frame of " + name + ": this browser cannot decode the " + what +
+        ". Download keeps the " + what + "."
+      );
+    }
+    return (
+      "Copied a still frame of " + name + " (browsers copy only still images). Download keeps the " + what + "."
+    );
+  }
+
+  // Where "Copied" shows when the copy came from the menu or the keyboard:
+  // the card's quick copy button, else the scope's Copy button.
+  function feedbackButton(scope) {
+    var card = scope.closest(".card");
+    return (card && card.querySelector(".quick-copy:not([hidden])")) || scope.querySelector("button[data-copy=image]");
+  }
+
+  var copying = {}; // item id -> true while its copy runs
+
+  function copyImage(scope, btn) {
+    var info = copyInfo(scope);
+    var support = imageClipboard();
+    if (support !== "ok") {
+      copyHelp(info, support);
       return;
     }
-    // Hand the clipboard a promise so the write starts inside the click
-    // (Safari requires that); fall back to awaiting the blob.
-    var pending = fetchPng(src);
+    if (copying[info.item]) return;
+    copying[info.item] = true;
+    var shown = btn || feedbackButton(scope);
+    if (shown) shown.classList.add("copying");
+    var used = { variant: info.variant, small: false };
+    var failure = null;
+    var png = (
+      info.kind === "still"
+        ? fetchBlob(info.src).then(function (blob) {
+            return imagePng(blob, false);
+          })
+        : framePng(info, used)
+    ).catch(function (err) {
+      failure = err;
+      throw err;
+    });
     var write;
     try {
-      write = navigator.clipboard.write([new ClipboardItem({ "image/png": pending })]);
+      // The ClipboardItem is made right here, inside the click or key
+      // press, holding a promise of the PNG: Safari requires that, and the
+      // permission to write cannot expire while the file loads.
+      write = navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     } catch (e) {
-      write = pending.then(function (blob) {
+      // Engines without promises in ClipboardItem want the blob itself.
+      write = png.then(function (blob) {
         return navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
       });
     }
     write
+      .then(
+        function () {
+          if (shown) flashButton(shown, "Copied ✓");
+          toast(copiedMessage(info, used));
+          reportUsage(info.item, used.variant);
+        },
+        function (err) {
+          toast(copyFailed(info, failure || err), true);
+        }
+      )
       .then(function () {
-        flashButton(btn, "Copied ✓");
-        toast("Image copied. Paste it into your chat.");
-        reportUsage(btn.getAttribute("data-item"), btn.getAttribute("data-variant"));
-      })
-      .catch(function (err) {
-        toast("Could not copy the image: " + (err && err.message ? err.message : err) + ". Try Download.", true);
+        delete copying[info.item];
+        if (shown) shown.classList.remove("copying");
       });
+  }
+
+  // document.execCommand("copy") on a hidden text field: deprecated, but
+  // the only way to copy text on plain http:// pages.
+  function legacyCopy(text) {
+    var field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.setAttribute("aria-hidden", "true");
+    field.className = "copy-buffer";
+    var active = document.activeElement;
+    document.body.appendChild(field);
+    field.select();
+    var ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (e) {
+      ok = false;
+    }
+    field.remove();
+    if (active && active.focus) active.focus({ preventScroll: true });
+    return ok ? Promise.resolve() : Promise.reject(new Error("copying text is not allowed here"));
   }
 
   function copyText(text) {
-    if (window.isSecureContext && navigator.clipboard) {
-      return navigator.clipboard.writeText(text);
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () {
+        return legacyCopy(text);
+      });
     }
-    return Promise.reject(new Error(INSECURE));
+    return legacyCopy(text);
   }
 
-  function copyLink(btn) {
-    var url = new URL(btn.getAttribute("data-src"), window.location.href).href;
-    copyText(url)
-      .then(function () {
-        flashButton(btn, "Link copied ✓");
+  function copyLink(scope, btn) {
+    var info = copyInfo(scope);
+    var url = new URL(info.original, window.location.href).href;
+    copyText(url).then(
+      function () {
+        if (btn) flashButton(btn, "Link copied ✓");
         toast("Link copied. It opens for people signed in to this server.");
-        reportUsage(btn.getAttribute("data-item"), btn.getAttribute("data-variant"));
-      })
-      .catch(function () {
+      },
+      function () {
         window.prompt("Copy this link:", url);
+      }
+    );
+  }
+
+  // Why copying cannot work on this page, and what to do instead: open the
+  // image (the browser's own "Copy Image" works everywhere) or download it.
+  function copyHelp(info, why) {
+    var old = document.getElementById("copy-help");
+    if (old) old.remove();
+    var video = info.kind === "video";
+    var d = document.createElement("dialog");
+    d.id = "copy-help";
+    d.className = "copy-help";
+    d.setAttribute("aria-labelledby", "copy-help-title");
+    d.setAttribute("aria-describedby", "copy-help-text");
+    function add(tag, text, attrs) {
+      var el = document.createElement(tag);
+      if (text) el.textContent = text;
+      Object.keys(attrs || {}).forEach(function (k) {
+        el.setAttribute(k, attrs[k]);
       });
+      return el;
+    }
+    var title = why === "insecure" ? "Copying images needs HTTPS" : "This browser cannot copy images";
+    d.appendChild(add("h2", title, { id: "copy-help-title" }));
+    var text = add("div", "", { id: "copy-help-text" });
+    text.appendChild(
+      add(
+        "p",
+        why === "insecure"
+          ? "Browsers let web pages put images on the clipboard only on https:// addresses (and on localhost). " +
+              "This page was opened over plain http://, so stickpile cannot copy “" + info.name + "”."
+          : "This browser does not let web pages put images on the clipboard, so stickpile cannot copy “" +
+              info.name + "”."
+      )
+    );
+    text.appendChild(
+      add(
+        "p",
+        video
+          ? "Open the video, or download it and drag the file into your chat."
+          : "Open the image and use your browser's own “Copy Image” (right-click it), or download it " +
+              "and drag the file into your chat."
+      )
+    );
+    d.appendChild(text);
+    if (why === "insecure") {
+      d.appendChild(
+        add(
+          "p",
+          "Copy works when stickpile is opened over https://, for example through tailscale serve. " +
+            "The desktop client copies without a browser, GIFs and videos included.",
+          { class: "hint" }
+        )
+      );
+    }
+    var row = add("div", "", { class: "inline-row" });
+    var open = add("a", video ? "Open video" : "Open image", {
+      class: "button primary",
+      href: info.kind === "still" ? info.src : info.original,
+      target: "_blank",
+      rel: "noopener",
+    });
+    var download = add("a", "Download", { class: "button", href: info.original, download: "" });
+    var close = add("button", "Close", { type: "button" });
+    row.appendChild(open);
+    row.appendChild(download);
+    row.appendChild(close);
+    d.appendChild(row);
+    var back = document.activeElement;
+    function done() {
+      if (d.open) d.close();
+    }
+    close.addEventListener("click", done);
+    open.addEventListener("click", function () {
+      setTimeout(done, 0);
+    });
+    download.addEventListener("click", function () {
+      setTimeout(done, 0);
+    });
+    d.addEventListener("close", function () {
+      d.remove();
+      if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true });
+    });
+    document.body.appendChild(d);
+    if (d.showModal) {
+      d.showModal();
+      open.focus();
+    } else {
+      // No <dialog> support: say it in the alert region instead.
+      d.remove();
+      toast(title + ". Open the image or download it instead.", true);
+    }
+  }
+
+  // Ctrl+C (⌘C) copies the focused card's item, or the item of an item page
+  // when nothing in particular has focus. Not in text fields, and not when
+  // text is selected (that is a text copy).
+  function isCopyShortcut(e) {
+    // Ctrl or ⌘, not both: whichever the platform copies with (the other
+    // does nothing there).
+    if (e.altKey || e.shiftKey || e.isComposing || e.ctrlKey === e.metaKey) return false;
+    var k = (e.key || "").toLowerCase();
+    // Other keyboard layouts (Cyrillic "с"): the key in the C position.
+    return k === "c" || (e.code === "KeyC" && !/^[a-z]$/.test(k));
+  }
+
+  function shortcutScope(t) {
+    if (editableTarget(t)) return null;
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed && String(sel).trim()) return null;
+    var card = t.closest("[data-menu]");
+    if (card) return card.querySelector("[data-copy-item]");
+    if (t === document.body || t === document.documentElement || t.id === "main") {
+      return document.querySelector("[data-copy-page]");
+    }
+    return null;
   }
 
   // ---- enhancement of new content ---------------------------------------
@@ -180,7 +549,13 @@
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll("button[data-copy][hidden]").forEach(function (b) {
       b.hidden = false;
+      if (b.classList.contains("quick-copy")) b.title += " (" + COPY_KEYS + ")";
     });
+    if (imageClipboard() === "insecure") {
+      root.querySelectorAll("[data-copy-insecure][hidden]").forEach(function (p) {
+        p.hidden = false;
+      });
+    }
     root.querySelectorAll("code.copyable").forEach(function (code) {
       if (code.nextElementSibling && code.nextElementSibling.classList.contains("copy-secret")) return;
       var b = document.createElement("button");
@@ -209,11 +584,12 @@
     });
   }
 
-  // ---- item context menu (set page) --------------------------------------
+  // ---- item context menu (item cards) ------------------------------------
 
   // Menu icons: 24×24 outlines, like the server's (web/components.rs).
   var ICONS = {
     copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+    link: ["M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1", "M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"],
     like: ["M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"],
     open: ["M14 4h6v6", "M20 4l-9 9", "M18 14v6H4V6h6"],
     download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
@@ -377,15 +753,27 @@
   function menuEntries(card) {
     var groups = [];
     var first = [];
-    var copy = card.querySelector("button[data-copy]");
-    if (copy) {
+    var scope = card.querySelector("[data-copy-item]");
+    if (scope) {
+      var frame = scope.getAttribute("data-copy-kind") !== "still";
       first.push({
-        label: copy.getAttribute("data-copy") === "image" ? "Copy image" : "Copy link",
+        label: frame ? "Copy still frame" : "Copy image",
         icon: "copy",
+        keys: COPY_KEYS,
+        ariaKeys: COPY_KEYS_ARIA,
         run: function () {
-          copy.click();
+          copyImage(scope, null);
         },
       });
+      if (frame) {
+        first.push({
+          label: "Copy link",
+          icon: "link",
+          run: function () {
+            copyLink(scope, null);
+          },
+        });
+      }
     }
     var like = card.querySelector("form.like-form button.like");
     if (like) {
@@ -539,6 +927,15 @@
         var label = document.createElement("span");
         label.textContent = entry.label;
         el.appendChild(label);
+        if (entry.keys) {
+          // The shortcut that does the same on the card (as native menus show it).
+          var keys = document.createElement("span");
+          keys.className = "menu-keys";
+          keys.setAttribute("aria-hidden", "true");
+          keys.textContent = entry.keys;
+          el.appendChild(keys);
+          el.setAttribute("aria-keyshortcuts", entry.ariaKeys);
+        }
         el.addEventListener("click", function (e) {
           if (entry.href) {
             // Links navigate (or download) by themselves; close afterwards.
@@ -673,8 +1070,10 @@
     var copy = t.closest("button[data-copy]");
     if (copy) {
       e.preventDefault();
-      if (copy.getAttribute("data-copy") === "image") copyImage(copy);
-      else copyLink(copy);
+      var scope = copyScope(copy);
+      if (!scope) return;
+      if (copy.getAttribute("data-copy") === "link") copyLink(scope, copy);
+      else copyImage(scope, copy);
       return;
     }
     var dismiss = t.closest("[data-dismiss]");
@@ -755,6 +1154,14 @@
       }
       return;
     }
+    if (isCopyShortcut(e)) {
+      var copyFrom = shortcutScope(t);
+      if (copyFrom) {
+        e.preventDefault();
+        if (!e.repeat) copyImage(copyFrom, null);
+      }
+      return;
+    }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && t.matches("button[data-menu-button]")) {
       // Menu button pattern: arrows open the menu on the first / last entry.
       var c = t.closest("[data-menu]");
@@ -787,5 +1194,7 @@
     toast("The server could not be reached. Check your connection and try again.", true);
   });
 
+  toastRegion(false);
+  toastRegion(true);
   enhance(document);
 })();

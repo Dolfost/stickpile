@@ -494,6 +494,56 @@ button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1
 .ctx-menu [role=separator] { height: 1px; margin: 0.25rem 0.35rem; background: var(--border); }
 .ctx-menu .menu-head { padding: 0.2rem 0.6rem 0.3rem; color: var(--muted); font-size: 0.78rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
+/* ---- copy to the clipboard (app.js) --------------------------------------
+   The menu entry's shortcut; "⋯" on the read-only item cards (home,
+   search), at the end of the name line like on the set page; the quick
+   copy button; the dialog shown where pages cannot copy images. */
+.ctx-menu .menu-keys { margin-left: auto; padding-left: 1.25rem; color: var(--muted); font-size: 0.78rem; }
+.card:not(.editor) .card-body { position: relative; }
+.card:not(.editor) .card-menu-btn {
+  position: absolute; top: 0.4rem; right: 0.35rem; width: 1.6rem; height: 1.6rem; min-height: 1.6rem;
+  border-color: transparent; background: transparent; color: var(--text-2);
+}
+.card:not(.editor) .card-menu-btn:hover, .card:not(.editor) .card-menu-btn[aria-expanded="true"] { background: var(--surface-2); border-color: var(--border); }
+.card:not(.editor):has(.card-menu-btn:not([hidden])) .name { padding-right: 1.6rem; }
+
+/* Quick copy: an icon on the thumbnail's bottom-left corner while the
+   pointer is over the card or focus is in it ("⋯" has the other corner in
+   the Grid view). It takes no room: the negative top margin pulls it up
+   onto the thumbnail. Touch screens (no hover, a coarse pointer) do without
+   it; they keep the card's Copy button and the menu. */
+.card > .quick-copy {
+  position: relative; z-index: 2; flex: none; align-self: flex-start;
+  width: 2rem; height: 2rem; min-height: 2rem; margin: -2.4rem 0 0.4rem 0.4rem; padding: 0; font-size: 1rem;
+  border-color: var(--border); background: var(--overlay); color: var(--text);
+  visibility: hidden; opacity: 0; transition: opacity 0.12s, visibility 0.12s;
+}
+.card:hover > .quick-copy, .card:focus-within > .quick-copy, .card > .quick-copy:is(.copying, .done) { visibility: visible; opacity: 1; }
+.card > .quick-copy:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+.card > .quick-copy.done { border-color: var(--success); color: var(--success); }
+button.copying { cursor: progress; }
+.quick-copy .icon-check, .quick-copy.done .icon-copy { display: none; }
+.quick-copy.done .icon-check { display: inline-block; }
+:is(.compact, .view-grid) .card > .quick-copy { width: 1.5rem; height: 1.5rem; min-height: 1.5rem; margin: -1.75rem 0 0.25rem 0.25rem; font-size: 0.85rem; }
+@media (hover: none) and (pointer: coarse) { .card > .quick-copy { display: none; } }
+@media (max-width: 40rem) {
+  /* Editor cards as rows: the corner of the 6.5rem thumbnail. */
+  .items-section:not(.compact):not(.view-grid) .card.editor > .quick-copy {
+    position: absolute; top: 4.6rem; left: 0.3rem; width: 1.6rem; height: 1.6rem; min-height: 1.6rem; margin: 0;
+  }
+}
+
+.copy-controls .copy-insecure { flex-basis: 100%; margin: 0.35rem 0; font-size: 0.9rem; }
+/* The text field of a link copy without the Clipboard API (plain http://). */
+.copy-buffer { position: fixed; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
+dialog.copy-help {
+  width: min(32rem, calc(100vw - 2rem)); padding: 1rem 1.25rem 1.1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); box-shadow: var(--popup-shadow);
+}
+dialog.copy-help::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog.copy-help h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+dialog.copy-help .inline-row { margin-top: 1rem; }
+
 /* ---- display options ("View") -----------------------------------------
    A <details> disclosure whose panel floats under its button (prefs.js
    keeps it inside the window and closes it on Escape or a click outside). */

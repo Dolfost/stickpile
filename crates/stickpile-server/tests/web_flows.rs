@@ -6,7 +6,7 @@
 mod common;
 mod web_common;
 
-use common::{png, png_near, TestServer};
+use common::{gif_anim, png, png_near, TestServer};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use stickpile_api::{routes, Visibility};
@@ -418,6 +418,152 @@ async fn usage_shows_up_in_stats_popular_and_home() {
     let html = b.get("/").await.text();
     assert!(html.contains("Recently copied"));
     assert!(html.contains(&format!("/items/{}", cat.id)));
+}
+
+/// The tag (`<…>`) that contains `marker`.
+fn tag_with<'a>(html: &'a str, marker: &str) -> &'a str {
+    let at = html.find(marker).unwrap_or_else(|| panic!("{marker} in {html}"));
+    let start = html[..at].rfind('<').unwrap();
+    let end = html[at..].find('>').unwrap() + at;
+    &html[start..=end]
+}
+
+/// `POST /api/v1/usage` the way app.js sends it: session cookie, JSON, the
+/// page's `Origin` and `Sec-Fetch-Site`, and `X-CSRF-Token` if given.
+async fn post_usage(b: &Browser, body: &Value, token: Option<&str>, origin: &str, site: &str) -> common::Resp {
+    let mut req = b
+        .client
+        .post(b.url(routes::USAGE))
+        .header("Origin", origin)
+        .header("Sec-Fetch-Site", site)
+        .json(body);
+    if let Some(t) = token {
+        req = req.header("X-CSRF-Token", t);
+    }
+    common::read(req.send().await.unwrap()).await
+}
+
+/// A copy in the browser (app.js; docs/web.md, "Copy to clipboard"): the
+/// markup says what to copy, and the usage event posted after a successful
+/// copy (`client` "web", `target` "generic", the variant the PNG was made
+/// from) is accepted once from the page, counts, and puts the item first
+/// in "Recently copied", whose cards copy again (controls, quick copy and
+/// menu). Without the CSRF token or from another site nothing is recorded.
+#[tokio::test]
+async fn web_copy_is_recorded_and_shows_in_recently_copied() {
+    let s = TestServer::start().await;
+    let alice = s.user("alice").await;
+    let set = s.create_set(&alice, "cats", Visibility::Private).await;
+    let cat = s.upload_one(&alice, &set.id, "cat.png", png(1)).await;
+    let dance = s.upload_one(&alice, &set.id, "dance.gif", gif_anim(3)).await;
+    let b = Browser::login(&s, &alice).await;
+    assert!(b.get("/").await.text().contains("Nothing copied yet"));
+
+    // What app.js copies: a PNG still as it is, a GIF as a still frame of
+    // the original (the thumbnail as the fallback).
+    let page = b.get(&format!("/sets/{}", set.id)).await.text();
+    let still = tag_with(&page, &format!("data-copy-item=\"{}\"", cat.id));
+    assert!(still.contains("data-copy-kind=\"still\""), "{still}");
+    assert!(still.contains(&format!("data-copy-src=\"/api/v1/items/{}/file/original\"", cat.id)));
+    assert!(still.contains("data-copy-variant=\"original\""), "{still}");
+    let anim = tag_with(&page, &format!("data-copy-item=\"{}\"", dance.id));
+    assert!(anim.contains("data-copy-kind=\"animation\""), "{anim}");
+    assert!(anim.contains(&format!("data-copy-thumb=\"/api/v1/items/{}/file/thumb\"", dance.id)));
+    assert!(
+        !anim.contains("data-copy-page"),
+        "only the item page copies on Ctrl+C without focus"
+    );
+    assert!(page.contains(">Copy frame<"), "the label says it is a still");
+    assert!(page.contains("class=\"quick-copy\""));
+
+    let t = now();
+    let event = |id: &str, item: &str, variant: &str| {
+        json!({"events": [{"id": id, "item_id": item, "copied_at": t - 1, "target": "generic",
+            "variant": variant, "client": "web"}]})
+    };
+    let csrf = b.csrf.clone().unwrap();
+    let rows = || async {
+        sqlx::query_as::<_, (String, Option<String>, Option<String>, Option<String>)>(
+            "SELECT item_id, client, target, variant FROM usage_events ORDER BY copied_at, id",
+        )
+        .fetch_all(&s.state.db)
+        .await
+        .unwrap()
+    };
+
+    // Refused: no token; a token from another origin; a cross-site request.
+    let cat_event = event("web-cat-1", &cat.id, "original");
+    for (token, origin, site) in [
+        (None, s.base.as_str(), "same-origin"),
+        (Some(csrf.as_str()), "https://evil.example", "cross-site"),
+        (Some(csrf.as_str()), s.base.as_str(), "cross-site"),
+    ] {
+        let r = post_usage(&b, &cat_event, token, origin, site).await;
+        assert_eq!(
+            r.status,
+            StatusCode::FORBIDDEN,
+            "{token:?} {origin} {site}: {}",
+            r.text()
+        );
+        assert_eq!(r.code(), "csrf");
+    }
+    assert!(rows().await.is_empty());
+
+    // Accepted from the page, once: a retry with the same id is a duplicate.
+    let r = post_usage(&b, &cat_event, Some(&csrf), &s.base, "same-origin").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(
+        (r.value()["accepted"].clone(), r.value()["duplicates"].clone()),
+        (json!(1), json!(0))
+    );
+    let r = post_usage(&b, &cat_event, Some(&csrf), &s.base, "same-origin").await;
+    assert_eq!(
+        (r.value()["accepted"].clone(), r.value()["duplicates"].clone()),
+        (json!(0), json!(1))
+    );
+    // The GIF's frame, a moment later.
+    let mut frame = event("web-dance-1", &dance.id, "original");
+    frame["events"][0]["copied_at"] = json!(t);
+    let r = post_usage(&b, &frame, Some(&csrf), &s.base, "same-origin").await;
+    assert_eq!(r.value()["accepted"], 1, "{}", r.text());
+
+    let web = (
+        Some("web".to_string()),
+        Some("generic".to_string()),
+        Some("original".to_string()),
+    );
+    assert_eq!(
+        rows().await,
+        vec![
+            (cat.id.clone(), web.0.clone(), web.1.clone(), web.2.clone()),
+            (dance.id.clone(), web.0, web.1, web.2),
+        ]
+    );
+    let item = s.get(&alice, &routes::path(routes::ITEM, &[&cat.id])).await.value();
+    assert_eq!(item["item"]["copies"], 1);
+
+    // "Recently copied": newest first, each card ready to copy again.
+    let home = b.get("/").await.text();
+    assert!(home.contains("Recently copied"));
+    let (d, c) = (
+        home.find(&format!("id=\"card-{}\"", dance.id))
+            .expect("dance in recently copied"),
+        home.find(&format!("id=\"card-{}\"", cat.id))
+            .expect("cat in recently copied"),
+    );
+    assert!(d < c, "newest first");
+    let card = tag_with(&home, &format!("id=\"card-{}\"", cat.id));
+    assert!(card.contains("data-menu"), "{card}");
+    assert!(card.contains(&format!("data-item-url=\"/items/{}\"", cat.id)));
+    assert!(card.contains(&format!("data-download-url=\"/api/v1/items/{}/file/original\"", cat.id)));
+    assert!(home.contains(&format!("data-copy-item=\"{}\"", cat.id)));
+    assert!(home.contains("More actions for cat"), "the menu button");
+    assert!(home.contains("class=\"quick-copy\""));
+
+    // Stats count it; the web reports the generic profile it copies for.
+    let stats = b.get("/stats").await.text();
+    assert!(stats.contains("2 copies in the last 30 days"), "{stats}");
+    assert!(stats.contains("Other apps"));
 }
 
 #[tokio::test]

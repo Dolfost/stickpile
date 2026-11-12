@@ -74,7 +74,8 @@ show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
 
 | Entry | Shown when | Does |
 |---|---|---|
-| Copy image / Copy link | always | the card's copy button (same rules as [Copy to clipboard](#copy-to-clipboard)) |
+| Copy image (stills) / Copy still frame (animations, videos), with "Ctrl+C" | always | copies the item, as Ctrl+C on the card does ([Copy to clipboard](#copy-to-clipboard)) |
+| Copy link | animations and videos | copies the file's address |
 | Like / Unlike | always | the card's like button |
 | Open item page | always | link to `/items/{id}` (middle-click opens a tab) |
 | Download original | always | download link |
@@ -83,6 +84,11 @@ show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
 | Use as cover / Stop using as cover | you can edit the set | makes the item the set's cover (or goes back to the first item) through `POST /sets/{id}/cover`; the grid comes back in the page's sort with the "Cover" badge on that card. When the set has a cover image, it asks first: the item replaces the image |
 | Move up, Move down, Move to top, Move to bottom | you can edit the set, set order, no likes filter | the set's move endpoint; the ends are disabled for the first and last item |
 | Delete… | you can edit the set | asks for confirmation, then removes the card |
+
+The read-only cards elsewhere (search results, the start page's "Recently
+copied", "Better versions") have the same menu with the copy entries, Open
+item page and Download original, and the same "⋯" button at the end of the
+name line.
 
 The menu is built by app.js from `data-*` attributes the server puts on the
 card only when the action is allowed (`data-edit-url`, `data-delete-url`,
@@ -259,8 +265,11 @@ wins.
   without the likes filter.
 - **Delete** asks for confirmation (a browser dialog with JavaScript, a
   confirmation page without).
-- **Context menu** on set page cards: right click, the context-menu key,
+- **Context menu** on item cards: right click, the context-menu key,
   Shift+F10 or "⋯". See [Set page](#set-page).
+- **Copy**: Ctrl+C (⌘C) on a focused card, or on an item page when nothing
+  in particular has focus, copies the sticker; the quick copy icon appears
+  on the thumbnail under the pointer. See [Copy to clipboard](#copy-to-clipboard).
 - **Likes**: the ♡/♥ button toggles your like (`aria-pressed` tells screen
   readers the state).
 - **Drag and drop and paste**: drop files on the dashed upload area, or
@@ -274,32 +283,78 @@ have the item name as alt text, and colours follow the theme (see
 
 ## Copy to clipboard
 
-Copy buttons need JavaScript and stay hidden without it (the stylesheet
-enforces the `hidden` attribute). "Download" always works.
+Every item card (the set page in all three styles, search results, the
+start page's "Recently copied", "Better versions") and the item page can
+put the sticker on the clipboard, ready to paste into a chat:
 
-| Media | Button | What happens |
+| Where | How |
+|---|---|
+| Card | **Copy** (**Copy frame** for animations and videos) in the card's buttons (Regular style). |
+| Card, fast | The **quick copy** icon on the thumbnail's bottom-left corner, shown only while the pointer is over the card or focus is in it, so the Grid style's thumbnails stay clean ("⋯" has the other corner there). It is a mouse shortcut: out of the tab order and hidden from screen readers, which have the Copy button and the menu. Touch screens (no hover, a coarse pointer) do without it. |
+| Card, keyboard | **Ctrl+C** (**⌘C** on a Mac) while focus is anywhere in the card (its thumbnail, name, buttons), unless text is selected (then it copies the text as usual) or focus is in a text field. Holding the keys copies once. |
+| Card menu | **Copy image** / **Copy still frame** (with the shortcut shown), and **Copy link** for animations and videos: right click, the context-menu key, Shift+F10 or "⋯" (see [Set page](#set-page)). |
+| Item page | **Copy image** / **Copy still frame**, **Copy link** for animations and videos, **Download**; Ctrl+C when nothing in particular has focus (e.g. after clicking the picture). |
+
+**What is copied.** Browsers write only `image/png` (besides text) to the
+system clipboard, so every copy is one PNG, the same as the desktop
+client's `image/png` offer for "Other / browser" ([clipboard.md](clipboard.md)):
+
+| Media | Copied | From |
 |---|---|---|
-| Still (PNG, JPEG, WebP) | **Copy** | The PNG is fetched (the original if it is a PNG, else the `png` variant; if that is not generated yet the original is converted to PNG in the browser) and written as `image/png` with `navigator.clipboard.write`. Chat apps paste it as a picture. |
-| Animation (GIF, animated WebP) | **Copy link** + **Download** | The absolute file URL is copied. |
-| Video (MP4, WebM) | **Copy link** + **Download** | Same. |
+| Still (PNG, JPEG, WebP) | the picture as a PNG | The original if it is a PNG. Otherwise the `png` variant, the server's lossless rendering of the original, used as it is; until that variant is generated, the original, converted to PNG on a canvas in the browser. |
+| Animation (GIF, animated WebP) | a **still frame** as a PNG: the first frame, the one the thumbnail shows, at full size | Decoded from the original in the browser. |
+| Video (MP4, WebM) | a **still frame** as a PNG: the frame about 10 % in, the one the thumbnail shows, at full size | Decoded from the original with a `<video>` element. |
 
-**Why no GIF or video copy?** The async Clipboard API only writes
-`image/png`, `text/plain` and `text/html` to the system clipboard. Writing
-`image/gif` or a video type is rejected, and converting a GIF to PNG keeps
-only its first frame. Chat apps need the actual file (`text/uri-list` or the
-GIF bytes), which only a native program can offer. So animations and videos get "Copy link" (the link
-opens for people signed in to this server; share links are a post-v1 feature)
-and "Download" (then drag the file into the chat). The desktop client puts the
-right formats on the clipboard; see [clipboard.md](clipboard.md).
+If the browser cannot decode the original (a video codec it lacks), the
+frame comes from the thumbnail (the same frame, at most 256 px), and the
+message says so.
 
-**Secure context.** The Clipboard API only exists on `https://` pages and on
-`localhost`. On plain `http://` the buttons explain this and point to
-Download and the desktop client. `tailscale serve` provides HTTPS on the
-tailnet.
+**Why only a still for GIFs and videos?** The Clipboard API rejects
+`image/gif` and video types, and drawing an animation on a canvas keeps one
+frame. Chat apps need the file itself (`text/uri-list` or the GIF bytes) to
+keep the motion, which only a native program can offer. So the label says
+"frame", the confirmation says "still frame … Download keeps the
+animation", and the item page explains it: to send the animation, download
+it and drag the file into the chat, or use the desktop client, which
+pastes GIFs and videos directly. **Copy link** copies the file's address
+(it opens for people signed in to this server; share links are a post-v1
+feature).
 
-**Usage statistics.** After a successful copy the page reports a usage event
-(`POST /api/v1/usage`, `client: "web"`, a random event id, the variant). It
-counts for popular items and your stats. Downloads are not counted.
+**How.** app.js creates the `ClipboardItem` synchronously inside the click
+or key press, with a promise of the PNG, then fetches and converts: Safari
+requires that, and the permission to write cannot expire while the file
+loads. Engines that refuse a promise get the finished blob instead.
+
+**Feedback.** The button shows "Copied ✓" (the quick copy icon a check
+mark) for a moment, and a message such as "Copied “cat”. Paste it into your
+chat." appears at the bottom in a polite live region (`#toast`,
+`role="status"`). Failures go to an alert region (`#toast-alert`,
+`role="alert"`) with the reason, e.g. "Could not copy “cat”: the download
+failed (HTTP 500). Try again, or use Download." Both regions exist from the
+page load, so screen readers announce the first message too.
+
+**Secure context.** The Clipboard API exists only on `https://` pages and
+on `localhost`. On plain `http://` (for example a tailnet name without
+`tailscale serve`) a copy opens a dialog, "Copying images needs HTTPS",
+that says why and offers **Open image** (in a new tab, where the browser's
+own "Copy Image" works) and **Download**; the item page shows the same
+note next to its buttons up front. A browser without `ClipboardItem` or
+without `image/png` support gets the same dialog, titled "This browser
+cannot copy images". Copy link falls back to `document.execCommand("copy")`
+there. `tailscale serve` provides HTTPS on the tailnet.
+
+**Usage statistics.** After a successful image copy the page reports one
+usage event, like the desktop client: `POST /api/v1/usage` with the
+session cookie and `X-CSRF-Token` (tailnet users: the same-origin check),
+a random event id, `client: "web"`, `target: "generic"` (the profile whose
+PNG it copied, as the CLI reports without `--target`) and the `variant`
+the PNG was made from (`original`, `png`, or `thumb` for the fallback
+frame). It counts for "Recently copied", popular items and your stats
+("Where you paste" lists it as "Other apps"). A failed or refused copy,
+Copy link and downloads are not counted.
+
+**Without JavaScript** the copy buttons stay hidden (the stylesheet
+enforces the `hidden` attribute); "Download" always works.
 
 ## Upload and import
 
@@ -524,7 +579,11 @@ lists' control and card parts, themes (`<html data-theme>` per account,
 none for System, the top bar's switch, Settings → Appearance and
 `POST /settings/theme` with its validation and CSRF) and the context-menu data per permission (no edit, delete
 or move entries for viewers, no move entries when sorted or filtered, the
-named "⋯" button);
+named "⋯" button); copying (`web_copy_is_recorded_and_shows_in_recently_copied`:
+the copy controls' data, the usage event app.js posts accepted once with the
+session cookie and CSRF header and refused without them or cross-site, and
+the item first in "Recently copied" with its copy controls, quick copy and
+menu);
 the CSP header and the absence of inline styles and scripts; static asset
 types; the emoji picker's markers (the emojis inputs, the script order, the
 `:` suggestions' combobox, the `emoji.json` notice and contents, its terms
@@ -541,3 +600,17 @@ and uploads with `ai_fields`. The tray itself (marking, approving, editing,
 "Approve all", what gets uploaded) was checked with Playwright in Chromium,
 Firefox and WebKit against a server without models: the test intercepts the
 suggestion endpoint in the page and adds the attribute.
+
+Copying in the browser was checked with Playwright against a test server
+with a still PNG, JPEG and WebP, a GIF, an animated WebP, an MP4 and a WebM:
+every route (button, quick copy in the Grid style, Ctrl+C on a card and on
+the item page, the menu on the start page and in search results, Copy
+link), the PNG handed to `navigator.clipboard.write` and its size, the
+usage events, the error region, and the dialog on plain `http://` (a tailnet
+name mapped to 127.0.0.1). Headless Chromium reads the PNG back from its
+clipboard; headless Firefox's clipboard keeps only text, and headless WebKit
+refuses to read without a paste prompt, so there the check stops at the
+write resolving with the right PNG. Headless WebKit in the nix sandbox
+crashes on any `<video>`, so video frames were checked in Chromium (MP4 and
+WebM at full size) and Firefox (WebM at full size, MP4 through the
+thumbnail fallback).
