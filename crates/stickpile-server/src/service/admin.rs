@@ -55,6 +55,9 @@ pub async fn list_users(state: &AppState) -> AppResult<Vec<AdminUser>> {
 }
 
 pub async fn create_user(state: &AppState, admin: &CurrentUser, req: AdminCreateUser) -> AppResult<AdminUser> {
+    if let Some(pw) = &req.password {
+        password::validate(pw, state.config.auth.min_password_length)?;
+    }
     let user = users::create(
         &state.db,
         NewUser {
@@ -93,10 +96,27 @@ pub async fn update_user(
     {
         return Err(AppError::conflict("cannot demote or disable the last active admin"));
     }
+    let display = req
+        .display_name
+        .as_deref()
+        .map(users::validate_display_name)
+        .transpose()?;
     let mut changes = serde_json::Map::new();
-    if let Some(d) = &req.display_name {
-        let d = users::validate_display_name(d)?;
-        let d = if d.is_empty() { user.username.clone() } else { d };
+    let mut user = user;
+    let mut renamed_from = None;
+    if let Some(name) = &req.username {
+        if let Some(old) = users::rename(state, id, name).await? {
+            changes.insert("username".into(), serde_json::json!({"from": old, "to": name.trim()}));
+            user = user_or_404(state, id).await?;
+            renamed_from = Some(old);
+        }
+    }
+    if let Some(d) = display {
+        let d = if d.is_empty() || renamed_from.as_deref() == Some(d.as_str()) {
+            user.username.clone()
+        } else {
+            d
+        };
         sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
             .bind(&d)
             .bind(id)
@@ -124,7 +144,7 @@ pub async fn update_user(
         changes.insert("disabled".into(), disabled.into());
     }
     if let Some(pw) = req.password {
-        password::validate(&pw)?;
+        password::validate(&pw, state.config.auth.min_password_length)?;
         let hash = password::hash(pw).await?;
         sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
             .bind(hash)

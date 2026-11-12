@@ -259,6 +259,11 @@ pub struct User {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateMe {
+    /// New username (2..=32 of `A-Z a-z 0-9 _ . -`, starting with a letter or
+    /// digit; unique ignoring case). A display name equal to the old username
+    /// follows it.
+    #[serde(default)]
+    pub username: Option<String>,
     /// Empty resets the display name to the username.
     pub display_name: Option<String>,
     #[serde(default, with = "double_option")]
@@ -870,6 +875,9 @@ pub struct AdminCreateUser {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AdminUpdateUser {
+    /// Rename the user (same rules as [`UpdateMe::username`]).
+    #[serde(default)]
+    pub username: Option<String>,
     pub display_name: Option<String>,
     pub role: Option<Role>,
     pub disabled: Option<bool>,

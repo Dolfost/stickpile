@@ -29,6 +29,8 @@ registration = "closed"
 tailscale_autocreate = true
 # Your tailnet login gets the admin role on first sight.
 tailscale_admins = ["you@github"]
+# Shortest password accepted when one is set (default 8, at least 4).
+#min_password_length = 8
 # Bootstrap a local admin on the first start (an empty database only), e.g.
 # for logging in from outside the tailnet:
 # 	mkdir -p $STICKPILE_DIR/secrets && chmod 700 $STICKPILE_DIR/secrets

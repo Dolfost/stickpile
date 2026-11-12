@@ -139,6 +139,22 @@ pub fn login_form(username: &str, next: &str, error: Option<&str>) -> Markup {
                 "On the tailnet? Open stickpile through its tailnet address and you are signed in automatically. "
                 a href="/register" { "Create an account" } " if the server allows it."
             }
+            // No email here: the ways back in are the tailnet, an admin, or
+            // the operator's command (docs/deployment.md).
+            details.forgot {
+                summary { "Forgot your password?" }
+                ul {
+                    li {
+                        "If your account has a tailnet login, open stickpile through its tailnet address from one of your "
+                        "own devices: you are signed in, and Settings sets a new password without the old one."
+                    }
+                    li { "Otherwise ask an administrator: the admin panel resets passwords." }
+                    li {
+                        "Whoever runs the server can set one with "
+                        code { "stickpile-server reset-password <username> --password-file <file>" } "."
+                    }
+                }
+            }
         }
     };
     layout::page(None, "Sign in", Nav::None, body)
@@ -332,7 +348,7 @@ pub struct RegisterForm {
     invite_code: String,
 }
 
-fn register_form(policy: Registration, f: &RegisterForm, error: Option<&str>) -> Markup {
+fn register_form(policy: Registration, min_pw: usize, f: &RegisterForm, error: Option<&str>) -> Markup {
     let body = html! {
         section.auth-box {
             h1 { "Create an account" }
@@ -363,13 +379,13 @@ fn register_form(policy: Registration, f: &RegisterForm, error: Option<&str>) ->
                     }
                     div.field-row {
                         label for="reg-password" { "Password" }
-                        input #reg-password type="password" name="password" required minlength="8"
+                        input #reg-password type="password" name="password" required minlength=(min_pw)
                             autocomplete="new-password" aria-describedby="reg-password-hint";
                         p.hint #reg-password-hint { "At least 8 characters." }
                     }
                     div.field-row {
                         label for="reg-password2" { "Repeat the password" }
-                        input #reg-password2 type="password" name="password2" required minlength="8"
+                        input #reg-password2 type="password" name="password2" required minlength=(min_pw)
                             autocomplete="new-password";
                     }
                     button.primary type="submit" { "Create account" }
@@ -399,7 +415,11 @@ pub async fn register_page(
     } else {
         StatusCode::OK
     };
-    (status, register_form(policy, &f, None)).into_response()
+    (
+        status,
+        register_form(policy, state.config.auth.min_password_length, &f, None),
+    )
+        .into_response()
 }
 
 pub async fn register_submit(
@@ -413,7 +433,12 @@ pub async fn register_submit(
     if f.password != f.password2 {
         return Ok(html_status(
             StatusCode::BAD_REQUEST,
-            register_form(policy, &f, Some("The passwords do not match.")),
+            register_form(
+                policy,
+                state.config.auth.min_password_length,
+                &f,
+                Some("The passwords do not match."),
+            ),
         ));
     }
     let req = RegisterRequest {
@@ -432,7 +457,10 @@ pub async fn register_submit(
                 password2: String::new(),
                 ..f
             };
-            Ok(html_status(e.status, register_form(policy, &f, Some(&msg))))
+            Ok(html_status(
+                e.status,
+                register_form(policy, state.config.auth.min_password_length, &f, Some(&msg)),
+            ))
         }
     }
 }

@@ -103,11 +103,20 @@ pub struct AuthConfig {
     /// auto-created or on every login.
     pub tailscale_admins: Vec<String>,
     pub session_ttl_days: u32,
+    /// Shortest password accepted when one is set (registration, settings,
+    /// admin). 4..=128; existing passwords are not affected.
+    pub min_password_length: usize,
     pub totp_issuer: String,
     /// Bootstrap: if the database has no users, create this admin on start.
     pub initial_admin_username: Option<String>,
     pub initial_admin_password_file: Option<PathBuf>,
 }
+
+/// Default of `auth.min_password_length`. (Here rather than in `auth` so this
+/// file stays self-contained for the drift guard in `nix/drift-guard`.)
+pub const DEFAULT_MIN_PASSWORD_LENGTH: usize = 8;
+/// Lowest value `auth.min_password_length` may take.
+pub const MIN_PASSWORD_LENGTH_FLOOR: usize = 4;
 
 impl Default for AuthConfig {
     fn default() -> Self {
@@ -116,6 +125,7 @@ impl Default for AuthConfig {
             tailscale_autocreate: true,
             tailscale_admins: Vec::new(),
             session_ttl_days: 30,
+            min_password_length: DEFAULT_MIN_PASSWORD_LENGTH,
             totp_issuer: "stickpile".into(),
             initial_admin_username: None,
             initial_admin_password_file: None,
@@ -347,6 +357,9 @@ impl Config {
         }
         if self.auth.session_ttl_days == 0 {
             return bad("auth.session_ttl_days must be > 0".into());
+        }
+        if !(MIN_PASSWORD_LENGTH_FLOOR..=128).contains(&self.auth.min_password_length) {
+            return bad("auth.min_password_length must be 4..=128".into());
         }
         if self.auth.initial_admin_username.is_some() != self.auth.initial_admin_password_file.is_some() {
             return bad("auth.initial_admin_username and auth.initial_admin_password_file go together".into());

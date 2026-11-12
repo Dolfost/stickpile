@@ -119,7 +119,7 @@ pub async fn register(state: &AppState, req: RegisterRequest, ip: Option<IpAddr>
         return Err(AppError::forbidden("registration is closed"));
     }
     users::validate_username(&req.username)?;
-    password::validate(&req.password)?;
+    password::validate(&req.password, state.config.auth.min_password_length)?;
     let mut role = Role::User;
     let mut invitation_id = None;
     if policy == Registration::Invite {

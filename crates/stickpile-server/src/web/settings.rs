@@ -18,6 +18,7 @@ use crate::auth::AuthMethod;
 use crate::db::UserRow;
 use crate::error::{AppError, AppResult};
 use crate::ids::now;
+use crate::service::users::USERNAME_PATTERN;
 use crate::service::{account, telegram, ui};
 use crate::state::AppState;
 
@@ -88,12 +89,22 @@ async fn render(
             h2 #s-profile { "Profile" }
             (err(Section::Profile))
             dl.kv {
-                dt { "Username" } dd { code { (me.username) } }
                 dt { "Role" } dd { (me.role) }
                 @if let Some(l) = &me.tailscale_login { dt { "Tailnet login" } dd { code { (l) } } }
             }
             form.stack.narrow method="post" action="/settings" {
                 (ctx.csrf_input())
+                div.field-row {
+                    label for="s-username" { "Username" }
+                    input #s-username type="text" name="username" value=(me.username) required
+                        minlength="2" maxlength="32" pattern=(USERNAME_PATTERN) autocomplete="username"
+                        spellcheck="false" autocapitalize="none" aria-describedby="s-username-hint";
+                    p.hint #s-username-hint {
+                        "Shown as the owner of your sets (“by " (me.username) "”), matched by "
+                        code { "by:" } " in search, and used to sign in with a password. "
+                        "2–32 letters, digits, " code { "_" } ", " code { "." } " or " code { "-" } "."
+                    }
+                }
                 div.field-row {
                     label for="s-display" { "Display name" }
                     input #s-display type="text" name="display_name" value=(me.display_name) maxlength="100";
@@ -116,11 +127,13 @@ async fn render(
             (err(Section::Password))
             @if tailnet && me.password_hash.is_none() {
                 p.muted { "You sign in through the tailnet. Set a password to also sign in from elsewhere or to create tokens with the CLI's login." }
+            } @else if tailnet {
+                p.muted { "You are signed in through the tailnet, so the current password is not needed to set a new one." }
             }
             form.stack.narrow method="post" action="/settings/password" {
                 (ctx.csrf_input())
                 input.sr-only type="text" name="username" value=(me.username) autocomplete="username" tabindex="-1" aria-hidden="true";
-                @if me.password_hash.is_some() {
+                @if me.password_hash.is_some() && !tailnet {
                     div.field-row {
                         label for="s-cur" { "Current password" }
                         input #s-cur type="password" name="current_password" required autocomplete="current-password";
@@ -128,11 +141,11 @@ async fn render(
                 }
                 div.field-row {
                     label for="s-new" { "New password" }
-                    input #s-new type="password" name="new_password" required minlength="8" autocomplete="new-password";
+                    input #s-new type="password" name="new_password" required minlength=(state.config.auth.min_password_length) autocomplete="new-password";
                 }
                 div.field-row {
                     label for="s-new2" { "Repeat the new password" }
-                    input #s-new2 type="password" name="new_password2" required minlength="8" autocomplete="new-password";
+                    input #s-new2 type="password" name="new_password2" required minlength=(state.config.auth.min_password_length) autocomplete="new-password";
                 }
                 button.primary type="submit" { "Change password" }
                 p.hint { "Changing it signs out your other browser sessions. API tokens keep working; revoke them below if needed." }
@@ -164,7 +177,7 @@ async fn render(
             @if tokens.is_empty() {
                 p.muted { "No tokens." }
             } @else {
-                table.data {
+                div.table-wrap { table.data {
                     thead { tr {
                         th scope="col" { "Name" } th scope="col" { "Token" } th scope="col" { "Created" }
                         th scope="col" { "Last used" } th scope="col" { "Expires" } th scope="col" { span.sr-only { "Actions" } }
@@ -193,20 +206,24 @@ async fn render(
                             }
                         }
                     }
-                }
+                } }
             }
-            form.inline-row method="post" action="/settings/tokens" {
+            // A panel of its own, apart from the list above.
+            form.token-form method="post" action="/settings/tokens" aria-labelledby="s-tok-new" {
+                h3 #s-tok-new { "New token" }
                 (ctx.csrf_input())
-                label for="s-tok-name" { "Name" }
-                input #s-tok-name type="text" name="name" required maxlength="100" placeholder="laptop desktop client";
-                label for="s-tok-exp" { "Expires" }
-                select #s-tok-exp name="expires_days" {
-                    option value="" { "never" }
-                    option value="30" { "in 30 days" }
-                    option value="90" { "in 90 days" }
-                    option value="365" { "in a year" }
+                div.inline-row {
+                    label for="s-tok-name" { "Name" }
+                    input #s-tok-name type="text" name="name" required maxlength="100" placeholder="laptop desktop client";
+                    label for="s-tok-exp" { "Expires" }
+                    select #s-tok-exp name="expires_days" {
+                        option value="" { "never" }
+                        option value="30" { "in 30 days" }
+                        option value="90" { "in 90 days" }
+                        option value="365" { "in a year" }
+                    }
+                    button.primary type="submit" { "Create token" }
                 }
-                button.primary type="submit" { "Create token" }
             }
         }
     };
@@ -238,6 +255,8 @@ async fn failed(state: &AppState, ctx: &Ctx, section: Section, e: AppError) -> A
 #[derive(Debug, Default, Deserialize)]
 pub struct ProfileForm {
     #[serde(default)]
+    username: String,
+    #[serde(default)]
     display_name: String,
     #[serde(default)]
     telegram_user_id: String,
@@ -261,7 +280,9 @@ pub async fn profile(State(state): State<AppState>, ctx: Ctx, Form(f): Form<Prof
             }
         }
     };
+    let username = f.username.trim();
     let req = UpdateMe {
+        username: (!username.is_empty()).then(|| username.to_string()),
         display_name: Some(f.display_name.trim().to_string()),
         telegram_user_id: Some(telegram_user_id),
     };

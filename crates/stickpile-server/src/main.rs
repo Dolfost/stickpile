@@ -33,6 +33,21 @@ enum Command {
         #[arg(long)]
         tailscale_login: Option<String>,
     },
+    /// Set a new password for a user who forgot theirs, then exit. Signs the
+    /// user out of every web session; API tokens keep working unless
+    /// `--revoke-tokens`. Safe while the server runs.
+    ResetPassword {
+        username: String,
+        /// File holding the new password (one line). Secrets are never passed inline.
+        #[arg(long)]
+        password_file: PathBuf,
+        /// Also revoke the user's API tokens (the CLI and desktop clients sign in again).
+        #[arg(long)]
+        revoke_tokens: bool,
+        /// Also turn off two-step verification (lost authenticator app).
+        #[arg(long)]
+        reset_totp: bool,
+    },
     /// Write a full backup into DIR: every set of every user as a set
     /// directory (`sets/<user>/<slug>/`), a database snapshot
     /// (`stickpile.db`) and `backup.json`. Safe while the server runs.
@@ -304,6 +319,10 @@ fn main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!("reading {}: {e}", p.display()))
                 })
                 .transpose()?;
+            if let Some(pw) = &password {
+                stickpile_server::auth::password::validate(pw, cfg.auth.min_password_length)
+                    .map_err(|e| anyhow::anyhow!("--password-file: {e}"))?;
+            }
             tokio::runtime::Runtime::new()?.block_on(async move {
                 std::fs::create_dir_all(&cfg.server.data_dir)?;
                 let db = stickpile_server::db::connect(&cfg.db_path()).await?;
@@ -329,6 +348,41 @@ fn main() -> anyhow::Result<()> {
                 )
                 .await;
                 println!("created user {} ({}, id {})", user.username, user.role, user.id);
+                Ok(())
+            })
+        }
+        Command::ResetPassword {
+            username,
+            password_file,
+            revoke_tokens,
+            reset_totp,
+        } => {
+            let cfg = stickpile_server::Config::load(&cli.config)?;
+            init_logging("warn");
+            let password = stickpile_server::config::read_secret(&password_file)
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", password_file.display()))?;
+            tokio::runtime::Runtime::new()?.block_on(async move {
+                let db = stickpile_server::db::connect(&cfg.db_path()).await?;
+                let user = stickpile_server::service::users::reset_password(
+                    &db,
+                    &username,
+                    password,
+                    cfg.auth.min_password_length,
+                    revoke_tokens,
+                    reset_totp,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+                println!(
+                    "new password set for {}; signed out of all web sessions{}{}",
+                    user.username,
+                    if revoke_tokens { "; API tokens revoked" } else { "" },
+                    if reset_totp {
+                        "; two-step verification turned off"
+                    } else {
+                        ""
+                    },
+                );
                 Ok(())
             })
         }

@@ -137,8 +137,8 @@ set's name, slug or visibility and new variants bump `updated_at` of its items.
 | `POST /api/v1/auth/token` | `TokenRequest` -> `TokenCreated` | Password login for API clients. `401 totp_required` if the account has TOTP and no code was sent. Rate limited per IP and per username. |
 | `POST /api/v1/auth/register` | `RegisterRequest` -> `User` (201) | Policy `auth.registration`: `closed` -> 403; `invite` -> `invite_code` required, the account gets the invitation's role, codes are single-use; `open` -> role `user`. Usernames: 2-32 of `A-Za-z0-9_.-`, starting alphanumeric; passwords at least 8 characters. Rate limited like login. |
 | `GET /api/v1/me` | -> `User` | |
-| `PATCH /api/v1/me` | `UpdateMe` -> `User` | `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears). Absent fields stay. Audited as `user.update_self`. |
-| `PUT /api/v1/me/password` | `ChangePassword` -> 204 | `current_password` required if the account has one. Other web sessions of the user are revoked; API tokens are kept. |
+| `PATCH /api/v1/me` | `UpdateMe` -> `User` | `username` (2-32 of `A-Z a-z 0-9 _ . -`, starting with a letter or digit; taken ignoring case -> 409; a change of case is allowed), `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears). Absent fields stay; every field is validated before anything changes. A rename keeps sessions, tokens and the tailnet login (they are bound to the user id), takes a display name equal to the old username along, refreshes the `by:` search and touches the user's items so clients refetch them (`updated_since`). The old name becomes free for others. Audited as `user.update_self` with `username: {from, to}`. |
+| `PUT /api/v1/me/password` | `ChangePassword` -> 204 | `current_password` required if the account has one, unless the request is signed in through the tailnet (`tailscale serve` has just vouched for the person). At least `auth.min_password_length` characters (default 8). Other web sessions of the user are revoked; API tokens are kept. |
 | `POST /api/v1/me/totp` | -> `TotpSetup` | Starts enrolment (secret + `otpauth://` URL); 409 if TOTP is already on. |
 | `POST /api/v1/me/totp/confirm` | `TotpCode` -> `User` | Enables TOTP with a current code. |
 | `POST /api/v1/me/totp/disable` | `TotpCode` -> `User` | Needs a current code. |
@@ -278,7 +278,7 @@ All admin routes need the `admin` role: anonymous callers get 401, other users
 |---|---|---|
 | `GET /api/v1/admin/users` | -> `[AdminUser]` | With set/item counts and storage. |
 | `POST /api/v1/admin/users` | `AdminCreateUser` -> `AdminUser` (201) | Username or tailnet login taken -> 409. |
-| `PATCH /api/v1/admin/users/{id}` | `AdminUpdateUser` -> `AdminUser` | A new password revokes the user's web sessions **and API tokens** (audit detail `tokens_revoked`); disabling revokes the sessions (disabled users cannot authenticate at all); `reset_totp` removes TOTP; `tailscale_login: null` unbinds. Demoting or disabling the last active admin -> 409. |
+| `PATCH /api/v1/admin/users/{id}` | `AdminUpdateUser` -> `AdminUser` | `username` renames the user (same rules and effects as `PATCH /api/v1/me`). A new password revokes the user's web sessions **and API tokens** (audit detail `tokens_revoked`); disabling revokes the sessions (disabled users cannot authenticate at all); `reset_totp` removes TOTP; `tailscale_login: null` unbinds. Demoting or disabling the last active admin -> 409. |
 | `DELETE /api/v1/admin/users/{id}` | -> 204 | Deletes the user and everything they own. Not yourself, not the last admin (409). |
 | `GET /api/v1/admin/invitations` | -> `[Invitation]` | |
 | `POST /api/v1/admin/invitations` | `CreateInvitation` -> `InvitationCreated` (201) | `url` = `<public_url>/register?code=<code>`; the code is shown only here (stored hashed). `expires_in` 60 s to 365 days, default 7 days. |

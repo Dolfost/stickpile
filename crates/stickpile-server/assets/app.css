@@ -173,6 +173,8 @@ button.done { border-color: var(--success); color: var(--success); }
 .field-row input[type=text], .field-row input[type=password], .field-row input[type=url], .field-row input[type=number], .field-row select { width: 100%; }
 .inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .inline-row input[type=text], .inline-row input[type=search] { flex: 1 1 12rem; }
+.token-form { margin-top: 1rem; padding: 0.75rem 1rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.token-form h3 { margin: 0 0 0.6rem; }
 form.inline { display: inline; margin: 0; }
 .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem 1.5rem; }
 .narrow-num { width: 5rem; }
@@ -418,7 +420,10 @@ dl.kv dt { color: var(--muted); font-weight: 600; }
 dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .uploader { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.25rem 1rem 1rem; margin: 1rem 0; }
 .import-into { margin-top: 1rem; }
-.import-into summary, .cheatsheet summary, details.manage summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.import-into summary, .cheatsheet summary, details.manage summary, details.forgot summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+details.forgot { margin-top: 0.75rem; }
+details.forgot ul { margin: 0.5rem 0 0; padding-left: 1.2rem; color: var(--text-2); }
+details.forgot li + li { margin-top: 0.35rem; }
 
 /* ---- upload ----------------------------------------------------------- */
 

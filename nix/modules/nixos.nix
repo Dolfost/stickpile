@@ -288,6 +288,10 @@ in
             session_ttl_days = opt types.ints.positive 30 ''
               Lifetime of web sessions.
             '';
+            min_password_length = opt (types.ints.between 4 128) 8 ''
+              Shortest password accepted when one is set (registration,
+              settings, admin). Existing passwords are not affected.
+            '';
             totp_issuer = opt types.str "stickpile" ''
               Issuer shown in authenticator apps.
             '';

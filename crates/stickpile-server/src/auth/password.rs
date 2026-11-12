@@ -9,14 +9,20 @@ use argon2::Argon2;
 
 use crate::error::{AppError, AppResult};
 
-pub const MIN_LEN: usize = 8;
+/// Shortest minimum `auth.min_password_length` may set.
+pub const MIN_LEN_FLOOR: usize = crate::config::MIN_PASSWORD_LENGTH_FLOOR;
+/// Default of `auth.min_password_length`.
+pub const DEFAULT_MIN_LEN: usize = crate::config::DEFAULT_MIN_PASSWORD_LENGTH;
 pub const MAX_LEN: usize = 1024;
 
-pub fn validate(password: &str) -> AppResult<()> {
+/// At least `min_len` characters (`auth.min_password_length`, never below
+/// [`MIN_LEN_FLOOR`]) and at most [`MAX_LEN`] bytes.
+pub fn validate(password: &str, min_len: usize) -> AppResult<()> {
+    let min = min_len.max(MIN_LEN_FLOOR);
     let n = password.chars().count();
-    if n < MIN_LEN {
+    if n < min {
         return Err(AppError::bad_request(format!(
-            "password must be at least {MIN_LEN} characters"
+            "password must be at least {min} characters"
         )));
     }
     if password.len() > MAX_LEN {
@@ -80,7 +86,13 @@ mod tests {
 
     #[test]
     fn length_rules() {
-        assert!(validate("short").is_err());
-        assert!(validate("long enough").is_ok());
+        assert!(validate("short", DEFAULT_MIN_LEN).is_err());
+        assert!(validate("long enough", DEFAULT_MIN_LEN).is_ok());
+        // A configured minimum of 4, and never below the floor.
+        assert!(validate("1234", 4).is_ok());
+        assert!(validate("abc", 4).is_err());
+        assert!(validate("abc", 1).is_err());
+        assert!(validate("ab\u{e9}d", 4).is_ok(), "characters, not bytes");
+        assert!(validate(&"x".repeat(MAX_LEN + 1), 4).is_err());
     }
 }

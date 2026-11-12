@@ -18,6 +18,7 @@ registration = "invite"
 tailscale_autocreate = true
 tailscale_admins = ["alice@github"]
 session_ttl_days = 30
+min_password_length = 8
 totp_issuer = "stickpile"
 initial_admin_username = "admin"
 initial_admin_password_file = "/run/secrets/stickpile-admin-password"

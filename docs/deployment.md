@@ -327,6 +327,38 @@ Pick one:
   podman exec stickpile stickpile-server create-user alice --admin --tailscale-login alice@github
   ```
 
+## Forgotten passwords
+
+stickpile sends no email, so a forgotten password is reset by someone who
+can vouch for the person:
+
+- **The tailnet**: an account with a tailnet login is signed in when it is
+  opened through `tailscale serve` from one of its owner's devices, and
+  Settings then sets a new password without the old one. A tagged device,
+  such as the server itself when it hosts a Tailscale Service, has no user
+  identity: sign in with a password there.
+- **An admin**: Admin panel → Users → Manage → Reset password. This also
+  revokes the user's sessions and API tokens.
+- **The host** (also when the only admin forgot theirs), safe while the
+  server runs:
+
+  ```sh
+  # NixOS
+  sudo -u stickpile stickpile-server reset-password alice --password-file /path/to/pw
+  # container: put the new password into $STICKPILE_DIR/secrets/ first
+  podman exec stickpile stickpile-server reset-password alice \
+    --password-file /run/secrets/stickpile/alice-password
+  ```
+
+  The user is signed out of every web session. API tokens (the CLI and
+  desktop clients) keep working unless you add `--revoke-tokens`;
+  `--reset-totp` also turns off two-step verification for a lost
+  authenticator. Delete the password file afterwards. The reset is in the
+  audit log as `user.password_reset`.
+
+`auth.min_password_length` (default 8, at least 4) sets the shortest
+password any of these accept.
+
 ## Backups and upgrades
 
 Everything is in the state directory: `/var/lib/stickpile` on NixOS,

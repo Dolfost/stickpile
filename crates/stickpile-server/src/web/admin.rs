@@ -17,6 +17,7 @@ use crate::error::{AppError, AppResult};
 use crate::ids::now;
 use crate::service::admin as svc;
 use crate::service::ui;
+use crate::service::users::USERNAME_PATTERN;
 use crate::state::{AiStatus, AppState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,7 +174,7 @@ fn user_done(done: Option<&str>) -> Option<&'static str> {
     })
 }
 
-fn user_row(ctx: &AdminCtx, u: &AdminUser) -> Markup {
+fn user_row(ctx: &AdminCtx, u: &AdminUser, min_pw: usize) -> Markup {
     let id = &u.user.id;
     let action = format!("/admin/users/{id}");
     let is_self = id == ctx.id();
@@ -206,6 +207,12 @@ fn user_row(ctx: &AdminCtx, u: &AdminUser) -> Markup {
                 details.manage {
                     summary { "Manage" span.sr-only { " " (u.user.username) } }
                     div.manage-box {
+                        (form("username", html! {
+                            label for=(format!("un-{id}")) { "Username" }
+                            input id=(format!("un-{id}")) type="text" name="username" value=(u.user.username) required
+                                minlength="2" maxlength="32" pattern=(USERNAME_PATTERN) spellcheck="false" autocapitalize="none";
+                            button.small type="submit" { "Rename" }
+                        }))
                         (form("role", html! {
                             label for=(format!("role-{id}")) { "Role" }
                             select id=(format!("role-{id}")) name="role" {
@@ -221,7 +228,7 @@ fn user_row(ctx: &AdminCtx, u: &AdminUser) -> Markup {
                         }
                         (form("password", html! {
                             label for=(format!("pw-{id}")) { "New password" }
-                            input id=(format!("pw-{id}")) type="password" name="password" minlength="8" required autocomplete="new-password";
+                            input id=(format!("pw-{id}")) type="password" name="password" minlength=(min_pw) required autocomplete="new-password";
                             button.small type="submit" { "Reset password" }
                         }))
                         @if u.user.totp_enabled {
@@ -243,7 +250,7 @@ fn user_row(ctx: &AdminCtx, u: &AdminUser) -> Markup {
     }
 }
 
-fn users_page(ctx: &AdminCtx, users: &[AdminUser], notice: Option<&str>, error: Option<&str>) -> Markup {
+fn users_page(ctx: &AdminCtx, users: &[AdminUser], min_pw: usize, notice: Option<&str>, error: Option<&str>) -> Markup {
     let body = html! {
         @if let Some(n) = notice { (layout::alert("success", n)) }
         @if let Some(e) = error { (layout::alert("error", e)) }
@@ -254,7 +261,7 @@ fn users_page(ctx: &AdminCtx, users: &[AdminUser], notice: Option<&str>, error: 
                     th scope="col" { "Last sign-in" } th scope="col" { "Sets / items" } th scope="col" { "Storage" }
                     th scope="col" { span.sr-only { "Actions" } }
                 } }
-                tbody { @for u in users { (user_row(ctx, u)) } }
+                tbody { @for u in users { (user_row(ctx, u, min_pw)) } }
             }
         }
         section aria-labelledby="a-new-user" {
@@ -274,7 +281,7 @@ fn users_page(ctx: &AdminCtx, users: &[AdminUser], notice: Option<&str>, error: 
                 div.two-col {
                     div.field-row {
                         label for="nu-pw" { "Password (optional)" }
-                        input #nu-pw type="password" name="password" minlength="8" autocomplete="new-password" aria-describedby="nu-pw-hint";
+                        input #nu-pw type="password" name="password" minlength=(min_pw) autocomplete="new-password" aria-describedby="nu-pw-hint";
                         p.hint #nu-pw-hint { "Leave empty for tailnet-only accounts." }
                     }
                     div.field-row {
@@ -295,7 +302,13 @@ fn users_page(ctx: &AdminCtx, users: &[AdminUser], notice: Option<&str>, error: 
 
 pub async fn users(State(state): State<AppState>, ctx: AdminCtx, Query(q): Query<DoneQuery>) -> AppResult<Markup> {
     let list = svc::list_users(&state).await?;
-    Ok(users_page(&ctx, &list, user_done(q.done.as_deref()), None))
+    Ok(users_page(
+        &ctx,
+        &list,
+        state.config.auth.min_password_length,
+        user_done(q.done.as_deref()),
+        None,
+    ))
 }
 
 async fn users_error(state: &AppState, ctx: &AdminCtx, e: AppError) -> AppResult<Response> {
@@ -303,7 +316,17 @@ async fn users_error(state: &AppState, ctx: &AdminCtx, e: AppError) -> AppResult
         return Err(e);
     }
     let list = svc::list_users(state).await?;
-    Ok((e.status, users_page(ctx, &list, None, Some(&e.message))).into_response())
+    Ok((
+        e.status,
+        users_page(
+            ctx,
+            &list,
+            state.config.auth.min_password_length,
+            None,
+            Some(&e.message),
+        ),
+    )
+        .into_response())
 }
 
 fn opt(s: &str) -> Option<String> {
@@ -355,6 +378,8 @@ pub struct UpdateUserForm {
     #[serde(default)]
     action: String,
     #[serde(default)]
+    username: String,
+    #[serde(default)]
     role: String,
     #[serde(default)]
     password: String,
@@ -370,6 +395,7 @@ pub async fn update_user(
 ) -> AppResult<Response> {
     let mut req = AdminUpdateUser::default();
     match f.action.as_str() {
+        "username" => req.username = Some(f.username.clone()),
         "role" => req.role = Some(parse_role(&f.role)),
         "disable" => req.disabled = Some(true),
         "enable" => req.disabled = Some(false),

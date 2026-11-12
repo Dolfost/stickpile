@@ -1224,3 +1224,281 @@ async fn anonymous_is_rejected_everywhere() {
     }
     let _ = Opts::default();
 }
+
+async fn search_ids(srv: &TestServer, u: &common::TestUser, q: &str) -> Vec<String> {
+    srv.get(u, &format!("{}?q={q}", routes::SEARCH))
+        .await
+        .expect(200)
+        .value()["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["item"]["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn change_password(srv: &TestServer, u: &common::TestUser, new: &str) -> common::Resp {
+    let body = json!({"current_password": u.password, "new_password": new});
+    srv.put(u, routes::ME_PASSWORD, body).await
+}
+
+#[tokio::test]
+async fn username_rename() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let admin = srv.admin("root").await;
+    let set = srv.create_set(&alice, "cats", Visibility::Public).await;
+    let item = srv.upload_one(&alice, &set.id, "cat.png", common::png(1)).await;
+    // Pretend the item was synced long ago, to see the rename touch it.
+    sqlx::query("UPDATE items SET updated_at = 1000")
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    assert_eq!(search_ids(&srv, &bob, "by:alice").await, vec![item.id.clone()]);
+
+    // Taken (ignoring case) and invalid names change nothing.
+    srv.patch(&alice, routes::ME, json!({"username": "BOB"}))
+        .await
+        .expect(409);
+    srv.patch(&alice, routes::ME, json!({"username": "-x"}))
+        .await
+        .expect(400);
+    // A bad display name next to a good username: nothing is renamed.
+    srv.patch(
+        &alice,
+        routes::ME,
+        json!({"username": "kitty", "display_name": "x".repeat(101)}),
+    )
+    .await
+    .expect(400);
+    let me: User = srv.get(&alice, routes::ME).await.expect(200).json();
+    assert_eq!(me.username, "alice");
+
+    // The rename; a display name equal to the old username follows it, also
+    // when a form sends that old value back.
+    let me: User = srv
+        .patch(
+            &alice,
+            routes::ME,
+            json!({"username": "kitty", "display_name": "alice"}),
+        )
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(me.username, "kitty");
+    assert_eq!(me.display_name, "kitty");
+    let set_now = srv
+        .get(&bob, &routes::path(routes::SET, &[&set.id]))
+        .await
+        .expect(200)
+        .value();
+    assert_eq!(set_now["set"]["owner_username"], "kitty");
+    assert_eq!(search_ids(&srv, &bob, "by:kitty").await, vec![item.id.clone()]);
+    assert!(search_ids(&srv, &bob, "by:alice").await.is_empty());
+    // Clients' offline caches refetch the item.
+    let synced = srv
+        .get(&bob, &format!("{}?updated_since=2000", routes::ITEMS))
+        .await
+        .expect(200)
+        .value();
+    assert_eq!(synced["items"][0]["id"], item.id.as_str());
+    assert_eq!(synced["items"][0]["owner_username"], "kitty");
+    // Tokens keep working (same token as before); the password login uses the new name.
+    let login = |name: &str| {
+        let body = json!({"username": name, "password": alice.password, "token_name": "x"});
+        srv.send(None, Method::POST, routes::AUTH_TOKEN, Some(body))
+    };
+    login("kitty").await.expect(200);
+    login("alice").await.expect(401);
+    // A change of case only is allowed; the same name again is a no-op.
+    let me: User = srv
+        .patch(&alice, routes::ME, json!({"username": "Kitty"}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(me.username, "Kitty");
+    srv.patch(&alice, routes::ME, json!({"username": "Kitty"}))
+        .await
+        .expect(200);
+    // The freed name can be taken by someone else.
+    let me: User = srv
+        .patch(&bob, routes::ME, json!({"username": "alice"}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(me.username, "alice");
+
+    // Admin rename; a custom display name stays.
+    srv.patch(&bob, routes::ME, json!({"display_name": "Bob B"}))
+        .await
+        .expect(200);
+    let up: AdminUser = srv
+        .patch(
+            &admin,
+            &routes::path(routes::ADMIN_USER, &[&bob.id]),
+            json!({"username": "bobby"}),
+        )
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(up.user.username, "bobby");
+    assert_eq!(up.user.display_name, "Bob B");
+    srv.patch(
+        &admin,
+        &routes::path(routes::ADMIN_USER, &[&bob.id]),
+        json!({"username": "kitty"}),
+    )
+    .await
+    .expect(409);
+    let audit: Vec<(String, String)> =
+        sqlx::query_as("SELECT action, details FROM audit_log WHERE details LIKE '%\"username\":{%' ORDER BY id")
+            .fetch_all(&srv.state.db)
+            .await
+            .unwrap();
+    let actions: Vec<&str> = audit.iter().map(|(a, _)| a.as_str()).collect();
+    assert_eq!(
+        actions,
+        [
+            "user.update_self",
+            "user.update_self",
+            "user.update_self",
+            "user.update"
+        ],
+        "{audit:?}"
+    );
+    assert!(audit[0].1.contains("\"from\":\"alice\"") && audit[0].1.contains("\"to\":\"kitty\""));
+}
+
+#[tokio::test]
+async fn password_minimum_is_configurable() {
+    // Default: 8.
+    let srv = TestServer::start().await;
+    let u = srv.user("alice").await;
+    change_password(&srv, &u, "1234").await.expect(400);
+    let html = srv.get(&u, "/settings").await.text();
+    assert!(html.contains("minlength=\"8\""));
+
+    // Lowered to 4: four characters are fine, three are not; forms follow.
+    let srv = TestServer::with_config(|c| c.auth.min_password_length = 4).await;
+    let u = srv.user("alice").await;
+    let admin = srv.admin("root").await;
+    change_password(&srv, &u, "123").await.expect(400);
+    change_password(&srv, &u, "1234").await.expect(204);
+    srv.send(
+        None,
+        Method::POST,
+        routes::AUTH_TOKEN,
+        Some(json!({"username": "alice", "password": "1234", "token_name": "x"})),
+    )
+    .await
+    .expect(200);
+    srv.post(
+        &admin,
+        routes::ADMIN_USERS,
+        json!({"username": "zoe", "password": "abcd", "role": "user"}),
+    )
+    .await
+    .expect(201);
+    srv.post(
+        &admin,
+        routes::ADMIN_USERS,
+        json!({"username": "yan", "password": "abc", "role": "user"}),
+    )
+    .await
+    .expect(400);
+    assert!(srv.get(&admin, "/admin/users").await.text().contains("minlength=\"4\""));
+
+    // Out of range is a config error.
+    let mut cfg = stickpile_server::Config::default();
+    cfg.auth.min_password_length = 3;
+    assert!(cfg.validate().is_err());
+    cfg.auth.min_password_length = 129;
+    assert!(cfg.validate().is_err());
+}
+
+#[tokio::test]
+async fn tailnet_sign_in_sets_a_password_without_the_current_one() {
+    let srv = TestServer::start().await;
+    let u = srv.user("alice").await;
+    sqlx::query("UPDATE users SET tailscale_login = 'alice@github' WHERE id = ?")
+        .bind(&u.id)
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    // A token (or a session) still needs the current password.
+    srv.put(&u, routes::ME_PASSWORD, json!({"new_password": "new-password-1"}))
+        .await
+        .expect(403);
+    // Through the tailnet it does not.
+    srv.unix(
+        "PUT",
+        routes::ME_PASSWORD,
+        &[("Tailscale-User-Login", "alice@github")],
+        Some(r#"{"new_password": "new-password-2"}"#),
+    )
+    .await
+    .expect(204);
+    srv.send(
+        None,
+        Method::POST,
+        routes::AUTH_TOKEN,
+        Some(json!({"username": "alice", "password": "new-password-2", "token_name": "x"})),
+    )
+    .await
+    .expect(200);
+    // The settings page leaves out the current-password field there.
+    let html = srv
+        .unix("GET", "/settings", &[("Tailscale-User-Login", "alice@github")], None)
+        .await
+        .expect(200)
+        .text();
+    assert!(!html.contains("current_password"), "{html}");
+    assert!(html.contains("the current password is not needed"));
+}
+
+#[tokio::test]
+async fn operator_password_reset() {
+    let srv = TestServer::start().await;
+    let u = srv.user("alice").await;
+    let db = &srv.state.db;
+    let reset = |pw: &str, revoke: bool, totp: bool| {
+        stickpile_server::service::users::reset_password(db, "ALICE", pw.to_string(), 8, revoke, totp)
+    };
+    assert!(reset("short", false, false).await.is_err());
+    let err = stickpile_server::service::users::reset_password(db, "nobody", "long-enough".into(), 8, false, false)
+        .await
+        .err()
+        .unwrap();
+    assert!(err.message.contains("no user named"), "{}", err.message);
+
+    sqlx::query("UPDATE users SET totp_secret = 'x' WHERE id = ?")
+        .bind(&u.id)
+        .execute(db)
+        .await
+        .unwrap();
+    reset("brand-new-pw", false, true).await.unwrap();
+    // The token survives; the new password works; TOTP is off.
+    srv.get(&u, routes::ME).await.expect(200);
+    srv.send(
+        None,
+        Method::POST,
+        routes::AUTH_TOKEN,
+        Some(json!({"username": "alice", "password": "brand-new-pw", "token_name": "x"})),
+    )
+    .await
+    .expect(200);
+    let me: User = srv.get(&u, routes::ME).await.expect(200).json();
+    assert!(!me.totp_enabled);
+    // With --revoke-tokens the old token stops working.
+    reset("another-new-pw", true, false).await.unwrap();
+    srv.get(&u, routes::ME).await.expect(401);
+    assert!(
+        audit_actions(&srv)
+            .await
+            .iter()
+            .filter(|a| *a == "user.password_reset")
+            .count()
+            == 2
+    );
+}

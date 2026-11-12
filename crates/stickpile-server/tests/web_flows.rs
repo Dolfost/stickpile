@@ -370,6 +370,39 @@ async fn account_settings() {
     assert_eq!(r.status, StatusCode::SEE_OTHER);
     assert_eq!(s.get(&alice, routes::ME).await.value()["telegram_user_id"], Value::Null);
 
+    // Username: the form sends every field back; a taken name is an error
+    // shown in the profile section; a free one renames the account.
+    let page = b.get("/settings").await.text();
+    assert!(page.contains("name=\"username\" value=\"alice\""), "{page}");
+    s.user("bob").await;
+    let r = b
+        .post_form(
+            "/settings",
+            &[
+                ("username", "Bob"),
+                ("display_name", "Alice A."),
+                ("telegram_user_id", ""),
+            ],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert!(r.text().contains("That username is already taken"));
+    let r = b
+        .post_form(
+            "/settings",
+            &[
+                ("username", "ally"),
+                ("display_name", "Alice A."),
+                ("telegram_user_id", ""),
+            ],
+        )
+        .await;
+    assert_eq!(location(&r), "/settings?done=profile");
+    let me = s.get(&alice, routes::ME).await.value();
+    assert_eq!(me["username"], "ally");
+    assert_eq!(me["display_name"], "Alice A.", "a custom display name stays");
+    assert!(b.get("/settings").await.text().contains("value=\"ally\""));
+
     // Password.
     let r = b
         .post_form(
@@ -411,7 +444,7 @@ async fn account_settings() {
         .text()
         .contains("Password changed"));
     let r = Browser::anonymous(&s)
-        .post_raw("/login", &[("username", "alice"), ("password", "new-password-1")])
+        .post_raw("/login", &[("username", "ally"), ("password", "new-password-1")])
         .await;
     assert_eq!(r.status, StatusCode::SEE_OTHER);
 
@@ -520,6 +553,7 @@ async fn admin_panel() {
         ("password", ("password", "brand-new-pass")),
         ("reset_totp", ("x", "")),
         ("tailscale", ("tailscale_login", "carol@github")),
+        ("username", ("username", "caroline")),
     ] {
         let r = b
             .post_form(&format!("/admin/users/{carol}"), &[("action", action), extra])
@@ -537,6 +571,8 @@ async fn admin_panel() {
     assert_eq!(c["user"]["role"], "admin");
     assert_eq!(c["disabled"], false);
     assert_eq!(c["user"]["tailscale_login"], "carol@github");
+    assert_eq!(c["user"]["username"], "caroline");
+    assert_eq!(c["user"]["display_name"], "Carol", "a custom display name stays");
     // The last admin cannot demote themselves... but two admins exist now.
     let me = root.id.clone();
     let r = b

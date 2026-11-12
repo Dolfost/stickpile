@@ -8,7 +8,7 @@
 
 use stickpile_api::{ApiToken, ChangePassword, TokenCreated, TotpSetup, UpdateMe, User};
 
-use crate::auth::{password, session, tokens, totp, CurrentUser};
+use crate::auth::{password, session, tokens, totp, AuthMethod, CurrentUser};
 use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::ids::now;
@@ -20,14 +20,36 @@ async fn reload(state: &AppState, viewer: &CurrentUser) -> AppResult<db::UserRow
         .ok_or_else(|| AppError::unauthorized("account no longer exists"))
 }
 
-/// Update the caller's profile: display name (empty resets it to the
-/// username) and the Telegram user id that owns exported packs.
+/// Update the caller's profile: username ([`crate::service::users::rename`]),
+/// display name (empty resets it to the username) and the Telegram user id
+/// that owns exported packs.
 pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) -> AppResult<User> {
-    let user = reload(state, viewer).await?;
+    // Validate everything before the rename, so a bad field changes nothing.
+    let display = req
+        .display_name
+        .as_deref()
+        .map(crate::service::users::validate_display_name)
+        .transpose()?;
+    if req.telegram_user_id.is_some_and(|tg| tg.is_some_and(|id| id <= 0)) {
+        return Err(AppError::bad_request("telegram_user_id must be a positive number"));
+    }
     let mut changes = serde_json::Map::new();
-    if let Some(d) = &req.display_name {
-        let d = crate::service::users::validate_display_name(d)?;
-        let d = if d.is_empty() { user.username.clone() } else { d };
+    let mut renamed_from = None;
+    if let Some(name) = &req.username {
+        if let Some(old) = crate::service::users::rename(state, viewer.id(), name).await? {
+            changes.insert("username".into(), serde_json::json!({"from": old, "to": name.trim()}));
+            renamed_from = Some(old);
+        }
+    }
+    let user = reload(state, viewer).await?;
+    if let Some(d) = display {
+        // Empty resets to the username; the old username (a form sends the
+        // field back unchanged) follows the rename like the stored one does.
+        let d = if d.is_empty() || renamed_from.as_deref() == Some(d.as_str()) {
+            user.username.clone()
+        } else {
+            d
+        };
         sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
             .bind(&d)
             .bind(viewer.id())
@@ -36,9 +58,6 @@ pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) ->
         changes.insert("display_name".into(), d.into());
     }
     if let Some(tg) = req.telegram_user_id {
-        if tg.is_some_and(|id| id <= 0) {
-            return Err(AppError::bad_request("telegram_user_id must be a positive number"));
-        }
         sqlx::query("UPDATE users SET telegram_user_id = ? WHERE id = ?")
             .bind(tg)
             .bind(viewer.id())
@@ -63,18 +82,21 @@ pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) ->
     Ok(reload(state, viewer).await?.to_api())
 }
 
-/// Change the caller's password (the current one is required if set). Other
-/// web sessions of the user are revoked; API tokens are kept.
+/// Change the caller's password. The current one is required if set, unless
+/// the request is signed in through the tailnet: `tailscale serve` has just
+/// vouched for the person, which is what the current password would prove.
+/// Other web sessions of the user are revoked; API tokens are kept.
 pub async fn change_password(state: &AppState, viewer: &CurrentUser, req: ChangePassword) -> AppResult<()> {
     let user = reload(state, viewer).await?;
-    if let Some(hash) = user.password_hash.clone() {
+    let tailnet = matches!(viewer.method, AuthMethod::Tailscale { .. });
+    if let Some(hash) = user.password_hash.clone().filter(|_| !tailnet) {
         let current = req.current_password.clone().unwrap_or_default();
         state.limiters.check_login(viewer.ip, &user.username)?;
         if !password::verify(current, Some(hash)).await {
             return Err(AppError::forbidden("current password is wrong"));
         }
     }
-    password::validate(&req.new_password)?;
+    password::validate(&req.new_password, state.config.auth.min_password_length)?;
     let hash = password::hash(req.new_password).await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
         .bind(hash)

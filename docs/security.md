@@ -39,14 +39,22 @@ with a read-only root filesystem is part of the deployment
   p = 1), hashed and verified on the blocking pool. Unknown users and users
   without a password are verified against a dummy hash so timing does not
   reveal whether an account exists. Unknown user, wrong password and disabled
-  account give the same error (`auth/password.rs`, `auth/login.rs`).
+  account give the same error (`auth/password.rs`, `auth/login.rs`). The
+  minimum length is `auth.min_password_length` (default 8, never below 4);
+  below 8 the login rate limits are what stands between a guesser and the
+  account, so keep such a server off the public internet.
 - **TOTP** (optional): RFC 6238, SHA-1, 6 digits, 30 s, plus or minus one
   step, compared in constant time. The last accepted step is stored, so a code
   cannot be replayed. Enrolment is pending until confirmed with a valid code;
   an admin can reset TOTP for a lost device (`auth/totp.rs`).
-- Changing your own password revokes your other web sessions but keeps your
-  API tokens, so the CLI and desktop clients stay logged in (revoke tokens
-  explicitly if a device may be compromised). An admin password reset
+- Changing your own password needs the current one, except on a request
+  signed in through the tailnet: `tailscale serve` has just vouched for the
+  person, which is what the current password would prove. It revokes your
+  other web sessions but keeps your API tokens, so the CLI and desktop
+  clients stay logged in (revoke tokens explicitly if a device may be
+  compromised). A forgotten password is reset by an admin or on the host with
+  `stickpile-server reset-password` (sessions revoked; tokens only with
+  `--revoke-tokens`); there is no email-based reset. An admin password reset
   assumes the old credentials are compromised and revokes all web sessions
   **and all API tokens** of the user (audit detail `tokens_revoked`).
   Disabling an account revokes its sessions; disabled users cannot
@@ -170,12 +178,13 @@ IP and JSON details. Writing an entry never fails the action it records.
 | `login_failed` | Failed login (details: username, reason `unknown_user`, `password`, `disabled` or `totp`) |
 | `register` | Self-service registration |
 | `token.create`, `token.revoke` | API token created (also by password login) or revoked |
-| `user.update_self` | Own display name or Telegram user id changed (`PATCH /api/v1/me`) |
+| `user.update_self` | Own username (`{from, to}`), display name or Telegram user id changed (`PATCH /api/v1/me`) |
 | `gitpack.create` | A set was bound to a git repository (URL redacted) |
 | `password.change`, `totp.enable`, `totp.disable` | Account security changes |
 | `user.create`, `user.update`, `user.delete` | Admin actions on users (`user.create` also from the `create-user` CLI) |
 | `user.autocreate`, `user.promote` | Tailnet auto-create; promotion via `auth.tailscale_admins` |
 | `user.bootstrap` | Initial admin created from the configuration |
+| `user.password_reset` | Password reset with `stickpile-server reset-password` (details: `tokens_revoked`, `reset_totp`) |
 | `invitation.create`, `invitation.delete` | Admin invitation management |
 | `set.delete` | A set was deleted |
 

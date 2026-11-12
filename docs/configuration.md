@@ -22,6 +22,7 @@ Use systemd credentials, agenix/sops-nix or podman secrets to provide them.
 | `stickpile-server [serve]` | Run the server until SIGINT/SIGTERM (graceful shutdown). |
 | `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: missing CLIP model files when `ai.enabled`, an unreadable or empty Telegram token or git token file, a missing `git.ssh_key_file`. |
 | `stickpile-server create-user <username> [--admin] [--password-file F] [--tailscale-login L]` | Create a user directly in the database (at least one of `--password-file` / `--tailscale-login`). |
+| `stickpile-server reset-password <username> --password-file F [--revoke-tokens] [--reset-totp]` | Set a new password for a user who forgot theirs; signs them out of every web session (see [deployment](deployment.md#forgotten-passwords)). |
 | `stickpile-server backup <dir>` | Full backup: every set as a set directory plus a database snapshot; safe while the server runs. See [backup.md](backup.md). |
 | `stickpile-server restore <dir>` | Rebuild a fresh `data_dir` from such a backup. |
 | `stickpile-server healthcheck [--url URL]` | `GET http://<server.listen>/healthz` (a wildcard address is checked on loopback) or `URL` (plain `http://` only); exit 0 on a 2xx answer within 3 s, else 1. For container health checks: no shell or curl needed. |
@@ -56,6 +57,7 @@ How `tailscale serve` reaches the server. See
 | `tailscale_autocreate` | bool | `true` | Create a user the first time an unknown tailnet login arrives through the trusted proxy. |
 | `tailscale_admins` | list of strings | `[]` | Tailnet logins (e.g. `alice@github`) that get the admin role when created or on their next request. |
 | `session_ttl_days` | integer > 0 | `30` | Web session lifetime; sliding with use. |
+| `min_password_length` | integer 4..=128 | `8` | Shortest password accepted when one is set (registration, settings, admin, `create-user`, the initial admin). Existing passwords keep working. Below 8, rely on the login rate limits and keep the server off the public internet. |
 | `totp_issuer` | string | `"stickpile"` | Issuer shown in authenticator apps. |
 | `initial_admin_username` | string | unset | If the database has no users at startup, create this admin ... |
 | `initial_admin_password_file` | path | unset | ... with the password in this file. Both keys or neither. |
