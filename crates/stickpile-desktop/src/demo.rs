@@ -5,7 +5,8 @@
 //! config as the real client. Each subdirectory is a pack (a directory from
 //! `stickpile backup` works), the loose files are one more; favorites and
 //! most used start from a fixed choice, and the account is a demo user that
-//! logs in and out without a server.
+//! logs in and out without a server. `[copy]` adjustments apply as in the
+//! real client; the adjusted files go to `demo/` in the cache directory.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use stickpile_api::{
     ItemSummary, MediaFormat, MediaKind, SearchHit, SetSource, SetSummary, TargetApp, Variant, VariantInfo, Visibility,
 };
-use stickpile_core::clipboard::ClipOffer;
-use stickpile_core::config::ClipboardConfig;
-use stickpile_core::PreparedCopy;
+use stickpile_core::clipboard::{adjust, ClipOffer};
+use stickpile_core::config::{ClipboardConfig, CopyConfig};
+use stickpile_core::{ClientConfig, PreparedCopy};
 use stickpile_quick::model::Results;
 
 use crate::backend::{AuthKind, Backend, BoxFut, Credentials, LoginError, Profile};
@@ -38,7 +39,15 @@ pub struct DemoBackend {
     liked: Mutex<Vec<String>>,
     /// The signed-in user; `None` after logout.
     user: Mutex<Option<String>>,
+    settings: Mutex<DemoSettings>,
+    /// Where adjusted copies are written.
+    out_dir: PathBuf,
+}
+
+/// The part of the client config the demo backend follows (changeable live).
+struct DemoSettings {
     clipboard: ClipboardConfig,
+    copy: CopyConfig,
 }
 
 /// Id and set fields of the loose files' pack.
@@ -165,8 +174,9 @@ fn pack_summary(id: &str, slug: &str, name: &str, items: &[DemoItem]) -> SetSumm
 
 impl DemoBackend {
     /// Index the media files directly inside `dir` and inside each of its
-    /// subdirectories (sorted by name).
-    pub fn scan(dir: &Path, clipboard: ClipboardConfig) -> std::io::Result<DemoBackend> {
+    /// subdirectories (sorted by name). Copies follow `cfg`'s clipboard and
+    /// copy settings.
+    pub fn scan(dir: &Path, cfg: &ClientConfig) -> std::io::Result<DemoBackend> {
         let mut items: Vec<DemoItem> = media_files(dir)?
             .into_iter()
             .map(|path| DemoItem {
@@ -226,8 +236,19 @@ impl DemoBackend {
             copies: Mutex::new(copies),
             liked: Mutex::new(liked),
             user: Mutex::new(Some(DEMO_USER.into())),
-            clipboard,
+            settings: Mutex::new(DemoSettings {
+                clipboard: cfg.clipboard.clone(),
+                copy: cfg.copy,
+            }),
+            out_dir: cfg.cache_path().join("demo"),
         })
+    }
+
+    /// New clipboard and copy settings (the Settings tab changed them).
+    pub fn configure(&self, cfg: &ClientConfig) {
+        let mut s = self.settings.lock().expect("not poisoned");
+        s.clipboard = cfg.clipboard.clone();
+        s.copy = cfg.copy;
     }
 
     pub fn len(&self) -> usize {
@@ -276,15 +297,22 @@ impl DemoBackend {
         let has_sticker = demo.summary.variants.iter().any(|v| v.variant == Variant::TgSticker);
         let wanted_sticker = sticker;
         let sticker = sticker && has_sticker;
-        let mimes = self.clipboard.offers(target).for_kind(demo.summary.kind, sticker);
-        let bytes = std::fs::read(&demo.path).map_err(|e| e.to_string())?;
+        let (mimes, copy) = {
+            let s = self.settings.lock().expect("not poisoned");
+            (
+                s.clipboard.offers(target).for_kind(demo.summary.kind, sticker).to_vec(),
+                s.copy,
+            )
+        };
+        let (path, format) = self.adjusted(demo, sticker, &copy)?;
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         let mut skipped = Vec::new();
-        for mime in mimes {
+        for mime in &mimes {
             let data = match mime.as_str() {
-                m if m == demo.summary.format.mime() => Some(bytes.clone()),
+                m if m == format.mime() => Some(bytes.clone()),
                 "image/png" if demo.summary.kind != MediaKind::Video => to_png(&bytes),
-                m => offers::file_ref_payload(m, &demo.path),
+                m => offers::file_ref_payload(m, &path),
             };
             match data {
                 Some(data) => out.push(ClipOffer {
@@ -307,10 +335,41 @@ impl DemoBackend {
             target,
             variant: if sticker { Variant::TgSticker } else { Variant::Original },
             sticker,
-            file: demo.path.clone(),
+            file: path,
             offers: out,
             warning,
         })
+    }
+
+    /// The file to copy and its format: the item's own file, or a copy with
+    /// the `[copy]` adjustments, written on first use.
+    fn adjusted(&self, demo: &DemoItem, sticker: bool, copy: &CopyConfig) -> Result<(PathBuf, MediaFormat), String> {
+        let original = (demo.path.clone(), demo.summary.format);
+        if demo.summary.kind != MediaKind::Still {
+            return Ok(original);
+        }
+        let Some(tag) = adjust::adjust_tag(copy, sticker) else {
+            return Ok(original);
+        };
+        let (ext, format) = if sticker {
+            ("webp", MediaFormat::Webp)
+        } else {
+            ("png", MediaFormat::Png)
+        };
+        let out = self.out_dir.join(adjust::adjusted_rel(&demo.summary.id, &tag, ext));
+        let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        if out.exists() && modified(&out) >= modified(&demo.path) {
+            return Ok((out, format));
+        }
+        let bytes = std::fs::read(&demo.path).map_err(|e| e.to_string())?;
+        let Some(a) = adjust::adjust_image(&bytes, sticker, copy)? else {
+            return Ok(original);
+        };
+        if let Some(dir) = out.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(&out, &a.bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+        Ok((out, format))
     }
 
     pub fn record_now(&self, item_id: &str) {
@@ -534,6 +593,11 @@ impl Backend for DemoBackend {
             Ok(())
         })
     }
+
+    /// The file itself: demo mode has no web UI.
+    fn web_url(&self, item_id: &str) -> Option<String> {
+        url::Url::from_file_path(&self.find(item_id)?.path).ok().map(Into::into)
+    }
 }
 
 #[cfg(test)]
@@ -542,6 +606,14 @@ mod tests {
     use crate::thumbs::tests::encoded;
     use image::ImageFormat;
 
+    /// Adjusted copies go to a hidden directory, which the scan skips.
+    fn config(dir: &Path) -> ClientConfig {
+        ClientConfig {
+            cache_dir: Some(dir.join(".cache")),
+            ..ClientConfig::default()
+        }
+    }
+
     fn fixture() -> (tempfile::TempDir, DemoBackend) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("naahh-cat.png"), encoded(64, 64, ImageFormat::Png)).unwrap();
@@ -549,7 +621,7 @@ mod tests {
         std::fs::write(dir.path().join("sticker.webp"), encoded(512, 256, ImageFormat::WebP)).unwrap();
         std::fs::write(dir.path().join("clip.mp4"), b"not really mp4").unwrap();
         std::fs::write(dir.path().join("notes.txt"), b"ignored").unwrap();
-        let backend = DemoBackend::scan(dir.path(), ClipboardConfig::default()).unwrap();
+        let backend = DemoBackend::scan(dir.path(), &config(dir.path())).unwrap();
         (dir, backend)
     }
 
@@ -623,8 +695,8 @@ mod tests {
 
     #[test]
     fn unsupported_offers_produce_a_warning() {
-        let (_d, mut b) = fixture();
-        b.clipboard.default.still = vec!["image/gif".into(), "text/plain".into()];
+        let (_d, b) = fixture();
+        b.settings.lock().unwrap().clipboard.default.still = vec!["image/gif".into(), "text/plain".into()];
         let item = b.find("naahh-cat.png").unwrap().summary.clone();
         let p = b.prepare_now(&item, TargetApp::Generic, false).unwrap();
         assert_eq!(p.offers.len(), 1);
@@ -706,7 +778,7 @@ mod tests {
         std::fs::write(d.join("Cats Etc/c-dance.gif"), encoded(20, 20, ImageFormat::Gif)).unwrap();
         std::fs::write(d.join("dogs/good-dog.webp"), encoded(30, 30, ImageFormat::WebP)).unwrap();
         std::fs::write(d.join(".hidden/x.png"), encoded(8, 8, ImageFormat::Png)).unwrap();
-        let b = DemoBackend::scan(d, ClipboardConfig::default()).unwrap();
+        let b = DemoBackend::scan(d, &config(d)).unwrap();
         assert_eq!(b.len(), 5);
 
         let packs = b.packs_now();
@@ -774,5 +846,34 @@ mod tests {
             Some("alice")
         );
         assert_eq!(b.login_now(None).unwrap().display_name.as_deref(), Some("Demo user"));
+    }
+
+    #[test]
+    fn copy_adjustments_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join("wide.png"), encoded(40, 20, ImageFormat::Png)).unwrap();
+        std::fs::write(d.join("dance.gif"), encoded(40, 20, ImageFormat::Gif)).unwrap();
+        let mut cfg = config(d);
+        let b = DemoBackend::scan(d, &cfg).unwrap();
+        let wide = b.find("wide.png").unwrap().summary.clone();
+        let p = b.prepare_now(&wide, TargetApp::Generic, false).unwrap();
+        assert!(p.file.ends_with("wide.png"), "no adjustment by default");
+
+        cfg.copy.square = stickpile_core::config::SquarePad::White;
+        b.configure(&cfg);
+        let p = b.prepare_now(&wide, TargetApp::Generic, false).unwrap();
+        assert!(p.file.starts_with(d.join(".cache/demo")), "{:?}", p.file);
+        assert!(p.file.ends_with("sq-white/wide.png"));
+        let img = image::load_from_memory(&p.offers[0].data).unwrap();
+        assert_eq!((img.width(), img.height()), (40, 40));
+        assert_eq!(p.offers[0].mime, "image/png");
+        assert!(String::from_utf8_lossy(&p.offers[1].data).contains(".cache/demo/sq-white/wide.png"));
+        // Second copy: the file is reused.
+        assert_eq!(b.prepare_now(&wide, TargetApp::Generic, false).unwrap().file, p.file);
+
+        let gif = b.find("dance.gif").unwrap().summary.clone();
+        let g = b.prepare_now(&gif, TargetApp::Generic, false).unwrap();
+        assert!(g.file.ends_with("dance.gif"), "animations are never changed");
     }
 }

@@ -178,6 +178,18 @@ pub trait Backend: Send + Sync + 'static {
     fn login(self: Arc<Self>, credentials: Option<Credentials>) -> BoxFut<Result<Profile, LoginError>>;
     /// Revokes the current token on the server (best effort) and deletes the token file.
     fn logout(self: Arc<Self>) -> BoxFut<Result<(), String>>;
+    /// Where the browser shows the item (`gx`).
+    fn web_url(&self, item_id: &str) -> Option<String>;
+}
+
+/// The item's page in the web UI of the server at `server_url`.
+pub fn item_page_url(server_url: &str, item_id: &str) -> Option<String> {
+    let mut url = url::Url::parse(server_url).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    url.path_segments_mut().ok()?.pop_if_empty().extend(["items", item_id]);
+    Some(url.into())
 }
 
 /// User-facing text for a core error.
@@ -188,13 +200,15 @@ pub fn describe(e: &CoreError) -> String {
 /// [`describe`] with the text for an unreachable server.
 fn describe_with(e: &CoreError, offline: &str) -> String {
     match e {
-        CoreError::NotLoggedIn => "Not logged in — run `stickpile login`".into(),
+        CoreError::NotLoggedIn => NOT_LOGGED_IN.into(),
         CoreError::Offline(_) => offline.into(),
-        e if e.is_unauthorized() => "The server rejected the token — run `stickpile login`".into(),
+        e if e.is_unauthorized() => REJECTED.into(),
         other => other.to_string(),
     }
 }
 
+const NOT_LOGGED_IN: &str = "Not logged in; log in on the Me tab (6)";
+const REJECTED: &str = "The server did not accept this client; log in on the Me tab (6)";
 const ITEM_NOT_CACHED: &str = "Server unreachable and the item is not cached";
 const UNREACHABLE: &str = "Server unreachable";
 const NO_TAILNET: &str =
@@ -474,6 +488,10 @@ impl Backend for CoreBackend {
             Ok(())
         })
     }
+
+    fn web_url(&self, item_id: &str) -> Option<String> {
+        item_page_url(&self.session.config().server_url, item_id)
+    }
 }
 
 #[cfg(test)]
@@ -524,7 +542,7 @@ mod tests {
     fn error_texts() {
         assert_eq!(
             describe(&CoreError::NotLoggedIn),
-            "Not logged in — run `stickpile login`"
+            "Not logged in; log in on the Me tab (6)"
         );
         assert_eq!(
             describe(&CoreError::Offline("timeout".into())),
@@ -532,6 +550,20 @@ mod tests {
         );
         assert_eq!(describe(&CoreError::Other("boom".into())), "boom");
         assert!(client_name().starts_with("desktop/"));
+    }
+
+    #[test]
+    fn item_pages() {
+        assert_eq!(
+            item_page_url("http://localhost:8080", "01ABC").as_deref(),
+            Some("http://localhost:8080/items/01ABC")
+        );
+        assert_eq!(
+            item_page_url("https://stickers.example/base/", "x y").as_deref(),
+            Some("https://stickers.example/base/items/x%20y")
+        );
+        assert_eq!(item_page_url("demo:/tmp/sets", "a"), None);
+        assert_eq!(item_page_url("not a url", "a"), None);
     }
 
     /// The whole popup flow through the real core against its mock server.
@@ -602,7 +634,7 @@ mod tests {
         let err = rt
             .block_on(b.clone().search("cat".into(), TargetApp::Generic, 5))
             .unwrap_err();
-        assert!(err.contains("stickpile login"), "{err}");
+        assert!(err.contains("the Me tab"), "{err}");
         assert!(b.login_required());
         assert!(rt.block_on(b.clone().sync()).is_err());
         assert!(b.login_required());
@@ -858,7 +890,7 @@ mod tests {
             assert!(b.login_required());
             b.login_required.store(false, Ordering::Relaxed);
             let err = b.clone().favorites(5).await.unwrap_err();
-            assert!(err.contains("stickpile login"), "{err}");
+            assert!(err.contains("the Me tab"), "{err}");
             assert!(b.login_required());
             assert!(b.clone().packs().await.is_err());
             assert!(b.clone().most_used(5).await.is_err());

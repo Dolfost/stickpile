@@ -7,6 +7,7 @@ use stickpile_core::ClientConfig;
 use stickpile_quick::focus::{self, FocusEnv, FocusError, WindowInfo};
 use stickpile_quick::history::WindowHistory;
 use stickpile_quick::model::{ModelConfig, OpenInfo, DEFAULT_DEBOUNCE_MS};
+use stickpile_quick::Tab;
 
 /// GApplication id: D-Bus name, Wayland app id / X11 class of the popup.
 pub const APP_ID: &str = "io.github.dolfost.Stickpile";
@@ -15,9 +16,14 @@ pub const APP_ID: &str = "io.github.dolfost.Stickpile";
 pub const VISIBLE_ROWS: u32 = 4;
 /// Space around a thumbnail inside its grid cell (GridView child padding + margins).
 pub const CELL_EXTRA_PX: u32 = 16;
-/// Search bar and footer heights plus outer margins.
-const CHROME_HEIGHT_PX: u32 = 56 + 44;
+/// Height a pack list cell adds under the cover: its name and item count.
+pub const PACK_LABELS_PX: u32 = 40;
+/// Tab row, header (title and text field) and footer heights plus outer margins.
+const CHROME_HEIGHT_PX: u32 = 40 + 46 + 26;
 const CHROME_WIDTH_PX: u32 = 24;
+/// The tab row needs this much (seven numbered tabs and the help button);
+/// narrower grids get wider cells instead.
+pub const MIN_WIDTH_PX: u32 = 700;
 
 pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
     ModelConfig {
@@ -29,18 +35,27 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
         prefer_stickers: cfg.prefer_stickers,
         hide_on_copy: cfg.ui.hide_on_copy,
         debounce_ms: DEFAULT_DEBOUNCE_MS,
-        // TODO: `modal` from `ui.modal` and `start_tab` from `ui.start_tab`
-        // (Tab::from_key) once the config has them; defaults until then.
+        modal: cfg.ui.modal,
+        // The config is validated, so an unknown name cannot get here.
+        start_tab: Tab::from_key(&cfg.ui.start_tab).unwrap_or_default(),
         ..ModelConfig::default()
     }
 }
 
-/// Default popup size in logical pixels for `ui.columns` × [`VISIBLE_ROWS`] cells.
+/// Default popup size in logical pixels for `ui.columns` x [`VISIBLE_ROWS`]
+/// cells, at least [`MIN_WIDTH_PX`] wide.
 pub fn window_size(cfg: &ClientConfig) -> (i32, i32) {
     let cell = cfg.ui.thumb_px + CELL_EXTRA_PX;
-    let w = cfg.ui.columns.max(1) * cell + CHROME_WIDTH_PX;
+    let w = (cfg.ui.columns.max(1) * cell + CHROME_WIDTH_PX).max(MIN_WIDTH_PX);
     let h = VISIBLE_ROWS * cell + CHROME_HEIGHT_PX;
     (w as i32, h as i32)
+}
+
+/// Rows of the pack list that fit where [`VISIBLE_ROWS`] item rows do (its
+/// cells are taller).
+pub fn pack_rows(cfg: &ClientConfig) -> usize {
+    let cell = cfg.ui.thumb_px + CELL_EXTRA_PX;
+    ((VISIBLE_ROWS * cell) / (cell + PACK_LABELS_PX)).max(1) as usize
 }
 
 /// Map a focus detection result to what the model needs. The popup's own
@@ -101,7 +116,6 @@ mod tests {
     use super::*;
     use stickpile_api::TargetApp;
     use stickpile_quick::focus::FocusBackend;
-    use stickpile_quick::Tab;
 
     fn win(class: &str, title: &str) -> WindowInfo {
         WindowInfo {
@@ -128,12 +142,23 @@ mod tests {
         assert_eq!(m.debounce_ms, 120);
         assert!(m.modal);
         assert_eq!(m.start_tab, Tab::Search);
+
+        cfg.ui.modal = false;
+        cfg.ui.start_tab = "most_used".into();
+        let m = model_config(&cfg);
+        assert!(!m.modal);
+        assert_eq!(m.start_tab, Tab::MostUsed);
     }
 
     #[test]
     fn window_size_follows_grid() {
-        let cfg = ClientConfig::default(); // 6 columns, 128 px
-        assert_eq!(window_size(&cfg), (6 * 144 + 24, 4 * 144 + 100));
+        let mut cfg = ClientConfig::default(); // 6 columns, 128 px
+        assert_eq!(window_size(&cfg), (6 * 144 + 24, 4 * 144 + 112));
+        assert_eq!(pack_rows(&cfg), 3);
+        cfg.ui.columns = 3;
+        assert_eq!(window_size(&cfg).0, MIN_WIDTH_PX as i32, "the tabs still fit");
+        cfg.ui.thumb_px = 64;
+        assert_eq!(pack_rows(&cfg), 2);
     }
 
     #[test]

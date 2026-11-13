@@ -2,6 +2,12 @@
 //! model and executes its commands on the tokio runtime. It holds no popup
 //! logic of its own; anything decidable without a display lives in the
 //! model or in the display-free modules of this crate.
+//!
+//! Focus follows the model's mode: in Insert the text field of the tab (or
+//! the page field the user went into) has the keyboard focus, in Normal no
+//! text field has it. Focus changes the user causes are reported back as
+//! `Event::TextFocus`, always from an idle callback, never while the model
+//! is borrowed for rendering.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -13,17 +19,24 @@ use std::time::{Duration, Instant};
 use adw::prelude::*;
 use futures::FutureExt;
 use gtk::{gdk, gio, glib};
-use stickpile_api::{ItemSummary, TargetApp};
+use stickpile_api::{ItemSummary, SetSummary, TargetApp};
+use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_quick::focus::FocusEnv;
 use stickpile_quick::model::{self, Command, Event, Level, Model, OpenInfo, StickerMode};
+use stickpile_quick::{Mode, Tab, View};
 
-use crate::backend::{Backend, BoxFut, CoreBackend};
+use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
 use crate::demo::DemoBackend;
 use crate::keys::{self, KeyPress, Mods};
 use crate::ui::drag::{self, LazyFileProvider, PreparedFuture};
 use crate::ui::item::StickerObject;
-use crate::{glue, offers, sync, thumbs};
+use crate::ui::me::{MeAction, MePage};
+use crate::ui::packs::{self, PackObject};
+use crate::ui::settings::{SettingsAction, SettingsPage};
+use crate::ui::tabbar::TabBar;
+use crate::ui::{help, set_class};
+use crate::{glue, offers, pages, sync, thumbs};
 
 /// Concurrent thumbnail downloads/decodes.
 const THUMB_CONCURRENCY: usize = 6;
@@ -33,12 +46,30 @@ const THUMB_CACHE: usize = 600;
 const PREPARED_CACHE: usize = 16;
 const SESSION_OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 
+const SEARCH_PLACEHOLDER: &str = "Search, or try e:😂 set:cats type:gif vibe:tired";
+
 const CSS: &str = r#"
 gridview.stickpile-grid > child { padding: 4px; border-radius: 10px; }
 .stickpile-badge { font-size: 0.7em; font-weight: bold; padding: 1px 5px; border-radius: 5px; margin: 6px; }
 .stickpile-warn { margin: 6px; color: @warning_color; }
 .stickpile-footer { padding: 4px 10px; }
 .stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
+.stickpile-tabs { padding: 6px 8px 0 8px; }
+.stickpile-tabs button.stickpile-tab { min-height: 26px; padding: 2px 9px; font-weight: normal; }
+.stickpile-tab-number { font-size: 0.8em; font-feature-settings: "tnum"; opacity: 0.55; }
+.stickpile-tabs button.stickpile-current { background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; font-weight: bold; }
+.stickpile-tabs button.stickpile-current .stickpile-tab-number { opacity: 0.9; }
+.stickpile-header { padding: 6px 8px; min-height: 34px; }
+.stickpile-mode { font-size: 0.75em; font-weight: bold; padding: 1px 6px; border-radius: 4px; }
+.stickpile-mode.insert { background-color: @accent_bg_color; color: @accent_fg_color; }
+.stickpile-mode.normal { background-color: alpha(currentColor, 0.12); }
+.stickpile-pending { font-family: monospace; font-weight: bold; }
+.stickpile-help { font-size: 0.92em; background-color: @popover_bg_color; color: @popover_fg_color; border-radius: 12px; padding: 14px 20px; box-shadow: 0 2px 14px alpha(black, 0.35); }
+.stickpile-help-key { font-family: monospace; font-weight: bold; }
+.stickpile-pack-name { font-weight: bold; }
+.stickpile-stat { padding: 10px 6px; }
+row.stickpile-cursor { background-color: alpha(@accent_bg_color, 0.14); box-shadow: inset 3px 0 @accent_bg_color; }
+button.stickpile-cursor { outline: 2px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
 "#;
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -74,12 +105,23 @@ struct DragState {
 struct Widgets {
     window: adw::ApplicationWindow,
     stack: gtk::Stack,
-    login: adw::StatusPage,
     error: adw::StatusPage,
+    tabs: TabBar,
+    back: gtk::Button,
+    title: gtk::Label,
     entry: gtk::SearchEntry,
+    count: gtk::Label,
+    /// items, packs, me, settings
+    content: gtk::Stack,
+    help: gtk::Widget,
     grid: gtk::GridView,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
+    pack_grid: gtk::GridView,
+    pack_store: gio::ListStore,
+    pack_selection: gtk::SingleSelection,
+    mode: gtk::Label,
+    pending: gtk::Label,
     target: gtk::Label,
     target_hint: gtk::Label,
     /// Footer sticker-mode toggle; clicking it is Ctrl+S.
@@ -89,24 +131,57 @@ struct Widgets {
 }
 
 pub struct Shell {
-    cfg: ClientConfig,
+    cfg: RefCell<ClientConfig>,
     config_path: PathBuf,
     config_error: Option<String>,
-    demo: bool,
+    demo_mode: bool,
+    demo: Option<Arc<DemoBackend>>,
     backend: RefCell<Option<Arc<dyn Backend>>>,
     backend_error: RefCell<Option<String>>,
     model: RefCell<Model>,
     w: Widgets,
+    me: Rc<MePage>,
+    settings: Rc<SettingsPage>,
+    /// Widgets are being updated from the model: their signals are not input.
     rendering: Cell<bool>,
     rendered_revision: Cell<u64>,
-    scrolled_to: Cell<Option<usize>>,
+    scrolled_to: Cell<Option<(View, usize)>>,
+    /// The tab on screen at the last render (`None`: hidden), to notice a
+    /// page coming into view.
+    shown: Cell<Option<Tab>>,
+    /// The grid geometry last reported to the model.
+    layout: Cell<Option<(usize, usize)>>,
     thumbs: RefCell<HashMap<String, Thumb>>,
+    /// Pack covers by [`cover_key`].
+    covers: RefCell<HashMap<String, Thumb>>,
     thumb_permits: Arc<tokio::sync::Semaphore>,
     prepared: RefCell<VecDeque<PreparedCopy>>,
     drag: RefCell<Option<DragState>>,
     search_timer: RefCell<Option<glib::SourceId>>,
     sync: RefCell<sync::SyncPolicy>,
     history_path: PathBuf,
+}
+
+/// A cover changes with the set's cover item or image.
+fn cover_key(set: &SetSummary) -> String {
+    format!(
+        "{}\n{}\n{}",
+        set.id,
+        set.cover_item_id.as_deref().unwrap_or_default(),
+        set.cover_url.as_deref().unwrap_or_default()
+    )
+}
+
+fn texture(rgba: thumbs::Rgba) -> gdk::Texture {
+    let stride = rgba.stride();
+    gdk::MemoryTexture::new(
+        rgba.width as i32,
+        rgba.height as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &glib::Bytes::from_owned(rgba.pixels),
+        stride,
+    )
+    .upcast()
 }
 
 impl Shell {
@@ -118,38 +193,51 @@ impl Shell {
         let history_path = glue::history_path(&cfg);
         let history = glue::load_history(&history_path);
         let model = Model::with_history(glue::model_config(&cfg), history);
-        let w = build_widgets(app, &cfg);
+        let me = MePage::new();
+        let settings = SettingsPage::new();
+        let w = build_widgets(app, &cfg, &me, &settings);
+        let mut backend_error = None;
+        let demo = match (&opts.demo, &config_error) {
+            (Some(dir), None) => match DemoBackend::scan(dir, &cfg) {
+                Ok(b) => {
+                    tracing::info!("demo mode: {} files from {}", b.len(), dir.display());
+                    Some(Arc::new(b))
+                }
+                Err(e) => {
+                    backend_error = Some(format!("{}: {e}", dir.display()));
+                    None
+                }
+            },
+            _ => None,
+        };
         let shell = Rc::new(Shell {
             config_path: opts.config_path,
             config_error,
-            demo: opts.demo.is_some(),
-            backend: RefCell::new(None),
-            backend_error: RefCell::new(None),
+            demo_mode: opts.demo.is_some(),
+            backend: RefCell::new(demo.clone().map(|d| d as Arc<dyn Backend>)),
+            demo,
+            backend_error: RefCell::new(backend_error),
             model: RefCell::new(model),
             w,
+            me,
+            settings,
             rendering: Cell::new(false),
             rendered_revision: Cell::new(u64::MAX),
             scrolled_to: Cell::new(None),
+            shown: Cell::new(None),
+            layout: Cell::new(None),
             thumbs: RefCell::new(HashMap::new()),
+            covers: RefCell::new(HashMap::new()),
             thumb_permits: Arc::new(tokio::sync::Semaphore::new(THUMB_CONCURRENCY)),
             prepared: RefCell::new(VecDeque::new()),
             drag: RefCell::new(None),
             search_timer: RefCell::new(None),
             sync: RefCell::new(sync::SyncPolicy::default()),
             history_path,
-            cfg,
+            cfg: RefCell::new(cfg),
         });
-        if shell.config_error.is_none() {
-            match &opts.demo {
-                Some(dir) => match DemoBackend::scan(dir, shell.cfg.clipboard.clone()) {
-                    Ok(b) => {
-                        tracing::info!("demo mode: {} files from {}", b.len(), dir.display());
-                        *shell.backend.borrow_mut() = Some(Arc::new(b));
-                    }
-                    Err(e) => *shell.backend_error.borrow_mut() = Some(format!("{}: {e}", dir.display())),
-                },
-                None => shell.open_session(),
-            }
+        if shell.config_error.is_none() && !shell.demo_mode {
+            shell.open_session(false);
         }
         shell.connect_signals();
         shell.start_sync_timer();
@@ -158,23 +246,29 @@ impl Shell {
     }
 
     /// (Re)open the core session. Runs inside the runtime so a panic in the
-    /// core cannot take the resident process down.
-    fn open_session(&self) {
-        let cfg = self.cfg.clone();
+    /// core cannot take the resident process down. `login_required`: what
+    /// the old session learned about the login (same server and token file).
+    fn open_session(&self, login_required: bool) {
+        let cfg = self.cfg.borrow().clone();
         let rt = runtime();
         let task = rt.spawn(Session::open(cfg));
         // Opening only loads the token and the cache; never let it freeze the UI.
         match rt.block_on(async { tokio::time::timeout(SESSION_OPEN_TIMEOUT, task).await }) {
             Ok(Ok(Ok(session))) => {
                 // Still no token: whatever the old session learned still holds.
-                let carried = self.login_required() && !session.is_logged_in();
+                let carried = login_required && !session.is_logged_in();
                 *self.backend.borrow_mut() = Some(Arc::new(CoreBackend::new(session, carried)));
                 *self.backend_error.borrow_mut() = None;
             }
-            Ok(Ok(Err(e))) => *self.backend_error.borrow_mut() = Some(crate::backend::describe(&e)),
-            Ok(Err(e)) => *self.backend_error.borrow_mut() = Some(format!("stickpile-core failed: {e}")),
-            Err(_) => *self.backend_error.borrow_mut() = Some("opening the local cache timed out".into()),
+            Ok(Ok(Err(e))) => self.session_failed(crate::backend::describe(&e)),
+            Ok(Err(e)) => self.session_failed(format!("stickpile-core failed: {e}")),
+            Err(_) => self.session_failed("opening the local cache timed out".into()),
         }
+    }
+
+    fn session_failed(&self, error: String) {
+        tracing::warn!("opening the session: {error}");
+        *self.backend_error.borrow_mut() = Some(error);
     }
 
     fn backend(&self) -> Option<Arc<dyn Backend>> {
@@ -185,16 +279,18 @@ impl Shell {
         self.backend().is_some_and(|b| b.login_required())
     }
 
-    pub fn config(&self) -> &ClientConfig {
-        &self.cfg
+    /// `ui.start_hidden` of the current config.
+    pub fn start_hidden(&self) -> bool {
+        self.cfg.borrow().ui.start_hidden
     }
 
     // -- entry points from the application -------------------------------------
 
     /// Show the popup; the focused window is captured first.
     pub fn open(self: &Rc<Self>, env: &FocusEnv) {
-        let info = glue::capture_focus(&self.cfg, env);
+        let info = glue::capture_focus(&self.cfg.borrow(), env);
         self.dispatch(Event::Open(info));
+        self.login_prompt();
     }
 
     pub fn toggle(self: &Rc<Self>, env: &FocusEnv) {
@@ -202,12 +298,13 @@ impl Shell {
         let open = if active {
             OpenInfo::default()
         } else {
-            glue::capture_focus(&self.cfg, env)
+            glue::capture_focus(&self.cfg.borrow(), env)
         };
         self.dispatch(Event::Toggle {
             popup_active: active,
             open,
         });
+        self.login_prompt();
     }
 
     pub fn hide(self: &Rc<Self>) {
@@ -216,13 +313,55 @@ impl Shell {
         }
     }
 
+    /// The server rejected us: nothing works until a login, so the popup
+    /// opens on the Me tab with its form.
+    fn login_prompt(self: &Rc<Self>) {
+        if self.model.borrow().is_visible() && self.login_required() {
+            self.dispatch(Event::ShowTab(Tab::Me));
+        }
+    }
+
     // -- model loop --------------------------------------------------------------------
 
     pub fn dispatch(self: &Rc<Self>, event: Event) {
         let commands = self.model.borrow_mut().handle(event);
         self.render();
+        self.after_render();
         for c in commands {
             self.execute(c);
+        }
+    }
+
+    /// What a render calls for that must not run inside it: the grid
+    /// geometry for the model, and loading a page that came into view.
+    fn after_render(self: &Rc<Self>) {
+        let (tab, view, visible) = {
+            let m = self.model.borrow();
+            (m.tab(), m.view(), m.is_visible())
+        };
+        let layout = {
+            let cfg = self.cfg.borrow();
+            let rows = match view {
+                View::Packs => glue::pack_rows(&cfg),
+                _ => glue::VISIBLE_ROWS as usize,
+            };
+            (cfg.ui.columns.max(1) as usize, rows)
+        };
+        if self.layout.get() != Some(layout) {
+            self.layout.set(Some(layout));
+            self.model.borrow_mut().handle(Event::Layout {
+                columns: layout.0,
+                visible_rows: layout.1,
+            });
+        }
+        let shown = visible.then_some(tab);
+        if shown != self.shown.get() {
+            self.shown.set(shown);
+            match shown {
+                Some(Tab::Me) => self.load_profile(),
+                Some(Tab::Settings) => self.reload_settings(),
+                _ => {}
+            }
         }
     }
 
@@ -244,7 +383,37 @@ impl Shell {
                     this.dispatch(Event::RecentLoaded(items.unwrap_or_default()));
                 });
             }
+            Command::LoadMostUsed { limit, generation } => self.answer(
+                move |b| b.most_used(limit),
+                move |outcome| Event::MostUsedLoaded { generation, outcome },
+            ),
+            Command::LoadFavorites { limit, generation } => self.answer(
+                move |b| b.favorites(limit),
+                move |outcome| Event::FavoritesLoaded { generation, outcome },
+            ),
+            Command::LoadPacks { generation } => {
+                self.answer(|b| b.packs(), move |outcome| Event::PacksLoaded { generation, outcome })
+            }
+            Command::LoadPackItems { set_id, generation } => {
+                let id = set_id.clone();
+                self.answer(
+                    move |b| b.pack_items(id),
+                    move |outcome| Event::PackItemsLoaded {
+                        set_id,
+                        generation,
+                        outcome,
+                    },
+                )
+            }
+            Command::ToggleFavorite { item_id } => {
+                let id = item_id.clone();
+                self.answer(
+                    move |b| b.toggle_favorite(id),
+                    move |outcome| Event::FavoriteToggled { item_id, outcome },
+                )
+            }
             Command::LoadThumbnails { items } => self.load_thumbnails(items),
+            Command::LoadPackCovers { packs } => self.load_covers(packs),
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
             Command::SaveHistory(history) => {
                 let path = self.history_path.clone();
@@ -254,6 +423,19 @@ impl Shell {
                     }
                 });
             }
+            Command::OpenInBrowser { item_id } => match self.backend().and_then(|b| b.web_url(&item_id)) {
+                Some(url) => self.open_uri(&url),
+                None => tracing::warn!("no web page for {item_id}"),
+            },
+            Command::Page(key) => {
+                let tab = self.model.borrow().tab();
+                tracing::debug!("page key {key:?} on {tab:?}");
+                match tab {
+                    Tab::Me => self.me.key(key),
+                    Tab::Settings => self.settings.key(key),
+                    _ => {}
+                }
+            }
             // A stale timer is ignored by the model, so none is cancelled.
             Command::KeyTimeout { after_ms, seq } => {
                 let this = self.clone();
@@ -261,16 +443,24 @@ impl Shell {
                     this.dispatch(Event::KeyTimeout { seq });
                 });
             }
-            // wired by the GTK step
-            Command::LoadMostUsed { .. }
-            | Command::LoadFavorites { .. }
-            | Command::LoadPacks { .. }
-            | Command::LoadPackItems { .. }
-            | Command::LoadPackCovers { .. }
-            | Command::ToggleFavorite { .. }
-            | Command::OpenInBrowser { .. }
-            | Command::Page(_) => {}
         }
+    }
+
+    /// Run a backend request and hand its outcome to the model; every
+    /// request is answered, with an error when there is no backend.
+    fn answer<T: Send + 'static>(
+        self: &Rc<Self>,
+        request: impl FnOnce(Arc<dyn Backend>) -> BoxFut<Result<T, String>>,
+        event: impl FnOnce(Result<T, String>) -> Event + 'static,
+    ) {
+        let Some(b) = self.backend() else {
+            self.dispatch(event(Err("not connected".into())));
+            return;
+        };
+        self.spawn(request(b), move |this, out| {
+            let outcome = out.unwrap_or_else(|| Err("internal error (see log)".into()));
+            this.dispatch(event(outcome));
+        });
     }
 
     /// Run `fut` on the runtime and hand its output to `done` on the GTK main
@@ -290,12 +480,60 @@ impl Shell {
         });
     }
 
+    fn open_uri(&self, uri: &str) {
+        let uri = uri.to_string();
+        gtk::UriLauncher::new(&uri).launch(Some(&self.w.window), gio::Cancellable::NONE, move |r| {
+            if let Err(e) = r {
+                tracing::warn!("opening {uri}: {e}");
+            }
+        });
+    }
+
     // -- rendering -------------------------------------------------------------------------
 
     fn render(&self) {
         let m = self.model.borrow();
         let w = &self.w;
-        self.rendering.set(true);
+        let was_rendering = self.rendering.replace(true);
+        let tab = m.tab();
+        let view = m.view();
+
+        w.tabs.render(tab);
+        w.title.set_label(&m.title());
+        w.back.set_visible(tab == Tab::Packs && m.open_pack().is_some());
+        let field = tab.has_text_field();
+        w.entry.set_visible(field);
+        w.title.set_hexpand(!field);
+        let placeholder = match (tab, m.open_pack()) {
+            (Tab::Packs, Some(p)) => format!("Filter {} by name, keyword or emoji", p.name),
+            (Tab::Packs, None) => "Filter packs by name".to_string(),
+            _ => SEARCH_PLACEHOLDER.to_string(),
+        };
+        if w.entry.placeholder_text().as_deref() != Some(placeholder.as_str()) {
+            w.entry.set_placeholder_text(Some(&placeholder));
+        }
+        if w.entry.text() != m.query() {
+            w.entry.set_text(m.query());
+            w.entry.set_position(-1);
+        }
+        let count = match view {
+            View::Items => pages::item_count(m.entries().len() as u64),
+            View::Packs if m.packs().len() == 1 => "1 pack".to_string(),
+            View::Packs => format!("{} packs", m.packs().len()),
+            View::Page => String::new(),
+        };
+        w.count.set_label(&count);
+        w.count.set_visible(!count.is_empty() && !field);
+
+        let page = match view {
+            View::Items => "items",
+            View::Packs => "packs",
+            View::Page if tab == Tab::Me => "me",
+            View::Page => "settings",
+        };
+        if w.content.visible_child_name().as_deref() != Some(page) {
+            w.content.set_visible_child_name(page);
+        }
 
         if m.entries_revision() != self.rendered_revision.get() {
             let thumbs = self.thumbs.borrow();
@@ -311,26 +549,53 @@ impl Shell {
                 })
                 .collect();
             w.store.splice(0, w.store.n_items(), &objects);
+            let covers = self.covers.borrow();
+            let packs: Vec<PackObject> = m
+                .packs()
+                .iter()
+                .map(|s| {
+                    let tex = match covers.get(&cover_key(s)) {
+                        Some(Thumb::Ready(t)) => Some(t),
+                        _ => None,
+                    };
+                    PackObject::new(s, tex)
+                })
+                .collect();
+            w.pack_store.splice(0, w.pack_store.n_items(), &packs);
             self.rendered_revision.set(m.entries_revision());
             self.scrolled_to.set(None);
         }
 
+        let (selection, grid) = match view {
+            View::Packs => (&w.pack_selection, &w.pack_grid),
+            _ => (&w.selection, &w.grid),
+        };
         let selected = m.selected().map(|i| i as u32).unwrap_or(gtk::INVALID_LIST_POSITION);
-        if w.selection.selected() != selected {
-            w.selection.set_selected(selected);
+        if view != View::Page && selection.selected() != selected {
+            selection.set_selected(selected);
         }
-        if m.is_visible() && w.window.is_visible() && m.selected() != self.scrolled_to.get() {
-            if let Some(i) = m.selected() {
-                w.grid.scroll_to(i as u32, gtk::ListScrollFlags::NONE, None);
+        let at = m.selected().filter(|_| view != View::Page).map(|i| (view, i));
+        if m.is_visible() && w.window.is_visible() && at != self.scrolled_to.get() {
+            if let Some((_, i)) = at {
+                grid.scroll_to(i as u32, gtk::ListScrollFlags::NONE, None);
             }
-            self.scrolled_to.set(m.selected());
-        }
-        if w.entry.text() != m.query() {
-            w.entry.set_text(m.query());
-            w.entry.set_position(-1);
+            self.scrolled_to.set(at);
         }
 
+        w.help.set_visible(m.help_visible());
+
         let f = m.footer();
+        match f.mode {
+            Some(mode) => {
+                w.mode.set_visible(true);
+                w.mode.set_label(mode.label());
+                set_class(&w.mode, "insert", mode == Mode::Insert);
+                set_class(&w.mode, "normal", mode == Mode::Normal);
+            }
+            None => w.mode.set_visible(false),
+        }
+        w.pending.set_label(&f.pending);
+        w.pending.set_visible(!f.pending.is_empty());
         w.target.set_label(&f.target);
         w.target_hint.set_label(&f.target_hint);
         match f.sticker {
@@ -349,61 +614,210 @@ impl Shell {
         set_class(&w.status, "warning", f.level == Level::Warning);
         set_class(&w.status, "dim-label", matches!(f.level, Level::Info | Level::Busy));
 
-        self.rendering.set(false);
+        self.apply_focus(&m);
+        let cursor = m.config().modal;
+        self.me.show_cursor(cursor && tab == Tab::Me);
+        self.settings.show_cursor(cursor && tab == Tab::Settings);
+
+        self.rendering.set(was_rendering);
         drop(m);
         self.update_page();
     }
 
-    /// Main grid, "Not logged in" (the server rejected us) or "cannot start".
+    /// Move the keyboard focus to match the mode. Callers set `rendering`,
+    /// so the focus changes made here are not reported back.
+    fn apply_focus(&self, m: &Model) {
+        let window = &self.w.window;
+        if !m.is_visible() || !window.is_visible() {
+            return;
+        }
+        let focus = GtkWindowExt::focus(window);
+        // An open drop-down list of the Settings page keeps the keys.
+        if focus
+            .as_ref()
+            .is_some_and(|f| f.ancestor(gtk::Popover::static_type()).is_some())
+        {
+            return;
+        }
+        match m.mode() {
+            Mode::Insert if m.tab().has_text_field() => {
+                let entry: &gtk::Widget = self.w.entry.upcast_ref();
+                if !focus.as_ref().is_some_and(|f| f == entry || f.is_ancestor(entry)) {
+                    self.w.entry.grab_focus();
+                }
+            }
+            // A page field the user went into; or no modes, where nothing is forced.
+            Mode::Insert => {}
+            Mode::Normal => {
+                if focus.is_some_and(|f| f.is::<gtk::Text>()) {
+                    GtkWindowExt::set_focus(window, None::<&gtk::Widget>);
+                }
+            }
+        }
+    }
+
+    /// The popup, or "stickpile cannot start" (bad config, no cache).
     fn update_page(&self) {
         let page = if self.config_error.is_some() || self.backend().is_none() {
             "error"
-        } else if self.login_required() {
-            "login"
         } else {
             "main"
         };
         if self.w.stack.visible_child_name().as_deref() == Some(page) {
             return;
         }
-        let config = glib::markup_escape_text(&self.config_path.display().to_string());
-        match page {
-            "error" => {
-                let msg = self
-                    .config_error
-                    .clone()
-                    .or_else(|| self.backend_error.borrow().clone())
-                    .unwrap_or_else(|| "unknown error".into());
-                self.w.error.set_description(Some(&format!(
-                    "{}\n\nConfig: <tt>{config}</tt>",
-                    glib::markup_escape_text(&msg)
-                )));
-            }
-            "login" => self.w.login.set_description(Some(&format!(
-                "The server did not accept this client. Run <tt>stickpile login</tt> in a terminal \
-                 (on the tailnet it needs no password), then open the popup again.\n\n\
-                 Server: <tt>{}</tt>\nConfig: <tt>{config}</tt>",
-                glib::markup_escape_text(&self.cfg.server_url)
-            ))),
-            _ => {}
+        if page == "error" {
+            let config = glib::markup_escape_text(&self.config_path.display().to_string());
+            let msg = self
+                .config_error
+                .clone()
+                .or_else(|| self.backend_error.borrow().clone())
+                .unwrap_or_else(|| "unknown error".into());
+            self.w.error.set_description(Some(&format!(
+                "{}\n\nConfig: <tt>{config}</tt>",
+                glib::markup_escape_text(&msg)
+            )));
         }
         self.w.stack.set_visible_child_name(page);
-        if page == "main" {
-            self.w.entry.grab_focus();
-        }
     }
 
     fn present(self: &Rc<Self>) {
         // Pick up a token written by `stickpile login` since the server said no.
-        if !self.demo && self.config_error.is_none() && (self.backend().is_none() || self.login_required()) {
-            self.open_session();
+        if !self.demo_mode && self.config_error.is_none() && (self.backend().is_none() || self.login_required()) {
+            self.open_session(self.login_required());
         }
         self.update_page();
-        // Failed thumbnails get another chance on every open.
+        // Failed thumbnails and covers get another chance on every open.
         self.thumbs.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
+        self.covers.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
+        let was = self.rendering.replace(true);
         self.w.window.present();
-        self.w.entry.grab_focus();
+        self.apply_focus(&self.model.borrow());
+        self.rendering.set(was);
         self.maybe_sync();
+    }
+
+    // -- Me and Settings --------------------------------------------------------------------
+
+    fn load_profile(self: &Rc<Self>) {
+        let Some(b) = self.backend() else {
+            self.me.profile_loaded(Err("not connected".into()));
+            return;
+        };
+        self.me.loading();
+        self.spawn(b.profile(), |this, out| {
+            this.me
+                .profile_loaded(out.unwrap_or_else(|| Err("internal error (see log)".into())));
+        });
+    }
+
+    fn me_action(self: &Rc<Self>, action: MeAction) {
+        let Some(b) = self.backend() else {
+            self.me.login_finished(Err(LoginError::Failed("not connected".into())));
+            return;
+        };
+        match action {
+            MeAction::Login(credentials) => self.spawn(b.login(credentials), |this, out| {
+                let outcome = out.unwrap_or_else(|| Err(LoginError::Failed("internal error (see log)".into())));
+                let ok = outcome.is_ok();
+                this.me.login_finished(outcome);
+                if ok {
+                    this.account_changed();
+                }
+            }),
+            MeAction::Logout => self.spawn(b.logout(), |this, out| {
+                this.me
+                    .logout_finished(out.unwrap_or_else(|| Err("internal error (see log)".into())));
+                this.account_changed();
+                this.load_profile();
+            }),
+            MeAction::Retry => self.load_profile(),
+            MeAction::Open(url) => self.open_uri(&url),
+        }
+    }
+
+    /// Logged in or out, or another server: what the item tabs show
+    /// belongs to the old account. Fetch it again and sync the new library.
+    fn account_changed(self: &Rc<Self>) {
+        self.thumbs.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
+        self.covers.borrow_mut().clear();
+        self.dispatch(Event::Reload);
+        *self.sync.borrow_mut() = sync::SyncPolicy::default();
+        self.maybe_sync();
+    }
+
+    fn settings_action(self: &Rc<Self>, action: SettingsAction) {
+        let path = self.settings.write_path();
+        let result = match action {
+            SettingsAction::Set(key, value) => config_file::set_value(&path, key, value),
+            SettingsAction::Reset(key) => config_file::unset_value(&path, key),
+        };
+        if let Err(e) = &result {
+            tracing::warn!("saving a setting: {e}");
+            self.settings.save_failed(&format!("Not saved: {e}"));
+        }
+        self.reload_settings();
+    }
+
+    /// Read the config again for the Settings page, and apply it if it changed.
+    fn reload_settings(self: &Rc<Self>) {
+        match config_file::load_layered(&self.config_path) {
+            Ok(layered) => {
+                self.settings.set_error(None);
+                self.settings.show(&layered, &self.config_path);
+                let changed = layered.config != *self.cfg.borrow();
+                if changed {
+                    self.apply_config(layered.config);
+                }
+            }
+            Err(e) => self.settings.set_error(Some(&e.to_string())),
+        }
+    }
+
+    /// Use a new config without a restart.
+    fn apply_config(self: &Rc<Self>, new: ClientConfig) {
+        let old = self.cfg.replace(new.clone());
+        let w = &self.w;
+        if old.ui.columns != new.ui.columns || old.ui.thumb_px != new.ui.thumb_px {
+            let columns = new.ui.columns.max(1);
+            for grid in [&w.grid, &w.pack_grid] {
+                grid.set_max_columns(columns.max(grid.max_columns()));
+                grid.set_min_columns(columns);
+                grid.set_max_columns(columns);
+            }
+            if old.ui.thumb_px != new.ui.thumb_px {
+                let px = new.ui.thumb_px as i32;
+                w.grid.set_factory(Some(&self.item_factory(px)));
+                w.pack_grid.set_factory(Some(&packs::factory(px)));
+            }
+            let (width, height) = glue::window_size(&new);
+            w.window.set_default_size(width, height);
+            self.layout.set(None);
+        }
+        let account = pages::account_changed(&old, &new);
+        if pages::needs_new_session(&old, &new) {
+            match &self.demo {
+                Some(demo) => demo.configure(&new),
+                None if !self.demo_mode && self.config_error.is_none() => {
+                    // Release the old session's cache first; if the new one
+                    // cannot open, the error page says so rather than the
+                    // old server answering on.
+                    let login_required = !account && self.login_required();
+                    self.backend.replace(None);
+                    self.open_session(login_required);
+                }
+                None => {}
+            }
+            self.update_page();
+        }
+        self.dispatch(Event::Configure(glue::model_config(&new)));
+        if account {
+            self.me.forget();
+            self.account_changed();
+            if self.model.borrow().tab() == Tab::Me {
+                self.load_profile();
+            }
+        }
     }
 
     // -- search ------------------------------------------------------------------------------
@@ -437,24 +851,17 @@ impl Shell {
     }
 
     fn run_search(self: &Rc<Self>, query: String, target: TargetApp, limit: usize, generation: u64) {
-        let Some(b) = self.backend() else {
-            self.dispatch(Event::Results {
-                generation,
-                outcome: Err("not connected".into()),
-            });
-            return;
-        };
-        self.spawn(b.search(query, target, limit), move |this, out| {
-            let outcome = out.unwrap_or_else(|| Err("internal error (see log)".into()));
-            this.dispatch(Event::Results { generation, outcome });
-        });
+        self.answer(
+            move |b| b.search(query, target, limit),
+            move |outcome| Event::Results { generation, outcome },
+        );
     }
 
-    // -- thumbnails -----------------------------------------------------------------------------
+    // -- thumbnails and covers -------------------------------------------------------------------
 
     fn load_thumbnails(self: &Rc<Self>, items: Vec<ItemSummary>) {
         let Some(backend) = self.backend() else { return };
-        let px = thumbs::decode_px(self.cfg.ui.thumb_px);
+        let px = thumbs::decode_px(self.cfg.borrow().ui.thumb_px);
         for item in items {
             if self.thumbs.borrow().contains_key(&item.id) {
                 continue;
@@ -477,15 +884,7 @@ impl Shell {
     fn thumbnail_done(&self, id: String, out: Option<Result<thumbs::Rgba, String>>) {
         let state = match out {
             Some(Ok(rgba)) => {
-                let stride = rgba.stride();
-                let tex = gdk::MemoryTexture::new(
-                    rgba.width as i32,
-                    rgba.height as i32,
-                    gdk::MemoryFormat::R8g8b8a8,
-                    &glib::Bytes::from_owned(rgba.pixels),
-                    stride,
-                )
-                .upcast::<gdk::Texture>();
+                let tex = texture(rgba);
                 for obj in self.w.store.iter::<StickerObject>().flatten() {
                     if obj.item_id() == id {
                         obj.set_texture(Some(&tex));
@@ -511,6 +910,53 @@ impl Shell {
                 .collect();
             thumbs.retain(|k, t| matches!(t, Thumb::Loading) || shown.contains(k));
         }
+    }
+
+    fn load_covers(self: &Rc<Self>, packs: Vec<SetSummary>) {
+        let Some(backend) = self.backend() else { return };
+        let px = thumbs::decode_px(self.cfg.borrow().ui.thumb_px);
+        for set in packs {
+            let key = cover_key(&set);
+            if self.covers.borrow().contains_key(&key) {
+                continue;
+            }
+            self.covers.borrow_mut().insert(key.clone(), Thumb::Loading);
+            let set_id = set.id.clone();
+            let b = backend.clone();
+            let permits = self.thumb_permits.clone();
+            let fut: BoxFut<Result<Option<thumbs::Rgba>, String>> = Box::pin(async move {
+                let _permit = permits.acquire_owned().await.map_err(|e| e.to_string())?;
+                let Some(path) = b.pack_cover(set).await? else {
+                    return Ok(None);
+                };
+                tokio::task::spawn_blocking(move || thumbs::decode_file(&path, px))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map(Some)
+            });
+            self.spawn(fut, move |this, out| this.cover_done(key, set_id, out));
+        }
+    }
+
+    fn cover_done(&self, key: String, set_id: String, out: Option<Result<Option<thumbs::Rgba>, String>>) {
+        let state = match out {
+            Some(Ok(Some(rgba))) => {
+                let tex = texture(rgba);
+                for obj in self.w.pack_store.iter::<PackObject>().flatten() {
+                    if obj.set_id() == set_id {
+                        obj.show_cover(&tex);
+                    }
+                }
+                Thumb::Ready(tex)
+            }
+            Some(Err(e)) => {
+                tracing::debug!("cover of {set_id}: {e}");
+                Thumb::Failed
+            }
+            // No cover: the placeholder stays.
+            Some(Ok(None)) | None => Thumb::Failed,
+        };
+        self.covers.borrow_mut().insert(key, state);
     }
 
     // -- copy ---------------------------------------------------------------------------------------
@@ -692,12 +1138,25 @@ impl Shell {
         });
 
         let this = self.clone();
-        w.selection.connect_selected_notify(move |sel| {
-            let i = sel.selected();
-            if !this.rendering.get() && i != gtk::INVALID_LIST_POSITION {
-                this.dispatch(Event::Select(i as usize));
-            }
-        });
+        w.tabs.connect(move |tab| this.dispatch(Event::ShowTab(tab)));
+        let this = self.clone();
+        w.tabs.help.connect_clicked(move |_| this.dispatch(Event::ToggleHelp));
+        let this = self.clone();
+        w.back.connect_clicked(move |_| this.dispatch(Event::PackBack));
+        let click = gtk::GestureClick::new();
+        let this = self.clone();
+        click.connect_released(move |_, _, _, _| this.dispatch(Event::ToggleHelp));
+        w.help.add_controller(click);
+
+        for selection in [&w.selection, &w.pack_selection] {
+            let this = self.clone();
+            selection.connect_selected_notify(move |sel| {
+                let i = sel.selected();
+                if !this.rendering.get() && i != gtk::INVALID_LIST_POSITION {
+                    this.dispatch(Event::Select(i as usize));
+                }
+            });
+        }
 
         // Same as Ctrl+S. The button never takes the focus, so typing goes on
         // in the search entry after a click.
@@ -708,18 +1167,82 @@ impl Shell {
             }
         });
 
-        let this = self.clone();
-        w.grid.connect_activate(move |_, pos| {
-            this.dispatch(Event::CopyAt {
-                index: pos as usize,
-                toggle_sticker: false,
+        for grid in [&w.grid, &w.pack_grid] {
+            let this = self.clone();
+            grid.connect_activate(move |_, pos| {
+                this.dispatch(Event::CopyAt {
+                    index: pos as usize,
+                    toggle_sticker: false,
+                });
             });
+        }
+
+        // Page actions run from the main loop: some come from signals that
+        // fire while a render holds the model (a field losing the focus).
+        let this = self.clone();
+        self.me.connect_action(move |action| {
+            let this = this.clone();
+            glib::idle_add_local_once(move || this.me_action(action));
+        });
+        let this = self.clone();
+        self.settings.connect_action(move |action| {
+            let this = this.clone();
+            glib::idle_add_local_once(move || this.settings_action(action));
+        });
+
+        // Report focus changes the user made; a click into a text field is Insert.
+        let this = self.clone();
+        w.window.connect_notify_local(Some("focus-widget"), move |win, _| {
+            let focus = GtkWindowExt::focus(win);
+            if let Some(f) = &focus {
+                this.me.follow(f);
+                this.settings.follow(f);
+            }
+            // GTK's own initial focus while mapping an inactive window is
+            // not the user's doing.
+            if this.rendering.get() || !win.is_active() {
+                return;
+            }
+            let text = focus.is_some_and(|f| f.is::<gtk::Text>());
+            let this = this.clone();
+            glib::idle_add_local_once(move || {
+                let still = GtkWindowExt::focus(&this.w.window).is_some_and(|f| f.is::<gtk::Text>());
+                if still == text {
+                    this.dispatch(Event::TextFocus(text));
+                }
+            });
+        });
+        // Whatever GTK focused while mapping the window, the mode decides.
+        let this = self.clone();
+        w.window.connect_is_active_notify(move |win| {
+            if !win.is_active() {
+                return;
+            }
+            let Ok(m) = this.model.try_borrow() else { return };
+            let was = this.rendering.replace(true);
+            this.apply_focus(&m);
+            this.rendering.set(was);
+            // A page field that went away while the window was inactive
+            // (the login form after a login) left Insert mode behind.
+            let text = GtkWindowExt::focus(win).is_some_and(|f| f.is::<gtk::Text>());
+            let stale = m.config().modal && m.mode() == Mode::Insert && m.tab().is_page() && !text;
+            drop(m);
+            if stale {
+                let this = this.clone();
+                glib::idle_add_local_once(move || this.dispatch(Event::TextFocus(false)));
+            }
         });
 
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let this = self.clone();
         keys.connect_key_pressed(move |ctl, keyval, keycode, state| {
+            // An open drop-down list handles its own keys.
+            let in_popover =
+                GtkWindowExt::focus(&this.w.window).is_some_and(|f| f.ancestor(gtk::Popover::static_type()).is_some());
+            if in_popover {
+                return glib::Propagation::Proceed;
+            }
             let name = keyval.name().map(|n| n.to_string()).unwrap_or_default();
             let latin = ctl
                 .widget()
@@ -757,10 +1280,15 @@ impl Shell {
             glib::Propagation::Proceed
         });
 
-        // Grid cells: picture + badge + warning icon, bound to the item's
-        // properties; each cell is also a drag source for the item's file.
+        let px = self.cfg.borrow().ui.thumb_px as i32;
+        w.grid.set_factory(Some(&self.item_factory(px)));
+        w.pack_grid.set_factory(Some(&packs::factory(px)));
+    }
+
+    /// Grid cells: picture + badge + warning icon, bound to the item's
+    /// properties; each cell is also a drag source for the item's file.
+    fn item_factory(self: &Rc<Self>, thumb_px: i32) -> gtk::SignalListItemFactory {
         let factory = gtk::SignalListItemFactory::new();
-        let thumb_px = self.cfg.ui.thumb_px as i32;
         let this = self.clone();
         factory.connect_setup(move |_, obj| {
             let Some(li) = obj.downcast_ref::<gtk::ListItem>() else {
@@ -822,57 +1350,96 @@ impl Shell {
             source.connect_drag_end(move |_, _, _| shell.drag_ended());
             cell.add_controller(source);
         });
-        w.grid.set_factory(Some(&factory));
+        factory
     }
 }
 
-fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
-    if on {
-        widget.add_css_class(class);
-    } else {
-        widget.remove_css_class(class);
-    }
-}
-
-fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
-    let css = gtk::CssProvider::new();
-    css.load_from_string(CSS);
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
-
-    let entry = gtk::SearchEntry::builder()
-        .hexpand(true)
-        .placeholder_text("Search — e:😂 set:cats type:gif vibe:tired")
-        .build();
-    let top = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .margin_top(8)
-        .margin_bottom(8)
-        .margin_start(8)
-        .margin_end(8)
-        .build();
-    top.append(&entry);
-
-    let store = gio::ListStore::new::<StickerObject>();
-    let selection = gtk::SingleSelection::new(Some(store.clone()));
-    selection.set_autoselect(false);
-    selection.set_can_unselect(true);
-    let columns = cfg.ui.columns.max(1);
+fn grid_view(selection: &gtk::SingleSelection, columns: u32) -> gtk::GridView {
     let grid = gtk::GridView::builder()
-        .model(&selection)
+        .model(selection)
         .min_columns(columns)
         .max_columns(columns)
         .single_click_activate(true)
         .can_focus(false)
         .build();
     grid.add_css_class("stickpile-grid");
-    let scroller = gtk::ScrolledWindow::builder()
+    grid
+}
+
+fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
-        .child(&grid)
-        .build();
+        .child(child)
+        .build()
+}
 
+fn single_selection(store: &gio::ListStore) -> gtk::SingleSelection {
+    let selection = gtk::SingleSelection::new(Some(store.clone()));
+    selection.set_autoselect(false);
+    selection.set_can_unselect(true);
+    selection
+}
+
+fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settings: &SettingsPage) -> Widgets {
+    let css = gtk::CssProvider::new();
+    css.load_from_string(CSS);
+    if let Some(display) = gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+
+    let tabs = TabBar::build();
+    let back = gtk::Button::builder()
+        .icon_name("go-previous-symbolic")
+        .can_focus(false)
+        .tooltip_text("Back to the packs (-, Backspace)")
+        .build();
+    back.add_css_class("flat");
+    let title = gtk::Label::builder()
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    title.add_css_class("heading");
+    let entry = gtk::SearchEntry::builder()
+        .hexpand(true)
+        .placeholder_text(SEARCH_PLACEHOLDER)
+        .build();
+    let count = gtk::Label::builder().xalign(1.0).build();
+    count.add_css_class("dim-label");
+    count.add_css_class("caption");
+    let header = gtk::Box::builder().spacing(8).build();
+    header.add_css_class("stickpile-header");
+    header.append(&back);
+    header.append(&title);
+    header.append(&entry);
+    header.append(&count);
+    let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    top.append(&tabs.root);
+    top.append(&header);
+
+    let columns = cfg.ui.columns.max(1);
+    let store = gio::ListStore::new::<StickerObject>();
+    let selection = single_selection(&store);
+    let grid = grid_view(&selection, columns);
+    let pack_store = gio::ListStore::new::<PackObject>();
+    let pack_selection = single_selection(&pack_store);
+    let pack_grid = grid_view(&pack_selection, columns);
+
+    let content = gtk::Stack::builder().vexpand(true).build();
+    content.add_named(&scrolled(&grid), Some("items"));
+    content.add_named(&scrolled(&pack_grid), Some("packs"));
+    content.add_named(&me.root, Some("me"));
+    content.add_named(&settings.root, Some("settings"));
+    let help = help::build();
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&content));
+    overlay.add_overlay(&help);
+
+    let mode = gtk::Label::new(None);
+    mode.add_css_class("stickpile-mode");
+    mode.set_valign(gtk::Align::Center);
+    let pending = gtk::Label::new(None);
+    pending.add_css_class("stickpile-pending");
     let target = gtk::Label::new(None);
     target.add_css_class("heading");
     target.set_tooltip_text(Some(
@@ -908,6 +1475,8 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
         .spacing(8)
         .build();
     footer.add_css_class("stickpile-footer");
+    footer.append(&mode);
+    footer.append(&pending);
     footer.append(&target);
     footer.append(&target_hint);
     footer.append(&sticker);
@@ -915,17 +1484,9 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
 
     let main = adw::ToolbarView::new();
     main.add_top_bar(&top);
-    main.set_content(Some(&scroller));
+    main.set_content(Some(&overlay));
     main.add_bottom_bar(&footer);
 
-    let login = adw::StatusPage::builder()
-        .icon_name("system-lock-screen-symbolic")
-        .title("Not logged in")
-        .description(format!(
-            "Run <tt>stickpile login</tt> in a terminal, then open the popup again.\n\nServer: <tt>{}</tt>",
-            glib::markup_escape_text(&cfg.server_url)
-        ))
-        .build();
     let error = adw::StatusPage::builder()
         .icon_name("dialog-error-symbolic")
         .title("stickpile cannot start")
@@ -933,7 +1494,6 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
 
     let stack = gtk::Stack::new();
     stack.add_named(&main, Some("main"));
-    stack.add_named(&login, Some("login"));
     stack.add_named(&error, Some("error"));
 
     let (width, height) = glue::window_size(cfg);
@@ -949,12 +1509,22 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig) -> Widgets {
     Widgets {
         window,
         stack,
-        login,
         error,
+        tabs,
+        back,
+        title,
         entry,
+        count,
+        content,
+        help,
         grid,
         store,
         selection,
+        pack_grid,
+        pack_store,
+        pack_selection,
+        mode,
+        pending,
         target,
         target_hint,
         sticker,

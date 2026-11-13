@@ -68,7 +68,7 @@ pub fn run() -> glib::ExitCode {
         }
         let s = shell.borrow().clone().expect("started above");
         let env = FocusEnv::from_vars(|k| cmdline.getenv(k).map(|v| v.to_string()));
-        match cli::action(&cli, first, s.config().ui.start_hidden) {
+        match cli::action(&cli, first, s.start_hidden()) {
             Action::Start { show: true } | Action::Show => s.open(&env),
             Action::Start { show: false } | Action::Nothing => {}
             Action::Toggle => s.toggle(&env),
