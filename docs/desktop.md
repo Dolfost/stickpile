@@ -6,7 +6,8 @@ press Enter, paste. GTK4 + libadwaita, resident in the background.
 ## Install and run
 
 1. Configure the server and log in once (the token is stored in
-   `$XDG_STATE_HOME/stickpile/token`, mode 0600):
+   `$XDG_STATE_HOME/stickpile/token`, mode 0600), either on the popup's
+   Me tab (6) or in a terminal:
 
    ```sh
    stickpile login            # see docs/cli.md; writes the token
@@ -14,8 +15,8 @@ press Enter, paste. GTK4 + libadwaita, resident in the background.
 
    On a tailnet behind `tailscale serve` requests work without a token
    (the server knows you from your tailnet identity), so this step is
-   optional there; `stickpile login` still turns that identity into a token
-   without a password.
+   optional there; "Log in with tailnet" on the Me tab, or `stickpile
+   login`, still turns that identity into a token without a password.
 
    The client reads `~/.config/stickpile/config.toml` (`--config FILE` or
    `STICKPILE_CONFIG` to override); with home-manager it is generated from
@@ -122,8 +123,9 @@ hl.window_rule {
 }
 ```
 
-The popup sizes itself from `ui.columns` × 4 rows of `ui.thumb_px`
-(888×676 with the defaults); add a `size` rule to override.
+The popup sizes itself from `ui.columns` x 4 rows of `ui.thumb_px`, at
+least 700 px wide so the tab row fits (888x688 with the defaults); add a
+`size` rule to override.
 
 ### Sway
 
@@ -148,11 +150,31 @@ System Settings → Keyboard → Shortcuts → Add New → Command or Script →
 `stickpile-desktop --hidden`) or the systemd unit. Focus detection is not
 available on KDE Wayland (same fallback as GNOME); on KDE X11 it works.
 
-## Keys
+## Tabs
 
-The popup has seven tabs, numbered in this order: 1 Search, 2 Recent,
-3 Most used, 4 Packs, 5 Favorites, 6 Me, 7 Settings. Every opening starts
-on `ui.start_tab` (Search by default).
+The popup has seven tabs, numbered in this order. Every opening starts on
+`ui.start_tab` (Search by default); when the server has rejected the
+client (signed out), it opens on Me instead, with the login form.
+
+| Tab | Shows |
+|---|---|
+| 1 Search | search results as you type; an empty query lists the recently used items, the ones used in the focused app first |
+| 2 Recent | the items recently copied on this device |
+| 3 Most used | your most copied items (on every device; offline, this device's history) |
+| 4 Packs | your packs, then other users' public packs: cover, name, item count. Enter opens one |
+| 5 Favorites | the items you liked; `f` (Ctrl+D in Insert) likes or unlikes the selected item anywhere |
+| 6 Me | who you are signed in as, with login and logout ([below](#me)) |
+| 7 Settings | the everyday settings, saved and applied at once ([below](#settings)) |
+
+From top to bottom the window has the tab row (click a tab, or press its
+number; `?` opens the key help), a header with the title ("Packs / Cats"
+inside a pack, with a back arrow), the text field on Search and Packs
+(an item count on the other grids), the grid or page, and the footer: the
+mode (INSERT / NORMAL), keys of a command still being typed, the target
+app, the sticker toggle and the status. Every tab fetches its list again
+each time it is shown, so it is never older than the last look.
+
+## Keys
 
 Keys work vim-style, in two modes:
 
@@ -213,10 +235,12 @@ opens the selected one: its items fill the grid, the header reads
 Escape in Normal mode go back to the list, with the pack you came from
 selected and the list filter as it was.
 
-**Me and Settings.** In Normal mode `j` / `k` (or the arrow keys) move
-between rows, Enter or Space presses a button or flips a switch, and `i`
-edits the row's text field. Editing a field (or clicking into one) is
-Insert mode; Escape leaves it.
+**Me and Settings.** In Normal mode `j` / `k` (or the arrow keys) move a
+highlight between the rows and buttons, `h` / `l` change a choice or a
+number by one step (and turn a switch off / on), Enter or Space presses a
+button, flips a switch or opens a choice list (arrows and Enter pick, Escape
+closes it), and `i` edits the row's text or number field. Editing a field
+(or clicking into one) is Insert mode; Escape leaves it.
 
 ### In every mode
 
@@ -325,6 +349,55 @@ first: AyuGram opens on what you send in Telegram, Vesktop on what you send
 in Discord. This is stored in `$XDG_CACHE_HOME/stickpile/desktop-window-history.json`
 (delete it to reset).
 
+## Me
+
+The Me tab shows who the popup is signed in as: name, server (the button
+next to it opens the web UI), how it is signed in (a token stored on this
+device, or the tailnet identity without a token), two-factor login, and
+counts (copies in all and this week, likes given and received, packs,
+items, storage, copies not yet uploaded). It is fetched again each time
+the tab is shown.
+
+Signed out, it shows a login form: username, password, then Enter (Enter
+in the username field moves on to the password). An account with
+two-factor login asks for the code in a third field. "Log in with tailnet"
+appears when the server knows this device by its tailnet identity; it
+stores a token without a password. Signed in with a token, "Log out"
+revokes the token on the server and deletes it; signed in by tailnet
+identity without a token, "Store a token" turns the identity into one. A
+login or logout applies at once: no restart, and every tab fetches its
+list again for the new account.
+
+## Settings
+
+The Settings tab edits the keys below plus the everyday ones from the top
+of the file, grouped as Popup, Copying and Server: a switch per boolean,
+a list per choice, a number field (with its range) per number, and a text
+field for the server URL (saved on Enter or when the field loses the
+focus). Every change is saved at once and applied to the running popup:
+the grid and window size, modes and start tab, copy adjustments, server
+URL and timeout (the connection is opened again; a new server URL also
+drops the lists fetched from the old one). Only "Start hidden" waits for
+the next start, as it only matters then. A value that cannot be saved (a
+server URL that is not http or https) is rejected with a message and the
+file stays as it was.
+
+The arrow next to a changed value resets it: the key is removed from the
+file, so the default (or the value `config.toml` sets) applies again.
+
+Where changes go depends on `config.toml`:
+
+- writable (or missing): the Settings tab edits `config.toml` itself;
+  comments, order and the other keys are kept, and nothing is locked;
+- read-only, as the home-manager module makes it (a link into
+  `/nix/store`): changes go to `settings.toml` next to it, which
+  `config.toml` overrides. The keys `config.toml` sets are shown read-only
+  with "Set by home-manager" ("Set in config.toml" when it is read-only
+  for another reason). Problems in `settings.toml` (an unknown key, a bad
+  value) are listed at the top of the page and the default is used.
+
+The page says at the top which file it saves to.
+
 ## Popup settings
 
 ```toml
@@ -348,13 +421,10 @@ alike: the image data and the file reference carry the same padded or
 flattened image, and padded stickers stay 512 px WebP. Animations and
 videos are left alone.
 
-The Settings tab edits these keys and the everyday ones from the top of
-the file (server URL, timeout, cache size, default target, sticker
-preference, focus detection). It saves to `config.toml` when it can write
-it. When `config.toml` is read-only, as the home-manager module makes it,
-the changes go to `settings.toml` next to it, and the keys `config.toml`
-sets are shown locked ("set by home-manager"). Clipboard offer lists and
-focus rules stay in `config.toml`. The layering rules are in
+The [Settings tab](#settings) edits these keys and the everyday ones from
+the top of the file (server URL, timeout, cache size, default target,
+sticker preference, focus detection). Clipboard offer lists and focus
+rules stay in `config.toml`. The layering rules are in
 [configuration.md](configuration.md#settings-saved-from-the-popup).
 
 ## Offline behaviour
@@ -379,7 +449,10 @@ names, the same clipboard offers as the real client, drag-and-drop, and a
 512 px WebP counts as a Telegram sticker. Each subdirectory of `DIR` is a
 pack (the output of `stickpile backup` works) and the loose files are one
 more; favorites and most used start from a fixed choice, and the account is
-a demo user that logs in and out without a server. Useful to try the popup
+a demo user that logs in and out without a server (any username works).
+`[copy]` padding and background apply as in the real client; the adjusted
+files are written to `demo/` in the cache directory. `gx` opens the file
+itself, since there is no web UI. Useful to try the popup
 and the paste matrix without a server. Quit a running instance first, since
 the running instance ignores `--demo`.
 
@@ -392,10 +465,11 @@ the running instance ignores `--demo`.
   cannot be toggled.
 - **The popup opens tiled / full-size.** Add the float + center window
   rules above.
-- **"Not logged in" page.** Shown when the server rejected a request
-  (no token and no tailnet identity, or a revoked token). Run
-  `stickpile login`; the next time the popup opens it re-reads the token,
-  no restart needed. The page shows the server URL and config path in use.
+- **"Not logged in; log in on the Me tab (6)".** The server rejected a
+  request (no token and no tailnet identity, or a revoked token). Once
+  that happened, the popup opens on the Me tab with the login form. Log in
+  there, or run `stickpile login`: the next time the popup opens it
+  re-reads the token, no restart needed.
 - **"stickpile cannot start" page.** The config file failed to parse (the
   error says where), or the cache could not be opened.
 - **Wrong target app.** Check the window class with `hyprctl -j
