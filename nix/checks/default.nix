@@ -1,6 +1,8 @@
 # Module checks: the Nix side of the "Nix-to-TOML mirror" (docs/nix.md).
 #
 #   config-drift         module defaults == Rust defaults, key by key, both ways
+#                        (client: the documented defaults; nothing set renders
+#                        an empty file)
 #   nixos-module         example NixOS config: evaluates, renders, the real
 #                        server loader accepts it, the unit is hardened
 #   home-manager-module  example home-manager config: evaluates, renders, the
@@ -63,15 +65,36 @@ let
         };
       }
     ]).config.services.stickpile;
-  clientDefaults =
-    (evalHome [
-      {
-        programs.stickpile = {
-          enable = true;
-          validateConfig = false;
-        };
-      }
-    ]).config.programs.stickpile;
+  clientHome = evalHome [
+    {
+      programs.stickpile = {
+        enable = true;
+        validateConfig = false;
+      };
+    }
+  ];
+  clientDefaults = clientHome.config.programs.stickpile;
+
+  # The client's settings are null unless set (only set keys are rendered, so
+  # the popup locks only those); each documents the client's default as JSON
+  # in `defaultText`. Collected here, keyed like `settings`, for the drift
+  # guard.
+  documentedDefaults =
+    opts:
+    lib.mapAttrs (
+      _: o:
+      if !(lib.isOption o) then
+        documentedDefaults o
+      else if o.type.name == "submodule" then
+        documentedDefaults (o.type.getSubOptions o.loc)
+      else if o ? defaultText then
+        builtins.fromJSON o.defaultText.text
+      else
+        o.default
+    ) (removeAttrs opts [ "_module" ]);
+  clientDocumentedDefaults = documentedDefaults (
+    clientHome.options.programs.stickpile.settings.type.getSubOptions [ ]
+  );
 
   # Built against the workspace lockfile and the real config sources.
   driftGuard = rust.craneLib.buildPackage {
@@ -118,12 +141,18 @@ in
         {
           nativeBuildInputs = [ driftGuard ];
           serverJson = pkgs.writeText "server-defaults.json" (builtins.toJSON serverDefaults.settings);
-          clientJson = pkgs.writeText "client-defaults.json" (builtins.toJSON clientDefaults.settings);
+          clientJson = pkgs.writeText "client-defaults.json" (builtins.toJSON clientDocumentedDefaults);
         }
         ''
           rc=0
           stickpile-config-drift server $serverJson ${serverDefaults.configFile} || rc=1
           stickpile-config-drift client $clientJson ${clientDefaults.configFile} || rc=1
+          # Nothing set renders nothing, so the popup locks nothing.
+          if grep -q '[^[:space:]]' ${clientDefaults.configFile}; then
+            echo "programs.stickpile.settings with nothing set renders keys:"
+            cat ${clientDefaults.configFile}
+            rc=1
+          fi
           [ $rc = 0 ] && touch $out
         '';
 
@@ -171,6 +200,9 @@ in
           export HOME=$TMPDIR XDG_CONFIG_HOME=$TMPDIR XDG_STATE_HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR
           stickpile --config "$configFile" config check
           [ "$configFile" = "${homeCfg.configFile}" ]
+          # Set with lib.mkDefault: still set, so rendered (and locked in the popup).
+          grep -qx 'timeout_secs = 7' "$configFile"
+          grep -qx 'start_tab = "favorites"' "$configFile"
           grep -q '^ExecStart=.*/bin/stickpile-desktop --hidden$' "$unit"
           grep -q '^PartOf=graphical-session.target$' "$unit"
           touch $out
