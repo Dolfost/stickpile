@@ -509,7 +509,7 @@ pub async fn page(
                 p.badges { (kind_badge(m.kind, m.format)) " " (quality_badge(m.quality)) }
                 @if q.saved.is_some() { (layout::alert("success", "Saved.")) }
                 (copy_controls(&card, true, false))
-                div.inline-row {
+                div.inline-row.like-row {
                     (like_form(&ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))
                     span.muted { (plural(item.copies, "copy", "copies")) }
                 }

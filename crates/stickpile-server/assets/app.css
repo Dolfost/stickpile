@@ -343,6 +343,9 @@ abbr.ai {
 .copy-controls { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
 .card .copy-controls .button, .card .copy-controls button { padding: 0.2rem 0.6rem; min-height: 2rem; font-size: 0.875rem; }
 .item-side .copy-controls .hint { flex-basis: 100%; }
+/* Apart from the copy buttons above and the file line below: the like
+   button sat flush against both. */
+.item-side .like-row { margin: 0.75rem 0; }
 .likes { color: var(--muted); font-size: 0.9rem; }
 .like-form { display: inline; margin: 0; }
 button.like { padding: 0.2rem 0.55rem; min-height: 2rem; gap: 0.25rem; }

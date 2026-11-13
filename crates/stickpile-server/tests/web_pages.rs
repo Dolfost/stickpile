@@ -71,6 +71,10 @@ async fn every_page_renders_for_its_user() {
     assert!(html.contains("data-copy=\"image\""), "stills copy as image");
     assert!(html.contains("Quality"));
     assert!(html.contains("Find a better version"));
+    assert!(
+        html.contains("class=\"inline-row like-row\""),
+        "the like row keeps off the copy buttons"
+    );
     assert!(html.contains(&format!("/api/v1/items/{}/file/thumb", cat.id)));
     let html = b.get(&format!("/items/{}", dance.id)).await.text();
     assert!(html.contains(">Copy still frame<"), "animations copy a still frame");
@@ -961,6 +965,7 @@ async fn csp_and_static_assets() {
     // flex basis the name line took the emoji line's room.
     assert!(css
         .contains(".compact .card.editor .field-emojis:not(.empty) {\n  display: block; flex: none; height: 1.35rem;"));
+    assert!(css.contains(".item-side .like-row { margin: 0.75rem 0; }"));
     assert!(css.contains(".items-section.view-grid .editor-grid"));
     assert!(css.contains(".items-section.hide-emojis"));
     assert!(css.contains(".set-list.hide-cover"));
