@@ -13,7 +13,7 @@ architecture and phase plan are in [docs/plan.md](docs/plan.md).
 - [x] Tag the first release, `v0.2.0` (the tag must match the workspace
       version). A failed release can be rebuilt for the same tag with
       `workflow_dispatch`.
-- [ ] Make the `ghcr.io/dolfost/stickpile` package public once the first
+- [x] Make the `ghcr.io/dolfost/stickpile` package public once the first
       image is pushed.
 
 ## Verify by hand
