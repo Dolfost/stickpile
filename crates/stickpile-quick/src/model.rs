@@ -1,25 +1,38 @@
 //! Popup state machine.
 //!
 //! The shell feeds [`Event`]s into [`Model::handle`] and executes the returned
-//! [`Command`]s (search, copy, hide, load thumbnails); it then re-renders from
-//! the model's read-only view ([`Model::entries`], [`Model::selected`],
+//! [`Command`]s (search, load, copy, hide, load thumbnails); it then re-renders
+//! from the model's read-only view ([`Model::tab`], [`Model::mode`],
+//! [`Model::view`], [`Model::entries`], [`Model::packs`], [`Model::selected`],
 //! [`Model::footer`]). Nothing here knows about a toolkit, a clock or the
 //! network, so every behaviour is unit-tested below.
 //!
 //! Async results are tagged: every [`Command::Search`] carries a generation
 //! number and [`Event::Results`] for any other generation are dropped, so a
-//! slow answer to an old query can never overwrite a newer one. Debouncing is
-//! the shell's job; the command carries a `debounce_ms` hint (0 when the user
-//! did not type, e.g. after switching the target app).
+//! slow answer to an old query can never overwrite a newer one. The list
+//! loads (most used, favorites, packs, a pack's items) are tagged the same
+//! way. Debouncing is the shell's job; the command carries a `debounce_ms`
+//! hint (0 when the user did not type, e.g. after switching the target app).
+//!
+//! With `modal` on, the shell maps keys by [`Model::mode`]: in Insert the
+//! text field has them, in Normal they arrive as [`Event::Normal`] and
+//! [`crate::vim`] turns them into commands. Each tab is shown in its
+//! [`Tab::default_mode`]; the shell reports focus changes of text fields
+//! ([`Event::TextFocus`]) and moves the focus to match [`Model::mode`].
 
 use stickpile_api::profiles::{self, ItemShape};
-use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, TargetApp};
+use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
 
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
+use crate::tabs::{Mode, PageKey, Tab, View};
+use crate::vim::{Cmd, Fed, NormalKey, Pending};
 
 /// Default delay between the last keystroke and the search request.
 pub const DEFAULT_DEBOUNCE_MS: u64 = 120;
+/// Default wait of a lone `1`-`7` in Normal mode for a motion (`3j`)
+/// before it switches to that tab.
+pub const DEFAULT_KEY_TIMEOUT_MS: u64 = 400;
 
 /// Static settings, usually taken from the client config (`ui.*`,
 /// `default_target`, `prefer_stickers`).
@@ -36,6 +49,15 @@ pub struct ModelConfig {
     pub prefer_stickers: bool,
     pub hide_on_copy: bool,
     pub debounce_ms: u64,
+    /// Items asked for on the Most used and Favorites tabs.
+    pub list_limit: usize,
+    /// Vim-style Insert / Normal modes (`ui.modal`). Off: the text field
+    /// always has the keys and Escape hides.
+    pub modal: bool,
+    /// The tab every opening starts on (`ui.start_tab`).
+    pub start_tab: Tab,
+    /// See [`DEFAULT_KEY_TIMEOUT_MS`].
+    pub key_timeout_ms: u64,
 }
 
 impl Default for ModelConfig {
@@ -49,6 +71,10 @@ impl Default for ModelConfig {
             prefer_stickers: false,
             hide_on_copy: true,
             debounce_ms: DEFAULT_DEBOUNCE_MS,
+            list_limit: 120,
+            modal: true,
+            start_tab: Tab::Search,
+            key_timeout_ms: DEFAULT_KEY_TIMEOUT_MS,
         }
     }
 }
@@ -93,8 +119,13 @@ pub enum Event {
         popup_active: bool,
         open: OpenInfo,
     },
+    /// Hide the popup (`stickpile-desktop hide`).
+    Hide,
     /// The window was hidden or closed by something else (WM close button).
     Hidden,
+    /// The text of the text field changed: the search query on Search, the
+    /// pack filter on Packs (the pack name filter, or the item filter inside
+    /// an opened pack). Ignored on the other tabs.
     QueryChanged(String),
     Results {
         generation: u64,
@@ -102,19 +133,42 @@ pub enum Event {
     },
     /// Most recently used items, newest first (answer to [`Command::LoadRecent`]).
     RecentLoaded(Vec<ItemSummary>),
+    /// Answer to [`Command::LoadMostUsed`].
+    MostUsedLoaded {
+        generation: u64,
+        outcome: Result<Vec<ItemSummary>, String>,
+    },
+    /// Answer to [`Command::LoadFavorites`].
+    FavoritesLoaded {
+        generation: u64,
+        outcome: Result<Vec<ItemSummary>, String>,
+    },
+    /// Answer to [`Command::LoadPacks`].
+    PacksLoaded {
+        generation: u64,
+        outcome: Result<Vec<SetSummary>, String>,
+    },
+    /// Answer to [`Command::LoadPackItems`].
+    PackItemsLoaded {
+        set_id: String,
+        generation: u64,
+        outcome: Result<Vec<ItemSummary>, String>,
+    },
     /// The grid's real geometry, if it differs from the configured one.
     Layout {
         columns: usize,
         visible_rows: usize,
     },
     Navigate(Nav),
-    /// Pointer selection.
+    /// Pointer selection (an item, or a pack in the pack list).
     Select(usize),
-    /// Enter (`toggle_sticker: false`) or Shift+Enter (`true`).
+    /// Enter (`toggle_sticker: false`) or Shift+Enter (`true`) in Insert
+    /// mode; in the pack list it opens the selected pack.
     CopySelected {
         toggle_sticker: bool,
     },
-    /// Double click / activation of a grid cell.
+    /// Double click / activation of a grid cell; in the pack list it opens
+    /// that pack.
     CopyAt {
         index: usize,
         toggle_sticker: bool,
@@ -128,7 +182,36 @@ pub enum Event {
     /// hiding and reopening; only a new model (process restart) goes back to
     /// `prefer_stickers`.
     ToggleSticker,
+    /// Escape in Insert mode (or with `modal` off): to Normal mode; without
+    /// `modal`, out of an opened pack, else hide.
     Escape,
+    /// A key in Normal mode (with `modal` on), interpreted by [`crate::vim`].
+    Normal(NormalKey),
+    /// Show this tab (Alt+1..7, a click on the tab bar).
+    ShowTab(Tab),
+    /// Tab / Shift+Tab, wrapping.
+    CycleTab {
+        backwards: bool,
+    },
+    /// The timer of [`Command::KeyTimeout`] fired.
+    KeyTimeout {
+        seq: u64,
+    },
+    /// A text field (the search entry, or a field on the Me / Settings
+    /// pages) took (`true`) or lost (`false`) the keyboard focus: Insert or
+    /// Normal mode. Only used with `modal` on.
+    TextFocus(bool),
+    /// F1 or a help button: show or hide the key help.
+    ToggleHelp,
+    /// Ctrl+D or a like button: like / unlike the selected item.
+    ToggleFavorite,
+    /// Answer to [`Command::ToggleFavorite`]: the item's new liked state.
+    FavoriteToggled {
+        item_id: String,
+        outcome: Result<bool, String>,
+    },
+    /// Back from an opened pack to the pack list (a back button).
+    PackBack,
     /// The clipboard now holds the item (answer to [`Command::Copy`]).
     CopyFinished {
         item_id: String,
@@ -163,10 +246,33 @@ pub enum Command {
     LoadRecent {
         limit: usize,
     },
+    /// Answer with [`Event::MostUsedLoaded`].
+    LoadMostUsed {
+        limit: usize,
+        generation: u64,
+    },
+    /// Answer with [`Event::FavoritesLoaded`].
+    LoadFavorites {
+        limit: usize,
+        generation: u64,
+    },
+    /// The user's sets; answer with [`Event::PacksLoaded`].
+    LoadPacks {
+        generation: u64,
+    },
+    /// All items of one set; answer with [`Event::PackItemsLoaded`].
+    LoadPackItems {
+        set_id: String,
+        generation: u64,
+    },
     /// Make sure these items' thumbnails are loaded (the shell skips ones it
     /// already has or is loading). Sent whenever the visible entries change.
     LoadThumbnails {
         items: Vec<ItemSummary>,
+    },
+    /// The same for the pack list: the cover of each set.
+    LoadPackCovers {
+        packs: Vec<SetSummary>,
     },
     /// Prepare the item for `target` and put it on the clipboard while the
     /// popup still has focus, then answer with `CopyFinished`/`CopyFailed`.
@@ -177,6 +283,23 @@ pub enum Command {
     },
     /// Persist the per-window history (changed after a copy).
     SaveHistory(WindowHistory),
+    /// Like or unlike; answer with [`Event::FavoriteToggled`].
+    ToggleFavorite {
+        item_id: String,
+    },
+    /// Open the item's page on the server in the browser.
+    OpenInBrowser {
+        item_id: String,
+    },
+    /// A Normal-mode key for the Me / Settings page.
+    Page(PageKey),
+    /// Send [`Event::KeyTimeout`] with `seq` after `after_ms`, unless
+    /// another key comes first (a stale one is ignored, so the shell need
+    /// not cancel it).
+    KeyTimeout {
+        after_ms: u64,
+        seq: u64,
+    },
 }
 
 /// How the current target app was chosen.
@@ -221,6 +344,19 @@ pub enum Status {
         name: String,
     },
     Error(String),
+    /// A list (most used, favorites, packs, a pack) is being fetched for the
+    /// first time.
+    Loading,
+    NoMostUsed,
+    NoFavorites,
+    NoPacks,
+    EmptyPack,
+    /// Fetching the shown list failed (the whole message).
+    LoadFailed(String),
+    /// Answer to a favorite toggle.
+    Favorite {
+        added: bool,
+    },
 }
 
 impl Status {
@@ -230,8 +366,13 @@ impl Status {
             | Status::NoResults { .. }
             | Status::NoRecent
             | Status::NothingSelected
-            | Status::Dropped { .. } => Level::Info,
-            Status::Searching | Status::Copying { .. } => Level::Busy,
+            | Status::Dropped { .. }
+            | Status::NoMostUsed
+            | Status::NoFavorites
+            | Status::NoPacks
+            | Status::EmptyPack
+            | Status::Favorite { .. } => Level::Info,
+            Status::Searching | Status::Copying { .. } | Status::Loading => Level::Busy,
             Status::Offline => Level::Warning,
             Status::Copied { warning, .. } => {
                 if warning.is_some() {
@@ -240,7 +381,7 @@ impl Status {
                     Level::Info
                 }
             }
-            Status::Error(_) => Level::Error,
+            Status::Error(_) | Status::LoadFailed(_) => Level::Error,
         }
     }
 
@@ -269,7 +410,34 @@ impl Status {
             }
             Status::Dropped { name } => format!("Dropped {name}"),
             Status::Error(e) => e.clone(),
+            Status::Loading => "Loading...".into(),
+            Status::NoMostUsed => "Nothing used yet".into(),
+            Status::NoFavorites => "No favorites yet".into(),
+            Status::NoPacks => "No packs yet".into(),
+            Status::EmptyPack => "This pack is empty".into(),
+            Status::LoadFailed(e) => e.clone(),
+            Status::Favorite { added: true } => "Added to favorites".into(),
+            Status::Favorite { added: false } => "Removed from favorites".into(),
         }
+    }
+
+    /// Describes what the shown list holds (rather than reporting something
+    /// the user did), so new data for the list replaces it.
+    fn describes_view(&self) -> bool {
+        matches!(
+            self,
+            Status::Idle
+                | Status::Searching
+                | Status::NoResults { .. }
+                | Status::NoRecent
+                | Status::Offline
+                | Status::Loading
+                | Status::NoMostUsed
+                | Status::NoFavorites
+                | Status::NoPacks
+                | Status::EmptyPack
+                | Status::LoadFailed(_)
+        )
     }
 }
 
@@ -293,6 +461,11 @@ pub struct Footer {
     pub status: String,
     pub level: Level,
     pub offline: bool,
+    /// The input mode ([`Mode::label`]); `None` with `modal` off.
+    pub mode: Option<Mode>,
+    /// Keys of an incomplete Normal-mode command ("3", "g", "12g"), like
+    /// vim's showcmd; empty when nothing is pending.
+    pub pending: String,
 }
 
 /// One grid cell.
@@ -365,16 +538,155 @@ pub fn incompatibility(item: &ItemSummary, target: TargetApp, sticker: bool) -> 
     profiles::choose_variant(target, &shape, sticker).err().map(|e| e.0)
 }
 
+/// Lowercase words of a filter; every one must match.
+fn filter_terms(filter: &str) -> Vec<String> {
+    filter.split_whitespace().map(str::to_lowercase).collect()
+}
+
+/// Client-side filter inside an opened pack: name, keywords, emojis, tags.
+fn item_matches(item: &ItemSummary, terms: &[String]) -> bool {
+    terms.iter().all(|t| {
+        std::iter::once(&item.name)
+            .chain(&item.keywords)
+            .chain(&item.emojis)
+            .chain(&item.tags)
+            .any(|field| field.to_lowercase().contains(t.as_str()))
+    })
+}
+
+fn pack_matches(set: &SetSummary, terms: &[String]) -> bool {
+    let name = set.name.to_lowercase();
+    let slug = set.slug.to_lowercase();
+    terms
+        .iter()
+        .all(|t| name.contains(t.as_str()) || slug.contains(t.as_str()))
+}
+
+/// No list entries but a filter typed: say so instead of "empty".
+fn filtered_status(base: Status, filter: &str, nothing_shown: bool) -> Status {
+    let filter = filter.trim();
+    if nothing_shown && !filter.is_empty() && matches!(base, Status::Idle) {
+        Status::NoResults { query: filter.into() }
+    } else {
+        base
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Showing {
     Recent,
     Results,
 }
 
+/// A list fetched from the shell; refreshed every time it is shown.
+#[derive(Debug, Clone, PartialEq)]
+struct Listing<T> {
+    items: Vec<T>,
+    /// Generation of the request in flight.
+    loading: Option<u64>,
+    /// At least one answer arrived: `items` are real (if maybe stale).
+    loaded: bool,
+    error: Option<String>,
+}
+
+impl<T> Default for Listing<T> {
+    fn default() -> Self {
+        Listing {
+            items: Vec::new(),
+            loading: None,
+            loaded: false,
+            error: None,
+        }
+    }
+}
+
+impl<T> Listing<T> {
+    /// Start a request unless one is in flight; its generation.
+    fn start(&mut self, requests: &mut u64) -> Option<u64> {
+        if self.loading.is_some() {
+            return None;
+        }
+        *requests += 1;
+        self.loading = Some(*requests);
+        self.error = None;
+        Some(*requests)
+    }
+
+    /// Take an answer; false (dropped) unless it answers the request in flight.
+    fn accept(&mut self, generation: u64, outcome: Result<Vec<T>, String>) -> bool {
+        if self.loading != Some(generation) {
+            return false;
+        }
+        self.loading = None;
+        match outcome {
+            Ok(items) => {
+                self.items = items;
+                self.loaded = true;
+            }
+            Err(e) => self.error = Some(e),
+        }
+        true
+    }
+
+    fn status(&self, what: &str, empty: Status) -> Status {
+        if let Some(e) = &self.error {
+            Status::LoadFailed(format!("Could not load {what}: {e}"))
+        } else if !self.loaded {
+            if self.loading.is_some() {
+                Status::Loading
+            } else {
+                Status::Idle
+            }
+        } else if self.items.is_empty() {
+            empty
+        } else {
+            Status::Idle
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Packs {
+    sets: Listing<SetSummary>,
+    /// Pack name filter of the list.
+    filter: String,
+    /// `sets` matching `filter`: the list as shown.
+    shown: Vec<SetSummary>,
+    open: Option<OpenPack>,
+    /// The pack selected in the list when `open` was entered.
+    list_selection: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OpenPack {
+    set: SetSummary,
+    items: Listing<ItemSummary>,
+    /// Item filter inside the pack.
+    filter: String,
+}
+
+/// Which entry to select after the grid was rebuilt.
+#[derive(Debug, Clone, PartialEq)]
+enum Sel {
+    First,
+    /// The same entry (by id, else the same position): same list, new compatibility.
+    Keep,
+    /// Fresh data for the shown list: [`Sel::Keep`] if the user moved the
+    /// selection, else the first entry.
+    Refresh,
+    /// Coming back to a view: this entry, else the first.
+    Id(Option<String>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Model {
     cfg: ModelConfig,
     visible: bool,
+    tab: Tab,
+    mode: Mode,
+    pending: Pending,
+    help: bool,
+    /// The search query (the text field on the Search tab).
     query: String,
     recent: Vec<ItemSummary>,
     results: Vec<SearchHit>,
@@ -382,6 +694,17 @@ pub struct Model {
     /// Target the current results were searched for (server hints apply to it only).
     results_target: TargetApp,
     showing: Showing,
+    /// A search is in flight.
+    searching: bool,
+    most_used: Listing<ItemSummary>,
+    favorites: Listing<ItemSummary>,
+    packs: Packs,
+    /// Generation counter of the list loads.
+    requests: u64,
+    /// Per tab, the entry selected when it was left (within one opening).
+    memory: [Option<String>; Tab::ALL.len()],
+    /// The user moved the selection in the shown view, so refreshed data keeps it.
+    touched: bool,
     entries: Vec<Entry>,
     entries_revision: u64,
     selected: Option<usize>,
@@ -407,6 +730,31 @@ struct InFlight {
     sticker: bool,
 }
 
+/// Events typed or clicked by the user: they cancel a pending Normal-mode
+/// sequence (answers, pointer hover and focus changes do not).
+fn cancels_pending(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Open(_)
+            | Event::Toggle { .. }
+            | Event::Hide
+            | Event::Hidden
+            | Event::QueryChanged(_)
+            | Event::Navigate(_)
+            | Event::CopySelected { .. }
+            | Event::CopyAt { .. }
+            | Event::CycleTarget { .. }
+            | Event::SetTarget(_)
+            | Event::ToggleSticker
+            | Event::Escape
+            | Event::ShowTab(_)
+            | Event::CycleTab { .. }
+            | Event::ToggleHelp
+            | Event::ToggleFavorite
+            | Event::PackBack
+    )
+}
+
 impl Model {
     pub fn new(cfg: ModelConfig) -> Model {
         Model::with_history(cfg, WindowHistory::default())
@@ -416,12 +764,27 @@ impl Model {
     pub fn with_history(cfg: ModelConfig, history: WindowHistory) -> Model {
         Model {
             visible: false,
+            tab: cfg.start_tab,
+            mode: if cfg.modal {
+                cfg.start_tab.default_mode()
+            } else {
+                Mode::Insert
+            },
+            pending: Pending::default(),
+            help: false,
             query: String::new(),
             recent: Vec::new(),
             results: Vec::new(),
             offline: false,
             results_target: cfg.default_target,
             showing: Showing::Recent,
+            searching: false,
+            most_used: Listing::default(),
+            favorites: Listing::default(),
+            packs: Packs::default(),
+            requests: 0,
+            memory: Default::default(),
+            touched: false,
             entries: Vec::new(),
             entries_revision: 0,
             selected: None,
@@ -447,22 +810,82 @@ impl Model {
     pub fn is_visible(&self) -> bool {
         self.visible
     }
+    pub fn tab(&self) -> Tab {
+        self.tab
+    }
+    /// Always [`Mode::Insert`] with `modal` off.
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+    pub fn view(&self) -> View {
+        match self.tab {
+            Tab::Me | Tab::Settings => View::Page,
+            Tab::Packs if self.packs.open.is_none() => View::Packs,
+            _ => View::Items,
+        }
+    }
+    /// Keys of an incomplete Normal-mode command (also in [`Model::footer`]).
+    pub fn pending(&self) -> String {
+        self.pending.display()
+    }
+    /// Draw the key help ([`crate::vim::HELP`]) over the popup.
+    pub fn help_visible(&self) -> bool {
+        self.help
+    }
+    /// Text of the text field on this tab: the search query, the pack
+    /// filter, or the item filter of the opened pack; empty elsewhere.
     pub fn query(&self) -> &str {
+        match (self.tab, &self.packs.open) {
+            (Tab::Search, _) => &self.query,
+            (Tab::Packs, Some(open)) => &open.filter,
+            (Tab::Packs, None) => &self.packs.filter,
+            _ => "",
+        }
+    }
+    /// The search query, whatever tab is shown.
+    pub fn search_query(&self) -> &str {
         &self.query
     }
+    /// Header text: the tab's label, or "Packs / Cats" inside a pack.
+    pub fn title(&self) -> String {
+        match (self.tab, &self.packs.open) {
+            (Tab::Packs, Some(open)) => format!("Packs / {}", open.set.name),
+            (tab, _) => tab.label().to_string(),
+        }
+    }
+    /// Item grid of the shown tab ([`View::Items`]); empty for the pack
+    /// list and the pages.
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }
-    /// Bumped whenever [`Model::entries`] changes, so the shell can skip
-    /// rebuilding its list model.
+    /// The pack list as shown (filtered), for [`View::Packs`].
+    pub fn packs(&self) -> &[SetSummary] {
+        &self.packs.shown
+    }
+    /// The opened pack, if the Packs tab shows one.
+    pub fn open_pack(&self) -> Option<&SetSummary> {
+        self.packs.open.as_ref().map(|o| &o.set)
+    }
+    /// Bumped whenever [`Model::entries`] or [`Model::packs`] change, so the
+    /// shell can skip rebuilding its list model.
     pub fn entries_revision(&self) -> u64 {
         self.entries_revision
     }
+    /// Index into [`Model::entries`], or into [`Model::packs`] on the pack list.
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
     pub fn selected_entry(&self) -> Option<&Entry> {
-        self.selected.and_then(|i| self.entries.get(i))
+        match self.view() {
+            View::Items => self.selected.and_then(|i| self.entries.get(i)),
+            _ => None,
+        }
+    }
+    pub fn selected_pack(&self) -> Option<&SetSummary> {
+        match self.view() {
+            View::Packs => self.selected.and_then(|i| self.packs.shown.get(i)),
+            _ => None,
+        }
     }
     pub fn target(&self) -> TargetApp {
         self.target
@@ -484,7 +907,7 @@ impl Model {
         self.generation
     }
     pub fn is_offline(&self) -> bool {
-        self.showing == Showing::Results && self.offline
+        self.tab == Tab::Search && self.showing == Showing::Results && self.offline
     }
     pub fn is_copying(&self) -> bool {
         self.copying.is_some()
@@ -519,12 +942,17 @@ impl Model {
             status: self.status.text(),
             level: self.status.level(),
             offline: self.is_offline(),
+            mode: self.cfg.modal.then_some(self.mode),
+            pending: self.pending.display(),
         }
     }
 
     // -- events ----------------------------------------------------------------
 
     pub fn handle(&mut self, event: Event) -> Vec<Command> {
+        if cancels_pending(&event) {
+            self.pending.clear();
+        }
         match event {
             Event::Open(info) => self.open(info),
             Event::Toggle { popup_active, open } => {
@@ -534,6 +962,13 @@ impl Model {
                     self.open(open)
                 }
             }
+            Event::Hide => {
+                if self.visible {
+                    self.hide()
+                } else {
+                    Vec::new()
+                }
+            }
             Event::Hidden => {
                 self.visible = false;
                 Vec::new()
@@ -541,56 +976,81 @@ impl Model {
             Event::QueryChanged(q) => self.query_changed(q),
             Event::Results { generation, outcome } => self.results(generation, outcome),
             Event::RecentLoaded(items) => self.recent_loaded(items),
+            Event::MostUsedLoaded { generation, outcome } => {
+                let fresh = self.most_used.accept(generation, outcome);
+                self.list_answered(fresh && self.tab == Tab::MostUsed)
+            }
+            Event::FavoritesLoaded { generation, outcome } => {
+                let fresh = self.favorites.accept(generation, outcome);
+                self.list_answered(fresh && self.tab == Tab::Favorites)
+            }
+            Event::PacksLoaded { generation, outcome } => {
+                let fresh = self.packs.sets.accept(generation, outcome);
+                self.list_answered(fresh && self.view() == View::Packs)
+            }
+            Event::PackItemsLoaded {
+                set_id,
+                generation,
+                outcome,
+            } => {
+                let fresh = match &mut self.packs.open {
+                    Some(open) if open.set.id == set_id => open.items.accept(generation, outcome),
+                    _ => false,
+                };
+                self.list_answered(fresh && self.tab == Tab::Packs)
+            }
             Event::Layout { columns, visible_rows } => {
                 self.columns = columns.max(1);
                 self.visible_rows = visible_rows.max(1);
                 Vec::new()
             }
             Event::Navigate(nav) => {
-                self.navigate(nav);
+                if self.view() != View::Page {
+                    self.navigate(nav);
+                }
                 Vec::new()
             }
             Event::Select(i) => {
-                if i < self.entries.len() {
+                if i < self.grid_len() {
                     self.selected = Some(i);
+                    self.touched = true;
                 }
                 Vec::new()
             }
-            Event::CopySelected { toggle_sticker } => match self.selected {
-                Some(i) => self.copy_at(i, toggle_sticker),
-                None => {
-                    if self.copying.is_none() {
-                        self.status = Status::NothingSelected;
-                    }
-                    Vec::new()
-                }
-            },
-            Event::CopyAt { index, toggle_sticker } => {
-                if index < self.entries.len() {
+            Event::CopySelected { toggle_sticker } => self.enter(toggle_sticker),
+            Event::CopyAt { index, toggle_sticker } => match self.view() {
+                View::Items if index < self.entries.len() => {
                     self.selected = Some(index);
                     self.copy_at(index, toggle_sticker)
-                } else {
-                    Vec::new()
                 }
-            }
-            Event::CycleTarget { backwards } => {
-                let all = TargetApp::ALL;
-                let i = all.iter().position(|t| *t == self.target).unwrap_or(0);
-                let n = all.len();
-                let next = if backwards {
-                    all[(i + n - 1) % n]
-                } else {
-                    all[(i + 1) % n]
-                };
-                self.set_target(next)
-            }
+                View::Packs => self.open_pack_at(index),
+                _ => Vec::new(),
+            },
+            Event::CycleTarget { backwards } => self.cycle_target(backwards),
             Event::SetTarget(t) => self.set_target(t),
-            Event::ToggleSticker => {
-                self.sticker = !self.sticker;
-                self.refresh_compat();
+            Event::ToggleSticker => self.toggle_sticker(),
+            Event::Escape => self.escape(),
+            Event::Normal(key) => self.normal_key(key),
+            Event::ShowTab(tab) => self.show_tab(tab),
+            Event::CycleTab { backwards } => {
+                let tab = if backwards { self.tab.prev() } else { self.tab.next() };
+                self.show_tab(tab)
+            }
+            Event::KeyTimeout { seq } => match self.pending.timeout(seq) {
+                Some(tab) if self.visible => self.show_tab(tab),
+                _ => Vec::new(),
+            },
+            Event::TextFocus(focused) => {
+                self.text_focus(focused);
                 Vec::new()
             }
-            Event::Escape => self.hide(),
+            Event::ToggleHelp => {
+                self.help = !self.help;
+                Vec::new()
+            }
+            Event::ToggleFavorite => self.toggle_favorite(),
+            Event::FavoriteToggled { item_id, outcome } => self.favorite_toggled(&item_id, outcome),
+            Event::PackBack => self.pack_back(),
             Event::CopyFinished { item_id, warning } => self.copy_finished(item_id, warning),
             Event::CopyFailed { item_id, error } => {
                 if self.copying.as_ref().is_none_or(|c| c.item_id != item_id) {
@@ -615,6 +1075,8 @@ impl Model {
         self.query.clear();
         self.results.clear();
         self.offline = false;
+        self.searching = false;
+        self.showing = Showing::Recent;
         self.copying = None;
         self.status = Status::Idle;
         // `sticker` is deliberately kept: the last Ctrl+S / footer toggle still holds.
@@ -629,42 +1091,330 @@ impl Model {
             }
         }
         self.window = info.window;
-        self.show_recent();
+        self.tab = self.cfg.start_tab;
+        self.mode = if self.cfg.modal {
+            self.tab.default_mode()
+        } else {
+            Mode::Insert
+        };
+        self.help = false;
+        self.memory = Default::default();
+        self.packs.filter.clear();
+        self.packs.open = None;
+        self.packs.list_selection = None;
+        // Every opening refreshes what it shows; answers to the last one's
+        // requests are dropped.
+        self.most_used.loading = None;
+        self.favorites.loading = None;
+        self.packs.sets.loading = None;
         let mut cmds = vec![Command::Present, Command::CancelSearch];
-        cmds.push(Command::LoadRecent {
-            limit: self.cfg.recent_count,
-        });
-        cmds.extend(self.thumbnails());
+        cmds.extend(self.enter_tab());
         cmds
     }
 
     fn hide(&mut self) -> Vec<Command> {
         self.visible = false;
+        self.pending.clear();
         vec![Command::Hide]
     }
 
+    // -- tabs and modes ----------------------------------------------------------
+
+    fn show_tab(&mut self, tab: Tab) -> Vec<Command> {
+        if tab == self.tab {
+            return Vec::new();
+        }
+        self.memory[self.tab.index()] = self.selected_id();
+        self.tab = tab;
+        self.pending.clear();
+        if self.cfg.modal {
+            self.mode = tab.default_mode();
+        }
+        self.enter_tab()
+    }
+
+    /// Show the current tab from what is known, ask for fresh data, and set
+    /// the tab's status.
+    fn enter_tab(&mut self) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        match self.tab {
+            Tab::Search => {
+                if self.query.trim().is_empty() {
+                    cmds.push(self.load_recent());
+                }
+            }
+            Tab::Recent => cmds.push(self.load_recent()),
+            Tab::MostUsed => {
+                cmds.extend(
+                    self.most_used
+                        .start(&mut self.requests)
+                        .map(|generation| Command::LoadMostUsed {
+                            limit: self.cfg.list_limit,
+                            generation,
+                        }),
+                )
+            }
+            Tab::Favorites => {
+                cmds.extend(
+                    self.favorites
+                        .start(&mut self.requests)
+                        .map(|generation| Command::LoadFavorites {
+                            limit: self.cfg.list_limit,
+                            generation,
+                        }),
+                )
+            }
+            Tab::Packs => {
+                cmds.extend(
+                    self.packs
+                        .sets
+                        .start(&mut self.requests)
+                        .map(|generation| Command::LoadPacks { generation }),
+                );
+                if let Some(open) = &mut self.packs.open {
+                    cmds.extend(
+                        open.items
+                            .start(&mut self.requests)
+                            .map(|generation| Command::LoadPackItems {
+                                set_id: open.set.id.clone(),
+                                generation,
+                            }),
+                    );
+                }
+            }
+            Tab::Me | Tab::Settings => {}
+        }
+        let remembered = self.memory[self.tab.index()].take();
+        self.rebuild(Sel::Id(remembered));
+        if self.copying.is_none() {
+            self.status = self.view_status();
+        }
+        cmds.extend(self.thumbnails());
+        cmds
+    }
+
+    fn load_recent(&self) -> Command {
+        Command::LoadRecent {
+            limit: self.cfg.recent_count,
+        }
+    }
+
+    fn set_mode(&mut self, mode: Mode) {
+        if self.cfg.modal && self.mode != mode {
+            self.mode = mode;
+            self.pending.clear();
+        }
+    }
+
+    fn text_focus(&mut self, focused: bool) {
+        if !self.visible {
+            return;
+        }
+        if focused && (self.tab.has_text_field() || self.tab.is_page()) {
+            self.set_mode(Mode::Insert);
+        } else if !focused {
+            self.set_mode(Mode::Normal);
+        }
+    }
+
+    /// Escape from Insert mode (or with `modal` off).
+    fn escape(&mut self) -> Vec<Command> {
+        if self.cfg.modal && self.mode == Mode::Insert {
+            self.set_mode(Mode::Normal);
+            return Vec::new();
+        }
+        self.escape_normal()
+    }
+
+    /// Escape with no text field to leave: close the help, leave the pack, hide.
+    fn escape_normal(&mut self) -> Vec<Command> {
+        if self.help {
+            self.help = false;
+            return Vec::new();
+        }
+        if self.tab == Tab::Packs && self.packs.open.is_some() {
+            return self.pack_back();
+        }
+        self.hide()
+    }
+
+    fn normal_key(&mut self, key: NormalKey) -> Vec<Command> {
+        if !self.cfg.modal || !self.visible || self.mode != Mode::Normal {
+            return Vec::new();
+        }
+        let counts = self.view() != View::Page;
+        match self.pending.feed(key, counts) {
+            Fed::Wait { timeout } => timeout
+                .map(|seq| Command::KeyTimeout {
+                    after_ms: self.cfg.key_timeout_ms,
+                    seq,
+                })
+                .into_iter()
+                .collect(),
+            Fed::Run(cmds) => cmds.into_iter().flat_map(|c| self.run(c)).collect(),
+        }
+    }
+
+    fn run(&mut self, cmd: Cmd) -> Vec<Command> {
+        let view = self.view();
+        let items = view == View::Items;
+        let page = |key| vec![Command::Page(key)];
+        match cmd {
+            Cmd::Move(nav, count) => {
+                if view == View::Page {
+                    return match nav {
+                        Nav::Up => page(PageKey::Up),
+                        Nav::Down => page(PageKey::Down),
+                        Nav::Left => page(PageKey::Left),
+                        Nav::Right => page(PageKey::Right),
+                        _ => Vec::new(),
+                    };
+                }
+                for _ in 0..count.min(self.grid_len().max(1)) {
+                    self.navigate(nav);
+                }
+                Vec::new()
+            }
+            Cmd::HalfPage { down } => {
+                if view != View::Page {
+                    let nav = if down { Nav::Down } else { Nav::Up };
+                    for _ in 0..(self.visible_rows / 2).max(1) {
+                        self.navigate(nav);
+                    }
+                }
+                Vec::new()
+            }
+            Cmd::GotoItem(n) => {
+                self.goto(n.saturating_sub(1));
+                Vec::new()
+            }
+            Cmd::RowStart => {
+                if let Some(i) = self.selected {
+                    self.goto(i - i % self.columns);
+                }
+                Vec::new()
+            }
+            Cmd::RowEnd => {
+                if let Some(i) = self.selected {
+                    self.goto(i - i % self.columns + self.columns - 1);
+                }
+                Vec::new()
+            }
+            Cmd::Yank { flip } if items => self.copy_selected(flip),
+            Cmd::Enter { .. } | Cmd::Space if view == View::Page => page(PageKey::Activate),
+            Cmd::Enter { shift } => self.enter(shift),
+            Cmd::Search => self.slash(),
+            Cmd::Insert { append } => self.insert(append),
+            Cmd::Tab(tab) => self.show_tab(tab),
+            Cmd::NextTab(n) => {
+                let tab = (0..n % Tab::ALL.len()).fold(self.tab, |t, _| t.next());
+                self.show_tab(tab)
+            }
+            Cmd::PrevTab(n) => {
+                let tab = (0..n % Tab::ALL.len()).fold(self.tab, |t, _| t.prev());
+                self.show_tab(tab)
+            }
+            Cmd::Favorite if items => self.toggle_favorite(),
+            Cmd::Target { backwards } => self.cycle_target(backwards),
+            Cmd::Sticker => self.toggle_sticker(),
+            Cmd::Browser if items => self.open_in_browser(),
+            Cmd::Help => {
+                self.help = !self.help;
+                Vec::new()
+            }
+            Cmd::Quit if self.help => {
+                self.help = false;
+                Vec::new()
+            }
+            Cmd::Quit => self.hide(),
+            Cmd::Escape => self.escape_normal(),
+            Cmd::Back if self.tab == Tab::Packs => self.pack_back(),
+            Cmd::Open if view == View::Packs => self.enter(false),
+            Cmd::Yank { .. } | Cmd::Space | Cmd::Favorite | Cmd::Browser | Cmd::Back | Cmd::Open => Vec::new(),
+        }
+    }
+
+    /// `/`: an empty text field in Insert mode (Search from tabs without one).
+    fn slash(&mut self) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        if self.tab.has_text_field() {
+            cmds.extend(self.query_changed(String::new()));
+        } else {
+            cmds.extend(self.search_query_changed(String::new()));
+            cmds.extend(self.show_tab(Tab::Search));
+        }
+        self.set_mode(Mode::Insert);
+        cmds
+    }
+
+    /// `i` / `a`: back to the text field as it is (Search from the other
+    /// grids); on a page, `i` asks the shell to focus the row's field.
+    fn insert(&mut self, append: bool) -> Vec<Command> {
+        if self.tab.is_page() {
+            return if append {
+                Vec::new()
+            } else {
+                vec![Command::Page(PageKey::Edit)]
+            };
+        }
+        let cmds = if self.tab.has_text_field() {
+            Vec::new()
+        } else {
+            self.show_tab(Tab::Search)
+        };
+        self.set_mode(Mode::Insert);
+        cmds
+    }
+
+    /// Enter: copy the selected item, or open the selected pack.
+    fn enter(&mut self, toggle_sticker: bool) -> Vec<Command> {
+        match self.view() {
+            View::Items => self.copy_selected(toggle_sticker),
+            View::Packs => match self.selected {
+                Some(i) => self.open_pack_at(i),
+                None => Vec::new(),
+            },
+            View::Page => Vec::new(),
+        }
+    }
+
+    // -- query, search and lists ---------------------------------------------------
+
     fn query_changed(&mut self, q: String) -> Vec<Command> {
+        match self.tab {
+            Tab::Search => self.search_query_changed(q),
+            Tab::Packs => self.pack_filter_changed(q),
+            _ => Vec::new(),
+        }
+    }
+
+    fn search_query_changed(&mut self, q: String) -> Vec<Command> {
         if q == self.query {
             return Vec::new();
         }
         self.query = q;
         self.generation += 1;
-        if self.query.trim().is_empty() {
-            self.results.clear();
-            self.offline = false;
-            if self.copying.is_none() {
-                self.status = Status::Idle;
-            }
-            self.show_recent();
-            let mut cmds = vec![Command::CancelSearch];
-            cmds.extend(self.thumbnails());
-            return cmds;
+        if !self.query.trim().is_empty() {
+            return vec![self.search_command(self.cfg.debounce_ms)];
         }
-        vec![self.search_command(self.cfg.debounce_ms)]
+        self.results.clear();
+        self.offline = false;
+        self.searching = false;
+        self.showing = Showing::Recent;
+        let mut cmds = vec![Command::CancelSearch];
+        if self.tab == Tab::Search {
+            self.rebuild(Sel::First);
+            if self.copying.is_none() {
+                self.status = self.search_status();
+            }
+            cmds.extend(self.thumbnails());
+        }
+        cmds
     }
 
     fn search_command(&mut self, debounce_ms: u64) -> Command {
-        if self.copying.is_none() {
+        self.searching = true;
+        if self.copying.is_none() && self.tab == Tab::Search {
             self.status = Status::Searching;
         }
         Command::Search {
@@ -680,6 +1430,8 @@ impl Model {
         if generation != self.generation || self.query.trim().is_empty() {
             return Vec::new();
         }
+        self.searching = false;
+        let shown = self.tab == Tab::Search;
         match outcome {
             Ok(mut r) => {
                 r.hits.truncate(self.cfg.max_results);
@@ -687,22 +1439,17 @@ impl Model {
                 self.results = r.hits;
                 self.results_target = self.target;
                 self.showing = Showing::Results;
-                self.rebuild_entries(true);
+                if !shown {
+                    return Vec::new();
+                }
+                self.rebuild(Sel::First);
                 if self.copying.is_none() {
-                    self.status = if self.results.is_empty() {
-                        Status::NoResults {
-                            query: self.query.trim().to_string(),
-                        }
-                    } else if self.offline {
-                        Status::Offline
-                    } else {
-                        Status::Idle
-                    };
+                    self.status = self.search_status();
                 }
                 self.thumbnails()
             }
             Err(e) => {
-                if self.copying.is_none() {
+                if self.copying.is_none() && shown {
                     self.status = Status::Error(format!("Search failed: {e}"));
                 }
                 Vec::new()
@@ -717,69 +1464,271 @@ impl Model {
         };
         items.truncate(self.cfg.recent_count);
         self.recent = items;
-        if self.showing != Showing::Recent {
+        let shown = match self.tab {
+            Tab::Recent => true,
+            Tab::Search => self.showing == Showing::Recent,
+            _ => false,
+        };
+        self.list_answered(shown)
+    }
+
+    /// New data (or an error) for a list; `shown`: it is on screen now.
+    fn list_answered(&mut self, shown: bool) -> Vec<Command> {
+        if !shown {
             return Vec::new();
         }
-        self.show_recent();
+        self.rebuild(Sel::Refresh);
+        if self.copying.is_none() && self.status.describes_view() {
+            self.status = self.view_status();
+        }
         self.thumbnails()
     }
 
-    fn show_recent(&mut self) {
-        self.showing = Showing::Recent;
-        self.rebuild_entries(true);
-        if self.recent.is_empty() && self.status == Status::Idle {
-            self.status = Status::NoRecent;
-        } else if !self.recent.is_empty() && self.status == Status::NoRecent {
-            self.status = Status::Idle;
+    fn pack_filter_changed(&mut self, q: String) -> Vec<Command> {
+        let filter = match &mut self.packs.open {
+            Some(open) => &mut open.filter,
+            None => &mut self.packs.filter,
+        };
+        if *filter == q {
+            return Vec::new();
+        }
+        *filter = q;
+        self.rebuild(Sel::First);
+        if self.copying.is_none() {
+            self.status = self.view_status();
+        }
+        self.thumbnails()
+    }
+
+    fn open_pack_at(&mut self, index: usize) -> Vec<Command> {
+        if self.view() != View::Packs {
+            return Vec::new();
+        }
+        let Some(set) = self.packs.shown.get(index).cloned() else {
+            return Vec::new();
+        };
+        self.packs.list_selection = Some(set.id.clone());
+        let mut items = Listing::default();
+        let load = items
+            .start(&mut self.requests)
+            .map(|generation| Command::LoadPackItems {
+                set_id: set.id.clone(),
+                generation,
+            });
+        self.packs.open = Some(OpenPack {
+            set,
+            items,
+            filter: String::new(),
+        });
+        self.rebuild(Sel::First);
+        if self.copying.is_none() {
+            self.status = self.view_status();
+        }
+        let mut cmds: Vec<Command> = load.into_iter().collect();
+        cmds.extend(self.thumbnails());
+        cmds
+    }
+
+    fn pack_back(&mut self) -> Vec<Command> {
+        if self.tab != Tab::Packs || self.packs.open.take().is_none() {
+            return Vec::new();
+        }
+        let selection = self.packs.list_selection.take();
+        self.rebuild(Sel::Id(selection));
+        if self.copying.is_none() {
+            self.status = self.view_status();
+        }
+        self.thumbnails()
+    }
+
+    /// What the status says about the shown view when nothing else is to be said.
+    fn view_status(&self) -> Status {
+        match self.tab {
+            Tab::Search => self.search_status(),
+            Tab::Recent if self.recent.is_empty() => Status::NoRecent,
+            Tab::MostUsed => self.most_used.status("most used items", Status::NoMostUsed),
+            Tab::Favorites => self.favorites.status("favorites", Status::NoFavorites),
+            Tab::Packs => match &self.packs.open {
+                Some(open) => filtered_status(
+                    open.items.status("the pack", Status::EmptyPack),
+                    &open.filter,
+                    self.entries.is_empty(),
+                ),
+                None => filtered_status(
+                    self.packs.sets.status("packs", Status::NoPacks),
+                    &self.packs.filter,
+                    self.packs.shown.is_empty(),
+                ),
+            },
+            Tab::Recent | Tab::Me | Tab::Settings => Status::Idle,
         }
     }
 
-    fn rebuild_entries(&mut self, reset_selection: bool) {
-        let sticker = self.sticker && supports_stickers(self.target);
-        self.entries = match self.showing {
-            Showing::Recent => self
-                .recent
-                .iter()
-                .map(|item| Entry {
-                    incompatible: incompatibility(item, self.target, sticker),
-                    item: item.clone(),
-                    matched: Vec::new(),
-                })
-                .collect(),
-            Showing::Results => self
-                .results
-                .iter()
-                .map(|hit| {
-                    let server = if self.results_target == self.target && !sticker {
-                        hit.incompatible.clone()
-                    } else {
-                        None
-                    };
-                    Entry {
-                        incompatible: server.or_else(|| incompatibility(&hit.item, self.target, sticker)),
-                        item: hit.item.clone(),
-                        matched: hit.matched.clone(),
-                    }
-                })
-                .collect(),
-        };
-        self.entries_revision += 1;
-        if reset_selection || self.selected.is_some_and(|i| i >= self.entries.len()) {
-            self.selected = if self.entries.is_empty() { None } else { Some(0) };
+    fn search_status(&self) -> Status {
+        if self.query.trim().is_empty() {
+            return if self.recent.is_empty() {
+                Status::NoRecent
+            } else {
+                Status::Idle
+            };
         }
+        if self.searching {
+            return Status::Searching;
+        }
+        match self.showing {
+            Showing::Results if self.results.is_empty() => Status::NoResults {
+                query: self.query.trim().to_string(),
+            },
+            Showing::Results if self.offline => Status::Offline,
+            _ => Status::Idle,
+        }
+    }
+
+    // -- grid ------------------------------------------------------------------------
+
+    /// Entries in the shown grid (items or packs).
+    fn grid_len(&self) -> usize {
+        match self.view() {
+            View::Items => self.entries.len(),
+            View::Packs => self.packs.shown.len(),
+            View::Page => 0,
+        }
+    }
+
+    fn selected_id(&self) -> Option<String> {
+        let i = self.selected?;
+        match self.view() {
+            View::Items => self.entries.get(i).map(|e| e.item.id.clone()),
+            View::Packs => self.packs.shown.get(i).map(|s| s.id.clone()),
+            View::Page => None,
+        }
+    }
+
+    fn position(&self, id: &str) -> Option<usize> {
+        match self.view() {
+            View::Items => self.entries.iter().position(|e| e.item.id == id),
+            View::Packs => self.packs.shown.iter().position(|s| s.id == id),
+            View::Page => None,
+        }
+    }
+
+    /// Recompute the shown grid (entries with compatibility, or the filtered
+    /// pack list) from the tab's data.
+    fn rebuild(&mut self, sel: Sel) {
+        let prev_id = self.selected_id();
+        let prev = self.selected;
+        let target = self.target;
+        let sticker = self.sticker && supports_stickers(target);
+        let local = |item: &ItemSummary| Entry {
+            incompatible: incompatibility(item, target, sticker),
+            item: item.clone(),
+            matched: Vec::new(),
+        };
+        self.entries = match self.tab {
+            Tab::Search => match self.showing {
+                Showing::Recent => self.recent.iter().map(local).collect(),
+                Showing::Results => self
+                    .results
+                    .iter()
+                    .map(|hit| {
+                        let server = if self.results_target == target && !sticker {
+                            hit.incompatible.clone()
+                        } else {
+                            None
+                        };
+                        Entry {
+                            incompatible: server.or_else(|| incompatibility(&hit.item, target, sticker)),
+                            item: hit.item.clone(),
+                            matched: hit.matched.clone(),
+                        }
+                    })
+                    .collect(),
+            },
+            Tab::Recent => self.recent.iter().map(local).collect(),
+            Tab::MostUsed => self.most_used.items.iter().map(local).collect(),
+            Tab::Favorites => self.favorites.items.iter().map(local).collect(),
+            Tab::Packs => match &self.packs.open {
+                Some(open) => {
+                    let terms = filter_terms(&open.filter);
+                    open.items
+                        .items
+                        .iter()
+                        .filter(|i| item_matches(i, &terms))
+                        .map(local)
+                        .collect()
+                }
+                None => Vec::new(),
+            },
+            Tab::Me | Tab::Settings => Vec::new(),
+        };
+        if self.view() == View::Packs {
+            let terms = filter_terms(&self.packs.filter);
+            self.packs.shown = self
+                .packs
+                .sets
+                .items
+                .iter()
+                .filter(|s| pack_matches(s, &terms))
+                .cloned()
+                .collect();
+        }
+        self.entries_revision += 1;
+
+        let len = self.grid_len();
+        if len == 0 {
+            self.selected = None;
+            return;
+        }
+        let keep = |m: &Model| {
+            prev_id
+                .as_deref()
+                .and_then(|id| m.position(id))
+                .or(prev.map(|i| i.min(len - 1)))
+                .unwrap_or(0)
+        };
+        let i = match sel {
+            Sel::First => {
+                self.touched = false;
+                0
+            }
+            Sel::Keep => keep(self),
+            Sel::Refresh if self.touched => keep(self),
+            Sel::Refresh => 0,
+            Sel::Id(id) => {
+                let found = id.as_deref().and_then(|id| self.position(id));
+                self.touched = found.is_some();
+                found.unwrap_or(0)
+            }
+        };
+        self.selected = Some(i);
     }
 
     fn refresh_compat(&mut self) {
-        self.rebuild_entries(false);
+        self.rebuild(Sel::Keep);
     }
 
     fn thumbnails(&self) -> Vec<Command> {
-        if self.entries.is_empty() {
-            return Vec::new();
+        match self.view() {
+            View::Items if !self.entries.is_empty() => vec![Command::LoadThumbnails {
+                items: self.entries.iter().map(|e| e.item.clone()).collect(),
+            }],
+            View::Packs if !self.packs.shown.is_empty() => vec![Command::LoadPackCovers {
+                packs: self.packs.shown.clone(),
+            }],
+            _ => Vec::new(),
         }
-        vec![Command::LoadThumbnails {
-            items: self.entries.iter().map(|e| e.item.clone()).collect(),
-        }]
+    }
+
+    fn cycle_target(&mut self, backwards: bool) -> Vec<Command> {
+        let all = TargetApp::ALL;
+        let i = all.iter().position(|t| *t == self.target).unwrap_or(0);
+        let n = all.len();
+        let next = if backwards {
+            all[(i + n - 1) % n]
+        } else {
+            all[(i + 1) % n]
+        };
+        self.set_target(next)
     }
 
     fn set_target(&mut self, t: TargetApp) -> Vec<Command> {
@@ -790,7 +1739,7 @@ impl Model {
             return Vec::new();
         }
         self.refresh_compat();
-        if self.showing == Showing::Results || !self.query.trim().is_empty() {
+        if !self.query.trim().is_empty() {
             // Re-rank with the new target's compatibility hints, right away.
             self.generation += 1;
             return vec![self.search_command(0)];
@@ -798,12 +1747,27 @@ impl Model {
         Vec::new()
     }
 
+    fn toggle_sticker(&mut self) -> Vec<Command> {
+        self.sticker = !self.sticker;
+        self.refresh_compat();
+        Vec::new()
+    }
+
+    fn goto(&mut self, i: usize) {
+        let len = self.grid_len();
+        if len > 0 {
+            self.selected = Some(i.min(len - 1));
+            self.touched = true;
+        }
+    }
+
     fn navigate(&mut self, nav: Nav) {
-        let n = self.entries.len();
+        let n = self.grid_len();
         if n == 0 {
             self.selected = None;
             return;
         }
+        self.touched = true;
         let Some(i) = self.selected else {
             self.selected = Some(0);
             return;
@@ -856,6 +1820,20 @@ impl Model {
         self.selected = Some(next);
     }
 
+    // -- item actions --------------------------------------------------------------------
+
+    fn copy_selected(&mut self, toggle_sticker: bool) -> Vec<Command> {
+        match self.selected {
+            Some(i) => self.copy_at(i, toggle_sticker),
+            None => {
+                if self.copying.is_none() {
+                    self.status = Status::NothingSelected;
+                }
+                Vec::new()
+            }
+        }
+    }
+
     fn copy_at(&mut self, index: usize, toggle_sticker: bool) -> Vec<Command> {
         if self.copying.is_some() {
             return Vec::new();
@@ -905,6 +1883,48 @@ impl Model {
             cmds.extend(self.hide());
         }
         cmds
+    }
+
+    /// The selected item, or "Nothing selected".
+    fn selected_item_id(&mut self) -> Option<String> {
+        let id = self.selected_entry().map(|e| e.item.id.clone());
+        if id.is_none() && self.copying.is_none() {
+            self.status = Status::NothingSelected;
+        }
+        id
+    }
+
+    fn toggle_favorite(&mut self) -> Vec<Command> {
+        self.selected_item_id()
+            .map(|item_id| Command::ToggleFavorite { item_id })
+            .into_iter()
+            .collect()
+    }
+
+    fn favorite_toggled(&mut self, item_id: &str, outcome: Result<bool, String>) -> Vec<Command> {
+        let status = match outcome {
+            Ok(liked) => {
+                if !liked {
+                    self.favorites.items.retain(|i| i.id != item_id);
+                    if self.tab == Tab::Favorites {
+                        self.rebuild(Sel::Keep);
+                    }
+                }
+                Status::Favorite { added: liked }
+            }
+            Err(e) => Status::Error(format!("Favorite failed: {e}")),
+        };
+        if self.copying.is_none() {
+            self.status = status;
+        }
+        Vec::new()
+    }
+
+    fn open_in_browser(&mut self) -> Vec<Command> {
+        self.selected_item_id()
+            .map(|item_id| Command::OpenInBrowser { item_id })
+            .into_iter()
+            .collect()
     }
 }
 
@@ -956,7 +1976,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn items(n: usize) -> Vec<ItemSummary> {
+    pub(crate) fn items(n: usize) -> Vec<ItemSummary> {
         (0..n).map(|i| item(&i.to_string())).collect()
     }
 
@@ -969,11 +1989,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn hits(n: usize) -> Vec<SearchHit> {
+    pub(crate) fn hits(n: usize) -> Vec<SearchHit> {
         (0..n).map(|i| hit(&format!("h{i}"))).collect()
     }
 
-    fn window(class: &str) -> WindowInfo {
+    pub(crate) fn window(class: &str) -> WindowInfo {
         WindowInfo {
             class: class.into(),
             title: "chat".into(),
@@ -981,7 +2001,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn cfg() -> ModelConfig {
+    pub(crate) fn cfg() -> ModelConfig {
         ModelConfig {
             columns: 4,
             visible_rows: 2,
@@ -991,7 +2011,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn opened(cfg: ModelConfig, detected: Option<TargetApp>) -> Model {
+    pub(crate) fn opened(cfg: ModelConfig, detected: Option<TargetApp>) -> Model {
         let mut m = Model::new(cfg);
         let window = detected.map(|_| window("com.ayugram.desktop"));
         m.handle(Event::Open(OpenInfo { window, detected }));
@@ -999,7 +2019,7 @@ pub(crate) mod tests {
     }
 
     /// Model showing `n` search results for query "cat".
-    fn with_results(n: usize) -> Model {
+    pub(crate) fn with_results(n: usize) -> Model {
         let mut m = opened(cfg(), None);
         m.handle(Event::QueryChanged("cat".into()));
         let generation = m.generation();
@@ -1013,7 +2033,7 @@ pub(crate) mod tests {
         m
     }
 
-    fn search_of(cmds: &[Command]) -> Option<(String, TargetApp, u64, u64)> {
+    pub(crate) fn search_of(cmds: &[Command]) -> Option<(String, TargetApp, u64, u64)> {
         cmds.iter().find_map(|c| match c {
             Command::Search {
                 query,
@@ -1026,7 +2046,7 @@ pub(crate) mod tests {
         })
     }
 
-    fn ids(m: &Model) -> Vec<String> {
+    pub(crate) fn ids(m: &Model) -> Vec<String> {
         m.entries().iter().map(|e| e.item.id.clone()).collect()
     }
 
@@ -1090,7 +2110,7 @@ pub(crate) mod tests {
         let mut m = with_results(3);
         m.handle(Event::CycleTarget { backwards: false });
         m.handle(Event::ToggleSticker);
-        m.handle(Event::Escape);
+        m.handle(Event::Hide);
         let cmds = m.handle(Event::Open(OpenInfo::default()));
         assert!(cmds.contains(&Command::CancelSearch));
         assert_eq!(m.query(), "");
@@ -1130,12 +2150,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn escape_and_hidden() {
+    fn hide_and_hidden() {
         let mut m = opened(cfg(), None);
-        assert_eq!(m.handle(Event::Escape), vec![Command::Hide]);
+        assert_eq!(m.handle(Event::Hide), vec![Command::Hide]);
         assert!(!m.is_visible());
+        assert!(m.handle(Event::Hide).is_empty(), "already hidden");
         let mut m = opened(cfg(), None);
         assert!(m.handle(Event::Hidden).is_empty());
+        assert!(!m.is_visible());
+        // Without modes, Escape hides as it always did.
+        let mut m = opened(ModelConfig { modal: false, ..cfg() }, None);
+        assert_eq!(m.handle(Event::Escape), vec![Command::Hide]);
         assert!(!m.is_visible());
     }
 
@@ -1816,8 +2841,8 @@ pub(crate) mod tests {
         };
         let mut m = opened(cfg(), Some(TargetApp::Telegram));
         m.handle(Event::ToggleSticker);
-        // Escape, the shortcut again, and the WM close button all keep it.
-        m.handle(Event::Escape);
+        // Hiding, the shortcut again, and the WM close button all keep it.
+        m.handle(Event::Hide);
         m.handle(Event::Open(telegram()));
         assert_eq!(m.sticker_mode(), StickerMode::On);
         m.handle(Event::Toggle {
@@ -1847,7 +2872,7 @@ pub(crate) mod tests {
             Some(TargetApp::Telegram),
         );
         m.handle(Event::ToggleSticker);
-        m.handle(Event::Escape);
+        m.handle(Event::Hide);
         m.handle(Event::Open(telegram()));
         assert_eq!(m.sticker_mode(), StickerMode::Off);
     }
@@ -1860,7 +2885,7 @@ pub(crate) mod tests {
             &m.handle(Event::CopySelected { toggle_sticker: true })[..],
             [Command::Copy { sticker: true, .. }]
         ));
-        m.handle(Event::Escape);
+        m.handle(Event::Hide);
         m.handle(Event::Open(OpenInfo {
             window: Some(window("com.ayugram.desktop")),
             detected: Some(TargetApp::Telegram),
@@ -1999,3 +3024,6 @@ pub(crate) mod tests {
         assert_eq!(Status::Error("x".into()).level(), Level::Error);
     }
 }
+
+#[cfg(test)]
+mod modal_tests;
