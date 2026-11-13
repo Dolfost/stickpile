@@ -4,8 +4,9 @@
 //! It implements the contract of `stickpile_api::routes` closely enough for
 //! the clients: bearer tokens (password + optional TOTP login), sets, uploads,
 //! tar import/export via `stickpile-setfmt`, the `GET /items` cache feed with
-//! cursors and tombstones, files, likes, a naive substring search, usage
-//! dedup, popular, jobs and a few admin routes. Test hooks: a controllable
+//! cursors and tombstones, files, set cover images, likes, a naive substring
+//! search (with `is:` filters), usage dedup, popular, `/stats/me`, jobs and a
+//! few admin routes. Test hooks: a controllable
 //! clock, page size, artificial delays and forced failures, and a request log.
 //!
 //! The server runs on its own thread and tokio runtime, so it works from both
@@ -68,6 +69,10 @@ pub struct MockState {
     pub tombstones: Vec<(String, i64)>,
     /// Accepted usage events.
     pub usage: Vec<UsageEvent>,
+    /// Event id -> id of the user who reported it.
+    pub usage_by: HashMap<String, String>,
+    /// Set id -> its own cover image (original bytes, also served as the thumb).
+    pub cover_images: HashMap<String, Vec<u8>>,
     /// Number of `POST /usage` requests received.
     pub usage_requests: usize,
     pub likes: HashSet<(String, String)>,
@@ -95,6 +100,8 @@ impl Default for MockState {
             items: Vec::new(),
             tombstones: Vec::new(),
             usage: Vec::new(),
+            usage_by: HashMap::new(),
+            cover_images: HashMap::new(),
             usage_requests: 0,
             likes: HashSet::new(),
             jobs: Vec::new(),
@@ -408,6 +415,16 @@ impl MockState {
     }
 
     fn set_summary(&self, s: &Set) -> SetSummary {
+        let cover_item_id = self
+            .items
+            .iter()
+            .find(|i| i.item.set_id == s.id)
+            .map(|i| i.item.id.clone());
+        let cover_url = match (&s.cover_image, &cover_item_id) {
+            (Some(image), _) => Some(image.thumb_url.clone()),
+            (None, Some(item)) => Some(r::path(r::ITEM_FILE, &[item, Variant::Thumb.as_str()])),
+            (None, None) => None,
+        };
         SetSummary {
             id: s.id.clone(),
             slug: s.slug.clone(),
@@ -417,14 +434,37 @@ impl MockState {
             visibility: s.visibility,
             source: s.source,
             item_count: s.item_count,
-            cover_item_id: self
-                .items
-                .iter()
-                .find(|i| i.item.set_id == s.id)
-                .map(|i| i.item.id.clone()),
-            cover_url: None,
+            cover_item_id,
+            cover_url,
             updated_at: s.updated_at,
         }
+    }
+
+    /// Give a set its own cover image (served as both original and thumb),
+    /// with URLs that change with the image like the server's.
+    pub fn set_cover_image(&mut self, set_id: &str, bytes: Vec<u8>) {
+        let sn = sniff(&bytes).expect("unsupported media in mock");
+        let sha = hex::encode(sha2::Sha256::digest(&bytes));
+        let url = |variant: Variant| {
+            format!(
+                "{}?v={}",
+                r::path(r::SET_COVER_FILE, &[set_id, variant.as_str()]),
+                &sha[..16]
+            )
+        };
+        let image = CoverImage {
+            thumb_url: url(Variant::Thumb),
+            url: url(Variant::Original),
+            format: sn.format,
+            width: sn.width,
+            height: sn.height,
+            sha256: sha.clone(),
+        };
+        let now = self.tick();
+        let set = self.sets.iter_mut().find(|s| s.id == set_id).expect("set");
+        set.cover_image = Some(image);
+        set.updated_at = now;
+        self.cover_images.insert(set_id.to_string(), bytes);
     }
 
     /// Read access by id (own, unlisted, public).
@@ -627,6 +667,7 @@ pub fn router(state: Shared) -> Router {
         .route(r::SET, get(get_set).delete(delete_set).patch(update_set))
         .route(r::SET_ITEMS, post(upload))
         .route(r::SET_EXPORT, get(export_set))
+        .route(r::SET_COVER_FILE, get(cover_file))
         .route(r::SETS_IMPORT, post(import_set))
         .route(r::SETS_GITPACK, post(gitpack))
         .route(r::SET_PULL, post(pull))
@@ -639,6 +680,7 @@ pub fn router(state: Shared) -> Router {
         .route(r::SEARCH, get(search))
         .route(r::USAGE, post(usage))
         .route(r::POPULAR, get(popular))
+        .route(r::STATS_ME, get(stats_me))
         .route(r::JOB, get(job))
         .route(r::ADMIN_USERS, get(admin_users))
         .route(r::ADMIN_STORAGE, get(admin_storage))
@@ -959,6 +1001,25 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
     Ok(([(header::CONTENT_TYPE, "application/x-tar")], Body::from(tar)).into_response())
 }
 
+async fn cover_file(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath((id, variant)): AxPath<(String, String)>,
+) -> HResult<Response> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) || !matches!(variant.as_str(), "original" | "thumb") {
+        return Err(not_found());
+    }
+    let bytes = st.cover_images.get(&id).ok_or_else(not_found)?.clone();
+    let mime = st
+        .set(&id)
+        .and_then(|set| set.cover_image.as_ref())
+        .map(|c| c.format.mime())
+        .unwrap_or("application/octet-stream");
+    Ok(([(header::CONTENT_TYPE, mime)], Body::from(bytes)).into_response())
+}
+
 async fn import_set(
     State(s): State<Shared>,
     h: HeaderMap,
@@ -1262,6 +1323,15 @@ async fn search(
         if !query.sets.accepts(|v| *v == sum.set_slug) {
             continue;
         }
+        let set = st.set(&it.item.set_id).expect("set of item");
+        let is = |v: &stickpile_api::query::Is| match v {
+            stickpile_api::query::Is::Mine => set.owner_id == u.id,
+            stickpile_api::query::Is::Liked => st.likes.contains(&(u.id.clone(), it.item.id.clone())),
+            stickpile_api::query::Is::Public => set.visibility == Visibility::Public,
+        };
+        if !query.is.accepts(is) {
+            continue;
+        }
         let mut matched = Vec::new();
         let mut ok = true;
         for term in &query.text {
@@ -1350,10 +1420,61 @@ async fn usage(State(s): State<Shared>, h: HeaderMap, Json(batch): Json<UsageBat
             it.item.copies += 1;
             it.item.updated_at = now;
         }
+        st.usage_by.insert(ev.id.clone(), u.id.clone());
         st.usage.push(ev);
         ack.accepted += 1;
     }
     Ok(Json(ack))
+}
+
+async fn stats_me(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<UserStats>> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    let mine: Vec<&UsageEvent> = st
+        .usage
+        .iter()
+        .filter(|e| st.usage_by.get(&e.id) == Some(&u.id))
+        .collect();
+    // Like the server: the caller's own copies, top 10, of items they can still read.
+    let mut counts: HashMap<&str, u64> = HashMap::new();
+    for e in &mine {
+        *counts.entry(e.item_id.as_str()).or_default() += 1;
+    }
+    let mut top: Vec<(&str, u64)> = counts.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let top_items = top
+        .into_iter()
+        .filter_map(|(id, n)| {
+            let it = st.items.iter().find(|i| i.item.id == id)?;
+            st.can_read(&u, &it.item.set_id).then(|| PopularEntry {
+                item: st.summary(&it.item),
+                value: n,
+            })
+        })
+        .take(10)
+        .collect();
+    let own_sets: HashSet<&str> = st
+        .sets
+        .iter()
+        .filter(|x| x.owner_id == u.id)
+        .map(|x| x.id.as_str())
+        .collect();
+    Ok(Json(UserStats {
+        sets: own_sets.len() as u64,
+        items: st
+            .items
+            .iter()
+            .filter(|i| own_sets.contains(i.item.set_id.as_str()))
+            .count() as u64,
+        storage_bytes: 0,
+        copies_total: mine.len() as u64,
+        copies_last_7d: mine.len() as u64,
+        likes_given: st.likes.iter().filter(|(user, _)| *user == u.id).count() as u64,
+        likes_received: 0,
+        top_items,
+        top_targets: vec![],
+        daily_copies: vec![0; 30],
+    }))
 }
 
 async fn popular(

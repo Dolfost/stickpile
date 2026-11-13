@@ -487,6 +487,30 @@ impl Cache {
         Ok(out)
     }
 
+    /// Distinct items by how often they were copied on this device, most
+    /// first (ties: most recently copied first). Summaries as in [`Cache::recent`].
+    pub fn most_copied(&self, limit: usize) -> Result<Vec<ItemSummary>> {
+        let db = self.db();
+        let mut st = db.prepare(
+            "SELECT i.json, (SELECT item_json FROM history WHERE seq = g.last)
+             FROM (SELECT item_id, COUNT(*) AS n, MAX(seq) AS last FROM history GROUP BY item_id) g
+             LEFT JOIN items i ON i.id = g.item_id
+             ORDER BY g.n DESC, g.last DESC LIMIT ?1",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = st.query_map([limit], |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (current, at_copy) = row?;
+            if let Some(item) = current.or(Some(at_copy)).and_then(|j| serde_json::from_str(&j).ok()) {
+                out.push(item);
+            }
+        }
+        Ok(out)
+    }
+
     // -- usage queue ----------------------------------------------------------------
 
     /// Queue an event; a duplicate id is ignored.

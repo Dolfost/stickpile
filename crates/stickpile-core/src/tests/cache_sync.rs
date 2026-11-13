@@ -127,6 +127,28 @@ fn server_or_account_change_resets_account_data() {
 }
 
 #[test]
+fn most_copied_ranks_local_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 16).unwrap();
+    let (_server, items) = seeded_server();
+    assert!(cache.most_copied(5).unwrap().is_empty());
+    for i in [0, 1, 2, 1, 3, 0, 1] {
+        let ev = crate::usage::copy_event(&items[i], None, None, "test");
+        cache.add_history(&items[i], &ev).unwrap();
+    }
+    let ids = |v: Vec<stickpile_api::ItemSummary>| v.into_iter().map(|i| i.id).collect::<Vec<_>>();
+    // Counts 1: 3, 0: 2, then the ties 3 and 2 by the latest copy.
+    let want: Vec<String> = [1, 0, 3, 2].iter().map(|&i| items[i].id.clone()).collect();
+    assert_eq!(ids(cache.most_copied(10).unwrap()), want);
+    assert_eq!(ids(cache.most_copied(2).unwrap()), want[..2]);
+    // The cached summary wins over the one stored at copy time.
+    let mut renamed = items[1].clone();
+    renamed.name = "renamed".into();
+    cache.upsert_items(&[renamed]).unwrap();
+    assert_eq!(cache.most_copied(1).unwrap()[0].name, "renamed");
+}
+
+#[test]
 fn lru_evicts_least_recently_used_files() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::open(dir.path(), 1).unwrap(); // 1 MiB

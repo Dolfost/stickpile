@@ -7,10 +7,9 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::json;
 use stickpile_api::*;
-use stickpile_core::cache::Cache;
 use stickpile_core::client::{ApiClient, PopularParams, UploadFile};
 use stickpile_core::clipboard::serve::spawn_detached;
-use stickpile_core::{token, ClientConfig, CoreError, Session};
+use stickpile_core::{session, token, ClientConfig, CoreError, Session};
 
 use crate::cli::*;
 use crate::output::{self, Table};
@@ -147,35 +146,13 @@ fn prompt_line(prompt: &str) -> Result<String> {
     Ok(line.trim().to_string())
 }
 
-fn hostname() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .or_else(|_| std::fs::read_to_string("/etc/hostname"))
-        .map(|s| s.trim().to_string())
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into())
-}
-
 async fn login(ctx: &Ctx, a: LoginArgs) -> Result<()> {
-    let token_name = a.token_name.unwrap_or_else(|| format!("stickpile-cli@{}", hostname()));
+    let token_name = a.token_name.unwrap_or_else(|| session::token_name("stickpile-cli"));
     let client = ApiClient::from_config(&ctx.config)?;
 
-    // On the tailnet (behind `tailscale serve`) the server already knows who we
-    // are: turn that identity into a token without asking for a password.
     if a.username.is_none() && a.password_file.is_none() {
-        match client.me().await {
-            Ok(user) => {
-                tracing::info!("authenticated by tailnet identity as {}", user.username);
-                let created = client
-                    .create_token(&CreateToken {
-                        name: token_name,
-                        expires_at: None,
-                    })
-                    .await?;
-                return finish_login(ctx, created, "tailnet identity");
-            }
-            Err(CoreError::NotLoggedIn) => {}
-            Err(e) => return Err(e.into()),
+        if let Some(created) = session::tailnet_login(&client, &token_name).await? {
+            return finish_login(ctx, created, "tailnet identity");
         }
     }
 
@@ -211,15 +188,7 @@ async fn login(ctx: &Ctx, a: LoginArgs) -> Result<()> {
 
 fn finish_login(ctx: &Ctx, created: TokenCreated, method: &str) -> Result<()> {
     let path = ctx.config.token_path();
-    token::write_token(&path, &created.token)?;
-    // Bind the offline cache to this server and account.
-    match Cache::open(&ctx.config.cache_path(), ctx.config.cache_max_mb) {
-        Ok(cache) => {
-            cache.bind_server(&ctx.config.server_url)?;
-            cache.set_me(&created.user)?;
-        }
-        Err(e) => tracing::warn!("offline cache: {e}"),
-    }
+    session::save_login(&ctx.config, None, &created)?;
     if ctx.json {
         return output::json(
             &json!({ "user": created.user, "token": created.info, "token_file": path, "method": method }),
@@ -235,28 +204,17 @@ fn finish_login(ctx: &Ctx, created: TokenCreated, method: &str) -> Result<()> {
 
 async fn logout(ctx: &Ctx) -> Result<()> {
     let path = ctx.config.token_path();
-    let Some(secret) = ctx.token()? else {
+    if ctx.token()?.is_none() {
         println!("Not logged in.");
         return Ok(());
-    };
-    let session = ctx.session().await?;
-    if let Err(e) = session.flush_usage().await {
-        tracing::info!("usage events stay queued: {e}");
     }
-    let client = ApiClient::from_config(&ctx.config)?.with_token(Some(secret));
-    let revoked = match client.current_token_id().await {
-        Ok(Some(id)) => client.revoke_token(&id).await.map(|_| true),
-        Ok(None) => Ok(false),
-        Err(e) => Err(e),
-    };
+    let revoked = ctx.session().await?.logout().await?.revoked;
     match &revoked {
         Ok(true) => {}
         Ok(false) => eprintln!("warning: this token was not found on the server; deleting it locally"),
         Err(e) if e.is_unauthorized() => {}
         Err(e) => eprintln!("warning: could not revoke the token on the server ({e}); revoke it in the web UI"),
     }
-    token::delete_token(&path)?;
-    session.cache().reset_account_data()?;
     if ctx.json {
         return output::json(&json!({ "revoked": matches!(revoked, Ok(true)), "token_file": path }));
     }

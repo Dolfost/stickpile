@@ -162,6 +162,18 @@ impl ApiClient {
         self
     }
 
+    /// A client on the same connection pool without a token: what the
+    /// server makes of us by tailnet identity alone.
+    pub fn anonymous(&self) -> ApiClient {
+        ApiClient {
+            http: self.http.clone(),
+            base: self.base.clone(),
+            token: Arc::new(RwLock::new(None)),
+            timeout: self.timeout,
+            transfer_timeout: self.transfer_timeout,
+        }
+    }
+
     pub fn with_transfer_timeout(mut self, timeout: Duration) -> ApiClient {
         self.transfer_timeout = timeout;
         self
@@ -525,9 +537,16 @@ impl ApiClient {
     /// Stream a variant into `dest` (via a temporary file + rename, so `dest`
     /// is never partial). Returns the number of bytes written.
     pub async fn download_item_file(&self, id: &str, variant: Variant, dest: &Path) -> Result<u64> {
+        self.download(&path(routes::ITEM_FILE, &[id, variant.as_str()]), dest)
+            .await
+    }
+
+    /// [`ApiClient::download_item_file`] for a URL path the server handed
+    /// out, such as a set's `cover_url` (query string included).
+    pub async fn download(&self, url_path: &str, dest: &Path) -> Result<u64> {
         use tokio::io::AsyncWriteExt;
         let rb = self
-            .request(Method::GET, &path(routes::ITEM_FILE, &[id, variant.as_str()]), true)?
+            .request(Method::GET, url_path, true)?
             .timeout(self.transfer_timeout);
         let mut resp = self.send(rb).await?;
         if let Some(parent) = dest.parent() {
@@ -784,13 +803,21 @@ async fn check_status(resp: Response) -> Result<Response> {
 
 /// Build an [`ItemSummary`] from an [`ItemDetail`] (e.g. for copying by id).
 pub fn summary_from_detail(d: &ItemDetail) -> ItemSummary {
-    let i = &d.item;
+    summary_of(&d.item, &d.set.slug, &d.set.name, &d.set.owner_username)
+}
+
+/// Build an [`ItemSummary`] from an item of a [`SetDetail`].
+pub fn summary_from_set_item(item: &Item, set: &Set) -> ItemSummary {
+    summary_of(item, &set.slug, &set.name, &set.owner_username)
+}
+
+fn summary_of(i: &Item, set_slug: &str, set_name: &str, owner_username: &str) -> ItemSummary {
     ItemSummary {
         id: i.id.clone(),
         set_id: i.set_id.clone(),
-        set_slug: d.set.slug.clone(),
-        set_name: d.set.name.clone(),
-        owner_username: d.set.owner_username.clone(),
+        set_slug: set_slug.to_string(),
+        set_name: set_name.to_string(),
+        owner_username: owner_username.to_string(),
         name: i.name.clone(),
         keywords: i.keywords.clone(),
         emojis: i.emojis.clone(),
