@@ -150,28 +150,101 @@ available on KDE Wayland (same fallback as GNOME); on KDE X11 it works.
 
 ## Keys
 
-The search field always has the focus; navigation keys are taken by the
-grid, everything else edits the query.
+The popup has seven tabs, numbered in this order: 1 Search, 2 Recent,
+3 Most used, 4 Packs, 5 Favorites, 6 Me, 7 Settings. Every opening starts
+on `ui.start_tab` (Search by default).
+
+Keys work vim-style, in two modes:
+
+- **Insert**: the text field has the keys. Search and Packs open in
+  Insert, so typing starts right away.
+- **Normal**: single keys act on the grid. Recent, Most used, Favorites,
+  Me and Settings open in Normal; Escape leaves Insert for Normal.
+
+The footer shows the mode and, like vim's showcmd, the keys of a command
+still being typed (`3`, `g`, `12g`). `?` (or F1) shows all keys over the
+popup.
+
+### Insert mode
 
 | Key | Action |
 |---|---|
-| typing | search (after a 120 ms pause); empty query shows recently used items |
-| ← → ↑ ↓ | move in the grid |
+| typing | search (after a 120 ms pause; an empty query shows recently used items). On Packs: filter the packs by name, or inside a pack its items by name, keyword or emoji |
+| arrow keys | move in the grid |
 | Home / End | first / last item |
 | Page Up / Page Down | one screen up / down |
-| Enter | copy the selected item for the current target, hide |
+| Enter | copy the selected item for the current target, hide; in the pack list, open the pack |
 | Shift+Enter | copy with sticker mode flipped for this copy (Telegram: send as a sticker) |
+| Ctrl+D | add the selected item to favorites, or remove it |
+| Escape | Normal mode |
+| Ctrl+Left/Right, Shift+Home/End | edit the query (word jump, select) |
+
+### Normal mode
+
+| Key | Action |
+|---|---|
+| h j k l, arrow keys | move left, down, up, right |
+| 3j, 2l | move with a count |
+| gg / G | first / last item (`5G` or `5gg`: the fifth) |
+| 0 / $ | start / end of the row |
+| Ctrl+d / Ctrl+u | half a screen down / up |
+| y, Enter | copy the selected item for the current target, hide |
+| Y, Shift+Enter | copy with sticker mode flipped for this copy |
+| f | add the selected item to favorites, or remove it |
+| gx | open the selected item in the browser |
+| t / T | next / previous target app |
+| s | toggle sticker mode |
+| / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
+| i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
+| 1 to 7 | go to that tab |
+| gt / gT | next / previous tab (`3gt`: tab 3) |
+| ? | show or hide the key help |
+| q, Escape | hide; Escape first cancels a half-typed command, closes the help, or leaves an opened pack |
+
+A digit is both a tab number and the start of a count: `3j` moves three
+rows down, while a lone `3` switches to tab 3 after a short pause
+(400 ms), or at once when the next key is not a motion. On Me and
+Settings, which have nothing to count, digits switch at once. Unknown
+keys do nothing.
+
+**Packs.** The Packs tab lists your packs. Enter, or `o` in Normal mode,
+opens the selected one: its items fill the grid, the header reads
+"Packs / <name>", and the text field filters the items. `-`, Backspace or
+Escape in Normal mode go back to the list, with the pack you came from
+selected and the list filter as it was.
+
+**Me and Settings.** In Normal mode `j` / `k` (or the arrow keys) move
+between rows, Enter or Space presses a button or flips a switch, and `i`
+edits the row's text field. Editing a field (or clicking into one) is
+Insert mode; Escape leaves it.
+
+### In every mode
+
+| Key | Action |
+|---|---|
+| Tab / Shift+Tab | next / previous tab, wrapping |
+| Alt+1 to Alt+7 | go to that tab |
+| F1 | show or hide the key help |
 | Ctrl+T / Ctrl+Shift+T | next / previous target app |
 | Ctrl+S | toggle sticker mode; kept until stickpile-desktop restarts (the footer toggle does the same) |
-| Escape | hide |
-| Ctrl+←/→, Shift+Home/End | edit the query (word jump, select) |
 
-Ctrl shortcuts also work while a Cyrillic (or other non-Latin) layout is
-active, as long as the first configured layout is Latin.
+In a text field on Me or Settings only Escape, the tab keys and F1 are
+taken by the popup; every other key goes to the field.
 
-Mouse: hovering selects, a click copies, and dragging an item drops the
-file itself into the target (useful for Telegram stickers and when an app
-ignores pasted file references). The search syntax of the server works in
+The Normal-mode keys and the Ctrl shortcuts are read by physical key, so
+they also work while a Cyrillic (or other non-Latin) layout is active, as
+long as the first configured layout is Latin.
+
+**Without modes.** With `ui.modal = false` the text field always has the
+keys and there is no Normal mode: the Insert-mode table above applies on
+every tab, Escape hides (inside an opened pack it first goes back to the
+list), and Tab / Shift+Tab, Alt+1 to Alt+7, F1 and the Ctrl shortcuts
+work as listed.
+
+Mouse: hovering selects, a click copies (in the pack list: opens the
+pack), and dragging an item drops the file itself into the target (useful
+for Telegram stickers and when an app ignores pasted file references).
+The search syntax of the server works in
 the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`.
 
 The footer shows the target app and how it was chosen (`auto: <window
