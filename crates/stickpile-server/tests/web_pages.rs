@@ -957,6 +957,10 @@ async fn csp_and_static_assets() {
         "JS-only buttons stay hidden"
     );
     assert!(css.contains(".items-section.compact .editor-grid"));
+    // Compact's name and emoji lines keep their height; with the Regular
+    // flex basis the name line took the emoji line's room.
+    assert!(css
+        .contains(".compact .card.editor .field-emojis:not(.empty) {\n  display: block; flex: none; height: 1.35rem;"));
     assert!(css.contains(".items-section.view-grid .editor-grid"));
     assert!(css.contains(".items-section.hide-emojis"));
     assert!(css.contains(".set-list.hide-cover"));
