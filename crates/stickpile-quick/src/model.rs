@@ -212,6 +212,12 @@ pub enum Event {
     },
     /// Back from an opened pack to the pack list (a back button).
     PackBack,
+    /// New settings (the Settings tab saved a change): applied at once,
+    /// without a new model.
+    Configure(ModelConfig),
+    /// The account or the server changed (login, logout, a new server URL):
+    /// forget the lists fetched for the old one and fetch the shown tab again.
+    Reload,
     /// The clipboard now holds the item (answer to [`Command::Copy`]).
     CopyFinished {
         item_id: String,
@@ -329,6 +335,8 @@ pub enum Status {
         query: String,
     },
     NoRecent,
+    /// The Recent tab with nothing used yet.
+    NothingUsed,
     Offline,
     NothingSelected,
     Copying {
@@ -365,6 +373,7 @@ impl Status {
             Status::Idle
             | Status::NoResults { .. }
             | Status::NoRecent
+            | Status::NothingUsed
             | Status::NothingSelected
             | Status::Dropped { .. }
             | Status::NoMostUsed
@@ -391,6 +400,7 @@ impl Status {
             Status::Searching => "Searching…".into(),
             Status::NoResults { query } => format!("No matches for “{query}”"),
             Status::NoRecent => "Nothing used yet — type to search".into(),
+            Status::NothingUsed => "Nothing used yet".into(),
             Status::Offline => "Offline — showing cached results".into(),
             Status::NothingSelected => "Nothing selected".into(),
             Status::Copying { name } => format!("Preparing {name}…"),
@@ -430,6 +440,7 @@ impl Status {
                 | Status::Searching
                 | Status::NoResults { .. }
                 | Status::NoRecent
+                | Status::NothingUsed
                 | Status::Offline
                 | Status::Loading
                 | Status::NoMostUsed
@@ -1051,6 +1062,8 @@ impl Model {
             Event::ToggleFavorite => self.toggle_favorite(),
             Event::FavoriteToggled { item_id, outcome } => self.favorite_toggled(&item_id, outcome),
             Event::PackBack => self.pack_back(),
+            Event::Configure(cfg) => self.configure(cfg),
+            Event::Reload => self.reload(),
             Event::CopyFinished { item_id, warning } => self.copy_finished(item_id, warning),
             Event::CopyFailed { item_id, error } => {
                 if self.copying.as_ref().is_none_or(|c| c.item_id != item_id) {
@@ -1116,6 +1129,65 @@ impl Model {
         self.visible = false;
         self.pending.clear();
         vec![Command::Hide]
+    }
+
+    fn configure(&mut self, cfg: ModelConfig) -> Vec<Command> {
+        let old = std::mem::replace(&mut self.cfg, cfg);
+        let cfg = &self.cfg;
+        if cfg.columns != old.columns {
+            self.columns = cfg.columns.max(1);
+        }
+        if cfg.visible_rows != old.visible_rows {
+            self.visible_rows = cfg.visible_rows.max(1);
+        }
+        let mut compat = false;
+        // A changed preference is the user's latest word on sticker mode.
+        if cfg.prefer_stickers != old.prefer_stickers && self.sticker != cfg.prefer_stickers {
+            self.sticker = cfg.prefer_stickers;
+            compat = true;
+        }
+        if self.target_source == TargetSource::Default && self.target != cfg.default_target {
+            self.target = cfg.default_target;
+            compat = true;
+        }
+        if cfg.modal != old.modal {
+            self.pending.clear();
+            self.mode = if cfg.modal {
+                self.tab.default_mode()
+            } else {
+                Mode::Insert
+            };
+        }
+        if compat {
+            self.refresh_compat();
+        }
+        Vec::new()
+    }
+
+    fn reload(&mut self) -> Vec<Command> {
+        self.most_used = Listing::default();
+        self.favorites = Listing::default();
+        self.packs.sets = Listing::default();
+        self.packs.open = None;
+        self.packs.list_selection = None;
+        self.packs.shown.clear();
+        self.memory = Default::default();
+        self.results.clear();
+        self.offline = false;
+        self.searching = false;
+        self.showing = Showing::Recent;
+        // Answers to searches for the old account are dropped.
+        self.generation += 1;
+        let mut cmds = vec![Command::CancelSearch];
+        if !self.visible {
+            self.rebuild(Sel::First);
+            return cmds;
+        }
+        if !self.query.trim().is_empty() {
+            cmds.push(self.search_command(0));
+        }
+        cmds.extend(self.enter_tab());
+        cmds
     }
 
     // -- tabs and modes ----------------------------------------------------------
@@ -1545,7 +1617,7 @@ impl Model {
     fn view_status(&self) -> Status {
         match self.tab {
             Tab::Search => self.search_status(),
-            Tab::Recent if self.recent.is_empty() => Status::NoRecent,
+            Tab::Recent if self.recent.is_empty() => Status::NothingUsed,
             Tab::MostUsed => self.most_used.status("most used items", Status::NoMostUsed),
             Tab::Favorites => self.favorites.status("favorites", Status::NoFavorites),
             Tab::Packs => match &self.packs.open {

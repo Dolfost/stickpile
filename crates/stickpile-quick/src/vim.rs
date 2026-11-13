@@ -310,7 +310,8 @@ pub const HELP: &[HelpSection] = &[
         title: "Me, Settings",
         keys: &[
             ("j k, arrows", "move between rows"),
-            ("Enter, Space", "press, toggle"),
+            ("h l", "change a choice or a number"),
+            ("Enter, Space", "press, toggle, open a choice"),
             ("i", "edit the field; Esc leaves it"),
         ],
     },

@@ -1282,3 +1282,117 @@ fn without_modes_a_start_tab_still_applies() {
     assert_eq!((m.tab(), m.mode()), (Tab::Favorites, Mode::Insert));
     assert!(favorites_gen(&cmds).is_some());
 }
+
+// -- live settings, account changes ---------------------------------------------------------------------
+
+#[test]
+fn recent_tab_says_nothing_used_without_a_search_hint() {
+    let mut m = open_on(Tab::Recent);
+    m.handle(Event::RecentLoaded(vec![]));
+    assert_eq!(m.status(), &Status::NothingUsed);
+    assert_eq!(m.footer().status, "Nothing used yet");
+    m.handle(Event::ShowTab(Tab::Search));
+    assert_eq!(m.status(), &Status::NoRecent, "Search still invites typing");
+}
+
+#[test]
+fn configure_applies_new_settings_at_once() {
+    let mut m = grid(10);
+    let mut new = ModelConfig {
+        columns: 5,
+        modal: false,
+        prefer_stickers: true,
+        default_target: TargetApp::Telegram,
+        hide_on_copy: false,
+        start_tab: Tab::Favorites,
+        ..cfg()
+    };
+    assert!(m.handle(Event::Configure(new.clone())).is_empty());
+    assert_eq!(m.config(), &new);
+    assert_eq!(m.mode(), Mode::Insert, "no modes: the keys go to the fields");
+    assert_eq!(m.columns(), 5);
+    m.handle(Event::Navigate(Nav::Down));
+    assert_eq!(m.selected(), Some(5));
+    assert_eq!(m.target(), TargetApp::Telegram, "the default target, nothing detected");
+    assert!(m.sticker());
+    assert_eq!(m.tab(), Tab::MostUsed, "the start tab waits for the next opening");
+
+    // Modes back on: the tab's own mode; a target picked by hand stays.
+    m.handle(Event::SetTarget(TargetApp::Discord));
+    new.modal = true;
+    new.default_target = TargetApp::Slack;
+    m.handle(Event::Configure(new.clone()));
+    assert_eq!(m.mode(), Mode::Normal);
+    assert_eq!(m.target(), TargetApp::Discord);
+    // An unchanged preference keeps a sticker toggle.
+    m.handle(Event::ToggleSticker);
+    m.handle(Event::Configure(new.clone()));
+    assert!(!m.sticker());
+
+    m.handle(Event::Hide);
+    m.handle(Event::Open(OpenInfo::default()));
+    assert_eq!((m.tab(), m.mode()), (Tab::Favorites, Mode::Normal));
+    assert_eq!(m.target(), TargetApp::Slack);
+}
+
+#[test]
+fn reload_forgets_the_old_accounts_lists() {
+    let (mut m, cmds) = open_with(ModelConfig {
+        start_tab: Tab::Favorites,
+        ..cfg()
+    });
+    let old = favorites_gen(&cmds).unwrap();
+    m.handle(Event::FavoritesLoaded {
+        generation: old,
+        outcome: Ok(items(3)),
+    });
+    let cmds = m.handle(Event::ShowTab(Tab::Packs));
+    m.handle(Event::PacksLoaded {
+        generation: packs_gen(&cmds).unwrap(),
+        outcome: Ok(vec![set("s1", "Cats")]),
+    });
+    m.handle(Event::CopySelected { toggle_sticker: false });
+    assert!(m.open_pack().is_some());
+    m.handle(Event::ShowTab(Tab::Favorites));
+
+    let cmds = m.handle(Event::Reload);
+    let new = favorites_gen(&cmds).expect("the shown tab is fetched again");
+    assert!(new > old);
+    assert!(m.entries().is_empty(), "nothing of the old account is shown");
+    assert_eq!(m.status(), &Status::Loading);
+    m.handle(Event::FavoritesLoaded {
+        generation: new,
+        outcome: Ok(items(1)),
+    });
+    assert_eq!(ids(&m), ["0"]);
+
+    let cmds = m.handle(Event::ShowTab(Tab::Packs));
+    assert!(packs_gen(&cmds).is_some());
+    assert_eq!(m.open_pack(), None, "the opened pack is closed");
+    assert!(m.packs().is_empty());
+}
+
+#[test]
+fn reload_searches_the_query_again() {
+    let mut m = with_results(3);
+    let before = m.generation();
+    let cmds = m.handle(Event::Reload);
+    assert!(has(&cmds, &Command::CancelSearch));
+    let (query, _, generation, debounce) = super::tests::search_of(&cmds).unwrap();
+    assert_eq!((query.as_str(), debounce), ("cat", 0));
+    assert!(generation > before);
+    assert_eq!(m.status(), &Status::Searching);
+    // An answer for the old account is dropped.
+    m.handle(Event::Results {
+        generation: before,
+        outcome: Ok(Results {
+            hits: hits(2),
+            offline: false,
+        }),
+    });
+    assert_eq!(m.status(), &Status::Searching);
+
+    let mut hidden = with_results(2);
+    hidden.handle(Event::Hide);
+    assert_eq!(hidden.handle(Event::Reload), [Command::CancelSearch]);
+}
