@@ -283,9 +283,12 @@ max_results = 60
 `stickpile-desktop --demo DIR` serves the media files of `DIR` (png, jpg,
 webp, gif, mp4, webm) instead of a server: substring search over file
 names, the same clipboard offers as the real client, drag-and-drop, and a
-512 px WebP counts as a Telegram sticker. Useful to try the popup and the
-paste matrix without a server. Quit a running instance first, since the
-running instance ignores `--demo`.
+512 px WebP counts as a Telegram sticker. Each subdirectory of `DIR` is a
+pack (the output of `stickpile backup` works) and the loose files are one
+more; favorites and most used start from a fixed choice, and the account is
+a demo user that logs in and out without a server. Useful to try the popup
+and the paste matrix without a server. Quit a running instance first, since
+the running instance ignores `--demo`.
 
 ## Troubleshooting
 

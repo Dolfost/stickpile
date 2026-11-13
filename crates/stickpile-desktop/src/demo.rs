@@ -2,18 +2,24 @@
 //! the popup, the clipboard offers and drag-and-drop can be exercised without
 //! a server (and before `stickpile-core` is complete). Search is a plain
 //! substring match over file names; offers follow the same `clipboard`
-//! config as the real client.
+//! config as the real client. Each subdirectory is a pack (a directory from
+//! `stickpile backup` works), the loose files are one more; favorites and
+//! most used start from a fixed choice, and the account is a demo user that
+//! logs in and out without a server.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, TargetApp, Variant, VariantInfo};
+use stickpile_api::{
+    ItemSummary, MediaFormat, MediaKind, SearchHit, SetSource, SetSummary, TargetApp, Variant, VariantInfo, Visibility,
+};
 use stickpile_core::clipboard::ClipOffer;
 use stickpile_core::config::ClipboardConfig;
 use stickpile_core::PreparedCopy;
 use stickpile_quick::model::Results;
 
-use crate::backend::{Backend, BoxFut};
+use crate::backend::{AuthKind, Backend, BoxFut, Credentials, LoginError, Profile};
 use crate::offers;
 
 struct DemoItem {
@@ -22,10 +28,22 @@ struct DemoItem {
 }
 
 pub struct DemoBackend {
+    dir: PathBuf,
     items: Vec<DemoItem>,
+    packs: Vec<SetSummary>,
     recent: Mutex<Vec<String>>,
+    /// Item id -> copies.
+    copies: Mutex<HashMap<String, u64>>,
+    /// Liked item ids, newest like first.
+    liked: Mutex<Vec<String>>,
+    /// The signed-in user; `None` after logout.
+    user: Mutex<Option<String>>,
     clipboard: ClipboardConfig,
 }
+
+/// Id and set fields of the loose files' pack.
+const LOOSE_PACK: &str = "demo";
+const DEMO_USER: &str = "demo";
 
 pub fn format_of(path: &Path) -> Option<MediaFormat> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -78,10 +96,10 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
     }
     ItemSummary {
         id: file_name.clone(),
-        set_id: "demo".into(),
-        set_slug: "demo".into(),
+        set_id: LOOSE_PACK.into(),
+        set_slug: LOOSE_PACK.into(),
         set_name: "Demo directory".into(),
-        owner_username: "demo".into(),
+        owner_username: DEMO_USER.into(),
         name: stem.clone(),
         keywords: stem
             .split(['-', '_', ' ', '.'])
@@ -106,27 +124,108 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
     }
 }
 
+/// The media files directly inside `dir`, sorted by name.
+fn media_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file() && format_of(p).is_some())
+        .map(|p| std::path::absolute(&p).unwrap_or(p))
+        .collect();
+    paths.sort();
+    Ok(paths)
+}
+
+fn slug_of(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn pack_summary(id: &str, slug: &str, name: &str, items: &[DemoItem]) -> SetSummary {
+    SetSummary {
+        id: id.into(),
+        slug: slug.into(),
+        name: name.into(),
+        description: String::new(),
+        owner_username: DEMO_USER.into(),
+        visibility: Visibility::Private,
+        source: SetSource::Local,
+        item_count: items.len() as u64,
+        cover_item_id: items.first().map(|i| i.summary.id.clone()),
+        cover_url: None,
+        updated_at: 0,
+    }
+}
+
 impl DemoBackend {
-    /// Index the media files directly inside `dir` (sorted by name).
+    /// Index the media files directly inside `dir` and inside each of its
+    /// subdirectories (sorted by name).
     pub fn scan(dir: &Path, clipboard: ClipboardConfig) -> std::io::Result<DemoBackend> {
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_file() && format_of(p).is_some())
-            .collect();
-        paths.sort();
-        let items = paths
+        let mut items: Vec<DemoItem> = media_files(dir)?
             .into_iter()
-            .map(|path| {
-                let path = std::path::absolute(&path).unwrap_or(path);
-                DemoItem {
-                    summary: summary_for(&path, format_of(&path).expect("filtered")),
-                    path,
-                }
+            .map(|path| DemoItem {
+                summary: summary_for(&path, format_of(&path).expect("filtered")),
+                path,
             })
             .collect();
+        let mut packs = Vec::new();
+        if !items.is_empty() {
+            packs.push(pack_summary(LOOSE_PACK, LOOSE_PACK, "Demo directory", &items));
+        }
+        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+            .collect();
+        subdirs.sort();
+        for sub in subdirs {
+            let name = sub
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let pack: Vec<DemoItem> = media_files(&sub)?
+                .into_iter()
+                .map(|path| {
+                    let mut summary = summary_for(&path, format_of(&path).expect("filtered"));
+                    summary.id = format!("{name}/{}", summary.id);
+                    summary.media_id = summary.id.clone();
+                    DemoItem { summary, path }
+                })
+                .collect();
+            if pack.is_empty() {
+                continue;
+            }
+            let set = pack_summary(&name, &slug_of(&name), &name, &pack);
+            items.extend(pack.into_iter().map(|mut i| {
+                i.summary.set_id = set.id.clone();
+                i.summary.set_slug = set.slug.clone();
+                i.summary.set_name = set.name.clone();
+                i
+            }));
+            packs.push(set);
+        }
+        // A fixed choice so the tabs are not empty on the first look.
+        let liked = items.iter().step_by(3).take(6).map(|i| i.summary.id.clone()).collect();
+        let copies = items
+            .iter()
+            .step_by(2)
+            .take(5)
+            .zip((1..=5u64).rev())
+            .map(|(i, n)| (i.summary.id.clone(), n))
+            .collect();
         Ok(DemoBackend {
+            dir: std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()),
             items,
+            packs,
             recent: Mutex::new(Vec::new()),
+            copies: Mutex::new(copies),
+            liked: Mutex::new(liked),
+            user: Mutex::new(Some(DEMO_USER.into())),
             clipboard,
         })
     }
@@ -219,6 +318,122 @@ impl DemoBackend {
         ids.retain(|id| id != item_id);
         ids.insert(0, item_id.to_string());
         ids.truncate(200);
+        *self
+            .copies
+            .lock()
+            .expect("not poisoned")
+            .entry(item_id.to_string())
+            .or_default() += 1;
+    }
+
+    pub fn most_used_now(&self, limit: usize) -> Vec<ItemSummary> {
+        let copies = self.copies.lock().expect("not poisoned");
+        let mut used: Vec<(usize, u64)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, item)| copies.get(&item.summary.id).map(|n| (i, *n)))
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        used.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        used.into_iter()
+            .take(limit)
+            .map(|(i, _)| self.items[i].summary.clone())
+            .collect()
+    }
+
+    pub fn favorites_now(&self, limit: usize) -> Vec<ItemSummary> {
+        let liked = self.liked.lock().expect("not poisoned");
+        liked
+            .iter()
+            .filter_map(|id| self.find(id))
+            .take(limit)
+            .map(|i| i.summary.clone())
+            .collect()
+    }
+
+    pub fn packs_now(&self) -> Vec<SetSummary> {
+        self.packs.clone()
+    }
+
+    pub fn pack_items_now(&self, set_id: &str) -> Result<Vec<ItemSummary>, String> {
+        if !self.packs.iter().any(|p| p.id == set_id) {
+            return Err(format!("{set_id} is not a demo pack"));
+        }
+        Ok(self
+            .items
+            .iter()
+            .filter(|i| i.summary.set_id == set_id)
+            .map(|i| i.summary.clone())
+            .collect())
+    }
+
+    /// The pack's first item that is not a video (demo mode has no video thumbnails).
+    pub fn pack_cover_now(&self, set_id: &str) -> Option<PathBuf> {
+        self.items
+            .iter()
+            .find(|i| i.summary.set_id == set_id && i.summary.kind != MediaKind::Video)
+            .map(|i| i.path.clone())
+    }
+
+    pub fn toggle_favorite_now(&self, item_id: &str) -> Result<bool, String> {
+        if self.find(item_id).is_none() {
+            return Err(format!("{item_id} is not in the demo directory"));
+        }
+        let mut liked = self.liked.lock().expect("not poisoned");
+        match liked.iter().position(|id| id == item_id) {
+            Some(pos) => {
+                liked.remove(pos);
+                Ok(false)
+            }
+            None => {
+                liked.insert(0, item_id.to_string());
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn profile_now(&self) -> Profile {
+        let server_url = format!("demo:{}", self.dir.display());
+        let user = self.user.lock().expect("not poisoned").clone();
+        let Some(user) = user else {
+            return Profile {
+                tailnet_login_available: true,
+                ..Profile::signed_out(server_url)
+            };
+        };
+        Profile {
+            auth: AuthKind::Token,
+            display_name: Some(if user == DEMO_USER {
+                "Demo user".into()
+            } else {
+                user.clone()
+            }),
+            username: Some(user),
+            copies: Some(self.copies.lock().expect("not poisoned").values().sum()),
+            likes: Some(self.liked.lock().expect("not poisoned").len() as u64),
+            packs: Some(self.packs.len() as u64),
+            items: Some(self.items.len() as u64),
+            tailnet_login_available: true,
+            ..Profile::signed_out(server_url)
+        }
+    }
+
+    /// Any credentials work; `None` signs in as the demo user.
+    pub fn login_now(&self, credentials: Option<Credentials>) -> Result<Profile, LoginError> {
+        let user = match credentials {
+            None => DEMO_USER.to_string(),
+            Some(c) if c.username.trim().is_empty() => {
+                return Err(LoginError::Failed("A username is required".into()));
+            }
+            Some(c) => c.username.trim().to_string(),
+        };
+        *self.user.lock().expect("not poisoned") = Some(user);
+        Ok(self.profile_now())
+    }
+
+    pub fn logout_now(&self) {
+        *self.user.lock().expect("not poisoned") = None;
     }
 }
 
@@ -279,6 +494,45 @@ impl Backend for DemoBackend {
 
     fn sync(self: Arc<Self>) -> BoxFut<Result<(), String>> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn most_used(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>> {
+        Box::pin(async move { Ok(self.most_used_now(limit)) })
+    }
+
+    fn favorites(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>> {
+        Box::pin(async move { Ok(self.favorites_now(limit)) })
+    }
+
+    fn packs(self: Arc<Self>) -> BoxFut<Result<Vec<SetSummary>, String>> {
+        Box::pin(async move { Ok(self.packs_now()) })
+    }
+
+    fn pack_items(self: Arc<Self>, set_id: String) -> BoxFut<Result<Vec<ItemSummary>, String>> {
+        Box::pin(async move { self.pack_items_now(&set_id) })
+    }
+
+    fn pack_cover(self: Arc<Self>, set: SetSummary) -> BoxFut<Result<Option<PathBuf>, String>> {
+        Box::pin(async move { Ok(self.pack_cover_now(&set.id)) })
+    }
+
+    fn toggle_favorite(self: Arc<Self>, item_id: String) -> BoxFut<Result<bool, String>> {
+        Box::pin(async move { self.toggle_favorite_now(&item_id) })
+    }
+
+    fn profile(self: Arc<Self>) -> BoxFut<Result<Profile, String>> {
+        Box::pin(async move { Ok(self.profile_now()) })
+    }
+
+    fn login(self: Arc<Self>, credentials: Option<Credentials>) -> BoxFut<Result<Profile, LoginError>> {
+        Box::pin(async move { self.login_now(credentials) })
+    }
+
+    fn logout(self: Arc<Self>) -> BoxFut<Result<(), String>> {
+        Box::pin(async move {
+            self.logout_now();
+            Ok(())
+        })
     }
 }
 
@@ -419,6 +673,106 @@ mod tests {
             b.clone().sync().await.unwrap();
             let mp4 = b.find("clip.mp4").unwrap().summary.clone();
             assert!(b.clone().thumbnail(mp4).await.is_err());
+
+            assert_eq!(b.clone().most_used(10).await.unwrap()[0].id, "clip.mp4");
+            assert_eq!(b.clone().favorites(10).await.unwrap().len(), 2);
+            let packs = b.clone().packs().await.unwrap();
+            assert_eq!(packs.len(), 1);
+            assert_eq!(b.clone().pack_items(packs[0].id.clone()).await.unwrap().len(), 4);
+            let cover = b.clone().pack_cover(packs[0].clone()).await.unwrap().unwrap();
+            assert!(
+                cover.ends_with("dance_party.gif"),
+                "videos have no thumbnail: {cover:?}"
+            );
+            assert!(b.clone().toggle_favorite("dance_party.gif".into()).await.unwrap());
+            assert_eq!(b.clone().profile().await.unwrap().auth, AuthKind::Token);
+            b.clone().logout().await.unwrap();
+            assert_eq!(b.clone().profile().await.unwrap().auth, AuthKind::None);
+            let p = b.clone().login(None).await.unwrap();
+            assert_eq!(p.username.as_deref(), Some("demo"));
         });
+    }
+
+    #[test]
+    fn subdirectories_are_packs() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join("loose.png"), encoded(16, 16, ImageFormat::Png)).unwrap();
+        for sub in ["Cats Etc", "dogs", ".hidden", "empty"] {
+            std::fs::create_dir(d.join(sub)).unwrap();
+        }
+        std::fs::write(d.join("Cats Etc/a-clip.mp4"), b"not really mp4").unwrap();
+        std::fs::write(d.join("Cats Etc/b-grumpy.png"), encoded(20, 20, ImageFormat::Png)).unwrap();
+        std::fs::write(d.join("Cats Etc/c-dance.gif"), encoded(20, 20, ImageFormat::Gif)).unwrap();
+        std::fs::write(d.join("dogs/good-dog.webp"), encoded(30, 30, ImageFormat::WebP)).unwrap();
+        std::fs::write(d.join(".hidden/x.png"), encoded(8, 8, ImageFormat::Png)).unwrap();
+        let b = DemoBackend::scan(d, ClipboardConfig::default()).unwrap();
+        assert_eq!(b.len(), 5);
+
+        let packs = b.packs_now();
+        let ids: Vec<_> = packs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["demo", "Cats Etc", "dogs"]);
+        assert_eq!(packs[1].slug, "cats-etc");
+        assert_eq!(packs.iter().map(|p| p.item_count).collect::<Vec<_>>(), [1, 3, 1]);
+
+        let cats = b.pack_items_now("Cats Etc").unwrap();
+        let ids: Vec<_> = cats.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["Cats Etc/a-clip.mp4", "Cats Etc/b-grumpy.png", "Cats Etc/c-dance.gif"]
+        );
+        assert!(cats
+            .iter()
+            .all(|i| i.set_name == "Cats Etc" && i.set_slug == "cats-etc"));
+        assert_eq!(b.pack_items_now("demo").unwrap()[0].id, "loose.png");
+        assert!(b.pack_items_now("nope").is_err());
+        assert!(b.pack_cover_now("Cats Etc").unwrap().ends_with("b-grumpy.png"));
+
+        let hits = b.search_now("dog", 10);
+        assert_eq!(hits[0].item.id, "dogs/good-dog.webp");
+        let p = b.prepare_now(&hits[0].item, TargetApp::Generic, false).unwrap();
+        assert!(p.file.ends_with("dogs/good-dog.webp"));
+    }
+
+    #[test]
+    fn favorites_most_used_and_account() {
+        let (_d, b) = fixture();
+        let ids = |items: Vec<ItemSummary>| items.into_iter().map(|i| i.id).collect::<Vec<_>>();
+        // The fixed choice: every third item liked, every second one copied.
+        assert_eq!(ids(b.favorites_now(10)), ["clip.mp4", "sticker.webp"]);
+        assert_eq!(ids(b.most_used_now(10)), ["clip.mp4", "naahh-cat.png"]);
+
+        assert!(b.toggle_favorite_now("naahh-cat.png").unwrap());
+        assert_eq!(ids(b.favorites_now(1)), ["naahh-cat.png"]);
+        assert!(!b.toggle_favorite_now("naahh-cat.png").unwrap());
+        assert_eq!(b.favorites_now(10).len(), 2);
+        assert!(b.toggle_favorite_now("nope.png").is_err());
+
+        b.record_now("naahh-cat.png");
+        b.record_now("naahh-cat.png");
+        b.record_now("dance_party.gif");
+        assert_eq!(
+            ids(b.most_used_now(10)),
+            ["naahh-cat.png", "clip.mp4", "dance_party.gif"]
+        );
+
+        let p = b.profile_now();
+        assert_eq!(p.auth, AuthKind::Token);
+        assert_eq!(p.username.as_deref(), Some("demo"));
+        assert_eq!((p.packs, p.likes, p.copies), (Some(1), Some(2), Some(12)));
+        b.logout_now();
+        let p = b.profile_now();
+        assert_eq!((p.auth, p.username), (AuthKind::None, None));
+        let creds = |username: &str| Credentials {
+            username: username.into(),
+            password: "pw".into(),
+            totp: None,
+        };
+        assert!(matches!(b.login_now(Some(creds(" "))), Err(LoginError::Failed(_))));
+        assert_eq!(
+            b.login_now(Some(creds("alice"))).unwrap().username.as_deref(),
+            Some("alice")
+        );
+        assert_eq!(b.login_now(None).unwrap().display_name.as_deref(), Some("Demo user"));
     }
 }
