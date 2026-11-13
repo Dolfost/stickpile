@@ -9,6 +9,7 @@ use stickpile_api::{ItemSummary, MediaKind, SearchHit, TargetApp, Variant, Varia
 
 use crate::cache::{self, safe_component, Cache, OfflineIndex, SyncReport};
 use crate::client::{summary_from_detail, ApiClient, SearchParams};
+use crate::clipboard::adjust::adjust_copy_file;
 use crate::clipboard::{build_offers, ClipOffer};
 use crate::usage::{copy_event, FlushReport, UsageQueue};
 use crate::{token, ClientConfig, CoreError, Result};
@@ -223,7 +224,17 @@ impl Session {
                 abs
             }
         };
-        let mime = variant_mime(item, &variant);
+        // `[copy]` padding / flattening; the offers below are built from the result.
+        let (file, mime) = adjust_copy_file(
+            &self.cache,
+            &rel,
+            file,
+            variant_mime(item, &variant),
+            item.kind,
+            is_sticker,
+            self.config.copy,
+        )
+        .await?;
         let offers_cfg = self
             .config
             .clipboard

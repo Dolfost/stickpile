@@ -133,6 +133,12 @@ fn config_check_valid_invalid_missing() {
         ),
         ("url.toml", "server_url = \"ftp://x\"\n", "server_url"),
         ("syntax.toml", "server_url = \n", "parsing"),
+        (
+            "tab.toml",
+            "[ui]\nstart_tab = \"home\"\n",
+            "ui.start_tab must be one of",
+        ),
+        ("square.toml", "[copy]\nsquare = \"black\"\n", "unknown variant `black`"),
     ] {
         let p = env.path(name);
         std::fs::write(&p, text).unwrap();
@@ -147,6 +153,33 @@ fn config_check_valid_invalid_missing() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no such file"));
 
     assert_eq!(env.ok(&["config", "path"]).trim(), env.config.to_str().unwrap());
+}
+
+#[test]
+fn config_check_layers_gui_settings_under_a_read_only_config() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new("http://127.0.0.1:9");
+    let dir = env.path("hm");
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("config.toml");
+    std::fs::write(&cfg, "[ui]\ncolumns = 8\n").unwrap();
+    std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&cfg).is_ok() {
+        return; // root ignores the mode; the core tests cover the store symlink
+    }
+    std::fs::write(
+        dir.join("settings.toml"),
+        "[ui]\ncolumns = 3\nthumb_px = 96\n[copy]\nsquare = \"white\"\nbogus = 1\n",
+    )
+    .unwrap();
+    let out = env.run(&["--json", "config", "check", "--file", cfg.to_str().unwrap()]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(parsed["ui"]["columns"], 8, "config.toml wins");
+    assert_eq!(parsed["ui"]["thumb_px"], 96);
+    assert_eq!(parsed["copy"]["square"], "white");
+    assert!(err.contains("warning:") && err.contains("copy.bogus"), "{err}");
 }
 
 #[test]

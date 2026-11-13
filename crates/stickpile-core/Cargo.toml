@@ -21,11 +21,14 @@ mock = ["dep:axum"]
 stickpile-api.workspace = true
 stickpile-search.workspace = true
 stickpile-setfmt.workspace = true
+# Decoding and the Telegram sticker encoder for copy-time padding.
+stickpile-media.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 reqwest.workspace = true

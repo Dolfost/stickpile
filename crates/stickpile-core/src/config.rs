@@ -1,6 +1,11 @@
 //! Client configuration (`$XDG_CONFIG_HOME/stickpile/config.toml`), shared by
 //! the CLI and the desktop client. Mirrored one-to-one by the home-manager
 //! module (`programs.stickpile.settings`); unknown keys are rejected.
+//!
+//! The standard loader, `ClientConfig::load`, lives in [`crate::settings`]: it
+//! layers the GUI's `settings.toml` under a read-only `config.toml`. This file
+//! stays self-contained (std, serde, toml, thiserror, directories,
+//! stickpile_api) because the Nix drift guard compiles it on its own.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +32,7 @@ pub struct ClientConfig {
     /// Server request timeout before falling back to the offline cache.
     pub timeout_secs: u64,
     pub ui: UiConfig,
+    pub copy: CopyConfig,
     pub focus: FocusConfig,
     pub clipboard: ClipboardConfig,
 }
@@ -42,6 +48,7 @@ impl Default for ClientConfig {
             prefer_stickers: false,
             timeout_secs: 5,
             ui: UiConfig::default(),
+            copy: CopyConfig::default(),
             focus: FocusConfig::default(),
             clipboard: ClipboardConfig::default(),
         }
@@ -62,7 +69,14 @@ pub struct UiConfig {
     /// Items shown before typing: most recently used first.
     pub recent_count: u32,
     pub max_results: u32,
+    /// Vim-style Insert/Normal modes in the popup; false keeps the plain keys.
+    pub modal: bool,
+    /// Tab shown when the popup opens, one of [`TABS`].
+    pub start_tab: String,
 }
+
+/// The popup's tabs in display order (`ui.start_tab` names one of them).
+pub const TABS: &[&str] = &["search", "recent", "most_used", "packs", "favorites", "me", "settings"];
 
 impl Default for UiConfig {
     fn default() -> Self {
@@ -73,6 +87,59 @@ impl Default for UiConfig {
             start_hidden: false,
             recent_count: 24,
             max_results: 60,
+            modal: true,
+            start_tab: "search".into(),
+        }
+    }
+}
+
+/// Copy-time adjustments of still images, applied when a copy is prepared so
+/// the clipboard image data and the copied file carry the same pixels.
+/// Animations and videos are never changed.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct CopyConfig {
+    /// Pad non-square stills and sticker renditions to a centred square
+    /// (never scaled or cropped).
+    pub square: SquarePad,
+    /// Fill the transparent pixels of stills copied as images (not stickers).
+    pub background: Background,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SquarePad {
+    #[default]
+    Off,
+    Transparent,
+    White,
+}
+
+impl SquarePad {
+    pub const NAMES: &'static [&'static str] = &["off", "transparent", "white"];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SquarePad::Off => "off",
+            SquarePad::Transparent => "transparent",
+            SquarePad::White => "white",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Background {
+    #[default]
+    Keep,
+    White,
+}
+
+impl Background {
+    pub const NAMES: &'static [&'static str] = &["keep", "white"];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Background::Keep => "keep",
+            Background::White => "white",
         }
     }
 }
@@ -185,6 +252,12 @@ pub enum ConfigError {
     Parse { path: PathBuf, source: toml::de::Error },
     #[error("invalid configuration: {0}")]
     Invalid(String),
+    #[error("{path}: {message}")]
+    Edit { path: PathBuf, message: String },
+    #[error("{path} is read-only")]
+    ReadOnly { path: PathBuf },
+    #[error("writing {path}: {source}")]
+    Write { path: PathBuf, source: std::io::Error },
 }
 
 impl ClientConfig {
@@ -195,8 +268,9 @@ impl ClientConfig {
             .unwrap_or_else(|| PathBuf::from("stickpile.toml"))
     }
 
-    /// Missing file = defaults.
-    pub fn load(path: &Path) -> Result<ClientConfig, ConfigError> {
+    /// Exactly this file, without the `settings.toml` layer that
+    /// `ClientConfig::load` adds. Missing file = defaults.
+    pub fn load_file(path: &Path) -> Result<ClientConfig, ConfigError> {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ClientConfig::default()),
@@ -236,6 +310,13 @@ impl ClientConfig {
             return Err(ConfigError::Invalid(
                 "ui.columns must be > 0 and ui.thumb_px >= 32".into(),
             ));
+        }
+        if !TABS.contains(&self.ui.start_tab.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "ui.start_tab must be one of {}, got {:?}",
+                TABS.join(", "),
+                self.ui.start_tab
+            )));
         }
         let known = [
             "image/png",
@@ -327,6 +408,54 @@ mod tests {
     fn rejects_unknown_mime_and_keys() {
         assert!(ClientConfig::from_toml("[clipboard.default]\nstill = [\"image/bmp\"]").is_err());
         assert!(ClientConfig::from_toml("serverurl = \"x\"").is_err());
+    }
+
+    #[test]
+    fn ui_and_copy_keys() {
+        let c = ClientConfig::from_toml(
+            "[ui]\nmodal = false\nstart_tab = \"most_used\"\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
+        )
+        .unwrap();
+        assert!(!c.ui.modal);
+        assert_eq!(c.ui.start_tab, "most_used");
+        assert_eq!(c.copy.square, SquarePad::White);
+        assert_eq!(c.copy.background, Background::White);
+        let d = ClientConfig::default();
+        assert!(d.ui.modal);
+        assert_eq!(d.ui.start_tab, "search");
+        assert_eq!((d.copy.square, d.copy.background), (SquarePad::Off, Background::Keep));
+        for name in SquarePad::NAMES {
+            let c = ClientConfig::from_toml(&format!("[copy]\nsquare = {name:?}")).unwrap();
+            assert_eq!(c.copy.square.as_str(), *name);
+        }
+        for name in Background::NAMES {
+            let c = ClientConfig::from_toml(&format!("[copy]\nbackground = {name:?}")).unwrap();
+            assert_eq!(c.copy.background.as_str(), *name);
+        }
+        for tab in TABS {
+            let c = ClientConfig::from_toml(&format!("[ui]\nstart_tab = {tab:?}")).unwrap();
+            assert_eq!(c.ui.start_tab, *tab);
+        }
+    }
+
+    #[test]
+    fn rejects_bad_ui_and_copy_values() {
+        let e = ClientConfig::from_toml("[ui]\nstart_tab = \"home\"")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("ui.start_tab must be one of search, recent"), "{e}");
+        let e = ClientConfig::from_toml("[copy]\nsquare = \"black\"")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("unknown variant `black`") && e.contains("transparent"),
+            "{e}"
+        );
+        let e = ClientConfig::from_toml("[copy]\nbackground = true")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("background"), "{e}");
+        assert!(ClientConfig::from_toml("[copy]\nsqaure = \"off\"").is_err());
     }
 
     #[test]

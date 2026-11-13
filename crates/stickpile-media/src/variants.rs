@@ -165,21 +165,28 @@ pub(crate) fn thumb(frame: &RgbaImage, px: u32) -> Result<Rendition, MediaError>
     ))
 }
 
-/// Telegram static sticker: longest side exactly 512, lossy WebP, the
-/// highest quality <= 95 that fits the size limit (binary search).
+/// Telegram static sticker: longest side exactly 512, encoded by
+/// [`tg_sticker_webp`].
 fn tg_sticker(frame: &RgbaImage) -> Result<Option<Rendition>, MediaError> {
-    let spec = tg_spec();
-    let dims = fit_exact(frame.width(), frame.height(), spec.static_side_px);
+    let dims = fit_exact(frame.width(), frame.height(), tg_spec().static_side_px);
     let img = image::imageops::resize(frame, dims.0, dims.1, FilterType::Lanczos3);
+    Ok(tg_sticker_webp(&img)?.map(|b| rendition(Variant::TgSticker, "image/webp", dims, b)))
+}
+
+/// Lossy WebP of an image already at sticker size, at the highest quality
+/// <= 95 that fits Telegram's static sticker limit (binary search); `None`
+/// when even quality 1 does not fit.
+pub(crate) fn tg_sticker_webp(img: &RgbaImage) -> Result<Option<Vec<u8>>, MediaError> {
+    let spec = tg_spec();
     let fits = |b: &Vec<u8>| b.len() as u64 <= spec.static_max_bytes;
-    let top = webp_lossy(&img, STICKER_MAX_QUALITY as f32)?;
+    let top = webp_lossy(img, STICKER_MAX_QUALITY as f32)?;
     if fits(&top) {
-        return Ok(Some(rendition(Variant::TgSticker, "image/webp", dims, top)));
+        return Ok(Some(top));
     }
     let (mut lo, mut hi, mut best) = (1u32, STICKER_MAX_QUALITY - 1, None);
     while lo <= hi {
         let mid = (lo + hi) / 2;
-        let b = webp_lossy(&img, mid as f32)?;
+        let b = webp_lossy(img, mid as f32)?;
         if fits(&b) {
             best = Some(b);
             lo = mid + 1;
@@ -188,7 +195,7 @@ fn tg_sticker(frame: &RgbaImage) -> Result<Option<Rendition>, MediaError> {
         }
     }
     match best {
-        Some(b) => Ok(Some(rendition(Variant::TgSticker, "image/webp", dims, b))),
+        Some(b) => Ok(Some(b)),
         None => {
             warn!(
                 "telegram sticker does not fit {} bytes even at quality 1, skipped",
