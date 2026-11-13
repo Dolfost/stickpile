@@ -56,7 +56,10 @@ Unknown keys are rejected, so typos fail loudly. `stickpile config check`
 validates a file without contacting the server.
 
 The desktop client reads the same file. The `ui` and `focus` sections only
-affect the desktop popup.
+affect the desktop popup. When the file is read-only (home-manager), the
+popup's Settings tab saves to `settings.toml` next to it, and both clients
+layer that file under `config.toml`; see
+[configuration.md](configuration.md#settings-saved-from-the-popup).
 
 ```toml
 # Base URL of the server (a path prefix is kept).
@@ -85,6 +88,12 @@ hide_on_copy = true
 start_hidden = false
 recent_count = 24       # items shown before typing, most recently copied first
 max_results = 60
+modal = true            # vim-style Insert/Normal modes; false keeps the plain keys
+start_tab = "search"    # search | recent | most_used | packs | favorites | me | settings
+
+[copy]                  # `copy` and the popup
+square = "off"          # off | transparent | white: pad non-square stills and stickers to a square
+background = "keep"     # keep | white: fill the transparent pixels of stills copied as images
 
 [focus]                 # desktop popup only
 detect = true           # read the focused window (Hyprland, Sway, X11) to pick the target
@@ -140,6 +149,10 @@ sticker = ["text/uri-list"]
 | `ui.start_hidden` | `false` | a bare `stickpile-desktop` that starts the resident instance does not show the popup (autostart uses `--hidden` instead) |
 | `ui.recent_count` | `24` | recently used items shown before typing |
 | `ui.max_results` | `60` | popup search results |
+| `ui.modal` | `true` | vim-style Insert/Normal modes in the popup |
+| `ui.start_tab` | `"search"` | popup tab shown on open: `search`, `recent`, `most_used`, `packs`, `favorites`, `me` or `settings` |
+| `copy.square` | `"off"` | pad non-square stills and sticker renditions to a square: `off`, `transparent` or `white` margins |
+| `copy.background` | `"keep"` | `white` fills the transparent pixels of stills copied as images |
 | `focus.detect` | `true` | detect the focused window |
 | `focus.rules` | see above | window → target rules |
 | `clipboard.default.{still,animation,video,sticker}` | see above | offers per kind |
@@ -224,9 +237,12 @@ stickpile config path
 ```
 
 `config check` runs the real loader and validation. It fails on a missing
-file, a TOML error, unknown keys, a non-http(s) `server_url` or unsupported
-clipboard MIME types. It never contacts the server, reads the token or opens
-the cache.
+file, a TOML error, unknown keys, a non-http(s) `server_url`, an unknown
+`ui.start_tab` or `[copy]` value, or unsupported clipboard MIME types. When
+the file is read-only, the popup's `settings.toml` next to it is layered in
+as the clients do it: its skipped entries are printed as `warning:` lines,
+and `--json` shows the result. It never contacts the server, reads the token
+or opens the cache.
 
 ### `sets`
 
@@ -297,6 +313,9 @@ example a video over Discord's 10 MiB limit, or no Telegram sticker rendition
 yet), the best available variant is copied anyway and a `warning:` explains
 why. `--print-path` prints the path of the cached file, named after the item
 (`…/clip/<media>.<variant>/naahh.gif`), for drag-and-drop tools or scripts.
+With `[copy]` padding or a white background, a still is copied as the
+adjusted PNG (`<cache_dir>/clip/<media>.<variant>.sq-white/<name>.png`) and a sticker
+as the padded WebP.
 
 ### `sync`, `flush`
 
@@ -441,6 +460,7 @@ longer visible) are dropped.
 | path | content |
 |---|---|
 | `$XDG_CONFIG_HOME/stickpile/config.toml` | configuration (shared with the desktop client) |
+| `$XDG_CONFIG_HOME/stickpile/settings.toml` | popup settings, used only when `config.toml` is read-only |
 | `$XDG_STATE_HOME/stickpile/token` | API token, mode 0600 |
 | `$XDG_CACHE_HOME/stickpile/cache.sqlite3` | metadata, sync cursor, history, usage queue (SQLite, WAL; safe to share between the CLI and the desktop client) |
 | `$XDG_CACHE_HOME/stickpile/files/thumb/` | thumbnails |

@@ -1,6 +1,7 @@
 # Example home-manager configuration for programs.stickpile, evaluated by the
-# `home-manager-module` flake check. It sets every option (no nulls).
-{ ... }:
+# `home-manager-module` flake check. It sets every option (no nulls), one of
+# them with `lib.mkDefault`, which counts as set and is rendered too.
+{ lib, ... }:
 {
   programs.stickpile = {
     enable = true;
@@ -12,7 +13,7 @@
       cache_max_mb = 1024;
       default_target = "generic";
       prefer_stickers = true;
-      timeout_secs = 5;
+      timeout_secs = lib.mkDefault 7;
       ui = {
         columns = 8;
         thumb_px = 96;
@@ -20,6 +21,12 @@
         start_hidden = false;
         recent_count = 32;
         max_results = 80;
+        modal = false;
+        start_tab = "favorites";
+      };
+      copy = {
+        square = "white";
+        background = "white";
       };
       focus = {
         detect = true;

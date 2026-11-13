@@ -206,6 +206,14 @@ pub fn pack_thumbnail(frame: &image::RgbaImage) -> Result<Vec<u8>, MediaError> {
     variants::pack_thumbnail(frame)
 }
 
+/// Encode an image that already has Telegram sticker dimensions (longest
+/// side 512) the way the `tg_sticker` variant is encoded: lossy WebP at the
+/// highest quality that fits the 512 KB limit. `None` if nothing fits. Used
+/// by clients that pad a sticker rendition before copying it.
+pub fn encode_tg_sticker(img: &image::RgbaImage) -> Result<Option<Vec<u8>>, MediaError> {
+    variants::tg_sticker_webp(img)
+}
+
 /// Decode a still (or first frame) for re-processing (e.g. Telegram import of
 /// a WebP sticker). Enforces `limits` (`max_bytes`, `max_pixels`; the
 /// dimensions are read from the header before decoding). JPEG EXIF

@@ -1,12 +1,15 @@
 # home-manager module: programs.stickpile
 #
 # `settings` mirrors the client's `ClientConfig`
-# (crates/stickpile-core/src/config.rs) one-to-one: same names, same nesting,
-# same defaults. It is written to $XDG_CONFIG_HOME/stickpile/config.toml, read
-# by both the `stickpile` CLI and `stickpile-desktop`. Options left at null
-# are omitted from the file. The `config-drift` flake check compares these
-# defaults with `ClientConfig::default()`; with `validateConfig` (default) the
-# generated file is checked by `stickpile config check` at build time.
+# (crates/stickpile-core/src/config.rs) one-to-one: same names, same nesting.
+# It is written to $XDG_CONFIG_HOME/stickpile/config.toml, read by both the
+# `stickpile` CLI and `stickpile-desktop`. Every setting defaults to null
+# (unset) and only the ones set are written, because the popup's Settings page
+# locks the keys this read-only file sets and saves the rest to settings.toml
+# next to it. Each option documents the client's default in `defaultText`
+# (JSON); the `config-drift` flake check compares those with
+# `ClientConfig::default()`. With `validateConfig` (default) the generated
+# file is checked by `stickpile config check` at build time.
 {
   config,
   lib,
@@ -28,6 +31,16 @@ let
   opt =
     type: default: description:
     mkOption { inherit type default description; };
+  # A client setting: unset (null) unless defined, so only what the user sets
+  # reaches config.toml. `default` is the client's own default.
+  setting =
+    type: default: description:
+    mkOption {
+      type = types.nullOr type;
+      default = null;
+      defaultText = lib.literalExpression (builtins.toJSON default);
+      inherit description;
+    };
   section =
     description: options:
     mkOption {
@@ -49,6 +62,17 @@ let
   ];
   target = types.enum targetNames;
 
+  # stickpile_core::config::TABS
+  tabNames = [
+    "search"
+    "recent"
+    "most_used"
+    "packs"
+    "favorites"
+    "me"
+    "settings"
+  ];
+
   # A path in the home directory, never copied into the store.
   hostPathOpt =
     description:
@@ -66,21 +90,21 @@ let
   # time, see validateConfig) rejects anything else.
   mime = types.str;
   offersOptions = {
-    still = opt (types.listOf mime) [
+    still = setting (types.listOf mime) [
       "image/png"
       "text/uri-list"
       "x-special/gnome-copied-files"
     ] "Offers for still images.";
-    animation = opt (types.listOf mime) [
+    animation = setting (types.listOf mime) [
       "image/gif"
       "text/uri-list"
       "x-special/gnome-copied-files"
     ] "Offers for GIFs and animated WebP.";
-    video = opt (types.listOf mime) [
+    video = setting (types.listOf mime) [
       "text/uri-list"
       "x-special/gnome-copied-files"
     ] "Offers for videos.";
-    sticker = opt (types.listOf mime) [
+    sticker = setting (types.listOf mime) [
       "text/uri-list"
       "x-special/gnome-copied-files"
     ] "Offers when copying the sticker rendition (512 px WebP).";
@@ -101,8 +125,17 @@ let
   };
   rule = contains: target: { inherit contains target; };
 
+  # Unset settings are null: drop them, then the fixed sections they leave
+  # empty. An empty `clipboard.targets.<name>` stays, since it means "the
+  # built-in offers for that target".
   dropNulls = lib.filterAttrsRecursive (_: v: v != null);
-  renderedConfig = settingsFormat.generate "stickpile-client.toml" (dropNulls s);
+  dropEmpty = lib.filterAttrs (_: v: v != { });
+  rendered =
+    let
+      set = dropNulls s;
+    in
+    dropEmpty (set // { clipboard = dropEmpty set.clipboard; });
+  renderedConfig = settingsFormat.generate "stickpile-client.toml" rendered;
   canRunCli = pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform;
   validatedConfig =
     pkgs.runCommand "stickpile-client.toml"
@@ -147,52 +180,91 @@ in
       default = { };
       description = ''
         Client configuration, rendered to $XDG_CONFIG_HOME/stickpile/config.toml.
-        Mirrors the client's `ClientConfig` one-to-one.
+        Mirrors the client's `ClientConfig` one-to-one. Settings left unset
+        (null) are not written: the client uses its default (shown as each
+        option's default) and the popup's Settings page can change them,
+        saving to settings.toml next to config.toml. Settings set here are
+        locked in the popup.
       '';
       type = types.submodule {
         options = {
-          server_url = opt types.str "http://localhost:8080" "Base URL of the stickpile server.";
+          server_url = setting types.str "http://localhost:8080" "Base URL of the stickpile server.";
           token_file = hostPathOpt ''
             API token file (written by `stickpile login`, mode 0600).
             null: `$XDG_STATE_HOME/stickpile/token`.
           '';
           cache_dir = hostPathOpt "Offline cache. null: `$XDG_CACHE_HOME/stickpile`.";
-          cache_max_mb = opt u64 512 ''
+          cache_max_mb = setting u64 512 ''
             Thumbnails and cached media files; least recently used are evicted
             beyond this.
           '';
-          default_target = opt target "generic" ''
+          default_target = setting target "generic" ''
             Target app when the focused window is not recognised.
           '';
-          prefer_stickers = opt types.bool false ''
+          prefer_stickers = setting types.bool false ''
             For targets with sticker support (Telegram), copy the sticker
             rendition by default. Toggle per copy with Shift+Enter in the popup
             or `--sticker`.
           '';
-          timeout_secs = opt u64 5 ''
+          timeout_secs = setting u64 5 ''
             Server request timeout before falling back to the offline cache.
           '';
 
           ui = section "Quick-search popup." {
-            columns = opt types.ints.positive 6 "Grid columns.";
-            thumb_px = opt (types.ints.between 32 4294967295) 128 "Thumbnail size (at least 32).";
-            hide_on_copy = opt types.bool true "Hide the popup after copying.";
-            start_hidden = opt types.bool false ''
+            columns = setting types.ints.positive 6 "Grid columns.";
+            thumb_px = setting (types.ints.between 32 4294967295) 128 "Thumbnail size (at least 32).";
+            hide_on_copy = setting types.bool true "Hide the popup after copying.";
+            start_hidden = setting types.bool false ''
               Start resident without showing the popup. The systemd user unit
               (`desktop.enable`) passes `--hidden` regardless, so a key-bound
               `stickpile-desktop` still shows the popup on first launch.
             '';
-            recent_count = opt u32 24 "Items shown before typing: most recently used first.";
-            max_results = opt u32 60 "Search results shown.";
+            recent_count = setting u32 24 "Items shown before typing: most recently used first.";
+            max_results = setting u32 60 "Search results shown.";
+            modal = setting types.bool true ''
+              Vim-style Insert/Normal modes in the popup; false keeps the plain
+              keys.
+            '';
+            start_tab = setting (types.enum tabNames) "search" ''
+              Tab shown when the popup opens.
+            '';
+          };
+
+          copy = section "Copy-time image adjustments (popup and `stickpile copy`)." {
+            square =
+              setting
+                (types.enum [
+                  "off"
+                  "transparent"
+                  "white"
+                ])
+                "off"
+                ''
+                  Pad non-square stills and Telegram sticker renditions to a
+                  centred square with transparent or white margins. Nothing is
+                  scaled or cropped; stickers stay 512 px WebP.
+                '';
+            background =
+              setting
+                (types.enum [
+                  "keep"
+                  "white"
+                ])
+                "keep"
+                ''
+                  `white` fills the transparent pixels of stills copied as
+                  images (the image data and the copied file). Stickers keep
+                  their transparency.
+                '';
           };
 
           focus = section "Focused-window detection (target app selection)." {
-            detect = opt types.bool true ''
+            detect = setting types.bool true ''
               Detect the focused window (Hyprland, Sway, X11) when the popup
               opens and map it to a target app with `rules`.
             '';
             rules =
-              opt (types.listOf focusRule)
+              setting (types.listOf focusRule)
                 [
                   (rule [
                     "telegram"

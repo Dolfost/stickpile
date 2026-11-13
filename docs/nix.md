@@ -88,9 +88,9 @@ nix develop -c cargo llvm-cov --workspace --exclude stickpile-desktop --exclude 
 | `doctests` | `cargo test --doc --workspace` (nextest skips doctests). |
 | `clippy` | `cargo clippy --workspace --all-targets -- --deny warnings` |
 | `fmt` | `cargo fmt --check` with the repo's `rustfmt.toml` |
-| `config-drift` | The NixOS and home-manager module defaults equal the Rust defaults, key by key. See [The drift guard](#the-drift-guard). |
+| `config-drift` | The NixOS module defaults and the client defaults documented by the home-manager module equal the Rust defaults, key by key. The home-manager module renders an empty file when nothing is set. See [The drift guard](#the-drift-guard). |
 | `nixos-module` | `nix/examples/nixos.nix` (every option set) evaluates as a whole NixOS system with its assertions. The real `stickpile-server --config <generated> check-config` accepts the generated TOML. Secret paths are rewritten to the service's credentials, and the unit has its `LoadCredential=` lines and hardening. |
-| `home-manager-module` | `nix/examples/home-manager.nix` (every option set) evaluates in a real home-manager configuration. The real `stickpile --config <generated> config check` accepts the TOML, and the `stickpile-desktop` user unit runs `stickpile-desktop --hidden` and is `PartOf=graphical-session.target`. |
+| `home-manager-module` | `nix/examples/home-manager.nix` (every option set, one through `lib.mkDefault`) evaluates in a real home-manager configuration. The real `stickpile --config <generated> config check` accepts the TOML, the `lib.mkDefault` value is rendered, and the `stickpile-desktop` user unit runs `stickpile-desktop --hidden` and is `PartOf=graphical-session.target`. |
 | `deploy-configs` | `deploy/quadlet/config.toml` and the config baked into the image both pass `check-config`. |
 | `nixos-vm` (x86_64 only) | A NixOS VM runs the module with its full hardening (including `MemoryDenyWriteExecute`). `/healthz` must answer over TCP and over the trusted unix socket (mode 0660), the database must belong to the service user. The initial-admin password is a root-only (0400) file, passed in through `LoadCredential`. The test prints the `systemd-analyze security` score. Needs KVM. |
 
@@ -104,8 +104,12 @@ the two must never drift. Three layers enforce this, and each fails loudly.
    includes: `crates/stickpile-server/src/config.rs` and
    `crates/stickpile-core/src/config.rs`. It serialises `Config::default()`
    and `ClientConfig::default()` to JSON. `None` becomes `null`, so optional
-   fields count too. It then compares that JSON with the module's evaluated
-   `settings` with nothing set (`builtins.toJSON`, nulls kept), recursively.
+   fields count too. It then compares that JSON with the module's defaults,
+   recursively. For the server these are the evaluated `settings` with
+   nothing set (`builtins.toJSON`, nulls kept). The client settings default
+   to `null` (see [Home-manager](#home-manager)), so the check reads the
+   client default each option documents instead: `defaultText` holds it as
+   JSON, collected from the option declarations by `nix/checks/default.nix`.
    A key that exists on only one side fails the check, and so does a default
    that differs, for example:
 
@@ -118,7 +122,8 @@ the two must never drift. Three layers enforce this, and each fails loudly.
    It also feeds the module's rendered default TOML through the real
    `from_toml` loader (`deny_unknown_fields`) and requires the result to
    equal the default. This catches type mismatches between the module and
-   Rust, and keys that the TOML rendering would mangle.
+   Rust, and keys that the TOML rendering would mangle. For the client that
+   file must also be empty: with nothing set, nothing is written.
 
    The program builds against the workspace `Cargo.lock` and its vendored
    crates. The included config modules must stay self-contained: they may use
@@ -139,9 +144,10 @@ the two must never drift. Three layers enforce this, and each fails loudly.
 
 When a config field is added in Rust, add an option with the same name,
 type, default and doc comment to `nix/modules/nixos.nix` (server) or
-`nix/modules/home-manager.nix` (client). Also set it in the matching
-`nix/examples/*.nix` (so that layer 2 sees a non-null value) and, for the
-server, in `crates/stickpile-server/config.example.toml`.
+`nix/modules/home-manager.nix` (client; use the `setting type default
+description` helper, which makes it nullable and documents `default`). Also
+set it in the matching `nix/examples/*.nix` (so that layer 2 sees a non-null
+value) and, for the server, in `crates/stickpile-server/config.example.toml`.
 
 ## Home-manager
 
@@ -159,6 +165,8 @@ server, in `crates/stickpile-server/config.example.toml`.
       server_url = "https://stickpile.example.ts.net";
       prefer_stickers = true;
       ui.columns = 8;
+      ui.start_tab = "favorites";
+      copy.square = "white";
       focus.rules = [
         { contains = [ "ayugram" "telegram" ]; target = "telegram"; }
         { contains = [ "vesktop" "discord" ]; target = "discord"; }
@@ -170,12 +178,22 @@ server, in `crates/stickpile-server/config.example.toml`.
 ```
 
 - `settings` mirrors `ClientConfig` (`crates/stickpile-core/src/config.rs`)
-  one-to-one. Options left at `null` (`token_file`, `cache_dir`) are omitted
-  from the file, so the client uses its XDG defaults
+  one-to-one, with the same names and nesting. Every option defaults to
+  `null` (unset), and only the options you set are written to the file. An
+  unset option gets the client's default, which the option docs show as its
+  default value. `token_file` and `cache_dir` unset mean the XDG defaults
   (`$XDG_STATE_HOME/stickpile/token`, `$XDG_CACHE_HOME/stickpile`). Setting
   `focus.rules` replaces the whole default list. Each entry under
   `clipboard.targets.<target>` falls back to the built-in offers for the lists
   it does not set (not to `clipboard.default`). This is the Rust behaviour.
+- The generated `config.toml` is a read-only link into the Nix store, so the
+  popup's Settings tab cannot write it. It saves its changes to
+  `~/.config/stickpile/settings.toml` instead, layered under `config.toml`.
+  Keys you set in `settings` win and show as locked ("set by home-manager")
+  in the popup; everything you leave unset stays editable there. A value
+  set with `lib.mkDefault` still counts as set. See
+  [configuration.md](configuration.md#client-configuration) for the layering
+  rules.
 - The token stays out of Nix: run `stickpile login` once and it writes
   `token_file`.
 - `desktop.enable` adds `systemd.user.services.stickpile-desktop`, which runs

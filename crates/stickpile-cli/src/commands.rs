@@ -125,9 +125,14 @@ pub fn config_check(path: &Path, as_json: bool) -> Result<()> {
     if !path.is_file() {
         bail!("{}: no such file", path.display());
     }
-    let cfg = ClientConfig::load(path)?;
+    // The file itself is checked strictly; skipped settings.toml entries
+    // (GUI settings under a read-only config) only warn.
+    let layered = stickpile_core::settings::load_layered(path)?;
+    for w in &layered.warnings {
+        eprintln!("warning: {w}");
+    }
     if as_json {
-        output::json(&cfg)?;
+        output::json(&layered.config)?;
     } else {
         println!("OK {}", path.display());
     }

@@ -262,7 +262,27 @@ hide_on_copy = true  # hide after copying / dropping
 start_hidden = false # true: a bare first `stickpile-desktop` starts resident without showing
 recent_count = 24    # recently used items shown before typing
 max_results = 60
+modal = true         # vim-style Insert/Normal modes; false keeps the plain keys
+start_tab = "search" # search | recent | most_used | packs | favorites | me | settings
+
+[copy]
+square = "off"       # off | transparent | white: pad non-square stills and stickers to a square
+background = "keep"  # keep | white: fill the transparent pixels of stills copied as images
 ```
+
+`[copy]` changes what is copied, in the popup and in `stickpile copy`
+alike: the image data and the file reference carry the same padded or
+flattened image, and padded stickers stay 512 px WebP. Animations and
+videos are left alone.
+
+The Settings tab edits these keys and the everyday ones from the top of
+the file (server URL, timeout, cache size, default target, sticker
+preference, focus detection). It saves to `config.toml` when it can write
+it. When `config.toml` is read-only, as the home-manager module makes it,
+the changes go to `settings.toml` next to it, and the keys `config.toml`
+sets are shown locked ("set by home-manager"). Clipboard offer lists and
+focus rules stay in `config.toml`. The layering rules are in
+[configuration.md](configuration.md#settings-saved-from-the-popup).
 
 ## Offline behaviour
 

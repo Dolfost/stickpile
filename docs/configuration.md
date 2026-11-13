@@ -151,4 +151,80 @@ Back up the whole directory; the database is the source of truth.
 
 ## Client configuration
 
-The CLI and desktop clients are configured separately; see [cli.md](cli.md).
+The `stickpile` CLI and the desktop popup read one file:
+`$XDG_CONFIG_HOME/stickpile/config.toml`, or `--config FILE` /
+`STICKPILE_CONFIG`. Every key is listed in
+[cli.md](cli.md#configuration-configtoml), and `stickpile config check`
+validates the file. The home-manager module
+(`programs.stickpile.settings`, [nix.md](nix.md#home-manager)) can write it
+for you.
+
+### Popup tabs and modes
+
+```toml
+[ui]
+modal = true          # vim-style Insert/Normal modes in the popup; false keeps the plain keys
+start_tab = "search"  # search | recent | most_used | packs | favorites | me | settings
+```
+
+Any other `start_tab` value is an error.
+
+### Copy-time image adjustments
+
+```toml
+[copy]
+square = "off"        # off | transparent | white: pad non-square stills and stickers to a square
+background = "keep"   # keep | white: fill the transparent pixels of stills copied as images
+```
+
+- `square` centres non-square stills and Telegram sticker renditions on a
+  square of their longest side. `transparent` or `white` is the colour of
+  the added margins; the image's own pixels are not changed. Nothing is
+  scaled up or cropped.
+- `background = "white"` composites stills copied as images onto white.
+  Sticker renditions keep their transparency.
+- Both apply in the popup and in `stickpile copy`, to the image data on the
+  clipboard and to the file that the file reference (`text/uri-list`, drag
+  and drop) points at, so every paste target gets the same pixels. An
+  adjusted still is a PNG. An adjusted sticker is still a valid Telegram
+  sticker: WebP, longest side 512, under the size limit. Animations and
+  videos are never changed, and nothing is rewritten when there is nothing
+  to do (a square, opaque image).
+- Adjusted files are cached next to the downloaded variants, one directory
+  per option combination, so changing an option never serves an old file:
+  `clip/<media>.<variant>.sq-white.bg-white/<name>.png`.
+
+### Settings saved from the popup
+
+The popup's Settings tab edits these keys:
+
+| Group | Keys |
+|---|---|
+| Popup | `ui.start_tab`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background` |
+| Server | `server_url`, `timeout_secs`, `cache_max_mb` |
+
+Clipboard offer lists, focus rules, `token_file` and `cache_dir` are set in
+`config.toml` only.
+
+Where the changes go depends on whether `config.toml` can be written:
+
+| `config.toml` | The Settings tab writes | Locked in the popup |
+|---|---|---|
+| writable, or missing | `config.toml` itself, keeping its comments, key order and other keys | nothing |
+| read-only: it resolves into `/nix/store` (home-manager links it there), it is a dangling symlink, or you have no write permission | `settings.toml` in the same directory | every key `config.toml` sets, shown as "set by home-manager" |
+
+With a read-only `config.toml` the client layers the two files:
+`config.toml` wins over `settings.toml`, which wins over the defaults.
+
+- `config.toml` keeps its strict errors: unknown keys and invalid values
+  fail as always.
+- In `settings.toml`, unknown keys, keys the Settings tab does not manage
+  and invalid values are skipped with a warning (logged by the popup,
+  printed by the CLI), so a stale value never stops the client from
+  starting.
+- A `settings.toml` next to a writable `config.toml` is ignored, with a
+  warning. Move its values into `config.toml` or delete it.
+- Both clients load the same way and see the same configuration.
+  `stickpile --json config check` prints the effective one, `settings.toml`
+  included.

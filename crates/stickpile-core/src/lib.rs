@@ -2,6 +2,8 @@
 //! Android and macOS through UniFFI).
 //!
 //! * [`config`] — client TOML config (mirrored by the home-manager module)
+//! * [`settings`] - the standard loader (`config.toml` layered with the GUI's
+//!   `settings.toml`) and the Settings page's schema and writers
 //! * [`client`] — typed async REST client
 //! * [`token`] — API token file storage (0600)
 //! * [`cache`] — offline cache: item metadata (searchable offline with
@@ -23,6 +25,7 @@ pub mod config;
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
 pub mod session;
+pub mod settings;
 pub mod token;
 pub mod usage;
 

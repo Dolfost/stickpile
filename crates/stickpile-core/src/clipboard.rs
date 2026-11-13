@@ -12,7 +12,8 @@
 //! | `text/plain` | the absolute path |
 //!
 //! [`serve`] (features `wayland` / `x11`) keeps offers on the clipboard from a
-//! detached helper process after the CLI exits.
+//! detached helper process after the CLI exits. [`adjust`] pads and flattens
+//! stills before their offers are built (`[copy]` in the config).
 
 use std::io::Cursor;
 use std::path::Path;
@@ -21,6 +22,7 @@ use image::{AnimationDecoder, ImageFormat};
 
 use crate::{CoreError, Result};
 
+pub mod adjust;
 pub mod serve;
 #[cfg(wl_backend)]
 mod wayland;
@@ -138,15 +140,12 @@ fn convert_image(src: &[u8], from: &str, to: &str) -> Result<Option<Vec<u8>>, St
     match to_fmt {
         ImageFormat::Jpeg => {
             // JPEG has no alpha channel: flatten onto white.
-            let rgba = img.to_rgba8();
-            let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
-            for (dst, p) in rgb.pixels_mut().zip(rgba.pixels()) {
-                let a = p[3] as u32;
-                for c in 0..3 {
-                    dst[c] = ((p[c] as u32 * a + 255 * (255 - a)) / 255) as u8;
-                }
-            }
-            rgb.write_to(&mut out, ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+            let mut rgba = img.to_rgba8();
+            adjust::flatten_onto_white(&mut rgba);
+            image::DynamicImage::ImageRgba8(rgba)
+                .to_rgb8()
+                .write_to(&mut out, ImageFormat::Jpeg)
+                .map_err(|e| e.to_string())?;
         }
         ImageFormat::WebP => {
             // The image crate encodes lossless WebP from RGB(A)8 only.
