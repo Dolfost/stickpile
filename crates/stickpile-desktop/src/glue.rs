@@ -29,6 +29,9 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
         prefer_stickers: cfg.prefer_stickers,
         hide_on_copy: cfg.ui.hide_on_copy,
         debounce_ms: DEFAULT_DEBOUNCE_MS,
+        // TODO: `modal` from `ui.modal` and `start_tab` from `ui.start_tab`
+        // (Tab::from_key) once the config has them; defaults until then.
+        ..ModelConfig::default()
     }
 }
 
@@ -98,6 +101,7 @@ mod tests {
     use super::*;
     use stickpile_api::TargetApp;
     use stickpile_quick::focus::FocusBackend;
+    use stickpile_quick::Tab;
 
     fn win(class: &str, title: &str) -> WindowInfo {
         WindowInfo {
@@ -122,6 +126,8 @@ mod tests {
         assert_eq!(m.default_target, TargetApp::Discord);
         assert!(m.prefer_stickers);
         assert_eq!(m.debounce_ms, 120);
+        assert!(m.modal);
+        assert_eq!(m.start_tab, Tab::Search);
     }
 
     #[test]

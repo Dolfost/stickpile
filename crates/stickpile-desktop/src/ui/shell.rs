@@ -212,7 +212,7 @@ impl Shell {
 
     pub fn hide(self: &Rc<Self>) {
         if self.model.borrow().is_visible() {
-            self.dispatch(Event::Escape);
+            self.dispatch(Event::Hide);
         }
     }
 
@@ -254,6 +254,22 @@ impl Shell {
                     }
                 });
             }
+            // A stale timer is ignored by the model, so none is cancelled.
+            Command::KeyTimeout { after_ms, seq } => {
+                let this = self.clone();
+                glib::timeout_add_local_once(Duration::from_millis(after_ms), move || {
+                    this.dispatch(Event::KeyTimeout { seq });
+                });
+            }
+            // wired by the GTK step
+            Command::LoadMostUsed { .. }
+            | Command::LoadFavorites { .. }
+            | Command::LoadPacks { .. }
+            | Command::LoadPackItems { .. }
+            | Command::LoadPackCovers { .. }
+            | Command::ToggleFavorite { .. }
+            | Command::OpenInBrowser { .. }
+            | Command::Page(_) => {}
         }
     }
 
@@ -716,11 +732,16 @@ impl Shell {
                 alt: state.contains(gdk::ModifierType::ALT_MASK),
                 logo: state.intersects(gdk::ModifierType::SUPER_MASK | gdk::ModifierType::META_MASK),
             };
-            match keys::map_key(&KeyPress {
+            let (mode, tab) = {
+                let m = this.model.borrow();
+                (m.mode(), m.tab())
+            };
+            let press = KeyPress {
                 name: &name,
                 latin: latin.as_deref(),
                 mods,
-            }) {
+            };
+            match keys::map_key(&press, mode, tab) {
                 Some(event) => {
                     this.dispatch(event);
                     glib::Propagation::Stop
