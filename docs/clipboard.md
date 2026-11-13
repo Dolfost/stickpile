@@ -265,7 +265,7 @@ sticker row and every other app are still provisional:
 | still (png, jpeg, static webp) | `image/png`, `text/uri-list`, `x-special/gnome-copied-files` |
 | animation (gif, animated webp) | `image/gif`, `text/uri-list`, `x-special/gnome-copied-files` |
 | video (mp4, webm) | `text/uri-list`, `x-special/gnome-copied-files` |
-| sticker (Shift+Enter / sticker mode, Telegram) | `text/uri-list`, `x-special/gnome-copied-files` |
+| sticker (Shift+Enter / sticker mode, Telegram) | `text/uri-list`, `x-special/gnome-copied-files`, `application/x-sticker`, `application/x-no-dialog` |
 
 Rationale: image data is the most widely accepted for stills; GIFs and
 videos need the file reference to keep their motion (confirmed for
@@ -304,10 +304,11 @@ sticker = ["text/uri-list"]
 ```
 
 Allowed entries: `image/png`, `image/gif`, `image/webp`, `image/jpeg`,
-`text/uri-list`, `x-special/gnome-copied-files`, `text/plain`. Anything
-else is rejected when the config is loaded. Which target a copy is for
-comes from the focused window (see `docs/desktop.md`) or Ctrl+T in the
-popup.
+`text/uri-list`, `x-special/gnome-copied-files`, `text/plain`, and the
+paste hints `application/x-sticker` and `application/x-no-dialog`
+(section 5). Anything else is rejected when the config is loaded. Which
+target a copy is for comes from the focused window (see `docs/desktop.md`)
+or Ctrl+T in the popup.
 
 When the matrix is filled in, the results become the new defaults in
 `ClipboardOffers::default` and per-target overrides in the defaults where
@@ -354,3 +355,67 @@ Clipboard lifetime and focus:
 
 Update the matrix above if any result changes (app updates do change paste
 behaviour), and adjust the defaults in section 3.
+
+## 5. Paste hints: `application/x-sticker` and `application/x-no-dialog`
+
+The app that receives a paste sees only the data, not what the copier
+meant by it. Telegram Desktop, for example, opens its send box for every
+pasted file, and sends a pasted WebP as a compressed photo (never a
+sticker) unless "send as file" is picked there. Nothing a stock client
+reads from the clipboard changes that.
+
+Two extra MIME types, offered next to the data they describe, say what the
+copier means. They are not specific to stickpile or Telegram: any app that
+copies can offer them, and any app that pastes can honour them.
+
+| MIME type | Meaning |
+|---|---|
+| `application/x-sticker` | The copied files are stickers. An app that has stickers sends them as stickers, not as photos or files. |
+| `application/x-no-dialog` | The paste should finish at once. An app that would open a confirmation dialog for it (a send box, an "attach as" choice) acts as if the user had confirmed that dialog with what it preselects. |
+
+Rules for both:
+
+- A hint is one more MIME type in the same clipboard offer as the data
+  (`text/uri-list`, `image/*`, ...). Only its presence counts: receivers
+  ignore the payload. stickpile writes `1`.
+- Hints apply to a plain paste (Ctrl+V or the app's Paste command). Drag
+  and drop, and explicit choices such as "paste as" or "send as file",
+  keep their usual behaviour.
+- A receiver that cannot do what a hint asks (a file it cannot send as a
+  sticker, say) ignores that hint, and then also keeps its dialog for the
+  paste: `application/x-no-dialog` is honoured only when every other hint
+  on the paste is. The user then sees what is actually going to be sent.
+- A receiver may keep its dialog for some content anyway (many or large
+  files, for example).
+- Copiers offer a hint only when the user asked for that behaviour, since
+  it applies to whichever app the user pastes into.
+- Any program that can write the clipboard can offer these types. They
+  skip a confirmation, so they are a convenience, not a security
+  boundary.
+
+### stickpile
+
+Sticker copies (Shift+Enter, sticker mode) offer both hints after the file
+reference to the 512 px WebP (section 3). No other copy offers a hint by
+default. Add `application/x-no-dialog` to a list in `[clipboard]` to skip
+the dialog for that kind of copy as well, or remove the hints from
+`sticker` to get the send box back.
+
+### Telegram Desktop
+
+Stock Telegram Desktop ignores both hints. So far only a local patch to
+AyuGram Desktop 7.2.9 honours them (not upstream). On a plain Ctrl+V into
+the message field, not while editing a message:
+
+- `application/x-sticker`: when every pasted file is one Telegram sends as
+  a sticker (a WebP under 2 MiB with sticker-like dimensions), "send as
+  file" is preselected, which sends them as stickers. Any other paste (a
+  WebM video sticker, a PNG) ignores the hint.
+- `application/x-no-dialog`: the paste is sent at once with what the send
+  box would have preselected, without a caption, to the chat or topic the
+  paste went to, replying to the message being replied to. Text in the
+  message field stays there. The send box still opens when the sticker
+  hint could not be honoured and for more files than one album holds; a
+  folder, a remote URL or an unreadable or too large file goes the usual
+  way. Chat restrictions and slow mode still apply: their usual error
+  shows instead of sending.

@@ -187,6 +187,17 @@ pub struct FocusRule {
     pub target: TargetApp,
 }
 
+/// Paste hint offered next to the file reference: the copied file is a
+/// sticker, so an app that has stickers should send it as one, not as a
+/// photo or a file (docs/clipboard.md, section 5). Apps that do not know
+/// the hint ignore it.
+pub const STICKER_HINT_MIME: &str = "application/x-sticker";
+
+/// Paste hint: the paste should complete without the confirmation dialog
+/// the receiving app would otherwise show, such as a send box
+/// (docs/clipboard.md, section 5). Apps that do not know the hint ignore it.
+pub const NO_DIALOG_HINT_MIME: &str = "application/x-no-dialog";
+
 /// MIME types offered on the clipboard, in offer order. The still, animation
 /// and video defaults are confirmed for Telegram on Wayland; the rest of the
 /// docs/clipboard.md matrix is still provisional. Tune without rebuilding.
@@ -194,7 +205,9 @@ pub struct FocusRule {
 /// Supported entries: `image/png`, `image/gif`, `image/webp`, `image/jpeg`
 /// (raw bytes of the chosen variant, converted if needed), `text/uri-list`
 /// (file:// URI of the materialised file), `x-special/gnome-copied-files`
-/// (`copy\nfile://...`), `text/plain` (the file path).
+/// (`copy\nfile://...`), `text/plain` (the file path), and the paste hints
+/// `application/x-sticker` and `application/x-no-dialog` (`1`; see
+/// [`STICKER_HINT_MIME`] and [`NO_DIALOG_HINT_MIME`]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct ClipboardOffers {
@@ -224,7 +237,12 @@ impl Default for ClipboardOffers {
             still: v(&["image/png", "text/uri-list", "x-special/gnome-copied-files"]),
             animation: v(&["image/gif", "text/uri-list", "x-special/gnome-copied-files"]),
             video: v(&["text/uri-list", "x-special/gnome-copied-files"]),
-            sticker: v(&["text/uri-list", "x-special/gnome-copied-files"]),
+            sticker: v(&[
+                "text/uri-list",
+                "x-special/gnome-copied-files",
+                STICKER_HINT_MIME,
+                NO_DIALOG_HINT_MIME,
+            ]),
         }
     }
 }
@@ -326,6 +344,8 @@ impl ClientConfig {
             "text/uri-list",
             "x-special/gnome-copied-files",
             "text/plain",
+            STICKER_HINT_MIME,
+            NO_DIALOG_HINT_MIME,
         ];
         let all = std::iter::once(&self.clipboard.default).chain(self.clipboard.targets.values());
         for offers in all {

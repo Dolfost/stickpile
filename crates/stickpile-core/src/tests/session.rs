@@ -162,8 +162,13 @@ async fn sticker_and_incompatible_choices_warn_but_copy() {
     let mimes: Vec<_> = p.offers.iter().map(|o| o.mime.as_str()).collect();
     assert_eq!(
         mimes,
-        ["text/uri-list", "x-special/gnome-copied-files"],
-        "sticker = file reference only"
+        [
+            "text/uri-list",
+            "x-special/gnome-copied-files",
+            "application/x-sticker",
+            "application/x-no-dialog"
+        ],
+        "sticker = file reference plus the sticker and no-dialog hints"
     );
 
     // WebP still to WhatsApp: no compatible variant -> original + warning.

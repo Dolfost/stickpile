@@ -10,6 +10,8 @@
 //! | `text/uri-list` | `file:///…\r\n` (percent-encoded) |
 //! | `x-special/gnome-copied-files` | `copy\nfile:///…` |
 //! | `text/plain` | the absolute path |
+//! | `application/x-sticker` | `1`: paste hint, the file is a sticker and should be sent as one (docs/clipboard.md, section 5). Apps that do not know it ignore it. |
+//! | `application/x-no-dialog` | `1`: paste hint, complete the paste without the app's confirmation dialog (docs/clipboard.md, section 5). Apps that do not know it ignore it. |
 //!
 //! [`serve`] (features `wayland` / `x11`) keeps offers on the clipboard from a
 //! detached helper process after the CLI exits. [`adjust`] pads and flattens
@@ -28,6 +30,8 @@ pub mod serve;
 mod wayland;
 #[cfg(x11_backend)]
 pub mod x11;
+
+pub use crate::config::{NO_DIALOG_HINT_MIME, STICKER_HINT_MIME};
 
 /// One MIME representation offered on the clipboard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +55,7 @@ pub fn build_offers(offers_cfg: &[String], file: &Path, file_mime: &str) -> Resu
             "text/uri-list" => uri_list(&abs).into_bytes(),
             "x-special/gnome-copied-files" => gnome_copied_files(&abs).into_bytes(),
             "text/plain" => abs.to_string_lossy().into_owned().into_bytes(),
+            STICKER_HINT_MIME | NO_DIALOG_HINT_MIME => b"1".to_vec(),
             "image/png" | "image/gif" | "image/webp" | "image/jpeg" => {
                 if bytes.is_none() {
                     bytes = Some(std::fs::read(&abs).map_err(|e| CoreError::Other(format!("{}: {e}", abs.display())))?);

@@ -86,8 +86,9 @@ let
   # ClientConfig.clipboard: ClipboardOffers. Each list is the MIME types
   # offered on the clipboard, in offer order. The client accepts `image/png`,
   # `image/gif`, `image/webp`, `image/jpeg`, `text/uri-list`,
-  # `x-special/gnome-copied-files` and `text/plain`; its loader (run at build
-  # time, see validateConfig) rejects anything else.
+  # `x-special/gnome-copied-files`, `text/plain` and the paste hints
+  # `application/x-sticker` and `application/x-no-dialog`; its loader (run
+  # at build time, see validateConfig) rejects anything else.
   mime = types.str;
   offersOptions = {
     still = setting (types.listOf mime) [
@@ -107,7 +108,14 @@ let
     sticker = setting (types.listOf mime) [
       "text/uri-list"
       "x-special/gnome-copied-files"
-    ] "Offers when copying the sticker rendition (512 px WebP).";
+      "application/x-sticker"
+      "application/x-no-dialog"
+    ] ''
+      Offers when copying the sticker rendition (512 px WebP). The paste
+      hints `application/x-sticker` (send it as a sticker) and
+      `application/x-no-dialog` (skip the send box) are for apps that know
+      them; others ignore them. See docs/clipboard.md, section 5.
+    '';
   };
   offers = types.submodule { options = offersOptions; };
 

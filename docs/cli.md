@@ -118,11 +118,12 @@ target = "slack"
 # MIME types put on the clipboard, in offer order, per media kind.
 # Supported: image/png image/gif image/webp image/jpeg text/uri-list
 #            x-special/gnome-copied-files text/plain
+#            application/x-sticker application/x-no-dialog
 [clipboard.default]
 still = ["image/png", "text/uri-list", "x-special/gnome-copied-files"]
 animation = ["image/gif", "text/uri-list", "x-special/gnome-copied-files"]
 video = ["text/uri-list", "x-special/gnome-copied-files"]
-sticker = ["text/uri-list", "x-special/gnome-copied-files"]
+sticker = ["text/uri-list", "x-special/gnome-copied-files", "application/x-sticker", "application/x-no-dialog"]
 
 # Per-target overrides replace [clipboard.default] for that target. Kinds left
 # out of a target section take the built-in defaults shown above (not the
@@ -393,6 +394,8 @@ media kind:
 | `text/uri-list` | `file:///…\r\n`, percent-encoded (spaces, `#`, non-ASCII) |
 | `x-special/gnome-copied-files` | `copy\nfile:///…` (GTK/Nautilus "copied file") |
 | `text/plain` | the absolute path |
+| `application/x-sticker` | `1`. Paste hint: the file is a sticker and should be sent as one, not as a photo or a file. Apps that do not know it ignore it (`docs/clipboard.md`, section 5) |
+| `application/x-no-dialog` | `1`. Paste hint: complete the paste without the app's confirmation dialog (a send box, for example). Apps that do not know it ignore it (`docs/clipboard.md`, section 5) |
 
 The file sits in the cache and is named after the item. Telegram and file
 managers show that name.

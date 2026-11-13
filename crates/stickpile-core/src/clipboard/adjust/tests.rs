@@ -298,8 +298,18 @@ async fn sticker_copy_is_padded_and_stays_a_sticker() {
     let img = image::load_from_memory_with_format(&bytes, ImageFormat::WebP).unwrap();
     assert_eq!(img.dimensions(), (512, 512));
     let mimes: Vec<_> = p.offers.iter().map(|o| o.mime.as_str()).collect();
-    assert_eq!(mimes, ["text/uri-list", "x-special/gnome-copied-files"]);
+    assert_eq!(
+        mimes,
+        [
+            "text/uri-list",
+            "x-special/gnome-copied-files",
+            "application/x-sticker",
+            "application/x-no-dialog"
+        ]
+    );
     assert_eq!(p.offers[0].data, crate::clipboard::uri_list(&p.file).into_bytes());
+    assert_eq!(p.offers[2].data, b"1");
+    assert_eq!(p.offers[3].data, b"1");
 }
 
 #[tokio::test]
