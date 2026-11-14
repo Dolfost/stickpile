@@ -61,7 +61,9 @@ if [ "${SKIP_CARGO:-}" != 1 ]; then
 	fi
 	if [ ! -s "$NATIVE_CACHE" ] || [ Cargo.lock -nt "$NATIVE_CACHE" ]; then
 		# shellcheck disable=SC2086
-		cargo rustc --release --locked $CARGO_TARGET -p stickpile-mac --features bindgen --lib \
+		# Without colours: GitHub's runners set CARGO_TERM_COLOR=always, and an
+		# escape code then sticks to the last library (-lm).
+		cargo rustc --color never --release --locked $CARGO_TARGET -p stickpile-mac --features bindgen --lib \
 			--crate-type staticlib -- --print native-static-libs 2>"$BUILD.native.log" || {
 			cat "$BUILD.native.log" >&2
 			exit 1
