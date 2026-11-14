@@ -199,7 +199,7 @@ async fn no_files(state: &AppState, ctx: &Ctx, set_id: &str, path_set: Option<&s
     }
     let page = match path_set {
         Some(id) => {
-            authz::editable_set(state, ctx.id(), id).await?;
+            authz::set_for(state, ctx.id(), id, authz::Need::Add).await?;
             let set = sets::detail(state, &ctx.user, id).await?.set;
             let body = html! {
                 p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
@@ -244,7 +244,7 @@ async fn read_upload(
                     .ok_or_else(|| AppError::bad_request("choose a set before the files"))?;
                 if !checked {
                     // Authorize before writing any temp file.
-                    authz::editable_set(state, caller.ctx.id(), sid).await?;
+                    authz::set_for(state, caller.ctx.id(), sid, authz::Need::Add).await?;
                     checked = true;
                 }
                 files.push(field_to_file(state, &mut field, max_file).await?);

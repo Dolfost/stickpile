@@ -50,7 +50,7 @@ pub fn image_info(set_id: &str, sha256: &str, format: MediaFormat, width: u32, h
 }
 
 /// Only stills in the formats every target takes.
-fn still_only(p: &stickpile_media::Probe) -> AppResult<()> {
+pub(crate) fn still_only(p: &stickpile_media::Probe) -> AppResult<()> {
     let what = match p.kind {
         MediaKind::Still if matches!(p.format, MediaFormat::Png | MediaFormat::Jpeg | MediaFormat::Webp) => {
             return Ok(())
@@ -66,7 +66,7 @@ fn still_only(p: &stickpile_media::Probe) -> AppResult<()> {
 
 /// Refuse videos and GIFs by their bytes before anything is decoded (a
 /// video would go to ffmpeg first).
-async fn sniff_still(file: &UploadFile) -> AppResult<()> {
+pub(crate) async fn sniff_still(file: &UploadFile) -> AppResult<()> {
     let bytes = file.bytes().await?;
     match stickpile_media::sniff(&bytes) {
         Some(MediaFormat::Png | MediaFormat::Jpeg | MediaFormat::Webp) => Ok(()),
@@ -144,7 +144,7 @@ async fn read_file(state: &AppState, mut mp: Multipart) -> AppResult<UploadFile>
 /// Set the cover image from a multipart body with one file part: the whole
 /// endpoint (authorization, rate limit as an upload), shared with the web UI.
 pub async fn upload_multipart(state: &AppState, viewer: &CurrentUser, set_id: &str, mp: Multipart) -> AppResult<Set> {
-    let set = authz::editable_set(state, viewer.id(), set_id).await?;
+    let set = authz::set_for(state, viewer.id(), set_id, authz::Need::EditPack).await?;
     state.limiters.check_upload(viewer.id())?;
     let file = read_file(state, mp).await?;
     store(state, &set, &file, true).await?;
@@ -154,7 +154,7 @@ pub async fn upload_multipart(state: &AppState, viewer: &CurrentUser, set_id: &s
 /// Remove the cover image (idempotent); the chosen item, else the first
 /// item, is the cover again.
 pub async fn remove(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<Set> {
-    authz::editable_set(state, viewer.id(), set_id).await?;
+    authz::set_for(state, viewer.id(), set_id, authz::Need::EditPack).await?;
     let mut tx = sets::begin(&state.db).await?;
     if clear(&mut tx, set_id).await? {
         sets::bump_version(&mut tx, set_id).await?;
@@ -186,7 +186,7 @@ pub async fn file(state: &AppState, viewer: &CurrentUser, set_id: &str, variant:
         .await?
         .ok_or_else(AppError::not_found)?;
     Ok(CoverFileRow {
-        slug: set.slug,
+        slug: set.slug.clone(),
         sha256: media.sha256,
         variant,
         row,

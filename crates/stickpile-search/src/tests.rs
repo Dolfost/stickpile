@@ -60,6 +60,7 @@ fn viewer(id: &str) -> Viewer {
     Viewer {
         user_id: id.into(),
         liked: HashSet::new(),
+        member_sets: HashSet::new(),
     }
 }
 
@@ -292,6 +293,31 @@ fn visibility_matrix() {
     assert_eq!(anon, strs(&["other-public", "own-public"]));
     let ix2 = index([with("x", |d| d.owner_id = String::new())]);
     assert!(sorted_ids(&ix2, "", &viewer("")).is_empty());
+}
+
+#[test]
+fn contributors_see_the_sets_they_contribute_to() {
+    let ix = index(["private", "unlisted"].iter().map(|id| {
+        with(id, |d| {
+            d.name = "grumpy cat".into();
+            d.owner_id = "bob".into();
+            d.set_id = format!("set-{id}");
+            d.visibility = if *id == "private" {
+                Visibility::Private
+            } else {
+                Visibility::Unlisted
+            };
+        })
+    }));
+    assert!(sorted_ids(&ix, "grumpy", &alice()).is_empty());
+    let mut v = alice();
+    v.member_sets.insert("set-private".into());
+    assert_eq!(sorted_ids(&ix, "grumpy", &v), strs(&["private"]));
+    assert_eq!(
+        sorted_ids(&ix, "is:mine", &v),
+        Vec::<String>::new(),
+        "is:mine stays the own sets"
+    );
 }
 
 // ---------------------------------------------------------------- filters

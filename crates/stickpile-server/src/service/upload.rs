@@ -433,21 +433,43 @@ pub struct Added {
 }
 
 /// Add `file` to the end of `set` (dedup by content: the same bytes already
-/// in the set -> `already_in_set`, no new item). Does not refresh the index.
-pub async fn add_to_set(state: &AppState, set: &SetRow, file: &UploadFile, input: &ItemInput) -> AppResult<Added> {
+/// in the set -> `already_in_set`, no new item), as added by `added_by`.
+/// Does not refresh the index.
+pub async fn add_to_set(
+    state: &AppState,
+    set: &SetRow,
+    file: &UploadFile,
+    input: &ItemInput,
+    added_by: &str,
+) -> AppResult<Added> {
     let recommended = set
         .recommended_px
         .map(|v| v as u32)
         .unwrap_or(state.config.media.default_recommended_px);
     let guard = state.media_lock.read().await;
     let (media, new_media) = media_for_file(state, file, recommended).await?;
+    add_media_to_set(state, set, media, new_media, input, added_by, guard).await
+}
+
+/// [`add_to_set`] for media already stored (`new_media`: just ingested,
+/// so it needs its variants). `guard` is the shared `media_lock` taken
+/// before the media was looked up; it is released once the item exists.
+pub async fn add_media_to_set(
+    state: &AppState,
+    set: &SetRow,
+    media: MediaRow,
+    new_media: bool,
+    input: &ItemInput,
+    added_by: &str,
+    guard: tokio::sync::RwLockReadGuard<'_, ()>,
+) -> AppResult<Added> {
     let mut tx = sets::begin(&state.db).await?;
     let item_id = new_id();
     let t = now();
     let inserted = sqlx::query(
         "INSERT INTO items (id, set_id, media_id, position, filename, name, name_source, keywords, keywords_source, \
-         emojis, emojis_source, vibe, vibe_source, tags, source_url, extra_toml, created_at, updated_at) \
-         VALUES (?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM items WHERE set_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         emojis, emojis_source, vibe, vibe_source, tags, source_url, extra_toml, created_at, updated_at, added_by) \
+         VALUES (?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM items WHERE set_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(set_id, media_id) DO NOTHING",
     )
     .bind(&item_id)
@@ -468,6 +490,7 @@ pub async fn add_to_set(state: &AppState, set: &SetRow, file: &UploadFile, input
     .bind(&input.extra_toml)
     .bind(t)
     .bind(t)
+    .bind(added_by)
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -590,7 +613,7 @@ pub async fn upload_multipart(
     set_id: &str,
     mp: Multipart,
 ) -> AppResult<Vec<UploadResult>> {
-    let set = authz::editable_set(state, viewer.id(), set_id).await?;
+    let set = authz::set_for(state, viewer.id(), set_id, authz::Need::Add).await?;
     state.limiters.check_upload(viewer.id())?;
     let parts = read_multipart(state, mp).await?;
     upload_parts(state, viewer, &set, parts).await
@@ -603,7 +626,7 @@ pub async fn upload(
     set_id: &str,
     parts: UploadParts,
 ) -> AppResult<Vec<UploadResult>> {
-    let set = authz::editable_set(state, viewer.id(), set_id).await?;
+    let set = authz::set_for(state, viewer.id(), set_id, authz::Need::Add).await?;
     state.limiters.check_upload(viewer.id())?;
     upload_parts(state, viewer, &set, parts).await
 }
@@ -626,7 +649,7 @@ async fn upload_parts(
         let shown = base_name(&file.filename).to_string();
         let outcome = async {
             let input = ItemInput::from_upload(&file.filename, parts.meta.get(i))?;
-            add_to_set(state, &set, file, &input).await
+            add_to_set(state, &set, file, &input, viewer.id()).await
         }
         .await;
         match outcome {

@@ -348,28 +348,29 @@ pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-/// Delete media no item references and no set has as its cover image any
-/// more (rows and files).
+/// Delete media no item references, no set has as its cover image and no
+/// proposal needs any more (rows and files).
 pub async fn gc_orphan_media(state: &AppState) -> AppResult<u64> {
     let _guard = state.media_lock.write().await;
-    let orphans: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, sha256 FROM media m WHERE NOT EXISTS (SELECT 1 FROM items i WHERE i.media_id = m.id) \
-         AND NOT EXISTS (SELECT 1 FROM sets s WHERE s.cover_media_id = m.id)",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let keep_since = crate::ids::now() - crate::service::proposals::KEEP_DECIDED_SECS;
+    let unused = format!(
+        "NOT EXISTS (SELECT 1 FROM items i WHERE i.media_id = m.id) \
+         AND NOT EXISTS (SELECT 1 FROM sets s WHERE s.cover_media_id = m.id) \
+         AND NOT {}",
+        crate::service::proposals::PROPOSAL_MEDIA_SQL
+    );
+    let orphans: Vec<(String, String)> = sqlx::query_as(&format!("SELECT id, sha256 FROM media m WHERE {unused}"))
+        .bind(keep_since)
+        .fetch_all(&state.db)
+        .await?;
     let mut n = 0;
     for (id, sha) in orphans {
-        let deleted = sqlx::query(
-            "DELETE FROM media WHERE id = ? AND NOT EXISTS (SELECT 1 FROM items WHERE media_id = ?) \
-             AND NOT EXISTS (SELECT 1 FROM sets WHERE cover_media_id = ?)",
-        )
-        .bind(&id)
-        .bind(&id)
-        .bind(&id)
-        .execute(&state.db)
-        .await?
-        .rows_affected();
+        let deleted = sqlx::query(&format!("DELETE FROM media AS m WHERE m.id = ?2 AND {unused}"))
+            .bind(keep_since)
+            .bind(&id)
+            .execute(&state.db)
+            .await?
+            .rows_affected();
         if deleted == 0 {
             continue;
         }

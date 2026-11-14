@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
-use stickpile_api::{FieldSource, Item, ItemDetail, MediaKind, UpdateItem, Variant};
+use stickpile_api::{FieldSource, Item, ItemDetail, MediaKind, Set, UpdateItem, Variant};
 
 use super::components::{
     ai_mark, copy_controls, file_url, fmt_bytes, grid, icon, item_card, item_url, kind_badge, like_form, plural,
@@ -265,8 +265,32 @@ pub(super) fn vibes(state: &AppState) -> Vec<String> {
 /// this viewer can take here. Like reuses the card's own button, copy the
 /// copy controls' `data-copy-*`.
 /// `is_cover`: the item is the set's chosen cover (a badge for everyone).
-pub fn editor_card(ctx: &Ctx, item: &Item, editable: bool, movable: Option<(bool, bool)>, is_cover: bool) -> Markup {
-    editor_card_in(ctx, item, None, editable, movable, is_cover)
+pub fn editor_card(ctx: &Ctx, item: &Item, rights: Rights, movable: Option<(bool, bool)>, is_cover: bool) -> Markup {
+    editor_card_in(ctx, item, None, rights, movable, is_cover)
+}
+
+/// What the viewer may do with one item where it is shown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Rights {
+    /// Edit its fields.
+    pub edit: bool,
+    /// Remove it from its set.
+    pub remove: bool,
+    /// Make it the set's cover.
+    pub cover: bool,
+}
+
+impl Rights {
+    /// From the set's permissions for the viewer and who added the item.
+    pub fn of(ctx: &Ctx, set: &Set, item: &Item) -> Rights {
+        let p = set.permissions;
+        let own = item.added_by_username.as_deref() == Some(ctx.user.user.username.as_str());
+        Rights {
+            edit: p.edit_all || (p.edit_own && own),
+            remove: p.remove_all || (p.edit_own && own),
+            cover: p.edit_pack,
+        }
+    }
 }
 
 /// [`editor_card`] shown outside its set (the start page's recently copied
@@ -275,7 +299,7 @@ pub fn editor_card_in(
     ctx: &Ctx,
     item: &Item,
     set: Option<(&str, &str)>,
-    editable: bool,
+    rights: Rights,
     movable: Option<(bool, bool)>,
     is_cover: bool,
 ) -> Markup {
@@ -288,10 +312,10 @@ pub fn editor_card_in(
     html! {
         article.card.editor id=(format!("item-{}", item.id)) data-menu=""
             data-item-url=(page) data-download-url=(file_url(&item.id, Variant::Original))
-            data-edit-url=[editable.then(|| format!("{page}?edit=1#edit"))]
-            data-delete-url=[editable.then_some(&delete_url)]
+            data-edit-url=[rights.edit.then(|| format!("{page}?edit=1#edit"))]
+            data-delete-url=[rights.remove.then_some(&delete_url)]
             data-move-url=[movable.map(|_| &move_url)] data-first[first] data-last[last]
-            data-cover-url=[editable.then_some(&cover_url)] data-cover[is_cover] {
+            data-cover-url=[rights.cover.then_some(&cover_url)] data-cover[is_cover] {
             a.thumb href=(page) {
                 (thumb(&item.id, &item.name, item.media.width, item.media.height))
             }
@@ -306,7 +330,7 @@ pub fn editor_card_in(
             div.card-body {
                 dl.fields {
                     @for f in Field::ALL {
-                        (field_block(ctx, item, f, editable))
+                        (field_block(ctx, item, f, rights.edit))
                         @if let (Field::Name, Some((sid, sname))) = (f, set) {
                             div.field.field-set {
                                 dt { span.field-label { "Set" } }
@@ -318,7 +342,7 @@ pub fn editor_card_in(
                 div.card-actions {
                     (like_form(ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))
                     (copy_controls(&card, false, true))
-                    @if editable {
+                    @if rights.remove || movable.is_some() {
                         div.manage {
                             @if movable.is_some() {
                                 @for (dir, label, ico, off) in [("up", "Move up", Icon::Up, first), ("down", "Move down", Icon::Down, last)] {
@@ -331,10 +355,12 @@ pub fn editor_card_in(
                                     }
                                 }
                             }
-                            a.button.icon-btn.danger href=(delete_url) hx-post=(delete_url)
-                                hx-confirm=(format!("Delete “{}” from this set?", item.name))
-                                hx-target="closest .card" hx-swap="delete" title="Delete" {
-                                (icon(Icon::Delete)) span.sr-only { "Delete " (item.name) }
+                            @if rights.remove {
+                                a.button.icon-btn.danger href=(delete_url) hx-post=(delete_url)
+                                    hx-confirm=(format!("Delete “{}” from this set?", item.name))
+                                    hx-target="closest .card" hx-swap="delete" title="Delete" {
+                                    (icon(Icon::Delete)) span.sr-only { "Delete " (item.name) }
+                                }
                             }
                         }
                     }
@@ -480,13 +506,15 @@ pub async fn page(
     Query(q): Query<PageQuery>,
 ) -> AppResult<Markup> {
     let d = svc::detail(&state, &ctx.user, &id).await?;
-    let set_row = ui::readable_set_row(&state, &ctx.user, &d.item.set_id).await?;
-    let editable = ui::can_edit(&ctx.user, &set_row);
+    let access = ui::readable_item(&state, &ctx.user, &id).await?;
+    let editable = access.can_edit();
+    let removable = access.can_remove();
+    let access_set = crate::service::sets::load_api_for(&state.db, &access.access).await?;
     let vibes = vibes(&state);
     let item = &d.item;
     let card = Card::from_item(item);
     let editing = editable && q.edit.is_some();
-    let move_targets = if editable {
+    let move_targets = if removable {
         ui::editable_sets(&state, &ctx.user)
             .await?
             .into_iter()
@@ -527,9 +555,12 @@ pub async fn page(
                         @for f in Field::ALL { (field_block(&ctx, item, f, editable)) }
                     }
                 }
-                @if editable {
+                @if !editable && super::collab::can_propose(&access_set) {
+                    p { a.button href=(format!("/items/{}/suggest", item.id)) { "Suggest changes…" } }
+                }
+                @if editable || removable {
                     div.item-actions {
-                        @if ai_ready {
+                        @if ai_ready && editable {
                             form.inline method="post" action=(format!("/items/{}/enrich", item.id))
                                 hx-post=(format!("/items/{}/enrich", item.id)) hx-target="#job-slot" hx-swap="innerHTML" {
                                 (ctx.csrf_input())
@@ -546,7 +577,9 @@ pub async fn page(
                                 button type="submit" { "Move" }
                             }
                         }
-                        a.button.danger href=(format!("/items/{}/delete", item.id)) { "Delete…" }
+                        @if removable {
+                            a.button.danger href=(format!("/items/{}/delete", item.id)) { "Delete…" }
+                        }
                     }
                     div #job-slot {}
                 }
@@ -653,10 +686,11 @@ pub async fn update_all(
     Ok(ctx.redirect(&format!("/items/{id}?saved=1")))
 }
 
+/// The item and whether the viewer may edit it.
 async fn item_for(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<(Item, bool)> {
     let d = svc::detail(state, &ctx.user, id).await?;
-    let set_row = ui::readable_set_row(state, &ctx.user, &d.item.set_id).await?;
-    Ok((d.item, ui::can_edit(&ctx.user, &set_row)))
+    let access = ui::readable_item(state, &ctx.user, id).await?;
+    Ok((d.item, access.can_edit()))
 }
 
 pub async fn field_view(
@@ -763,8 +797,8 @@ pub async fn like(
 }
 
 pub async fn delete_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {
-    let (item, editable) = item_for(&state, &ctx, &id).await?;
-    if !editable {
+    let item = svc::detail(&state, &ctx.user, &id).await?.item;
+    if !ui::readable_item(&state, &ctx.user, &id).await?.can_remove() {
         return Err(AppError::forbidden("you cannot delete this item"));
     }
     let body = html! {

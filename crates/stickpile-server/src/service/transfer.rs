@@ -186,7 +186,7 @@ pub async fn import_bundle(
     into: Option<&str>,
 ) -> AppResult<ImportReport> {
     let target = match into {
-        Some(id) => Some(authz::editable_set(state, viewer.id(), id).await?),
+        Some(id) => Some(authz::editable_set(state, viewer.id(), id).await?.set),
         None => None,
     };
     import_bundle_into(state, viewer, bundle, target).await
@@ -296,7 +296,7 @@ pub async fn import_bundle_into(
             continue;
         }
         let file = UploadFile::from_bytes(f.filename.clone(), f.bytes);
-        match add_to_set(state, &set, &file, &input).await {
+        match add_to_set(state, &set, &file, &input, &set.owner_id).await {
             Ok(added) if added.already_in_set => {
                 if !kept.insert(added.item_id.clone()) {
                     report.errors.push(ImportError {
@@ -375,7 +375,7 @@ pub async fn import_bundle_into(
             .map(|e| e.id.clone())
             .collect();
         if !stale.is_empty() {
-            sets::tombstone(&mut tx, &stale, &set.owner_id, Audience::for_removal(set.visibility())).await?;
+            sets::tombstone(&mut tx, &stale, &set, Audience::for_removal(set.visibility())).await?;
             for id in &stale {
                 sqlx::query("DELETE FROM items WHERE id = ?")
                     .bind(id)

@@ -76,13 +76,46 @@ pub const TELEGRAM_IMPORT: &str = "/api/v1/telegram/import";
 pub const SET_PROBLEMS: &str = "/api/v1/sets/{id}/problems";
 /// PUT: mark the problem as "not a problem" (204); DELETE: undo (204). Owner only.
 pub const SET_PROBLEM_DISMISSAL: &str = "/api/v1/sets/{id}/problems/{problem}/dismissal";
+/// GET -> `Vec<`[`crate::model::Member`]`>`: the set's contributors (owner and contributors).
+pub const SET_MEMBERS: &str = "/api/v1/sets/{id}/members";
+/// PUT [`crate::model::PutMember`] -> Member: add a contributor or change
+/// their permissions (owner). DELETE: remove them (owner), or leave (the
+/// contributor themself). `{username}` is the contributor's username.
+pub const SET_MEMBER: &str = "/api/v1/sets/{id}/members/{username}";
+/// POST [`crate::model::NewProposal`] (name, description, cover_item_id) ->
+/// [`crate::model::Proposal`]: propose changes to someone else's set.
+pub const SET_PROPOSALS: &str = "/api/v1/sets/{id}/proposals";
+/// POST multipart, as [`SET_ITEMS`] plus an optional `message` part ->
+/// Proposal: propose new stickers for someone else's set.
+pub const SET_PROPOSAL_ITEMS: &str = "/api/v1/sets/{id}/proposals/items";
+/// POST multipart (`file`: a still image, optional `message`) -> Proposal:
+/// propose a cover image.
+pub const SET_PROPOSAL_COVER: &str = "/api/v1/sets/{id}/proposals/cover";
+
+// --- proposals ---------------------------------------------------------------------
+/// GET `?box=incoming|outgoing&status=open|accepted|declined|withdrawn` ->
+/// `Vec<`[`crate::model::Proposal`]`>`, newest first.
+pub const PROPOSALS: &str = "/api/v1/proposals";
+/// GET -> Proposal (its proposer, the set's owner and reviewers).
+pub const PROPOSAL: &str = "/api/v1/proposals/{id}";
+/// POST [`crate::model::DecideProposal`] -> Proposal: make the change (owner or reviewer).
+pub const PROPOSAL_ACCEPT: &str = "/api/v1/proposals/{id}/accept";
+/// POST [`crate::model::DecideProposal`] -> Proposal (owner or reviewer).
+pub const PROPOSAL_DECLINE: &str = "/api/v1/proposals/{id}/decline";
+/// POST -> Proposal (its proposer).
+pub const PROPOSAL_WITHDRAW: &str = "/api/v1/proposals/{id}/withdraw";
+/// GET -> thumbnail of a proposed sticker (`{n}`: its 0-based position) or,
+/// with `{n}` = `cover`, of a proposed cover image, while the proposal is open.
+pub const PROPOSAL_THUMB: &str = "/api/v1/proposals/{id}/thumb/{n}";
+
 /// GET `?scope=mine|server&severity=&kind=&dismissed=` -> [`crate::model::ProblemReport`].
 /// `server` (every set) is for admins only.
 pub const PROBLEMS: &str = "/api/v1/problems";
 
 // --- items -----------------------------------------------------------------------
 /// GET `?updated_since=<unix>&cursor=<opaque>&limit=<n>` -> [`crate::model::ItemPage`].
-/// Every item the caller may see in search (own + public; not unlisted), for client caches.
+/// Every item the caller may see in search (own, contributed to and public;
+/// not unlisted), for client caches.
 pub const ITEMS: &str = "/api/v1/items";
 /// GET -> [`crate::model::ItemDetail`]; PATCH [`crate::model::UpdateItem`] -> Item; DELETE
 pub const ITEM: &str = "/api/v1/items/{id}";
@@ -95,6 +128,9 @@ pub const ITEM_LIKE: &str = "/api/v1/items/{id}/like";
 pub const ITEM_BETTER: &str = "/api/v1/items/{id}/better";
 /// POST -> [`crate::model::Job`]: re-run AI enrichment.
 pub const ITEM_ENRICH: &str = "/api/v1/items/{id}/enrich";
+/// POST [`crate::model::NewProposal`] (name, keywords, emojis, tags, vibe)
+/// -> [`crate::model::Proposal`]: propose changes to someone else's sticker.
+pub const ITEM_PROPOSALS: &str = "/api/v1/items/{id}/proposals";
 
 // --- AI ----------------------------------------------------------------------------
 /// POST multipart (one `file` part: a still image, at most 2 MiB; a small

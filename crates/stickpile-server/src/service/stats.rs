@@ -37,6 +37,7 @@ pub async fn record_usage(state: &AppState, viewer: &CurrentUser, batch: UsageBa
         rejected: Vec::new(),
     };
     let mut set_cache: HashMap<String, Option<db::SetRow>> = HashMap::new();
+    let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
     let mut counted: HashMap<String, ()> = HashMap::new();
     let mut tx = sets::begin(&state.db).await?;
     for ev in batch.events {
@@ -62,7 +63,7 @@ pub async fn record_usage(state: &AppState, viewer: &CurrentUser, batch: UsageBa
         let allowed = set_cache
             .get(&set_id)
             .and_then(|s| s.as_ref())
-            .is_some_and(|s| authz::can_report_usage(viewer.id(), s));
+            .is_some_and(|s| authz::can_read_set(viewer.id(), s, member_sets.contains(&s.id)));
         if !allowed {
             ack.rejected.push(ev.id);
             continue;
@@ -168,7 +169,7 @@ pub async fn popular(
         PopularScope::Set => {
             let sid = set_id.ok_or_else(|| AppError::bad_request("scope=set needs set=<id>"))?;
             let set = authz::readable_set(state, viewer.id(), sid).await?;
-            ("i.set_id = ?".into(), set.id)
+            ("i.set_id = ?".into(), set.id.clone())
         }
     };
     let t = now();

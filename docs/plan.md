@@ -72,6 +72,10 @@ spike/clipspike     phase 0 throwaway clipboard tool
 Admins get no implicit content access, only the admin API. "Not found" and
 "forbidden" both return 404 for content, so ids cannot be probed.
 
+A set's contributors are treated like its owner for reading, browse, search
+and client caches; what they may change follows their permissions, and the
+settings stay the owner's ([collaboration.md](collaboration.md)).
+
 ## Phases
 
 | # | Phase | Contents | Done when |

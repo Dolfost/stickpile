@@ -218,7 +218,7 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
             ..Default::default()
         };
         let file = UploadFile::from_bytes(format!("{:03}-sticker.{ext}", i + 1), sticker.bytes);
-        match upload::add_to_set(state, &row, &file, &input).await {
+        match upload::add_to_set(state, &row, &file, &input, &row.owner_id).await {
             Ok(added) if added.already_in_set => skipped.push(json!({
                 "file_unique_id": sticker.file_unique_id,
                 "reason": "the same file as an earlier sticker of the pack",

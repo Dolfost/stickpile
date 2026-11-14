@@ -10,7 +10,7 @@ use stickpile_api::{
 };
 
 use crate::auth::CurrentUser;
-use crate::authz;
+use crate::authz::{self, Need, Standing};
 use crate::db::{self, enum_str, parse_enum, SetRow, SET_COLUMNS};
 use crate::error::{AppError, AppResult};
 use crate::ids::{new_id, now};
@@ -24,9 +24,11 @@ pub enum SetScope {
     /// The caller's own sets (default).
     #[default]
     Mine,
+    /// Sets the caller contributes to.
+    Contributing,
     /// Public sets of every user (including the caller's).
     Public,
-    /// Own sets plus other users' public sets.
+    /// Own sets, the ones the caller contributes to, and other users' public sets.
     All,
 }
 
@@ -163,8 +165,14 @@ fn list_select() -> String {
     )
 }
 
-/// `cover`: the set's cover, its items already checked to be in the set.
-pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Cover, viewer: &str) -> Set {
+/// `cover`: the set's cover, its items already checked to be in the set;
+/// `standing`: the viewer's.
+pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Cover, standing: Standing) -> Set {
+    let access = authz::SetAccess {
+        viewer: String::new(),
+        set: row.clone(),
+        standing,
+    };
     let git = (row.source == "git").then(|| GitBinding {
         url: row.git_url.clone().unwrap_or_default(),
         branch: row.git_branch.clone(),
@@ -199,7 +207,9 @@ pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Cover,
         cover_item_id: cover.item,
         cover_image: cover.image,
         item_count,
-        editable: authz::can_edit_set(viewer, row),
+        editable: access.can_manage(),
+        role: access.role(),
+        permissions: access.permissions(),
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -223,8 +233,14 @@ fn to_summary(r: &SetListRow) -> SetSummary {
 
 /// API view of a set row for `viewer`.
 pub async fn load_api(db: &SqlitePool, row: &SetRow, viewer: &str) -> AppResult<Set> {
+    let access = authz::access(db, viewer, row.clone()).await?;
+    load_api_for(db, &access).await
+}
+
+/// API view of a set whose access was checked.
+pub async fn load_api_for(db: &SqlitePool, access: &authz::SetAccess) -> AppResult<Set> {
     let r = sqlx::query_as::<_, SetListRow>(&format!("{} WHERE s.id = ?", list_select()))
-        .bind(&row.id)
+        .bind(&access.set.id)
         .fetch_one(db)
         .await?;
     Ok(to_api(
@@ -232,7 +248,7 @@ pub async fn load_api(db: &SqlitePool, row: &SetRow, viewer: &str) -> AppResult<
         &r.owner_username,
         r.item_count.max(0) as u64,
         r.cover(),
-        viewer,
+        access.standing,
     ))
 }
 
@@ -260,6 +276,7 @@ pub async fn summary(db: &SqlitePool, set_id: &str) -> AppResult<SetSummary> {
 pub async fn list(state: &AppState, viewer: &CurrentUser, scope: SetScope) -> AppResult<Vec<SetSummary>> {
     let (cond, bind_viewer) = match scope {
         SetScope::Mine => ("s.owner_id = ?", true),
+        SetScope::Contributing => ("s.id IN (SELECT set_id FROM set_members WHERE user_id = ?)", true),
         SetScope::Public => ("s.visibility = 'public'", false),
         SetScope::All => (authz::SEARCHABLE_SQL, true),
     };
@@ -269,9 +286,17 @@ pub async fn list(state: &AppState, viewer: &CurrentUser, scope: SetScope) -> Ap
         q = q.bind(viewer.id());
     }
     let rows = q.fetch_all(&state.db).await?;
+    let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
     Ok(rows
         .iter()
-        .filter(|r| authz::can_list_set(viewer.id(), &r.set))
+        .filter(|r| {
+            authz::searchable(
+                viewer.id(),
+                &r.set.owner_id,
+                r.set.visibility(),
+                member_sets.contains(&r.set.id),
+            )
+        })
         .map(to_summary)
         .collect())
 }
@@ -346,12 +371,18 @@ pub async fn create(state: &AppState, viewer: &CurrentUser, req: CreateSet) -> A
         },
     )
     .await?;
-    Ok(to_api(&row, &viewer.user.username, 0, Cover::default(), viewer.id()))
+    Ok(to_api(
+        &row,
+        &viewer.user.username,
+        0,
+        Cover::default(),
+        Standing::Owner,
+    ))
 }
 
 pub async fn detail(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<SetDetail> {
-    let row = authz::readable_set(state, viewer.id(), set_id).await?;
-    let set = load_api(&state.db, &row, viewer.id()).await?;
+    let access = authz::readable_set(state, viewer.id(), set_id).await?;
+    let set = load_api_for(&state.db, &access).await?;
     let rows = hydrate::fetch_by_set(&state.db, set_id).await?;
     let items = hydrate::items(&state.db, viewer.id(), &rows).await?;
     Ok(SetDetail { set, items })
@@ -405,21 +436,56 @@ impl Audience {
     }
 }
 
+/// Record that `item_ids` of `set` are gone for `audience`. A removal
+/// (not [`Audience::Others`]) also reaches the set's contributors.
 pub async fn tombstone(
     conn: &mut sqlx::SqliteConnection,
     item_ids: &[String],
-    owner_id: &str,
+    set: &SetRow,
     audience: Audience,
 ) -> AppResult<()> {
     let t = now();
     for id in item_ids {
         sqlx::query("INSERT INTO item_tombstones (item_id, owner_id, audience, removed_at) VALUES (?, ?, ?, ?)")
             .bind(id)
-            .bind(owner_id)
+            .bind(&set.owner_id)
             .bind(audience.as_str())
             .bind(t)
             .execute(&mut *conn)
             .await?;
+    }
+    if audience != Audience::Others {
+        member_tombstones(conn, &set.id, item_ids).await?;
+    }
+    Ok(())
+}
+
+/// Record that `item_ids` are gone for the contributors of `set_id` (their
+/// caches drop them unless they can still see them).
+pub async fn member_tombstones(conn: &mut sqlx::SqliteConnection, set_id: &str, item_ids: &[String]) -> AppResult<()> {
+    let members: Vec<String> = sqlx::query_scalar("SELECT user_id FROM set_members WHERE set_id = ?")
+        .bind(set_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    user_tombstones(conn, &members, item_ids).await
+}
+
+/// Record that `item_ids` are gone for each of `users`.
+pub async fn user_tombstones(
+    conn: &mut sqlx::SqliteConnection,
+    users: &[String],
+    item_ids: &[String],
+) -> AppResult<()> {
+    let t = now();
+    for user in users {
+        for id in item_ids {
+            sqlx::query("INSERT INTO member_tombstones (item_id, user_id, removed_at) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(user)
+                .bind(t)
+                .execute(&mut *conn)
+                .await?;
+        }
     }
     Ok(())
 }
@@ -456,7 +522,7 @@ pub async fn on_visibility_change(conn: &mut sqlx::SqliteConnection, set: &SetRo
         .fetch_all(&mut *conn)
         .await?;
     if old == Visibility::Public {
-        tombstone(conn, &ids, &set.owner_id, Audience::Others).await?;
+        tombstone(conn, &ids, set, Audience::Others).await?;
     } else if new == Visibility::Public {
         for id in &ids {
             sqlx::query("DELETE FROM item_tombstones WHERE item_id = ? AND audience = 'others'")
@@ -468,8 +534,23 @@ pub async fn on_visibility_change(conn: &mut sqlx::SqliteConnection, set: &SetRo
     Ok(())
 }
 
+/// PATCH a set: slug, visibility and the recommended format are the
+/// owner's; name, description and cover need the `edit_pack` permission.
 pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: UpdateSet) -> AppResult<Set> {
-    let set = authz::editable_set(state, viewer.id(), set_id).await?;
+    let settings =
+        req.slug.is_some() || req.visibility.is_some() || req.aspect_ratio.is_some() || req.recommended_px.is_some();
+    let need = if settings { Need::Manage } else { Need::EditPack };
+    let set = authz::set_for(state, viewer.id(), set_id, need).await?;
+    apply_update(state, &set.set, req).await?;
+    let row = db::set_by_id(&state.db, set_id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    load_api(&state.db, &row, viewer.id()).await
+}
+
+/// The changes of [`update`] without authorization (also an accepted proposal's).
+pub(crate) async fn apply_update(state: &AppState, set: &SetRow, req: UpdateSet) -> AppResult<()> {
+    let set_id = set.id.as_str();
     if let Some(slug) = &req.slug {
         validate_slug(slug)?;
     }
@@ -481,7 +562,21 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
     if let Some(px) = req.recommended_px {
         validate_px(px)?;
     }
-    let old_cover = chosen_cover(&state.db, set_id).await?;
+    let mut tx = begin(&state.db).await?;
+    // The row as it is now: owners, contributors and accepted proposals
+    // change sets concurrently, and every column is written back below.
+    let fresh: SetRow = sqlx::query_as(&format!("SELECT {SET_COLUMNS} FROM sets WHERE id = ?"))
+        .bind(set_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    let set = &fresh;
+    let old_cover: Option<String> =
+        sqlx::query_scalar(&format!("SELECT {CHOSEN_COVER_SQL} FROM sets s WHERE s.id = ?"))
+            .bind(set_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
     let new_cover = match req.cover_item_id.clone() {
         None => old_cover.clone(),
         Some(None) => None,
@@ -489,12 +584,11 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
             let in_set: Option<String> = sqlx::query_scalar("SELECT id FROM items WHERE id = ? AND set_id = ?")
                 .bind(&id)
                 .bind(set_id)
-                .fetch_optional(&state.db)
+                .fetch_optional(&mut *tx)
                 .await?;
             Some(in_set.ok_or_else(|| AppError::bad_request("the cover must be an item of this set"))?)
         }
     };
-    let mut tx = begin(&state.db).await?;
     let new_slug = req.slug.clone().unwrap_or_else(|| set.slug.clone());
     let new_name = name.unwrap_or_else(|| set.name.clone());
     let new_desc = description.unwrap_or_else(|| set.description.clone());
@@ -516,7 +610,7 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
         || new_cover != old_cover
         || new_cover_media != set.cover_media_id;
     if changed {
-        on_visibility_change(&mut tx, &set, new_vis).await?;
+        on_visibility_change(&mut tx, set, new_vis).await?;
         let res = sqlx::query(
             "UPDATE sets SET slug = ?, name = ?, description = ?, visibility = ?, aspect_w = ?, aspect_h = ?, \
              recommended_px = ?, cover_item_id = ?, cover_media_id = ? WHERE id = ?",
@@ -551,10 +645,7 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, set_id: &str, req: U
     if changed {
         index::refresh_set(state, set_id).await?;
     }
-    let row = db::set_by_id(&state.db, set_id)
-        .await?
-        .ok_or_else(AppError::not_found)?;
-    load_api(&state.db, &row, viewer.id()).await
+    Ok(())
 }
 
 /// Delete a set and its items (the owner only). Media files, the cover
@@ -581,7 +672,7 @@ pub async fn delete_row(state: &AppState, set: &SetRow) -> AppResult<()> {
         .bind(&set.id)
         .fetch_all(&mut *tx)
         .await?;
-    tombstone(&mut tx, &ids, &set.owner_id, Audience::for_removal(set.visibility())).await?;
+    tombstone(&mut tx, &ids, set, Audience::for_removal(set.visibility())).await?;
     sqlx::query("DELETE FROM sets WHERE id = ?")
         .bind(&set.id)
         .execute(&mut *tx)
@@ -593,7 +684,7 @@ pub async fn delete_row(state: &AppState, set: &SetRow) -> AppResult<()> {
 
 /// Replace the item order with `req.item_ids` (must be a permutation).
 pub async fn reorder(state: &AppState, viewer: &CurrentUser, set_id: &str, req: ReorderItems) -> AppResult<SetDetail> {
-    authz::editable_set(state, viewer.id(), set_id).await?;
+    authz::set_for(state, viewer.id(), set_id, Need::EditPack).await?;
     let mut tx = begin(&state.db).await?;
     let mut current: Vec<String> = sqlx::query_scalar("SELECT id FROM items WHERE set_id = ? ORDER BY position, id")
         .bind(set_id)

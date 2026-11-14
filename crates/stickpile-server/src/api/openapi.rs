@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use super::{admin, ai, auth, integrations, items, misc, problems, sets};
+use super::{admin, ai, auth, collab, integrations, items, misc, problems, sets};
 
 struct SecuritySchemes;
 
@@ -89,6 +89,19 @@ impl Modify for SecuritySchemes {
         items::unlike,
         items::better,
         items::enrich,
+        collab::list_members,
+        collab::put_member,
+        collab::delete_member,
+        collab::propose_set,
+        collab::propose_items,
+        collab::propose_cover,
+        collab::propose_item,
+        collab::list,
+        collab::get,
+        collab::accept,
+        collab::decline,
+        collab::withdraw,
+        collab::thumb,
         ai::suggest,
         misc::search,
         misc::usage,
@@ -119,6 +132,7 @@ impl Modify for SecuritySchemes {
         (name = "admin", description = "Administration (role admin)"),
         (name = "integrations", description = "Git packs and Telegram import/export (background jobs)"),
         (name = "problems", description = "Problems report: duplicates, Telegram blockers, media and metadata issues"),
+        (name = "collaboration", description = "Contributors of sets and proposals to other users' sets"),
         (name = "misc", description = "Health, profiles, jobs, this document"),
     )
 )]

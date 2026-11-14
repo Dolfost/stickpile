@@ -88,7 +88,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Popul
         return Ok(cols);
     }
     let set_name = match &set_id {
-        Some(id) => Some(ui::readable_set_row(&state, &ctx.user, id).await?.name),
+        Some(id) => Some(ui::readable_set(&state, &ctx.user, id).await?.set.name),
         None => None,
     };
     let body = html! {

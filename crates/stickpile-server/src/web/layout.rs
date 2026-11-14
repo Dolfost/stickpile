@@ -19,6 +19,7 @@ const HTMX_CONFIG: &str = r#"{"includeIndicatorStyles":false,"allowEval":false,"
 pub enum Nav {
     Home,
     Sets,
+    Collaboration,
     Upload,
     Search,
     Popular,
@@ -106,6 +107,13 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                             ul.nav {
                                 (nav_link("/", "Home", Nav::Home, active))
                                 (nav_link("/sets", "Sets", Nav::Sets, active))
+                                li {
+                                    a href="/collaboration" aria-current=[(active == Nav::Collaboration).then_some("page")] {
+                                        "Collaboration"
+                                        // Proposals waiting for this user, fetched after the page.
+                                        span hx-get="/collaboration/badge" hx-trigger="load" hx-swap="outerHTML" {}
+                                    }
+                                }
                                 (nav_link("/upload", "Upload", Nav::Upload, active))
                                 (nav_link("/search", "Search", Nav::Search, active))
                                 (nav_link("/popular", "Popular", Nav::Popular, active))

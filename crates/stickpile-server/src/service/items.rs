@@ -8,7 +8,7 @@ use stickpile_media::hash::hamming;
 
 use crate::auth::CurrentUser;
 use crate::authz::{self, SEARCHABLE_SQL};
-use crate::db::{i64_to_u64, source_str, to_json_list};
+use crate::db::{self, i64_to_u64, source_str, to_json_list};
 use crate::error::{AppError, AppResult};
 use crate::ids::now;
 use crate::index;
@@ -60,9 +60,43 @@ const CONFIRMABLE: [&str; 4] = ["name", "keywords", "emojis", "vibe"];
 
 /// PATCH an item: edited fields become `user`-sourced; `confirm` flips the
 /// listed fields to `user` without changing values; `set_id` moves the item
-/// to the end of another set the caller can edit.
+/// to the end of another set. Field changes need the right to edit the
+/// item, a move the right to remove it here and to add stickers there.
 pub async fn update(state: &AppState, viewer: &CurrentUser, item_id: &str, req: UpdateItem) -> AppResult<Item> {
-    let r = authz::editable_item(state, viewer.id(), item_id).await?;
+    let edits = req.name.is_some()
+        || req.keywords.is_some()
+        || req.emojis.is_some()
+        || req.vibe.is_some()
+        || req.tags.is_some()
+        || !req.confirm.is_empty();
+    let r = if edits {
+        authz::editable_item(state, viewer.id(), item_id).await?
+    } else {
+        authz::readable_item(state, viewer.id(), item_id).await?
+    };
+    let target = match req.set_id.as_deref() {
+        Some(sid) if sid != r.access.set.id => {
+            if !r.can_remove() {
+                return Err(r.access.refuse("move this sticker out"));
+            }
+            Some(authz::set_for(state, viewer.id(), sid, authz::Need::Add).await?)
+        }
+        _ if !edits && !r.can_edit() => return Err(r.access.refuse("edit this sticker")),
+        _ => None,
+    };
+    apply_update(state, viewer.id(), &r, req, target.map(|t| t.set)).await
+}
+
+/// The changes of [`update`] without authorization (also an accepted
+/// proposal's): `target` is the set to move the item to, if any.
+pub(crate) async fn apply_update(
+    state: &AppState,
+    viewer: &str,
+    r: &authz::ItemRef,
+    req: UpdateItem,
+    target: Option<db::SetRow>,
+) -> AppResult<Item> {
+    let item_id = r.item_id.as_str();
     for c in &req.confirm {
         if !CONFIRMABLE.contains(&c.as_str()) {
             return Err(AppError::bad_request(format!(
@@ -80,10 +114,6 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, item_id: &str, req: 
     let vibe = match &req.vibe {
         None => None,
         Some(v) => Some(clean_vibe(v.as_deref())?),
-    };
-    let target = match req.set_id.as_deref() {
-        Some(sid) if sid != r.set.id => Some(authz::editable_set(state, viewer.id(), sid).await?),
-        _ => None,
     };
 
     let mut tx = sets::begin(&state.db).await?;
@@ -172,16 +202,18 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, item_id: &str, req: 
             }
             Err(e) => return Err(e.into()),
         }
-        let (old_vis, new_vis) = (r.set.visibility(), target.visibility());
-        if old_vis == Visibility::Public && new_vis != Visibility::Public {
-            sets::tombstone(&mut tx, &[item_id.to_string()], &r.set.owner_id, Audience::Others).await?;
-        } else if new_vis == Visibility::Public {
+        // Everyone who saw it in the old set (its owner, its contributors,
+        // everyone if it was public) drops it from their cache, unless they
+        // see it in the new set: the sync leaves out what is still visible.
+        let removal = Audience::for_removal(r.access.set.visibility());
+        sets::tombstone(&mut tx, &[item_id.to_string()], &r.access.set, removal).await?;
+        if target.visibility() == Visibility::Public {
             sqlx::query("DELETE FROM item_tombstones WHERE item_id = ? AND audience = 'others'")
                 .bind(item_id)
                 .execute(&mut *tx)
                 .await?;
         }
-        sets::renumber(&mut tx, &r.set.id).await?;
+        sets::renumber(&mut tx, &r.access.set.id).await?;
         sets_.push(target.id.clone());
         changed = true;
     }
@@ -191,32 +223,32 @@ pub async fn update(state: &AppState, viewer: &CurrentUser, item_id: &str, req: 
             .bind(item_id)
             .execute(&mut *tx)
             .await?;
-        sets_.push(r.set.id.clone());
+        sets_.push(r.access.set.id.clone());
         for s in &sets_ {
             sets::bump_version(&mut tx, s).await?;
         }
     }
     tx.commit().await?;
     index::refresh_items(state, &[item_id.to_string()]).await?;
-    get_item(state, viewer.id(), item_id).await
+    get_item(state, viewer, item_id).await
 }
 
 pub async fn delete(state: &AppState, viewer: &CurrentUser, item_id: &str) -> AppResult<()> {
-    let r = authz::editable_item(state, viewer.id(), item_id).await?;
+    let r = authz::removable_item(state, viewer.id(), item_id).await?;
     let mut tx = sets::begin(&state.db).await?;
     sets::tombstone(
         &mut tx,
         &[item_id.to_string()],
-        &r.set.owner_id,
-        Audience::for_removal(r.set.visibility()),
+        &r.access.set,
+        Audience::for_removal(r.access.set.visibility()),
     )
     .await?;
     sqlx::query("DELETE FROM items WHERE id = ?")
         .bind(item_id)
         .execute(&mut *tx)
         .await?;
-    sets::renumber(&mut tx, &r.set.id).await?;
-    sets::bump_version(&mut tx, &r.set.id).await?;
+    sets::renumber(&mut tx, &r.access.set.id).await?;
+    sets::bump_version(&mut tx, &r.access.set.id).await?;
     tx.commit().await?;
     index::remove_items(state, &[item_id.to_string()]);
     Ok(())
@@ -241,10 +273,7 @@ async fn like_state(state: &AppState, viewer: &str, item_id: &str) -> AppResult<
 
 /// Like (idempotent). Allowed on every item the caller can read.
 pub async fn like(state: &AppState, viewer: &CurrentUser, item_id: &str) -> AppResult<LikeState> {
-    let r = authz::readable_item(state, viewer.id(), item_id).await?;
-    if !authz::can_like(viewer.id(), &r.set) {
-        return Err(AppError::not_found());
-    }
+    authz::readable_item(state, viewer.id(), item_id).await?;
     let mut tx = sets::begin(&state.db).await?;
     let n = sqlx::query("INSERT OR IGNORE INTO ratings (user_id, item_id, created_at) VALUES (?, ?, ?)")
         .bind(viewer.id())
@@ -266,10 +295,7 @@ pub async fn like(state: &AppState, viewer: &CurrentUser, item_id: &str) -> AppR
 
 /// Unlike (idempotent).
 pub async fn unlike(state: &AppState, viewer: &CurrentUser, item_id: &str) -> AppResult<LikeState> {
-    let r = authz::readable_item(state, viewer.id(), item_id).await?;
-    if !authz::can_like(viewer.id(), &r.set) {
-        return Err(AppError::not_found());
-    }
+    authz::readable_item(state, viewer.id(), item_id).await?;
     let mut tx = sets::begin(&state.db).await?;
     let n = sqlx::query("DELETE FROM ratings WHERE user_id = ? AND item_id = ?")
         .bind(viewer.id())
@@ -365,11 +391,12 @@ fn decode_cursor(c: &str) -> AppResult<(i64, String)> {
     ))
 }
 
-/// Every item the caller may search (own + public, never others' unlisted),
-/// ordered by (`updated_at`, id), with `updated_at >= updated_since`.
-/// `removed` (first page only, when `updated_since` is given) lists items
-/// the caller could see before and no longer can: deleted items, items of
-/// deleted sets, and other users' items whose set stopped being public.
+/// Every item the caller may search (own, contributed to and public, never
+/// others' unlisted), ordered by (`updated_at`, id), with `updated_at >=
+/// updated_since`. `removed` (first page only, when `updated_since` is
+/// given) lists items the caller could see before and no longer can:
+/// deleted items, items of deleted sets, other users' items whose set
+/// stopped being public, and the items of sets they stopped contributing to.
 pub async fn sync_page(
     state: &AppState,
     viewer: &CurrentUser,
@@ -407,13 +434,17 @@ pub async fn sync_page(
     let items = hydrate::summaries(&state.db, rows).await?;
     let removed = match (updated_since, cursor) {
         (Some(since), None) => {
-            let mut ids: Vec<String> = sqlx::query_scalar(
-                "SELECT DISTINCT item_id FROM item_tombstones WHERE removed_at >= ? AND \
-                 ((owner_id = ? AND audience IN ('owner', 'all')) OR (owner_id != ? AND audience IN ('others', 'all'))) \
-                 AND item_id NOT IN (SELECT i.id FROM items i JOIN sets s ON s.id = i.set_id WHERE (s.owner_id = ? OR s.visibility = 'public'))",
-            )
+            let mut ids: Vec<String> = sqlx::query_scalar(&format!(
+                "SELECT item_id FROM ( \
+                   SELECT item_id FROM item_tombstones WHERE removed_at >= ? AND \
+                   ((owner_id = ? AND audience IN ('owner', 'all')) OR (owner_id != ? AND audience IN ('others', 'all'))) \
+                   UNION SELECT item_id FROM member_tombstones WHERE removed_at >= ? AND user_id = ?) \
+                 WHERE item_id NOT IN (SELECT i.id FROM items i JOIN sets s ON s.id = i.set_id WHERE {SEARCHABLE_SQL})"
+            ))
             .bind(since)
             .bind(viewer.id())
+            .bind(viewer.id())
+            .bind(since)
             .bind(viewer.id())
             .bind(viewer.id())
             .fetch_all(&state.db)
@@ -434,9 +465,16 @@ pub async fn sync_page(
 /// Purge tombstones older than `max_age_secs` (clients that have not synced
 /// for that long should do a full resync).
 pub async fn purge_tombstones(db: &sqlx::SqlitePool, max_age_secs: i64) -> AppResult<u64> {
-    Ok(sqlx::query("DELETE FROM item_tombstones WHERE removed_at < ?")
-        .bind(now() - max_age_secs)
+    let before = now() - max_age_secs;
+    let n = sqlx::query("DELETE FROM item_tombstones WHERE removed_at < ?")
+        .bind(before)
         .execute(db)
         .await?
-        .rows_affected())
+        .rows_affected();
+    let m = sqlx::query("DELETE FROM member_tombstones WHERE removed_at < ?")
+        .bind(before)
+        .execute(db)
+        .await?
+        .rows_affected();
+    Ok(n + m)
 }

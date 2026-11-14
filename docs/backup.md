@@ -24,19 +24,25 @@ tests are in `crates/stickpile-server/tests/integrations_backup.rs`.
       memes/
     bob/
       dogs/
+  proposals/
+    <media id>.png         files of open proposals (they are in no set)
 ```
 
 - **`stickpile.db`**: everything the server knows. That is users and their
   password hashes, API token hashes, TOTP secrets, sessions, invitations,
   sets, items and all metadata, AI suggestions and embeddings, likes, usage
   events, the audit log, the job queue, git-pack bindings with their webhook
-  secrets, and Telegram pack bindings.
+  secrets, Telegram pack bindings, and [contributors and
+  proposals](collaboration.md).
 - **`sets/<username>/<slug>/`**: each set in the
   [set directory format](set-format.md), exactly what
   `GET /api/v1/sets/{id}/export.tar` or `stickpile export` would write:
   `set.toml` (with the AI source markers and unknown keys) and the stored
   originals, named `NNN-<name>.<ext>` in set order, plus `cover.<ext>` for
   a set with a cover image.
+- **`proposals/<media id>.<ext>`**: the stored originals of the stickers
+  and cover images of open proposals, which belong to no set yet. A restore
+  writes them back, so the proposals can still be accepted.
 - **`backup.json`**:
 
   ```json

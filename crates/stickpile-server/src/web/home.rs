@@ -75,7 +75,7 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
             } @else {
                 div.grid.editor-grid {
                     @for (item, set_name) in &recent {
-                        (items::editor_card_in(&ctx, item, Some((&item.set_id, set_name)), false, None, false))
+                        (items::editor_card_in(&ctx, item, Some((&item.set_id, set_name)), items::Rights::default(), None, false))
                     }
                 }
             }

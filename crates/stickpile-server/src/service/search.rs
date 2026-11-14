@@ -115,9 +115,11 @@ pub async fn search(state: &AppState, viewer: &CurrentUser, params: SearchParams
         expansions,
         min_similarity: MIN_SIMILARITY,
     };
+    let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
     let v = Viewer {
         user_id: viewer.id().to_string(),
         liked,
+        member_sets: member_sets.clone(),
     };
     let st = state.clone();
     let q2 = query.clone();
@@ -137,7 +139,12 @@ pub async fn search(state: &AppState, viewer: &CurrentUser, params: SearchParams
             continue;
         };
         // Defence in depth: never return what the caller may not search.
-        if !authz::searchable(viewer.id(), &row.owner_id, row.visibility()) {
+        if !authz::searchable(
+            viewer.id(),
+            &row.owner_id,
+            row.visibility(),
+            member_sets.contains(&row.set_id),
+        ) {
             continue;
         }
         let variants = vars.get(&row.media_id).cloned().unwrap_or_default();

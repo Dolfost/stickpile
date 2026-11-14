@@ -9,18 +9,18 @@ use maud::{html, Markup};
 use serde::Deserialize;
 use stickpile_api::routes as r;
 use stickpile_api::{
-    CreateSet, Item, MediaFormat, ReorderItems, Set, SetDetail, SetSource, UpdateSet, Variant, Visibility,
+    CreateSet, Item, MediaFormat, ReorderItems, Set, SetDetail, SetRole, SetSource, UpdateSet, Variant, Visibility,
 };
 
 use super::components::{
     file_url, fmt_time, opt_time, plural, set_list, set_list_view, set_url, source_badge, view_menu, visibility_badge,
 };
 use super::layout::{self, Nav};
-use super::{integrations, items, problems, upload, Ctx, MultipartCaller};
+use super::{collab, integrations, items, problems, upload, Ctx, MultipartCaller};
 use crate::assets;
 use crate::error::{AppError, AppResult};
-use crate::service::cover;
 use crate::service::sets::{self, SetScope};
+use crate::service::{cover, members};
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -204,6 +204,20 @@ fn set_fields(ctx: &Ctx, f: &SetForm, new: bool) -> Markup {
                     placeholder="512" aria-describedby="set-px-hint";
                 p.hint #set-px-hint { "Longest side; 512 for Telegram stickers. Drives the quality score." }
             }
+        }
+    }
+}
+
+/// What a contributor may edit: name and description.
+fn pack_fields(f: &SetForm) -> Markup {
+    html! {
+        div.field-row {
+            label for="set-name" { "Name" }
+            input #set-name type="text" name="name" value=(f.name) required maxlength="200";
+        }
+        div.field-row {
+            label for="set-desc" { "Description" }
+            textarea #set-desc name="description" rows="3" maxlength="5000" { (f.description) }
         }
     }
 }
@@ -416,6 +430,11 @@ pub async fn page(
     let view = ItemsView::parse(q.view.as_deref());
     let set = &detail.set;
     let is_owner = set.owner_id == ctx.id();
+    let members = if set.role == SetRole::Viewer {
+        Vec::new()
+    } else {
+        members::of_set(&state.db, &set.id).await?
+    };
     let body = html! {
         header.set-head {
             div.section-head {
@@ -432,8 +451,19 @@ pub async fn page(
                     " · Telegram: " a href=(format!("https://t.me/addstickers/{tg}")) rel="noopener noreferrer" target="_blank" { (tg) }
                 }
             }
+            @if set.role == SetRole::Contributor {
+                p.contrib-note {
+                    "You contribute to this pack: " (collab::permissions_summary(&set.permissions)) "."
+                }
+            }
             nav.actions aria-label="Set actions" {
                 @if is_owner { a.button href=(format!("/sets/{}/settings", set.id)) { "Settings" } }
+                @if !is_owner && set.permissions.edit_pack {
+                    a.button href=(format!("/sets/{}/settings", set.id)) { "Edit pack" }
+                }
+                @if collab::can_propose(set) {
+                    a.button href=(format!("/sets/{}/propose", set.id)) { "Propose…" }
+                }
                 a.button href=(r::path(r::SET_EXPORT, &[&set.id])) download { "Export (.tar)" }
                 a.button href=(format!("/popular?scope=set&set={}", set.id)) { "Popular in this set" }
                 @if is_owner { (integrations::set_actions(&state, &ctx, set)) }
@@ -443,13 +473,15 @@ pub async fn page(
                 p.muted { "This set mirrors a git repository and is read-only here. Edit it upstream; changes arrive with the next pull." }
             }
         }
-        @if set.editable {
+        @if set.permissions.add {
             section.uploader aria-labelledby="upload-head" {
                 h2 #upload-head { "Add items" }
                 (upload::upload_form(&ctx, &state, &set.id, set.aspect_ratio))
-                details.import-into {
-                    summary { "Replace from a set directory" }
-                    (upload::import_form(&ctx, Some(&set.id)))
+                @if set.editable {
+                    details.import-into {
+                        summary { "Replace from a set directory" }
+                        (upload::import_form(&ctx, Some(&set.id)))
+                    }
                 }
             }
         }
@@ -481,6 +513,9 @@ pub async fn page(
             }
             (editor_grid(&ctx, &detail, sort, min_likes, false))
         }
+        @if set.role != SetRole::Viewer {
+            div #contributors { (collab::contributors_section(&ctx, set, &members)) }
+        }
         // Duplicates, Telegram blockers, ...: fetched after the page.
         @if is_owner { (problems::set_section(&set.id)) }
     };
@@ -506,14 +541,14 @@ fn head_cover(set: &Set, oob: bool) -> Markup {
 /// "Use as cover" replaces the image.
 pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oob: bool) -> Markup {
     let shown = arrange(&detail.items, sort, min_likes);
-    let movable = detail.set.editable && sort == Sort::Position && min_likes == 0;
+    let movable = detail.set.permissions.edit_pack && sort == Sort::Position && min_likes == 0;
     let last = detail.items.len().saturating_sub(1);
     let hidden = detail.items.len() - shown.len();
     let has_image = detail.set.cover_image.is_some();
     html! {
         div #set-items hx-swap-oob=[oob.then_some("true")] data-cover-image[has_image] {
             @if detail.items.is_empty() {
-                p.muted { "This set is empty." @if detail.set.editable { " Upload files above." } }
+                p.muted { "This set is empty." @if detail.set.permissions.add { " Upload files above." } }
             } @else {
                 @if hidden > 0 {
                     p.muted.small { (plural(hidden as u64, "item is", "items are")) " hidden by the likes filter." }
@@ -525,7 +560,7 @@ pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oo
                         (items::editor_card(
                             ctx,
                             item,
-                            detail.set.editable,
+                            items::Rights::of(ctx, &detail.set, item),
                             movable.then_some((idx == 0, idx >= last)),
                             !has_image && detail.set.cover_item_id.as_deref() == Some(item.id.as_str()),
                         ))
@@ -608,7 +643,7 @@ pub async fn move_item(
     Form(f): Form<MoveForm>,
 ) -> AppResult<Response> {
     let detail = sets::detail(&state, &ctx.user, &id).await?;
-    if !detail.set.editable {
+    if !detail.set.permissions.edit_pack {
         return Err(AppError::forbidden("you cannot change this set"));
     }
     let mut ids: Vec<String> = detail.items.iter().map(|i| i.id.clone()).collect();
@@ -769,7 +804,7 @@ enum Notice<'a> {
 fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Notice) -> Markup {
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
-        h1 { "Set settings" }
+        h1 { @if set.role == SetRole::Owner { "Set settings" } @else { "Edit pack" } }
         @match notice {
             Notice::Saved => (layout::alert("success", "Saved.")),
             Notice::Error(e) => (layout::alert("error", e)),
@@ -783,13 +818,24 @@ fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Noti
                 button.primary type="submit" { "Save" }
             }
             (cover_image_section(ctx, set, items, notice))
+        } @else if set.permissions.edit_pack {
+            // A contributor who may edit the pack: name, description, cover.
+            form.stack.narrow method="post" action=(format!("/sets/{}/settings", set.id)) {
+                (ctx.csrf_input())
+                (pack_fields(f))
+                @if !items.is_empty() || set.cover_image.is_some() { (cover_choice(f, set, items)) }
+                button.primary type="submit" { "Save" }
+            }
+            (cover_image_section(ctx, set, items, notice))
         } @else {
             p { "This set is a read-only git pack: its metadata comes from the repository's set.toml." }
         }
-        section.danger {
-            h2 { "Delete" }
-            p { "Deleting the set removes it and all its items for everyone. This cannot be undone." }
-            a.button.danger href=(format!("/sets/{}/delete", set.id)) { "Delete this set…" }
+        @if set.role == SetRole::Owner {
+            section.danger {
+                h2 { "Delete" }
+                p { "Deleting the set removes it and all its items for everyone. This cannot be undone." }
+                a.button.danger href=(format!("/sets/{}/delete", set.id)) { "Delete this set…" }
+            }
         }
     };
     ctx.page("Set settings", Nav::Sets, body)
@@ -809,13 +855,22 @@ pub struct SavedQuery {
     saved: Option<String>,
 }
 
+/// The owner, or a contributor who may edit the pack (name, description, cover).
+async fn pack_editor(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<SetDetail> {
+    let detail = sets::detail(state, &ctx.user, id).await?;
+    if detail.set.owner_id != ctx.id() && !detail.set.permissions.edit_pack {
+        return Err(AppError::forbidden("only the owner can change this set"));
+    }
+    Ok(detail)
+}
+
 pub async fn settings_page(
     State(state): State<AppState>,
     ctx: Ctx,
     Path(id): Path<String>,
     Query(q): Query<SavedQuery>,
 ) -> AppResult<Markup> {
-    let d = owned(&state, &ctx, &id).await?;
+    let d = pack_editor(&state, &ctx, &id).await?;
     let notice = match q.saved.as_deref() {
         None => Notice::None,
         Some("cover") => Notice::Cover("The new cover image is in place."),
@@ -837,20 +892,31 @@ pub async fn settings_submit(
     Path(id): Path<String>,
     Form(f): Form<SetForm>,
 ) -> AppResult<Response> {
-    let d = owned(&state, &ctx, &id).await?;
+    let d = pack_editor(&state, &ctx, &id).await?;
+    let owner = d.set.role == SetRole::Owner;
     let attempt = async {
-        let req = UpdateSet {
-            slug: Some(f.slug.trim().to_string()),
-            name: Some(f.name.clone()),
-            description: Some(f.description.clone()),
-            visibility: Some(parse_visibility(&f.visibility)?),
-            aspect_ratio: Some(parse_aspect(&f.aspect)?),
-            recommended_px: Some(parse_px(&f.recommended_px)?),
-            cover_item_id: match f.cover.as_deref().map(str::trim) {
-                None | Some(COVER_IMAGE) => None,
-                Some("") => Some(None),
-                Some(item) => Some(Some(item.to_string())),
-            },
+        let cover_item_id = match f.cover.as_deref().map(str::trim) {
+            None | Some(COVER_IMAGE) => None,
+            Some("") => Some(None),
+            Some(item) => Some(Some(item.to_string())),
+        };
+        let req = if owner {
+            UpdateSet {
+                slug: Some(f.slug.trim().to_string()),
+                name: Some(f.name.clone()),
+                description: Some(f.description.clone()),
+                visibility: Some(parse_visibility(&f.visibility)?),
+                aspect_ratio: Some(parse_aspect(&f.aspect)?),
+                recommended_px: Some(parse_px(&f.recommended_px)?),
+                cover_item_id,
+            }
+        } else {
+            UpdateSet {
+                name: Some(f.name.clone()),
+                description: Some(f.description.clone()),
+                cover_item_id,
+                ..Default::default()
+            }
         };
         sets::update(&state, &ctx.user, &id, req).await
     };
@@ -881,7 +947,7 @@ async fn cover_image_done(
     match outcome {
         Ok(_) => Ok(ctx.redirect(&format!("/sets/{id}/settings?saved={done}#cover-image"))),
         Err(e) if e.status.is_client_error() => {
-            let d = owned(state, ctx, id).await?;
+            let d = pack_editor(state, ctx, id).await?;
             let f = SetForm::from_set(&d.set);
             let page = settings_form(ctx, &d.set, &d.items, &f, Notice::CoverError(&form_error(&e)));
             Ok((e.status, page).into_response())
@@ -898,7 +964,7 @@ pub async fn cover_image_upload(
     req: Request,
 ) -> AppResult<Response> {
     let ctx = &caller.ctx;
-    owned(&state, ctx, &id).await?;
+    pack_editor(&state, ctx, &id).await?;
     let outcome = async {
         let mp = caller.multipart(&state, req).await?;
         cover::upload_multipart(&state, &ctx.user, &id, mp).await
@@ -913,7 +979,7 @@ pub async fn cover_image_remove(
     ctx: Ctx,
     Path(id): Path<String>,
 ) -> AppResult<Response> {
-    owned(&state, &ctx, &id).await?;
+    pack_editor(&state, &ctx, &id).await?;
     let outcome = cover::remove(&state, &ctx.user, &id).await;
     cover_image_done(&state, &ctx, &id, outcome, "nocover").await
 }

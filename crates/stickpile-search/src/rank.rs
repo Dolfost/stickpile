@@ -173,7 +173,9 @@ impl<'a> Filters<'a> {
     }
 
     fn visible(&self, doc: &Doc) -> bool {
-        doc.visibility == Visibility::Public || (!self.viewer.user_id.is_empty() && doc.owner_id == self.viewer.user_id)
+        doc.visibility == Visibility::Public
+            || (!self.viewer.user_id.is_empty() && doc.owner_id == self.viewer.user_id)
+            || self.viewer.member_sets.contains(&doc.set_id)
     }
 
     fn pass(&self, s: &Slot) -> bool {

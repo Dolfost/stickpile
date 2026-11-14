@@ -1003,3 +1003,39 @@ button.emoji-btn:focus-visible { outline: 2px solid var(--focus); outline-offset
 }
 
 /* ---- problems (end) ---------------------------------------------------- */
+
+/* ---- collaboration (begin) ---------------------------------------------- */
+.nav-badge {
+  display: inline-block; min-width: 1.3em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px;
+  background: var(--accent); color: var(--accent-ink); font-size: 0.75em; font-weight: 700; text-align: center; line-height: 1.5;
+}
+.proposals { display: flex; flex-direction: column; gap: 0.9rem; max-width: 52rem; }
+.proposal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem 0.85rem; }
+.proposal-head .meta { margin: 0.2rem 0 0; font-size: 0.9rem; }
+.proposal-message { margin: 0.6rem 0; padding: 0.4rem 0.75rem; border-left: 3px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-note { margin: 0.6rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+.proposal-actions > form.inline-row { flex: 1 1 100%; }
+.proposal-actions input[type=text] { flex: 1 1 14rem; }
+.proposed-items { list-style: none; padding: 0; margin: 0.6rem 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.75rem; }
+.proposed-items li { display: flex; gap: 0.5rem; align-items: flex-start; overflow-wrap: anywhere; }
+.proposal .mini-thumb { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 4.5rem; height: 4.5rem;
+  border-radius: 8px; background: var(--checker); overflow: hidden; }
+.proposal .mini-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.proposal .mini-thumb.gone { font-size: 0.75rem; color: var(--muted); background: var(--surface-2); }
+table.diff { border-collapse: collapse; margin: 0.6rem 0 0; width: 100%; max-width: 46rem; }
+table.diff th, table.diff td { text-align: left; vertical-align: top; padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+table.diff thead th { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+table.diff td.before { color: var(--text-2); text-decoration: line-through; text-decoration-color: var(--muted); }
+table.diff td.after { font-weight: 600; }
+.contributors { margin: 1.75rem 0; max-width: 52rem; }
+.member-list { list-style: none; padding: 0; margin: 0.5rem 0 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.member { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.75rem; }
+.member-perms { margin-top: 0.4rem; }
+label.check { display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.75rem; font-weight: normal; }
+fieldset.checks { display: flex; flex-wrap: wrap; gap: 0.35rem 0; }
+.add-member { max-width: 46rem; }
+.contrib-note { margin: 0.4rem 0; color: var(--text-2); }
+.contrib-list { padding-left: 1.2rem; }
+h2 .count { color: var(--muted); font-weight: normal; }
+/* ---- collaboration (end) ------------------------------------------------ */

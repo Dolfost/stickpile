@@ -64,6 +64,8 @@ pub struct Viewer {
     pub user_id: String,
     /// Item ids the viewer liked (for `is:liked`).
     pub liked: HashSet<String>,
+    /// Sets the viewer contributes to: searchable like their own.
+    pub member_sets: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]

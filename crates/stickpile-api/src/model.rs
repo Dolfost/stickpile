@@ -436,10 +436,241 @@ pub struct Set {
     #[serde(default)]
     pub cover_url: Option<String>,
     pub item_count: u64,
-    /// True if the caller may edit (owner, and not a read-only git pack).
+    /// True if the caller may change the set's settings (owner, and not a
+    /// read-only git pack). Contributors check [`Set::permissions`].
     pub editable: bool,
+    /// The caller's relation to the set.
+    #[serde(default)]
+    pub role: SetRole,
+    /// What the caller may do in the set: everything for its owner, the
+    /// granted permissions for a contributor, nothing otherwise. All false
+    /// for a read-only git pack.
+    #[serde(default)]
+    pub permissions: Permissions,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// A user's relation to a set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SetRole {
+    Owner,
+    /// Added by the owner with some [`Permissions`].
+    Contributor,
+    /// Anyone else who can see the set.
+    #[default]
+    Viewer,
+}
+
+/// What a contributor may do in a set (the owner may do all of it and
+/// more: settings, visibility, contributors, deleting the set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct Permissions {
+    /// Add stickers (upload, or move one in from another set).
+    pub add: bool,
+    /// Edit and remove the stickers they added.
+    pub edit_own: bool,
+    /// Edit everyone's stickers (the owner's and other contributors').
+    pub edit_all: bool,
+    /// Remove everyone's stickers.
+    pub remove_all: bool,
+    /// Edit the set's name, description, cover and order.
+    pub edit_pack: bool,
+    /// Accept or decline proposals for the set.
+    pub review: bool,
+}
+
+impl Permissions {
+    pub const ALL: Permissions = Permissions {
+        add: true,
+        edit_own: true,
+        edit_all: true,
+        remove_all: true,
+        edit_pack: true,
+        review: true,
+    };
+    pub const NONE: Permissions = Permissions {
+        add: false,
+        edit_own: false,
+        edit_all: false,
+        remove_all: false,
+        edit_pack: false,
+        review: false,
+    };
+    /// What a newly added contributor gets unless the owner says otherwise.
+    pub const CONTRIBUTOR_DEFAULT: Permissions = Permissions {
+        add: true,
+        edit_own: true,
+        edit_all: false,
+        remove_all: false,
+        edit_pack: false,
+        review: false,
+    };
+    /// Any permission at all.
+    pub fn any(&self) -> bool {
+        *self != Permissions::NONE
+    }
+}
+
+/// A contributor of a set, as its owner and contributors see them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Member {
+    pub username: String,
+    pub display_name: String,
+    pub permissions: Permissions,
+    pub added_at: i64,
+}
+
+/// Body of PUT [`crate::routes::SET_MEMBER`]: add a contributor or change
+/// their permissions.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PutMember {
+    pub permissions: Permissions,
+}
+
+/// What a proposal asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalKind {
+    /// New stickers for the set ([`Proposal::items`]).
+    AddItems,
+    /// Changes to one sticker: name, keywords, emojis, tags, vibe.
+    EditItem,
+    /// Changes to the set: name, description, cover.
+    EditSet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStatus {
+    /// Waiting for the owner or a reviewer.
+    Open,
+    /// Accepted: the change was made.
+    Accepted,
+    Declined,
+    /// Taken back by the proposer.
+    Withdrawn,
+}
+
+/// Field changes of an [`ProposalKind::EditItem`] or
+/// [`ProposalKind::EditSet`] proposal; absent fields stay as they are.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct ProposedChanges {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Set description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emojis: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// `Some(None)` clears the vibe.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "double_option")]
+    pub vibe: Option<Option<String>>,
+    /// An item of the set as its cover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_item_id: Option<String>,
+}
+
+impl ProposedChanges {
+    pub fn is_empty(&self) -> bool {
+        *self == ProposedChanges::default()
+    }
+}
+
+/// A sticker proposed for a set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProposedItem {
+    pub name: String,
+    pub keywords: Vec<String>,
+    pub emojis: Vec<String>,
+    pub tags: Vec<String>,
+    pub vibe: Option<String>,
+    pub kind: MediaKind,
+    pub format: MediaFormat,
+    pub width: u32,
+    pub height: u32,
+    /// URL path of its thumbnail while the proposal is open.
+    pub thumb_url: Option<String>,
+    /// The item it became once accepted.
+    pub item_id: Option<String>,
+}
+
+/// A request to change someone's set, from its sender's or its reviewers' side.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Proposal {
+    pub id: String,
+    pub kind: ProposalKind,
+    pub status: ProposalStatus,
+    pub set: SetSummary,
+    /// The sticker an [`ProposalKind::EditItem`] proposal changes; `None`
+    /// once it was removed.
+    pub item: Option<ItemSummary>,
+    pub proposer_username: String,
+    /// The proposer's note.
+    pub message: String,
+    /// [`ProposalKind::AddItems`]: the stickers, in order.
+    pub items: Vec<ProposedItem>,
+    pub changes: ProposedChanges,
+    /// The values `changes` replace, as they were when it was proposed.
+    pub before: ProposedChanges,
+    /// URL path of a proposed cover image (thumbnail) while it is open.
+    pub cover_image_url: Option<String>,
+    pub reviewer_username: Option<String>,
+    /// The reviewer's note.
+    pub review_note: String,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+    /// The caller may accept or decline it.
+    pub can_decide: bool,
+    /// The caller may withdraw it (its proposer, while open).
+    pub can_withdraw: bool,
+}
+
+/// Body of POST [`crate::routes::ITEM_PROPOSALS`] and
+/// [`crate::routes::SET_PROPOSALS`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewProposal {
+    #[serde(default)]
+    pub message: String,
+    #[serde(flatten)]
+    pub changes: ProposedChanges,
+}
+
+/// Body of POST [`crate::routes::PROPOSAL_ACCEPT`] / [`crate::routes::PROPOSAL_DECLINE`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DecideProposal {
+    #[serde(default)]
+    pub note: String,
+}
+
+/// `box` of GET [`crate::routes::PROPOSALS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalBox {
+    /// Proposals for the sets the caller owns or reviews.
+    #[default]
+    Incoming,
+    /// The caller's own proposals.
+    Outgoing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -654,6 +885,9 @@ pub struct Item {
     pub vibe_source: FieldSource,
     /// User tags (never AI).
     pub tags: Vec<String>,
+    /// Who added it to the set (`None`: a removed account, or an older server).
+    #[serde(default)]
+    pub added_by_username: Option<String>,
     pub media: MediaInfo,
     pub likes: u64,
     pub liked_by_me: bool,

@@ -5,6 +5,7 @@
 pub mod admin;
 pub mod ai;
 pub mod auth;
+pub mod collab;
 pub mod integrations;
 pub mod items;
 pub mod misc;
@@ -52,6 +53,11 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::SET_EXPORT, get(sets::export))
         .route(r::SET_COVER, put(sets::put_cover).delete(sets::delete_cover).layer(big))
         .route(r::SET_COVER_FILE, get(sets::cover_file))
+        .route(r::SET_MEMBERS, get(collab::list_members))
+        .route(r::SET_MEMBER, put(collab::put_member).delete(collab::delete_member))
+        .route(r::SET_PROPOSALS, post(collab::propose_set))
+        .route(r::SET_PROPOSAL_ITEMS, post(collab::propose_items).layer(big))
+        .route(r::SET_PROPOSAL_COVER, post(collab::propose_cover).layer(big))
         .route(r::SET_PULL, post(integrations::pull))
         .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
         .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))
@@ -70,6 +76,14 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::ITEM_LIKE, put(items::like).delete(items::unlike))
         .route(r::ITEM_BETTER, get(items::better))
         .route(r::ITEM_ENRICH, post(items::enrich))
+        .route(r::ITEM_PROPOSALS, post(collab::propose_item))
+        // proposals
+        .route(r::PROPOSALS, get(collab::list))
+        .route(r::PROPOSAL, get(collab::get))
+        .route(r::PROPOSAL_ACCEPT, post(collab::accept))
+        .route(r::PROPOSAL_DECLINE, post(collab::decline))
+        .route(r::PROPOSAL_WITHDRAW, post(collab::withdraw))
+        .route(r::PROPOSAL_THUMB, get(collab::thumb))
         // AI suggestions: one small image, nothing stored.
         .route(
             r::AI_SUGGEST,

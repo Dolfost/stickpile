@@ -123,10 +123,10 @@ pub async fn for_set(state: &AppState, viewer: &CurrentUser, set_id: &str, filte
             .ok_or_else(AppError::not_found)?
     } else {
         let set = authz::readable_set(state, viewer.id(), set_id).await?;
-        if set.owner_id != viewer.id() {
+        if !set.is_owner() {
             return Err(AppError::forbidden("only the owner of a set sees its problems"));
         }
-        set
+        set.set
     };
     let mut out = check(state, viewer, vec![set], filter).await?;
     Ok(out.pop().expect("one set in, one out"))
@@ -203,7 +203,7 @@ pub async fn dismiss(state: &AppState, viewer: &CurrentUser, set_id: &str, probl
         dismissed: true,
         ..Filter::default()
     };
-    let current = check(state, viewer, vec![set.clone()], all).await?;
+    let current = check(state, viewer, vec![set.set.clone()], all).await?;
     let Some(p) = current.iter().flat_map(|s| &s.problems).find(|p| p.id == problem_id) else {
         return Err(AppError::new(
             axum::http::StatusCode::NOT_FOUND,
@@ -283,6 +283,7 @@ async fn check(
         }
     }
     let sigs = signatures(state, needed).await;
+    let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
 
     let mut out = Vec::with_capacity(sets.len());
     for ((set, f), c) in sets.iter().zip(&facts).zip(&cands) {
@@ -290,7 +291,7 @@ async fn check(
         for p in &mut problems {
             p.dismissed = dismissed.contains(&(set.id.clone(), p.id.clone()));
         }
-        let readable = authz::can_read_set(viewer.id(), set);
+        let readable = authz::can_read_set(viewer.id(), set, member_sets.contains(&set.id));
         if !readable {
             for p in &mut problems {
                 for it in &mut p.items {
@@ -313,7 +314,7 @@ async fn check(
             problems,
             counts: c,
             can_dismiss: set.owner_id == viewer.id(),
-            can_edit: authz::can_edit_set(viewer.id(), set),
+            can_edit: set.owner_id == viewer.id() && !set.read_only(),
         });
     }
     Ok(out)

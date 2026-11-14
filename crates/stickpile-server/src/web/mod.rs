@@ -24,6 +24,7 @@
 
 mod admin;
 mod auth;
+mod collab;
 mod components;
 mod home;
 mod integrations;
@@ -78,6 +79,23 @@ pub fn routes() -> Router<AppState> {
         .route("/sets/{id}/upload", post(upload::upload_to_set).layer(big()))
         .route("/sets/{id}/import", post(upload::import_into).layer(big()))
         // problems
+        .route("/collaboration", get(collab::tab))
+        .route("/collaboration/badge", get(collab::badge))
+        .route("/proposals/{id}", get(collab::page))
+        .route("/proposals/{id}/accept", post(collab::accept))
+        .route("/proposals/{id}/decline", post(collab::decline))
+        .route("/proposals/{id}/withdraw", post(collab::withdraw))
+        .route("/sets/{id}/contributors", post(collab::add_member))
+        .route("/sets/{id}/contributors/{username}", post(collab::update_member))
+        .route("/sets/{id}/contributors/{username}/remove", post(collab::remove_member))
+        .route("/sets/{id}/propose", get(collab::propose_page))
+        .route("/sets/{id}/propose/changes", post(collab::propose_changes))
+        .route("/sets/{id}/propose/items", post(collab::propose_items).layer(big()))
+        .route("/sets/{id}/propose/cover", post(collab::propose_cover).layer(big()))
+        .route(
+            "/items/{id}/suggest",
+            get(collab::suggest_page).post(collab::suggest_submit),
+        )
         .route("/problems", get(problems::tab))
         .route("/sets/{id}/problems", get(problems::set_page))
         .route("/sets/{id}/problems/{problem}/dismiss", post(problems::dismiss))

@@ -7,7 +7,9 @@
 //! 2. `<dir>/sets/<username>/<slug>/`: every set of every user in the set
 //!    directory format, exported **from the snapshot** (so directories and
 //!    database agree), with the stored originals from `<data_dir>/media`.
-//! 3. `<dir>/backup.json`: time, versions and counts.
+//! 3. `<dir>/proposals/<media id>.<ext>`: the stored originals of the
+//!    stickers and cover images of open proposals (they are in no set).
+//! 4. `<dir>/backup.json`: time, versions and counts.
 //!
 //! [`restore`] (`stickpile-server restore <dir>`) turns such a backup into
 //! the data directory of a fresh server: it copies the snapshot (newer
@@ -42,6 +44,7 @@ pub const FORMAT: u32 = 1;
 pub const MANIFEST: &str = "backup.json";
 pub const DB_FILE: &str = "stickpile.db";
 pub const SETS_DIR: &str = "sets";
+pub const PROPOSALS_DIR: &str = "proposals";
 
 /// Contents of `backup.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -86,7 +89,7 @@ fn prepare(dir: &Path) -> anyhow::Result<()> {
                 // Ours: an earlier (possibly interrupted) backup.
                 let ours = names
                     .iter()
-                    .all(|n| [DB_FILE, MANIFEST, SETS_DIR].contains(&n.as_str()));
+                    .all(|n| [DB_FILE, MANIFEST, SETS_DIR, PROPOSALS_DIR].contains(&n.as_str()));
                 if !ours {
                     anyhow::bail!(
                         "{} is not empty and is not an earlier backup; refusing to write into it",
@@ -99,9 +102,11 @@ fn prepare(dir: &Path) -> anyhow::Result<()> {
                         std::fs::remove_file(&p).map_err(|e| anyhow::anyhow!("removing {}: {e}", p.display()))?;
                     }
                 }
-                let sets = dir.join(SETS_DIR);
-                if sets.exists() {
-                    std::fs::remove_dir_all(&sets).map_err(|e| anyhow::anyhow!("removing {}: {e}", sets.display()))?;
+                for sub in [SETS_DIR, PROPOSALS_DIR] {
+                    let p = dir.join(sub);
+                    if p.exists() {
+                        std::fs::remove_dir_all(&p).map_err(|e| anyhow::anyhow!("removing {}: {e}", p.display()))?;
+                    }
                 }
             }
         }
@@ -191,12 +196,41 @@ pub async fn run(config: &Config, dir: &Path) -> anyhow::Result<BackupInfo> {
             Err(e) => info.errors.push(format!("{username}/{}: {e}", set.slug)),
         }
     }
+    // 3. Media of open proposals, which no set directory holds.
+    for (media_id, path) in open_proposal_media(&snap).await? {
+        let Some(src) = files::resolve(&media_dir, &path) else {
+            continue;
+        };
+        let ext = path.rsplit('.').next().unwrap_or("bin");
+        let out = dir.join(PROPOSALS_DIR).join(format!("{media_id}.{ext}"));
+        let copied = async {
+            tokio::fs::create_dir_all(dir.join(PROPOSALS_DIR)).await?;
+            tokio::fs::copy(&src, &out).await
+        }
+        .await;
+        match copied {
+            Ok(n) => info.bytes += n,
+            Err(e) => info.errors.push(format!("proposal media {media_id}: {e}")),
+        }
+    }
     snap.close().await;
 
-    // 3. backup.json last: its presence marks a finished backup.
+    // 4. backup.json last: its presence marks a finished backup.
     let json = serde_json::to_vec_pretty(&info)?;
     tokio::fs::write(dir.join(MANIFEST), json).await?;
     Ok(info)
+}
+
+/// (media id, stored original's path) of every media an open proposal needs.
+async fn open_proposal_media(db: &SqlitePool) -> anyhow::Result<Vec<(String, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT v.media_id, v.path FROM media_variants v WHERE v.variant = 'original' AND v.media_id IN ( \
+           SELECT pi.media_id FROM proposal_items pi JOIN proposals p ON p.id = pi.proposal_id WHERE p.status = 'open' \
+           UNION SELECT cover_media_id FROM proposals WHERE status = 'open') \
+         ORDER BY v.media_id",
+    )
+    .fetch_all(db)
+    .await?)
 }
 
 /// Every set with its owner's username, by username and slug.
@@ -356,6 +390,41 @@ pub async fn restore(config: &Config, dir: &Path) -> anyhow::Result<RestoreInfo>
                 }
             }
         }
+    }
+    // Media of open proposals.
+    for (media_id, path) in open_proposal_media(&pool).await? {
+        wanted
+            .entry(media_id.clone())
+            .or_insert_with(|| format!("a proposal's file {media_id}"));
+        if restored.contains(&media_id) {
+            continue;
+        }
+        let ext = path.rsplit('.').next().unwrap_or("bin");
+        let Ok(bytes) = tokio::fs::read(dir.join(PROPOSALS_DIR).join(format!("{media_id}.{ext}"))).await else {
+            continue;
+        };
+        let Some(m) = crate::db::media_by_id(&pool, &media_id).await? else {
+            continue;
+        };
+        if sha256_hex(&bytes) != m.original_sha256 {
+            continue;
+        }
+        let target = Restored {
+            id: &media_id,
+            sha256: &m.sha256,
+            format: m.format(),
+        };
+        info.media += target.write(&pool, &media_dir, &opts, &tools, bytes).await?;
+        // Its other variants are made when the proposal is accepted.
+        sqlx::query("DELETE FROM media_variants WHERE media_id = ? AND variant NOT IN ('original', 'thumb')")
+            .bind(&media_id)
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE media SET variants_done = 0 WHERE id = ?")
+            .bind(&media_id)
+            .execute(&pool)
+            .await?;
+        restored.insert(media_id);
     }
     let mut missing: Vec<String> = wanted
         .into_iter()

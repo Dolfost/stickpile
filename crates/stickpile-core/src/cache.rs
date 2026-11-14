@@ -711,6 +711,7 @@ impl OfflineIndex {
         let viewer = Viewer {
             user_id: self.me.clone().unwrap_or_default(),
             liked: HashSet::new(),
+            member_sets: HashSet::new(),
         };
         let opts = SearchOptions {
             limit,

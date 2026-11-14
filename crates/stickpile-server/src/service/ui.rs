@@ -37,17 +37,20 @@ pub async fn recently_copied(state: &AppState, viewer: &CurrentUser, limit: i64)
     Ok(ids.iter().filter_map(|id| map.remove(id)).collect())
 }
 
-/// The viewer's sets they can add items to (own sets except read-only git
-/// packs), by name.
+/// The sets the viewer can add items to (own sets and sets they may add
+/// stickers to as a contributor, except read-only git packs), by name.
 pub async fn editable_sets(state: &AppState, viewer: &CurrentUser) -> AppResult<Vec<SetSummary>> {
     let rows = sqlx::query_as::<_, SetRow>(&format!(
-        "SELECT {SET_COLUMNS} FROM sets WHERE owner_id = ? ORDER BY name COLLATE NOCASE, id"
+        "SELECT {SET_COLUMNS} FROM sets WHERE owner_id = ? \
+         OR id IN (SELECT set_id FROM set_members WHERE user_id = ? AND can_add = 1) \
+         ORDER BY name COLLATE NOCASE, id"
     ))
+    .bind(viewer.id())
     .bind(viewer.id())
     .fetch_all(&state.db)
     .await?;
     let mut out = Vec::new();
-    for row in rows.iter().filter(|r| authz::can_edit_set(viewer.id(), r)) {
+    for row in rows.iter().filter(|r| !r.read_only()) {
         out.push(sets::summary(&state.db, &row.id).await?);
     }
     Ok(out)
@@ -95,15 +98,15 @@ pub async fn job(state: &AppState, viewer: &CurrentUser, id: &str) -> AppResult<
     Ok(job.to_api())
 }
 
-/// The raw set row for a set the viewer may read (404 otherwise): the item
-/// page needs the edit rule, which summaries do not carry.
-pub async fn readable_set_row(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<SetRow> {
+/// A set the viewer may read with their standing in it (404 otherwise):
+/// the item page needs the edit rules, which summaries do not carry.
+pub async fn readable_set(state: &AppState, viewer: &CurrentUser, set_id: &str) -> AppResult<authz::SetAccess> {
     authz::readable_set(state, viewer.id(), set_id).await
 }
 
-/// Whether the viewer may edit the set (owner, not a read-only git pack).
-pub fn can_edit(viewer: &CurrentUser, set: &SetRow) -> bool {
-    authz::can_edit_set(viewer.id(), set)
+/// An item the viewer may read with their standing in its set (404 otherwise).
+pub async fn readable_item(state: &AppState, viewer: &CurrentUser, item_id: &str) -> AppResult<authz::ItemRef> {
+    authz::readable_item(state, viewer.id(), item_id).await
 }
 
 /// Re-read the viewer's own user row (fresh TOTP state for the settings page).

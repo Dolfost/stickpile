@@ -28,6 +28,9 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
   version" of the same meme.
 - **Telegram import/export**: pull an existing pack into a set, or publish a
   set as a pack.
+- **Collaboration**: add contributors to a pack and choose what each may do,
+  or propose stickers and changes to someone else's pack; both sides follow
+  the requests on a Collaboration tab ([docs](docs/collaboration.md)).
 - **Multi-user**, with Tailscale login without passwords, local accounts with
   TOTP, revocable API tokens, an admin panel and an audit log.
 

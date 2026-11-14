@@ -154,15 +154,15 @@ TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 
 | Method and path | Body -> response | Notes |
 |---|---|---|
-| `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `public` (all users' public sets), `all` (own + others' public). Others' unlisted sets are never listed. Summaries carry the `description` too. |
+| `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `contributing` (sets the caller [contributes to](collaboration.md)), `public` (all users' public sets), `all` (own, contributed and others' public). Others' unlisted sets are never listed. Summaries carry the `description` too. |
 | `POST /api/v1/sets` | `CreateSet` -> `Set` (201) | Slug `[a-z0-9-]`, 1-64 characters, unique per owner (409). |
-| `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, unlisted or public sets. |
-| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | Owner only; read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; either one also removes the set's [cover image](#cover-image) (the cover is what was chosen last), leaving it out keeps it. `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` the item lists show without a cover image (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
+| `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, contributed, unlisted or public sets. `Set.role` and `Set.permissions` say what the caller may do ([collaboration.md](collaboration.md)). |
+| `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | `slug`, `visibility`, `aspect_ratio` and `recommended_px` are the owner's; `name`, `description` and `cover_item_id` need the `edit_pack` permission (the owner has every permission). Read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; either one also removes the set's [cover image](#cover-image) (the cover is what was chosen last), leaving it out keeps it. `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` the item lists show without a cover image (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
 | `DELETE /api/v1/sets/{id}` | -> 204 | Owner only (also for read-only git packs). Audited. |
-| `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `item_ids` must list every item exactly once (else 400). |
-| `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below. |
+| `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `edit_pack` permission. `item_ids` must list every item exactly once (else 400). |
+| `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below; the `add` permission. |
 | `GET /api/v1/sets/{id}/export.tar` | -> `application/x-tar` | Anyone who can read the set. |
-| `PUT /api/v1/sets/{id}/cover` | multipart, one file part -> `Set` | The set's own [cover image](#cover-image); owner only, not read-only git packs. |
+| `PUT /api/v1/sets/{id}/cover` | multipart, one file part -> `Set` | The set's own [cover image](#cover-image); `edit_pack` permission, not read-only git packs. |
 | `DELETE /api/v1/sets/{id}/cover` | -> `Set` | Removes the cover image (idempotent). |
 | `GET /api/v1/sets/{id}/cover/{variant}` | -> image bytes | `original` or `thumb` of the cover image; anyone who can read the set. |
 | `POST /api/v1/sets/import?into=` | multipart -> `ImportReport` | See below. |
@@ -285,15 +285,15 @@ picture uploaded for the set that is not one of its items: it is never in
 
 | Method and path | Body -> response | Notes |
 |---|---|---|
-| `GET /api/v1/items?updated_since=&cursor=&limit=` | -> `ItemPage` | Own and public items, never others' unlisted. See [Pagination](#pagination). |
+| `GET /api/v1/items?updated_since=&cursor=&limit=` | -> `ItemPage` | Own, contributed and public items, never others' unlisted. See [Pagination](#pagination). |
 | `GET /api/v1/items/{id}` | -> `ItemDetail` | Quality report, near-duplicates from the caller's library, apps that cannot take any current variant. |
-| `PATCH /api/v1/items/{id}` | `UpdateItem` -> `Item` | Owner only. Edited fields become `user`-sourced; `confirm` (`name`, `keywords`, `emojis`, `vibe`) marks AI values as confirmed without changing them; `set_id` moves the item to the end of another set the caller can edit (409 if that set has the same media). |
-| `DELETE /api/v1/items/{id}` | -> 204 | Owner only. |
+| `PATCH /api/v1/items/{id}` | `UpdateItem` -> `Item` | The owner, or a contributor who may edit the item (`edit_all`, or `edit_own` for items they added). Edited fields become `user`-sourced; `confirm` (`name`, `keywords`, `emojis`, `vibe`) marks AI values as confirmed without changing them; `set_id` moves the item to the end of another set: it needs the right to remove the item here and the `add` permission there (409 if that set has the same media). `Item.added_by_username` is who added it. |
+| `DELETE /api/v1/items/{id}` | -> 204 | The owner, or a contributor who may remove the item (`remove_all`, or `edit_own` for items they added). |
 | `GET /api/v1/items/{id}/file/{variant}` | -> bytes | See below. |
 | `PUT /api/v1/items/{id}/like` | -> `LikeState` | Idempotent; allowed on every item the caller can read. |
 | `DELETE /api/v1/items/{id}/like` | -> `LikeState` | Idempotent. |
 | `GET /api/v1/items/{id}/better` | -> `[ItemSummary]` | Searchable items (own + public) with a pHash within the near-duplicate distance and a higher quality score, best first. |
-| `POST /api/v1/items/{id}/enrich` | -> `Job` | Owner only; re-runs AI enrichment. 503 `unavailable` when AI is off, `ai_loading` (with `Retry-After`) while the model loads. |
+| `POST /api/v1/items/{id}/enrich` | -> `Job` | Anyone who may edit the item; re-runs AI enrichment. 503 `unavailable` when AI is off, `ai_loading` (with `Retry-After`) while the model loads. |
 
 ### AI suggestions
 
@@ -417,6 +417,32 @@ endpoint, with the owner. For other users' private sets the items are
 `description` and no `cover_item_id`, and the admin still cannot read the
 set or its files. `can_dismiss` and `can_edit` are false on other users'
 sets.
+
+### Collaboration
+
+Contributors and proposals, described in [collaboration.md](collaboration.md).
+`Permissions` has the booleans `add`, `edit_own`, `edit_all`, `remove_all`,
+`edit_pack` and `review`.
+
+| Method and path | Body -> response | Notes |
+|---|---|---|
+| `GET /api/v1/sets/{id}/members` | -> `[Member]` | The set's contributors with their permissions; the owner and contributors (403 for others, 404 if the set cannot be read). |
+| `PUT /api/v1/sets/{id}/members/{username}` | `PutMember` -> `Member` | Owner only: add a contributor or change their permissions. 400 for an unknown or disabled user, or the owner. A new contributor's client cache picks the set up on its next sync. |
+| `DELETE /api/v1/sets/{id}/members/{username}` | -> 204 | The owner removes a contributor, or a contributor leaves. Their cache drops the set's items on its next sync. |
+| `POST /api/v1/sets/{id}/proposals` | `NewProposal` -> `Proposal` (201) | Propose a new `name`, `description` or `cover_item_id` (an item of the set) for someone else's set, with a `message`. Values equal to the current ones are left out; nothing left is a 400. |
+| `POST /api/v1/sets/{id}/proposals/items` | multipart -> `Proposal` (201) | Propose new stickers: file parts, an optional `meta` JSON part as for uploads, an optional `message` part. At most 50 files; rate-limited like uploads. |
+| `POST /api/v1/sets/{id}/proposals/cover` | multipart -> `Proposal` (201) | Propose a cover image: one still image part, an optional `message`. |
+| `POST /api/v1/items/{id}/proposals` | `NewProposal` -> `Proposal` (201) | Propose a new `name`, `keywords`, `emojis`, `tags` or `vibe` for someone else's sticker. 400 if the caller may edit it directly. |
+| `GET /api/v1/proposals?box=&status=&limit=` | -> `[Proposal]` | `incoming` (default: for the sets the caller owns or reviews) or `outgoing` (the caller's own), newest first; `status` is `open`, `accepted`, `declined` or `withdrawn`. |
+| `GET /api/v1/proposals/{id}` | -> `Proposal` | Its proposer, the set's owner and reviewers; 404 for everyone else. |
+| `POST /api/v1/proposals/{id}/accept` | `DecideProposal` -> `Proposal` | Owner or reviewer: makes the change. 409 if the proposal is not open, or the change cannot be made any more (it then stays open). |
+| `POST /api/v1/proposals/{id}/decline` | `DecideProposal` -> `Proposal` | Owner or reviewer, with an optional `note`. |
+| `POST /api/v1/proposals/{id}/withdraw` | -> `Proposal` | Its proposer, while open. |
+| `GET /api/v1/proposals/{id}/thumb/{n}` | -> image | The thumbnail of proposed sticker `n` (0-based) or, with `cover`, of a proposed cover image, while the proposal is open. |
+
+Who may propose: anyone who can read the set and is not its owner; not
+for read-only git packs. 404 for sets the caller cannot read, 409 beyond 20
+open proposals per user and set.
 
 ### Admin
 

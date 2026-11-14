@@ -265,6 +265,8 @@ impl MockState {
             cover_url: None,
             item_count: 0,
             editable: true,
+            role: stickpile_api::SetRole::Owner,
+            permissions: stickpile_api::Permissions::ALL,
             created_at: now,
             updated_at: now,
         };
@@ -326,6 +328,7 @@ impl MockState {
             vibe: None,
             vibe_source: FieldSource::User,
             tags: Vec::new(),
+            added_by_username: None,
             media,
             likes: 0,
             liked_by_me: false,
@@ -794,6 +797,10 @@ async fn get_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<Strin
     }
     let mut set = st.set(&id).expect("set").clone();
     set.editable = set.owner_id == u.id;
+    if !set.editable {
+        set.role = stickpile_api::SetRole::Viewer;
+        set.permissions = stickpile_api::Permissions::NONE;
+    }
     let mut items: Vec<Item> = st
         .items
         .iter()
