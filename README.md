@@ -50,9 +50,10 @@ v3](https://www.unicode.org/license.txt); see
 | `stickpile-server` | REST API (OpenAPI at `/api/v1/openapi.json`) and web UI |
 | `stickpile` | command-line client |
 | `stickpile-desktop` | Linux quick-search popup (GTK4/libadwaita), resident, bound to a global shortcut |
+| `Stickpile.app` | the same popup for macOS, a menu bar app with its own shortcut ([docs/macos.md](docs/macos.md)) |
 
-Android, a stickpile panel for Unexpected Keyboard, and macOS come after v1
-(see [docs/plan.md](docs/plan.md)).
+Android and a stickpile panel for Unexpected Keyboard come after v1 (see
+[docs/plan.md](docs/plan.md)).
 
 ## Run the server
 
@@ -182,6 +183,15 @@ hl.bind('SUPER + semicolon', hl.dsp.exec_cmd('stickpile-desktop'))
 The client config (`~/.config/stickpile/config.toml`, or
 `programs.stickpile.settings` in home-manager) controls the server URL, cache
 size, focus rules and which clipboard formats each app gets.
+
+**macOS** ([docs/macos.md](docs/macos.md)): install the menu bar app with
+Homebrew, set the server on its Settings tab and press Option+Space in a chat
+app. Cmd stands in for Ctrl.
+
+```
+brew tap dolfost/stickpile https://github.com/Dolfost/stickpile
+brew install --cask stickpile
+```
 
 ## Search syntax
 

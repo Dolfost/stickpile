@@ -419,3 +419,37 @@ the message field, not while editing a message:
   folder, a remote URL or an unreadable or too large file goes the usual
   way. Chat restrictions and slow mode still apply: their usual error
   shows instead of sending.
+
+## 6. macOS
+
+The macOS app ([macos.md](macos.md)) uses the same `[clipboard]` lists and
+writes them as one pasteboard item, each MIME type as a pasteboard type
+(table in [macos.md](macos.md#what-goes-on-the-pasteboard)). What the
+receiving apps do with that comes from their source code (Qt 6 `qtbase`,
+`tdesktop` and Chromium, read 2026-11-14) and is still to be confirmed by
+hand:
+
+- **Qt 6** (Telegram Desktop, AyuGram) reads file URLs from `public.url` or
+  `public.file-url`, image data only from `public.tiff` (macOS adds a TIFF
+  copy of PNG data, so a PNG is seen as an image), and any other MIME type
+  from `com.trolltech.anymime.<type with / as -->`, which is how the paste
+  hints are written.
+- **Telegram Desktop** tries the URLs first and sends the files when they
+  are all local and readable; image data is the fallback and is always a
+  flat still. GIFs therefore keep their animation through the file, and a
+  WebP becomes a sticker only through the file with "send as file", as on
+  Linux.
+- **Discord** (Chromium) offers only the files when the pasteboard has a
+  `public.file-url`, and uploads them unchanged (GIFs stay animated); image
+  data alone would be a static PNG.
+
+So the Linux defaults fit: the file reference decides, and the image data is
+a fallback for apps that do not read files. Checks to make by hand (Cmd+V in
+the message box after a copy from the popup):
+
+| | Telegram Desktop | Discord |
+|---|---|---|
+| still (PNG) | photo | image upload |
+| animation (GIF) | animation | animated upload |
+| video (MP4) | video | video upload |
+| sticker (Shift+Enter, WebP) | send box; sticker with "send as file" | image upload |

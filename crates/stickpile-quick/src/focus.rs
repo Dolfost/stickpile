@@ -12,6 +12,9 @@
 //!   `WM_CLASS` and `_NET_WM_NAME`. Only used in X11 sessions: under XWayland it
 //!   would only see X clients.
 //!
+//! * **macOS**: the app reports the frontmost application itself (its
+//!   bundle id as the class, its name as the title); nothing here asks.
+//!
 //! Parsers are pure functions over the captured replies; the socket I/O is a
 //! few small functions with a short timeout so a hung compositor cannot block
 //! the popup.
@@ -33,6 +36,8 @@ pub enum FocusBackend {
     Hyprland,
     Sway,
     X11,
+    /// Given by the macOS app (`NSWorkspace.frontmostApplication`).
+    MacOs,
 }
 
 impl FocusBackend {
@@ -41,6 +46,7 @@ impl FocusBackend {
             FocusBackend::Hyprland => "hyprland",
             FocusBackend::Sway => "sway",
             FocusBackend::X11 => "x11",
+            FocusBackend::MacOs => "macos",
         }
     }
 }
@@ -158,6 +164,8 @@ pub fn detect_with(env: &FocusEnv) -> Result<Option<WindowInfo>, FocusError> {
             }
             FocusBackend::Sway => sway_focused_window(env.swaysock.as_deref().expect("listed only with SWAYSOCK")),
             FocusBackend::X11 => x11_active_window(env.display.as_deref()),
+            // Never listed by `backends()`: the macOS app asks the system itself.
+            FocusBackend::MacOs => Ok(None),
         };
         match result {
             Ok(w) => return Ok(w),

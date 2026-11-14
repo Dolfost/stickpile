@@ -1,6 +1,6 @@
 [package]
 name = "stickpile-desktop"
-description = "stickpile Linux desktop client (GTK4 + libadwaita)"
+description = "stickpile Linux desktop client (GTK4 + libadwaita), and the display-free parts the macOS app shares"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,9 +14,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "stickpile-desktop"
 path = "src/main.rs"
+required-features = ["gtk"]
 
 [features]
-default = ["x11"]
+default = ["gtk", "x11"]
+# The GTK4 popup, the `stickpile-desktop` program. Without it the crate is
+# only its display-free modules, which the macOS app shares.
+gtk = ["dep:gtk", "dep:adw"]
 # Focused-window detection in X11 sessions.
 x11 = ["stickpile-quick/x11"]
 
@@ -25,8 +29,8 @@ stickpile-api.workspace = true
 stickpile-core.workspace = true
 stickpile-quick.workspace = true
 stickpile-i18n.workspace = true
-gtk.workspace = true
-adw.workspace = true
+gtk = { workspace = true, optional = true }
+adw = { workspace = true, optional = true }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true

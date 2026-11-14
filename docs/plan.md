@@ -20,7 +20,7 @@ behind them.
 | Desktop toolkit | gtk4-rs + libadwaita directly. The popup's state machine lives in `stickpile-quick` with no toolkit dependency. | The state machine is testable without a display and reusable by the Android and macOS shells. Relm4 would add a macro layer without making anything easier to test. |
 | Global shortcut | The resident GApplication is unique on D-Bus, so running `stickpile-desktop` again toggles the popup. Bind it in the compositor (Hyprland `bind = SUPER, semicolon, exec, stickpile-desktop`). | This works on every compositor. The XDG GlobalShortcuts portal is optional and post-v1. |
 | Target detection | Read the focused window (Hyprland IPC, Sway IPC, X11 `_NET_ACTIVE_WINDOW`) when the popup opens, and map its class with configurable rules (AyuGram → Telegram, Vesktop → Discord). | This drives the variant choice and the "cannot be sent to this app" warning. |
-| macOS (post-v1) | **SwiftUI shell over `stickpile-core` via UniFFI** | A good quick-search popup on macOS needs a non-activating `NSPanel`, an `NSStatusItem`, `NSPasteboard` writes of several representations, and Carbon or `MASShortcut` hotkeys. These are all one-liners in Swift and awkward or impossible in iced, egui or slint, none of which look native. Tauri needs a JavaScript toolchain. |
+| macOS (post-v1) | **Swift shell over the shared Rust popup via UniFFI** (built: `stickpile-mac`, [macos.md](macos.md)) | A good quick-search popup on macOS needs a non-activating `NSPanel`, an `NSStatusItem`, `NSPasteboard` writes of several representations, and Carbon or `MASShortcut` hotkeys. These are all one-liners in Swift and awkward or impossible in iced, egui or slint, none of which look native. Tauri needs a JavaScript toolchain. |
 | Git packs | libgit2 (`git2`) | gitoxide cannot push yet. |
 
 ## Crates
@@ -87,7 +87,7 @@ settings stay the owner's ([collaboration.md](collaboration.md)).
 | 4 | Clients (**v1**) | `stickpile-core`, `stickpile` CLI, GTK desktop | core cache/queue/sync tests, quick-model tests, CLI e2e against a real server |
 | 5 | Packaging | flake packages, NixOS + home-manager modules with TOML mirror check, container image, quadlets + aorus snippet, CI + release workflows | `nix flake check` green |
 | 6 | post-v1 | Android (Kotlin + UniFFI), Unexpected Keyboard fork (separate repo), F-Droid metadata | — |
-| 7 | post-v1 | macOS SwiftUI client | — |
+| 7 | post-v1 | macOS client: `stickpile-mac` (the GTK shell's driver without GTK, behind UniFFI) and a Swift menu bar app ([macos.md](macos.md)) | app builds in CI and the release; pasting confirmed by hand ([clipboard.md](clipboard.md#6-macos)) |
 
 ## Open questions and risks
 

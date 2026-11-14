@@ -1,0 +1,39 @@
+[package]
+name = "stickpile-mac"
+description = "stickpile macOS app: the popup's driver in Rust, behind a UniFFI interface for the Swift app in app/"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "stickpile_mac"
+crate-type = ["lib", "staticlib"]
+
+# Generates the Swift side of the interface (uniffi-bindgen-swift): see app/build.sh.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+stickpile-api.workspace = true
+stickpile-core.workspace = true
+stickpile-quick.workspace = true
+stickpile-i18n.workspace = true
+stickpile-desktop = { path = "../stickpile-desktop", default-features = false }
+uniffi = "0.32"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+toml.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+image.workspace = true

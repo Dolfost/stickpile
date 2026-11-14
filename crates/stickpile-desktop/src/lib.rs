@@ -12,9 +12,11 @@
 //! * [`demo`] — `--demo DIR` backend serving a directory of files
 //! * [`pages`]: texts and decisions of the Me and Settings tabs
 //!
-//! GTK modules: [`app`] (resident application) and [`ui`] (window, tabs,
-//! grids, pages, drag source).
+//! GTK modules, with the `gtk` feature (on by default): [`app`] (resident
+//! application) and [`ui`] (window, tabs, grids, pages, drag source). The
+//! macOS app (`stickpile-mac`) uses the crate without it.
 
+#[cfg(feature = "gtk")]
 pub mod app;
 pub mod backend;
 pub mod cli;
@@ -25,4 +27,5 @@ pub mod offers;
 pub mod pages;
 pub mod sync;
 pub mod thumbs;
+#[cfg(feature = "gtk")]
 pub mod ui;

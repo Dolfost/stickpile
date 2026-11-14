@@ -2,12 +2,15 @@
 #
 #   linux      server, CLI, desktop for x86_64 and aarch64, built by Nix and
 #              repackaged to run outside Nix (see "Linux tarballs" below)
-#   macos      CLI + server for arm64 and x86_64, built by cargo
+#   macos      CLI + server for arm64 and x86_64, built by cargo, and the
+#              Stickpile app (crates/stickpile-mac, ad-hoc signed)
 #   windows    CLI, built by cargo (best effort)
 #   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
 #              built by Nix and pushed with skopeo
 #   release    GitHub release with every artifact and SHA256SUMS
 #   stable     moves the `stable` branch to the release, for flake inputs
+#   homebrew   points the Homebrew cask (Casks/stickpile.rb) at the release's
+#              macOS zips and commits it to main
 #
 # Linux tarballs: Nix binaries point at /nix/store for their loader and
 # libraries. The release job rewrites the ELF interpreter to the distribution's
@@ -131,6 +134,13 @@ jobs:
       # `brew install onnxruntime` to enable AI.
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p stickpile-cli -p stickpile-server
+      # The menu bar app: the Rust driver for this target, then the Swift app
+      # with the runner's Xcode. Ad-hoc signed, not notarized (docs/macos.md).
+      - name: Build Stickpile.app
+        env:
+          TARGET: ${{ matrix.target }}
+          OUT: app-dist
+        run: crates/stickpile-mac/app/build.sh
       - name: Package
         run: |
           name="stickpile-${TAG}-${{ matrix.arch }}-macos"
@@ -139,6 +149,7 @@ jobs:
           cp crates/stickpile-server/config.example.toml LICENSE README.md "$name/"
           printf 'Runtime: brew install ffmpeg (videos, animations), brew install onnxruntime (AI).\n' > "$name/README.txt"
           tar -czf "dist/$name.tar.gz" "$name"
+          cp app-dist/Stickpile.zip "dist/Stickpile-${TAG}-${{ matrix.arch }}-macos.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
@@ -284,3 +295,40 @@ jobs:
             exit 0
           fi
           git push origin "$commit:refs/heads/stable"
+
+  # This repository is a Homebrew tap (Casks/stickpile.rb, docs/macos.md):
+  # point the cask at the release's macOS zips and commit it to main. Fails,
+  # without touching the cask, when either zip is missing (the macOS builds
+  # are best effort).
+  homebrew:
+    name: Homebrew cask
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Update the cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${TAG#v}
+          for arch in arm64 x86_64; do
+            gh release download "$TAG" --repo "${{ github.repository }}" \
+              --pattern "Stickpile-$TAG-$arch-macos.zip" --dir zips
+          done
+          arm=$(sha256sum "zips/Stickpile-$TAG-arm64-macos.zip" | cut -d' ' -f1)
+          intel=$(sha256sum "zips/Stickpile-$TAG-x86_64-macos.zip" | cut -d' ' -f1)
+          sed -i -E \
+            -e "s/^  version \".*\"/  version \"$version\"/" \
+            -e "s/(arm: +)\"[0-9a-f]{64}\"/\\1\"$arm\"/" \
+            -e "s/(intel: +)\"[0-9a-f]{64}\"/\\1\"$intel\"/" \
+            Casks/stickpile.rb
+          git diff
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Point the Homebrew cask at $TAG"
+          git push origin HEAD:main

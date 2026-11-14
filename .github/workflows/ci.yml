@@ -6,6 +6,9 @@
 #                home-manager module checks and (x86_64) the NixOS VM test.
 #   coverage     cargo llvm-cov over the workspace in the dev shell; lcov
 #                artifact + summary on the run page.
+#   macos-app    builds the macOS app (crates/stickpile-mac: the Rust driver,
+#                then the Swift app) on a macOS runner, so a change to either
+#                side that breaks the other is caught here.
 #
 # Nix builds are cached in the GitHub Actions cache (Magic Nix Cache). Only
 # paths built here are stored; everything from cache.nixos.org is not. GitHub
@@ -98,3 +101,17 @@ jobs:
           path: |
             lcov.info
             coverage.txt
+
+  macos-app:
+    name: macOS app
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Stickpile.app
+        run: crates/stickpile-mac/app/build.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stickpile-macos-app
+          path: dist/Stickpile.zip

@@ -211,3 +211,19 @@ The server does not know this device by its tailnet identity; sign in with a use
 {n} MB	{n} МБ
 {n} GB	{n} ГБ
 {n} TB	{n} ТБ
+
+# The macOS app (crates/stickpile-mac/app)
+About stickpile	Про stickpile
+Open stickpile	Відкрити stickpile
+Quit stickpile	Вийти зі stickpile
+Launch at login	Запускати під час входу
+Shortcut	Клавіша виклику
+{shortcut} is taken by another app	{shortcut} уже зайнято іншою програмою
+Target app: click for the next one	Цільова програма: клацніть, щоб вибрати наступну
+Could not write to the pasteboard	Не вдалося записати в буфер обміну
+The pasteboard refused {type}	Буфер обміну не прийняв {type}
+Undo	Відмінити
+Redo	Повторити
+Cut	Вирізати
+Paste	Вставити
+Select All	Вибрати все

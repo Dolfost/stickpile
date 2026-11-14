@@ -239,14 +239,53 @@ fn ukrainian_covers_the_scripts() {
     );
 }
 
-/// Every text the desktop client and its popup model mark has a Ukrainian one.
+/// Every text the desktop clients (GTK, macOS) and their popup model mark
+/// has a Ukrainian one.
 #[test]
 fn ukrainian_covers_the_desktop_client() {
     let mut missing = untranslated(Lang::Uk, "stickpile-quick");
     missing.extend(untranslated(Lang::Uk, "stickpile-desktop"));
+    missing.extend(untranslated(Lang::Uk, "stickpile-mac"));
     assert!(
         missing.is_empty(),
         "{} texts without Ukrainian:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
+}
+
+/// Every `tr("...")` / `trf("...")` label of the macOS app's Swift code has a
+/// Ukrainian one (the generated bindings in `app/build` are left out).
+#[test]
+fn ukrainian_covers_the_mac_app() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stickpile-mac/app");
+    let mut missing = Vec::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if !path.ends_with("build") {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("swift") {
+                continue;
+            }
+            for key in js_keys(&std::fs::read_to_string(&path).unwrap()) {
+                if lookup(Lang::Uk, &key).is_none() {
+                    missing.push(format!("{}: {key:?}", path.display()));
+                }
+            }
+        }
+    }
+    missing.sort();
+    missing.dedup();
+    assert!(
+        missing.is_empty(),
+        "{} macOS app texts without Ukrainian:\n{}",
         missing.len(),
         missing.join("\n")
     );
