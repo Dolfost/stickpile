@@ -152,8 +152,11 @@ jobs:
         run: |
           set -o pipefail
           crates/stickpile-mac/app/build.sh 2>&1 | tee build.log || {
-            # The end of the log as one annotation (%0A is a line break).
-            printf '::error title=build.sh::%s\n' "$(tail -n 80 build.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            # The log from the Swift step on (else its end) as one annotation,
+            # without colours (%0A is a line break).
+            if grep -q '^swiftc:' build.log; then sed -n '/^swiftc:/,$p' build.log; else cat build.log; fi |
+              tail -n 60 | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}' >annotation.txt
+            printf '::error title=build.sh::%s\n' "$(cat annotation.txt)"
             exit 1
           }
       - name: Package

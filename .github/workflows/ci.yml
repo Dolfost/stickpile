@@ -21,10 +21,9 @@ on:
   pull_request:
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  # Superseded pull request runs are cancelled; every commit on main is checked.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# Concurrency is per job: superseded pull request jobs are cancelled, every
+# commit on main is checked, and the macOS app job does not wait for the Nix
+# jobs of an earlier commit.
 
 permissions:
   contents: read
@@ -40,6 +39,9 @@ jobs:
             system: x86_64-linux
           - runner: ubuntu-24.04-arm
             system: aarch64-linux
+    concurrency:
+      group: ci-flake-check-${{ matrix.system }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
@@ -69,6 +71,9 @@ jobs:
 
   coverage:
     name: coverage
+    concurrency:
+      group: ci-coverage-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -104,6 +109,9 @@ jobs:
 
   macos-app:
     name: macOS app
+    concurrency:
+      group: ci-macos-app-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -122,8 +130,11 @@ jobs:
         run: |
           set -o pipefail
           crates/stickpile-mac/app/build.sh 2>&1 | tee build.log || {
-            # The end of the log as one annotation (%0A is a line break).
-            printf '::error title=build.sh::%s\n' "$(tail -n 80 build.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            # The log from the Swift step on (else its end) as one annotation,
+            # without colours (%0A is a line break).
+            if grep -q '^swiftc:' build.log; then sed -n '/^swiftc:/,$p' build.log; else cat build.log; fi |
+              tail -n 60 | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}' >annotation.txt
+            printf '::error title=build.sh::%s\n' "$(cat annotation.txt)"
             exit 1
           }
       - uses: actions/upload-artifact@v7
