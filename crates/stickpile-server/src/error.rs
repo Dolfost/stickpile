@@ -103,7 +103,10 @@ impl std::error::Error for AppError {}
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let mut resp = (self.status, Json(self.to_api())).into_response();
+        // In the request's language when the catalog has the message.
+        let mut api = self.to_api();
+        api.message = crate::i18n::t_dyn(&api.message);
+        let mut resp = (self.status, Json(api)).into_response();
         if let Some(secs) = self.retry_after {
             if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
                 resp.headers_mut().insert(header::RETRY_AFTER, v);

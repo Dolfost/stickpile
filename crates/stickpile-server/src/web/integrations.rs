@@ -18,6 +18,7 @@ use super::components::{fmt_time, set_url};
 use super::layout::{self, Nav};
 use super::{safe_next, Ctx};
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, t_dyn, tf};
 use crate::service::{gitpack, sets, telegram, ui};
 use crate::state::AppState;
 
@@ -36,8 +37,8 @@ pub fn routes() -> Router<AppState> {
 /// Extra buttons on the sets list.
 pub fn set_list_links(state: &AppState) -> Markup {
     html! {
-        @if gitpack::enabled(state) { a.button href="/gitpacks/new" { "Add a git pack" } }
-        @if telegram::enabled(state) { a.button href="/telegram/import" { "Import a Telegram pack" } }
+        @if gitpack::enabled(state) { a.button href="/gitpacks/new" { (t("Add a git pack")) } }
+        @if telegram::enabled(state) { a.button href="/telegram/import" { (t("Import a Telegram pack")) } }
     }
 }
 
@@ -48,10 +49,10 @@ pub fn upload_page_links(state: &AppState) -> Markup {
     html! {
         @if git || tg {
             section aria-labelledby="up-more" {
-                h2 #up-more { "More sources" }
+                h2 #up-more { (t("More sources")) }
                 ul.link-list {
-                    @if git { li { a href="/gitpacks/new" { "Subscribe to a git repository as a set" } } }
-                    @if tg { li { a href="/telegram/import" { "Import a Telegram sticker pack" } } }
+                    @if git { li { a href="/gitpacks/new" { (t("Subscribe to a git repository as a set")) } } }
+                    @if tg { li { a href="/telegram/import" { (t("Import a Telegram sticker pack")) } } }
                 }
             }
         }
@@ -66,12 +67,12 @@ pub fn set_actions(state: &AppState, ctx: &Ctx, set: &Set) -> Markup {
         @if set.git.is_some() && gitpack::enabled(state) {
             form.inline method="post" action=(pull_url) hx-post=(pull_url) hx-target="#set-job" hx-swap="innerHTML" {
                 (ctx.csrf_input())
-                button type="submit" { "Pull now" }
+                button type="submit" { (t("Pull now")) }
             }
         }
         @if telegram::enabled(state) && set.item_count > 0 {
             a.button href=(format!("/sets/{}/telegram", set.id)) {
-                @if set.telegram_pack.is_some() { "Update Telegram pack" } @else { "Publish to Telegram" }
+                @if set.telegram_pack.is_some() { (t("Update Telegram pack")) } @else { (t("Publish to Telegram")) }
             }
         }
         div #set-job aria-live="polite" {}
@@ -84,12 +85,23 @@ pub fn set_actions(state: &AppState, ctx: &Ctx, set: &Set) -> Markup {
 
 fn kind_label(k: JobKind) -> &'static str {
     match k {
-        JobKind::Variants => "Generating variants",
-        JobKind::Enrich => "AI suggestions",
-        JobKind::GitPull => "Git pull",
-        JobKind::GitPush => "Git push",
-        JobKind::TelegramImport => "Telegram import",
-        JobKind::TelegramExport => "Telegram export",
+        JobKind::Variants => t("Generating variants"),
+        JobKind::Enrich => t("AI suggestions"),
+        JobKind::GitPull => t("Git pull"),
+        JobKind::GitPush => t("Git push"),
+        JobKind::TelegramImport => t("Telegram import"),
+        JobKind::TelegramExport => t("Telegram export"),
+    }
+}
+
+/// [`status_label`] in the request's language (the label itself is a CSS
+/// class too).
+fn status_text(s: JobStatus) -> &'static str {
+    match s {
+        JobStatus::Queued => t("queued"),
+        JobStatus::Running => t("running"),
+        JobStatus::Done => t("done"),
+        JobStatus::Failed => t("failed"),
     }
 }
 
@@ -133,18 +145,18 @@ pub fn job_fragment(job: &Job, back: Option<&str>) -> Markup {
     html! {
         div class=(format!("job job-{}", status_label(job.status))) id=(format!("job-{}", job.id)) role="status"
             hx-get=[running.then_some(poll.as_str())] hx-trigger=[running.then_some("every 2s")] hx-swap="outerHTML" {
-            strong { (kind_label(job.kind)) } ": " (status_label(job.status))
+            strong { (kind_label(job.kind)) } ": " (status_text(job.status))
             @if running { span.spinner aria-hidden="true" {} }
-            @if job.attempts > 1 { " (attempt " (job.attempts) ")" }
+            @if job.attempts > 1 { " " (tf("(attempt {n})", &[("n", &job.attempts)])) }
             @if let Some(e) = &job.error { p.error-text { (e) } }
             @if job.status == JobStatus::Done {
                 @if let Some(skipped) = job.result.as_ref().and_then(|r| r.get("skipped")).and_then(|v| v.as_str()) {
                     p.muted { (skipped) }
                 }
                 p.job-links {
-                    @if let Some(sid) = result_set { a href=(set_url(sid)) { "Open the set" } " " }
-                    @if let Some(u) = result_url { a href=(u) rel="noopener noreferrer" target="_blank" { "Open in Telegram" } " " }
-                    @if let Some(b) = back { a href=(b) { "Reload to see the changes" } }
+                    @if let Some(sid) = result_set { a href=(set_url(sid)) { (t("Open the set")) } " " }
+                    @if let Some(u) = result_url { a href=(u) rel="noopener noreferrer" target="_blank" { (t("Open in Telegram")) } " " }
+                    @if let Some(b) = back { a href=(b) { (t("Reload to see the changes")) } }
                 }
             }
         }
@@ -172,14 +184,14 @@ pub async fn job_status(
         @if job_running(&job) { noscript { meta http-equiv="refresh" content="3"; } }
     };
     let body = html! {
-        h1 { "Background job" }
+        h1 { (t("Background job")) }
         (fragment)
-        p.muted.small { "Started " (fmt_time(job.created_at)) "." }
-        @if let Some(b) = safe_next(q.back.as_deref()) { p { a href=(b) { "← back" } } }
+        p.muted.small { (tf("Started {time}.", &[("time", &fmt_time(job.created_at))])) }
+        @if let Some(b) = safe_next(q.back.as_deref()) { p { a href=(b) { "← " (t("back")) } } }
     };
     Ok(layout::page_with_head(
         Some(&ctx.user),
-        "Background job",
+        t("Background job"),
         Nav::None,
         head,
         body,
@@ -206,49 +218,49 @@ pub struct GitPackForm {
 
 fn gitpack_form(ctx: &Ctx, f: &GitPackForm, error: Option<&str>) -> Markup {
     let body = html! {
-        p.crumbs { a href="/sets" { "← Sets" } }
-        h1 { "Add a git pack" }
+        p.crumbs { a href="/sets" { "← " (t("Sets")) } }
+        h1 { (t("Add a git pack")) }
         p {
-            "Subscribe to a git repository that holds a set directory (" code { "set.toml" } " plus media). "
-            "The server clones it, imports it as a new set and pulls again on a schedule or when the webhook fires."
+            (t("Subscribe to a git repository that holds a set directory")) " (" code { "set.toml" } " " (t("plus media")) ")."
+            " " (t("The server clones it, imports it as a new set and pulls again on a schedule or when the webhook fires."))
         }
         @if let Some(e) = error { (layout::alert("error", e)) }
         form.stack.narrow method="post" action="/gitpacks/new" {
             (ctx.csrf_input())
             div.field-row {
-                label for="gp-url" { "Repository URL" }
+                label for="gp-url" { (t("Repository URL")) }
                 input #gp-url type="url" name="url" value=(f.url) required placeholder="https://github.com/someone/cats.git"
                     spellcheck="false" autocapitalize="none";
             }
             div.two-col {
                 div.field-row {
-                    label for="gp-branch" { "Branch (optional)" }
-                    input #gp-branch type="text" name="branch" value=(f.branch) placeholder="default branch" spellcheck="false";
+                    label for="gp-branch" { (t("Branch (optional)")) }
+                    input #gp-branch type="text" name="branch" value=(f.branch) placeholder=(t("default branch")) spellcheck="false";
                 }
                 div.field-row {
-                    label for="gp-subdir" { "Folder in the repository (optional)" }
-                    input #gp-subdir type="text" name="subdir" value=(f.subdir) placeholder="repository root" spellcheck="false";
+                    label for="gp-subdir" { (t("Folder in the repository (optional)")) }
+                    input #gp-subdir type="text" name="subdir" value=(f.subdir) placeholder=(t("repository root")) spellcheck="false";
                 }
             }
             fieldset.field-row {
-                legend { "Mode" }
+                legend { (t("Mode")) }
                 label.radio {
                     input type="radio" name="mode" value="read_only" checked[f.mode != "push"];
-                    " " strong { "Read-only" } " — edit upstream; the web UI shows an “Edit upstream” link"
+                    " " strong { (t("Read-only")) } " — " (t("edit upstream; the web UI shows an “Edit upstream” link"))
                 }
                 label.radio {
                     input type="radio" name="mode" value="push" checked[f.mode == "push"];
-                    " " strong { "Push edits back" } " — needs push credentials on the server"
+                    " " strong { (t("Push edits back")) } " — " (t("needs push credentials on the server"))
                 }
             }
             div.field-row {
-                label for="gp-slug" { "Slug (optional)" }
+                label for="gp-slug" { (t("Slug (optional)")) }
                 input #gp-slug type="text" name="slug" value=(f.slug) maxlength="64" pattern="[a-z0-9][a-z0-9\\-]*" spellcheck="false";
             }
-            button.primary type="submit" { "Add git pack" }
+            button.primary type="submit" { (t("Add git pack")) }
         }
     };
-    ctx.page("Add a git pack", Nav::Sets, body)
+    ctx.page(t("Add a git pack"), Nav::Sets, body)
 }
 
 pub async fn gitpack_page(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> {
@@ -281,30 +293,30 @@ pub async fn gitpack_create(
     let created = match gitpack::create(&state, &ctx.user, req).await {
         Ok(c) => c,
         Err(e) if e.status.is_client_error() && e.code != "not_found" => {
-            return Ok((e.status, gitpack_form(&ctx, &f, Some(&e.message))).into_response());
+            return Ok((e.status, gitpack_form(&ctx, &f, Some(&t_dyn(&e.message)))).into_response());
         }
         Err(e) => return Err(e),
     };
     let set = &created.set;
     let body = html! {
-        h1 { "Git pack added" }
-        (layout::alert("success", &format!("“{}” is being cloned.", set.name)))
+        h1 { (t("Git pack added")) }
+        (layout::alert("success", &tf("“{name}” is being cloned.", &[("name", &set.name)])))
         (job_fragment(&created.job, Some(&set_url(&set.id))))
         section.secret-box {
-            h2 { "Webhook" }
-            p { "To pull on every push, add this webhook to the repository. " strong { "The secret is shown only now." } }
+            h2 { (t("Webhook")) }
+            p { (t("To pull on every push, add this webhook to the repository.")) " " strong { (t("The secret is shown only now.")) } }
             dl.kv {
                 dt { "Payload URL" } dd { code.copyable { (created.webhook_url) } }
-                dt { "Secret" } dd { code.copyable { (created.webhook_secret) } }
+                dt { (t("Secret")) } dd { code.copyable { (created.webhook_secret) } }
             }
             p.hint {
-                "GitHub/Gitea/Forgejo: use the secret for the HMAC signature (X-Hub-Signature-256). "
-                "Others: send it in the X-Stickpile-Webhook-Secret header."
+                (t("GitHub/Gitea/Forgejo: use the secret for the HMAC signature (X-Hub-Signature-256)."))
+                " " (t("Others: send it in the X-Stickpile-Webhook-Secret header."))
             }
         }
-        p { a.button.primary href=(set_url(&set.id)) { "Open the set" } }
+        p { a.button.primary href=(set_url(&set.id)) { (t("Open the set")) } }
     };
-    Ok(ctx.page("Git pack added", Nav::Sets, body).into_response())
+    Ok(ctx.page(t("Git pack added"), Nav::Sets, body).into_response())
 }
 
 pub async fn pull(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {
@@ -337,33 +349,33 @@ pub struct TgImportForm {
 
 fn tg_import_form(ctx: &Ctx, f: &TgImportForm, error: Option<&str>) -> Markup {
     let body = html! {
-        p.crumbs { a href="/sets" { "← Sets" } }
-        h1 { "Import a Telegram sticker pack" }
-        p { "The pack becomes a new set; each sticker keeps its emoji. Animated (.tgs) stickers are skipped." }
+        p.crumbs { a href="/sets" { "← " (t("Sets")) } }
+        h1 { (t("Import a Telegram sticker pack")) }
+        p { (t("The pack becomes a new set; each sticker keeps its emoji. Animated (.tgs) stickers are skipped.")) }
         @if let Some(e) = error { (layout::alert("error", e)) }
         form.stack.narrow method="post" action="/telegram/import" {
             (ctx.csrf_input())
             div.field-row {
-                label for="tg-pack" { "Pack name or link" }
+                label for="tg-pack" { (t("Pack name or link")) }
                 input #tg-pack type="text" name="pack_name" value=(f.pack_name) required
                     placeholder="https://t.me/addstickers/SomePack" spellcheck="false" autocapitalize="none";
             }
             div.field-row {
-                label for="tg-slug" { "Slug (optional)" }
+                label for="tg-slug" { (t("Slug (optional)")) }
                 input #tg-slug type="text" name="slug" value=(f.slug) maxlength="64" pattern="[a-z0-9][a-z0-9\\-]*" spellcheck="false";
             }
             div.field-row {
-                label for="tg-vis" { "Visibility" }
+                label for="tg-vis" { (t("Visibility")) }
                 select #tg-vis name="visibility" {
-                    option value="private" selected[f.visibility != "unlisted" && f.visibility != "public"] { "Private" }
-                    option value="unlisted" selected[f.visibility == "unlisted"] { "Unlisted" }
-                    option value="public" selected[f.visibility == "public"] { "Public" }
+                    option value="private" selected[f.visibility != "unlisted" && f.visibility != "public"] { (t("Private")) }
+                    option value="unlisted" selected[f.visibility == "unlisted"] { (t("Unlisted")) }
+                    option value="public" selected[f.visibility == "public"] { (t("Public")) }
                 }
             }
-            button.primary type="submit" { "Import" }
+            button.primary type="submit" { (t("Import")) }
         }
     };
-    ctx.page("Import a Telegram pack", Nav::Sets, body)
+    ctx.page(t("Import a Telegram pack"), Nav::Sets, body)
 }
 
 pub async fn telegram_import_page(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> {
@@ -390,7 +402,7 @@ pub async fn telegram_import(
     match telegram::import(&state, &ctx.user, req).await {
         Ok(job) => Ok(ctx.redirect(&format!("/jobs/{}", job.id))),
         Err(e) if e.status.is_client_error() && e.code != "not_found" => {
-            Ok((e.status, tg_import_form(&ctx, &f, Some(&e.message))).into_response())
+            Ok((e.status, tg_import_form(&ctx, &f, Some(&t_dyn(&e.message)))).into_response())
         }
         Err(e) => Err(e),
     }
@@ -408,34 +420,34 @@ fn tg_export_form(ctx: &Ctx, set: &Set, f: &TgExportForm, error: Option<&str>) -
     let has_owner = ctx.user.user.telegram_user_id.is_some();
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
-        h1 { "Publish “" (set.name) "” to Telegram" }
+        h1 { (tf("Publish “{name}” to Telegram", &[("name", &set.name)])) }
         p {
-            "Every item becomes a sticker (stills as 512 px WebP, animations and videos as video stickers). "
-            "The first export creates the pack, later ones update it. Items that cannot become stickers are listed afterwards."
+            (t("Every item becomes a sticker (stills as 512 px WebP, animations and videos as video stickers)."))
+            " " (t("The first export creates the pack, later ones update it. Items that cannot become stickers are listed afterwards."))
         }
         @if let Some(p) = &set.telegram_pack {
-            p { "Currently published as " a href=(telegram::pack_url(p)) rel="noopener noreferrer" target="_blank" { (p) } "." }
+            p { (t("Currently published as")) " " a href=(telegram::pack_url(p)) rel="noopener noreferrer" target="_blank" { (p) } "." }
         }
         @if !has_owner {
-            (layout::alert("info", "Telegram packs belong to a Telegram user. Set your Telegram user id in Settings, unless the administrator configured a default owner."))
+            (layout::alert("info", t("Telegram packs belong to a Telegram user. Set your Telegram user id in Settings, unless the administrator configured a default owner.")))
         }
         @if let Some(e) = error { (layout::alert("error", e)) }
         form.stack.narrow method="post" action=(format!("/sets/{}/telegram", set.id)) {
             (ctx.csrf_input())
             div.field-row {
-                label for="tge-name" { "Pack short name (optional)" }
+                label for="tge-name" { (t("Pack short name (optional)")) }
                 input #tge-name type="text" name="pack_name" value=(f.pack_name) maxlength="64" spellcheck="false"
                     aria-describedby="tge-name-hint";
-                p.hint #tge-name-hint { "Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug." }
+                p.hint #tge-name-hint { (t("Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug.")) }
             }
             div.field-row {
-                label for="tge-title" { "Pack title (optional)" }
+                label for="tge-title" { (t("Pack title (optional)")) }
                 input #tge-title type="text" name="title" value=(f.title) maxlength="64" placeholder=(set.name);
             }
-            button.primary type="submit" { "Publish" }
+            button.primary type="submit" { (t("Publish")) }
         }
     };
-    ctx.page("Publish to Telegram", Nav::Sets, body)
+    ctx.page(t("Publish to Telegram"), Nav::Sets, body)
 }
 
 async fn own_set(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<Set> {
@@ -483,7 +495,7 @@ pub async fn telegram_export(
             )))
         }
         Err(e) if e.status.is_client_error() && e.code != "not_found" => {
-            Ok((e.status, tg_export_form(&ctx, &set, &f, Some(&e.message))).into_response())
+            Ok((e.status, tg_export_form(&ctx, &set, &f, Some(&t_dyn(&e.message)))).into_response())
         }
         Err(e) => Err(e),
     }

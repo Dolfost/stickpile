@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use stickpile_core::config::StartMode;
 use stickpile_core::ClientConfig;
+use stickpile_i18n::Lang;
 use stickpile_quick::focus::{self, FocusEnv, FocusError, WindowInfo};
 use stickpile_quick::history::WindowHistory;
 use stickpile_quick::model::{ModelConfig, OpenInfo, Tile, Tiles, DEFAULT_DEBOUNCE_MS};
@@ -121,6 +122,36 @@ pub fn history_path(cfg: &ClientConfig) -> PathBuf {
     cfg.cache_path().join("desktop-window-history.json")
 }
 
+/// The popup's language: `ui.language` when it names one, else the
+/// account's (`account`, from the server or its cache), else the system's
+/// locale (`env`), else English.
+pub fn effective_lang(cfg: &ClientConfig, account: Option<Lang>, env: impl Fn(&str) -> Option<String>) -> Lang {
+    Lang::parse(&cfg.ui.language)
+        .or(account)
+        .or_else(|| Lang::from_env(env))
+        .unwrap_or_default()
+}
+
+/// Where the account's language is kept between starts (offline too).
+pub fn account_lang_path(cfg: &ClientConfig) -> PathBuf {
+    cfg.cache_path().join("desktop-account-language")
+}
+
+/// `None` when missing or "automatic".
+pub fn load_account_lang(path: &Path) -> Option<Lang> {
+    Lang::parse(std::fs::read_to_string(path).ok()?.trim())
+}
+
+/// Remember the account's language (`None`: automatic).
+pub fn save_account_lang(path: &Path, lang: Option<Lang>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, lang.map(|l| l.code()).unwrap_or("auto"))?;
+    std::fs::rename(&tmp, path)
+}
+
 /// The tab the popup was last closed on, for `ui.start_tab = "last"`.
 pub fn last_tab_path(cfg: &ClientConfig) -> PathBuf {
     cfg.cache_path().join("desktop-last-tab")
@@ -224,6 +255,34 @@ mod tests {
         assert_eq!(grid_layout(100, 50, 144, 144), (1, 1), "at least one");
         assert_eq!(grid_layout(100_000, 50, 144, 144).0, MAX_COLUMNS as usize);
         assert_eq!(grid_layout(0, 0, 0, 0), (1, 1));
+    }
+
+    #[test]
+    fn language_choice() {
+        let mut cfg = ClientConfig::default();
+        let no_env = |_: &str| None;
+        let uk_env = |k: &str| (k == "LANG").then(|| "uk_UA.UTF-8".to_string());
+        assert_eq!(effective_lang(&cfg, None, no_env), Lang::En);
+        assert_eq!(effective_lang(&cfg, None, uk_env), Lang::Uk, "the system's");
+        assert_eq!(
+            effective_lang(&cfg, Some(Lang::En), uk_env),
+            Lang::En,
+            "the account's first"
+        );
+        cfg.ui.language = "uk".into();
+        assert_eq!(
+            effective_lang(&cfg, Some(Lang::En), no_env),
+            Lang::Uk,
+            "a choice here wins"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache/lang");
+        assert_eq!(load_account_lang(&path), None);
+        save_account_lang(&path, Some(Lang::Uk)).unwrap();
+        assert_eq!(load_account_lang(&path), Some(Lang::Uk));
+        save_account_lang(&path, None).unwrap();
+        assert_eq!(load_account_lang(&path), None);
     }
 
     #[test]

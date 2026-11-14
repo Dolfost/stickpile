@@ -7,6 +7,7 @@ use stickpile_api::Theme;
 use super::components::{icon, Icon};
 use crate::assets;
 use crate::auth::{AuthMethod, CurrentUser};
+use crate::i18n::{t, tc, tf};
 
 /// htmx settings (CSP-compatible: no injected `<style>`, no eval, no inline
 /// scripts from responses, same-origin requests only, no history snapshots
@@ -28,6 +29,20 @@ pub enum Nav {
     Settings,
     Admin,
     None,
+}
+
+/// The scripts' texts in the request's language, as JSON (`{"English":
+/// "translation"}`) for app.js and upload.js; none in English.
+fn js_strings() -> Option<String> {
+    let lang = crate::i18n::current();
+    if lang == crate::i18n::Lang::En {
+        return None;
+    }
+    let map: serde_json::Map<String, serde_json::Value> = stickpile_i18n::file_entries(lang, "js")
+        .into_iter()
+        .map(|(en, tr)| (en, serde_json::Value::String(tr)))
+        .collect();
+    Some(serde_json::Value::Object(map).to_string())
 }
 
 pub fn csrf_input(token: Option<&str>) -> Markup {
@@ -75,7 +90,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
     // ---- theme (end) ---------------------------------------------------
     html! {
         (DOCTYPE)
-        html lang="en" data-theme=[data_theme] {
+        html lang=(crate::i18n::current().code()) data-theme=[data_theme] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
@@ -98,36 +113,36 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                 script src=(assets::url("upload.js")) defer {}
                 (head)
             }
-            body hx-headers=[hx_headers] data-csrf=[csrf] {
-                a.skip href="#main" { "Skip to content" }
+            body hx-headers=[hx_headers] data-csrf=[csrf] data-i18n=[js_strings()] {
+                a.skip href="#main" { (t("Skip to content")) }
                 header.topbar {
                     a.brand href="/" { "stickpile" }
                     @if let Some(u) = user {
-                        nav aria-label="Main" {
+                        nav aria-label=(t("Main")) {
                             ul.nav {
-                                (nav_link("/", "Home", Nav::Home, active))
-                                (nav_link("/sets", "Sets", Nav::Sets, active))
+                                (nav_link("/", t("Home"), Nav::Home, active))
+                                (nav_link("/sets", t("Sets"), Nav::Sets, active))
                                 li {
                                     a href="/collaboration" aria-current=[(active == Nav::Collaboration).then_some("page")] {
-                                        "Collaboration"
+                                        (t("Collaboration"))
                                         // Proposals waiting for this user, fetched after the page.
                                         span hx-get="/collaboration/badge" hx-trigger="load" hx-swap="outerHTML" {}
                                     }
                                 }
-                                (nav_link("/upload", "Upload", Nav::Upload, active))
-                                (nav_link("/search", "Search", Nav::Search, active))
-                                (nav_link("/popular", "Popular", Nav::Popular, active))
-                                (nav_link("/stats", "Stats", Nav::Stats, active))
-                                (nav_link("/problems", "Problems", Nav::Problems, active))
-                                (nav_link("/settings", "Settings", Nav::Settings, active))
+                                (nav_link("/upload", tc("page", "Upload"), Nav::Upload, active))
+                                (nav_link("/search", t("Search"), Nav::Search, active))
+                                (nav_link("/popular", t("Popular"), Nav::Popular, active))
+                                (nav_link("/stats", t("Stats"), Nav::Stats, active))
+                                (nav_link("/problems", t("Problems"), Nav::Problems, active))
+                                (nav_link("/settings", t("Settings"), Nav::Settings, active))
                                 @if u.is_admin() {
-                                    (nav_link("/admin", "Admin", Nav::Admin, active))
+                                    (nav_link("/admin", t("Admin"), Nav::Admin, active))
                                 }
                             }
                         }
                         form.topsearch role="search" method="get" action="/search" {
-                            label.sr-only for="topsearch-q" { "Search" }
-                            input #topsearch-q type="search" name="q" placeholder="Search…" autocomplete="off";
+                            label.sr-only for="topsearch-q" { (t("Search")) }
+                            input #topsearch-q type="search" name="q" placeholder=(t("Search…")) autocomplete="off";
                         }
                     }
                     // The right-hand group: the theme switch, then a divider
@@ -138,16 +153,16 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                         (theme_switch(user, csrf))
                         @if let Some(u) = user {
                             div.who {
-                                span.whoami title=(format!("Signed in as {}", u.user.username)) {
+                                span.whoami title=(tf("Signed in as {username}", &[("username", &u.user.username)])) {
                                     (u.user.display_name)
                                     @if let AuthMethod::Tailscale { login } = &u.method {
-                                        " " span.badge.tailnet title=(format!("Signed in through the tailnet as {login}")) { "tailnet" }
+                                        " " span.badge.tailnet title=(tf("Signed in through the tailnet as {login}", &[("login", login)])) { "tailnet" }
                                     }
                                 }
                                 @if matches!(u.method, AuthMethod::Session { .. }) {
                                     form.inline method="post" action="/logout" {
                                         (csrf_input(csrf))
-                                        button.link type="submit" { "Sign out" }
+                                        button.link type="submit" { (t("Sign out")) }
                                     }
                                 }
                             }
@@ -180,8 +195,8 @@ fn theme_switch(user: Option<&CurrentUser>, csrf: Option<&str>) -> Markup {
     let button = html! {
         button.icon-btn.theme-toggle type=(if user.is_some() { "submit" } else { "button" }) hidden[user.is_none()]
             data-theme-toggle="" aria-pressed=(if dark { "true" } else { "false" })
-            title=(if dark { "Switch to the light theme" } else { "Switch to the dark theme" }) {
-            (icon(Icon::Moon)) (icon(Icon::Sun)) span.sr-only { "Dark theme" }
+            title=(if dark { t("Switch to the light theme") } else { t("Switch to the dark theme") }) {
+            (icon(Icon::Moon)) (icon(Icon::Sun)) span.sr-only { (t("Dark theme")) }
         }
     };
     html! {
@@ -205,7 +220,7 @@ pub fn flash_error(message: &str) -> Markup {
         div.alert.error role="alert" {
             (message)
             " "
-            button.link.dismiss type="button" data-dismiss="" { "Dismiss" }
+            button.link.dismiss type="button" data-dismiss="" { (t("Dismiss")) }
         }
     }
 }
@@ -220,21 +235,27 @@ pub fn alert(kind: &str, message: &str) -> Markup {
 pub fn error_page(user: Option<&CurrentUser>, status: StatusCode, code: &str, message: &str) -> Markup {
     let (title, explain): (&str, &str) = match status {
         StatusCode::NOT_FOUND => (
-            "Not found",
-            "This page does not exist, or you do not have access to it.",
+            t("Not found"),
+            t("This page does not exist, or you do not have access to it."),
         ),
         StatusCode::FORBIDDEN if code == "csrf" => (
-            "Request blocked",
-            "The form was submitted from another site or has expired. Reload the page and try again.",
+            t("Request blocked"),
+            t("The form was submitted from another site or has expired. Reload the page and try again."),
         ),
-        StatusCode::FORBIDDEN => ("Not allowed", message),
-        StatusCode::METHOD_NOT_ALLOWED => ("Not allowed", "This address does not accept that kind of request."),
-        StatusCode::TOO_MANY_REQUESTS => ("Too many requests", "Slow down a little and try again in a minute."),
+        StatusCode::FORBIDDEN => (t("Not allowed"), message),
+        StatusCode::METHOD_NOT_ALLOWED => (
+            t("Not allowed"),
+            t("This address does not accept that kind of request."),
+        ),
+        StatusCode::TOO_MANY_REQUESTS => (
+            t("Too many requests"),
+            t("Slow down a little and try again in a minute."),
+        ),
         s if s.is_server_error() => (
-            "Something went wrong",
-            "The server could not complete the request. The details are in the server log.",
+            t("Something went wrong"),
+            t("The server could not complete the request. The details are in the server log."),
         ),
-        _ => ("Request failed", message),
+        _ => (t("Request failed"), message),
     };
     let body = html! {
         section.error-page {
@@ -242,9 +263,9 @@ pub fn error_page(user: Option<&CurrentUser>, status: StatusCode, code: &str, me
             h1 { (title) }
             p { (explain) }
             p {
-                a href="/" { "Go to the start page" }
+                a href="/" { (t("Go to the start page")) }
                 @if user.is_none() {
-                    " or " a href="/login" { "sign in" }
+                    " " (t("or")) " " a href="/login" { (t("sign in")) }
                 }
                 "."
             }

@@ -257,6 +257,11 @@ pub struct User {
     /// Colour theme of the web UI.
     #[serde(default)]
     pub theme: Theme,
+    /// The language chosen for the web UI and the clients that follow the
+    /// account (`en`, `uk`); `None`: automatic (the browser's or the
+    /// system's language).
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 /// Colour theme of the web UI, chosen per user.
@@ -302,6 +307,9 @@ pub struct UpdateMe {
     /// Colour theme of the web UI: `system`, `light` or `dark`.
     #[serde(default)]
     pub theme: Option<Theme>,
+    /// UI language (`en`, `uk`); `null` goes back to automatic.
+    #[serde(default, with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub language: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

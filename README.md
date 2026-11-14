@@ -31,6 +31,9 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
 - **Collaboration**: add contributors to a pack and choose what each may do,
   or propose stickers and changes to someone else's pack; both sides follow
   the requests on a Collaboration tab ([docs](docs/collaboration.md)).
+- **English and Ukrainian**: each user picks a language in the web UI's
+  settings or in the desktop popup, and the choice follows them from one to
+  the other ([docs](docs/languages.md)).
 - **Multi-user**, with Tailscale login without passwords, local accounts with
   TOTP, revocable API tokens, an admin panel and an audit log.
 

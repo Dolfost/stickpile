@@ -1,0 +1,93 @@
+# Ukrainian: web-collab. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+
+# Permissions of contributors: (label, hint)
+Add stickers	Додавати стікери
+upload new stickers to the set	завантажувати нові стікери в набір
+Edit their stickers	Редагувати свої стікери
+edit and remove the stickers they added	редагувати й прибирати стікери, які додали самі
+Edit all stickers	Редагувати всі стікери
+edit everyone's stickers, yours too	редагувати стікери всіх, зокрема ваші
+Remove any sticker	Прибирати будь-які стікери
+remove everyone's stickers	прибирати стікери будь-кого
+Edit the pack	Редагувати набір
+name, description, cover and order	назва, опис, обкладинка й порядок
+Review proposals	Розглядати пропозиції
+accept or decline what others propose	приймати чи відхиляти пропозиції інших
+View only	Лише перегляд
+
+# The Collaboration tab
+{n} proposal waits for you|{n} proposals wait for you	{n} пропозиція чекає на вас|{n} пропозиції чекають на вас|{n} пропозицій чекають на вас
+Proposals for your packs, the ones you sent to others, and the packs you contribute to.	Пропозиції до ваших наборів, ваші пропозиції іншим і набори, у яких ви берете участь.
+To propose something, open someone's pack or sticker and choose	Щоб щось запропонувати, відкрийте чужий набір або стікер і виберіть
+Propose	Запропонувати
+Incoming	Вхідні
+Nothing waits for you.	На вас нічого не чекає.
+Your proposals	Ваші пропозиції
+You have no open proposals.	У вас немає відкритих пропозицій.
+Packs you contribute to	Набори, у яких ви берете участь
+None yet. A pack's owner can add you on its page.	Поки що немає. Власник набору може додати вас на сторінці набору.
+Decided	Вирішені
+No decided proposals yet.	Вирішених пропозицій ще немає.
+
+# One proposal
+New stickers	Нові стікери
+Sticker changes	Зміни стікера
+New cover image	Нове зображення обкладинки
+Pack changes	Зміни набору
+# Status of a proposal (feminine: пропозиція).
+status::Open	Відкрита
+Accepted	Прийнята
+Declined	Відхилена
+Withdrawn	Відкликана
+(none)	(немає)
+the first sticker	перший стікер
+for	для
+from {user}	від {user}
+accepted by {user}	прийнято користувачем {user}
+declined by {user}	відхилено користувачем {user}
+withdrawn {time}	відкликано {time}
+no file	немає файлу
+The sticker was removed.	Стікер прибрано.
+As the cover image:	Як зображення обкладинки:
+the proposed cover	запропонована обкладинка
+Note:	Примітка:
+Note for {user}	Примітка для {user}
+A note (optional)	Примітка (необов'язково)
+Accept	Прийняти
+Decline	Відхилити
+Withdraw	Відкликати
+Field	Поле
+Now	Зараз
+Proposed	Запропоновано
+
+# Contributors (set page)
+Contributors	Учасники
+People you add here see this set (also when it is private) and may change it as you allow.	Люди, яких ви тут додасте, бачать цей набір (навіть приватний) і можуть змінювати його так, як ви дозволите.
+Settings, visibility, contributors and deleting stay yours.	Налаштування, видимість, учасники й видалення залишаються за вами.
+No contributors yet.	Учасників ще немає.
+Remove	Прибрати
+Leave	Покинути
+Add a contributor	Додати учасника
+username	ім'я користувача
+They may	Учасник може
+Add	Додати
+
+# Proposing
+{owner} decides; you see the answer under	Рішення ухвалює {owner}; відповідь ви побачите в розділі
+To change one sticker, open it and choose	Щоб змінити один стікер, відкрийте його й виберіть
+Suggest changes	Запропонувати зміни
+Propose to “{set}”	Пропозиція для набору “{set}”
+Message (optional)	Повідомлення (необов'язково)
+Propose stickers	Запропонувати стікери
+Name, description, cover	Назва, опис, обкладинка
+(keep the cover)	(залишити обкладинку)
+Propose changes	Запропонувати зміни
+A cover image	Зображення обкладинки
+Image (PNG, JPEG or WebP)	Зображення (PNG, JPEG або WebP)
+Propose cover image	Запропонувати зображення обкладинки
+Suggest changes to “{name}”	Запропонувати зміни до стікера “{name}”
+The pack's owner decides; you see the answer under	Рішення ухвалює власник набору; відповідь ви побачите в розділі
+Keywords (comma separated)	Ключові слова (через кому)
+Emojis (comma separated)	Емодзі (через кому)
+Tags (comma separated)	Теги (через кому)
+Send suggestion	Надіслати пропозицію

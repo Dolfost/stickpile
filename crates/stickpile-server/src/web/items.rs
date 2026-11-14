@@ -22,6 +22,7 @@ use super::components::{
 use super::layout::{self, Nav};
 use super::{integrations, Ctx};
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, tc, tf};
 use crate::service::{items as svc, ui};
 use crate::state::{AiStatus, AppState};
 
@@ -58,20 +59,30 @@ impl Field {
     }
     fn label(self) -> &'static str {
         match self {
-            Field::Name => "Name",
-            Field::Keywords => "Keywords",
-            Field::Emojis => "Emojis",
-            Field::Vibe => "Vibe",
-            Field::Tags => "Tags",
+            Field::Name => t("Name"),
+            Field::Keywords => t("Keywords"),
+            Field::Emojis => t("Emojis"),
+            Field::Vibe => t("Vibe"),
+            Field::Tags => t("Tags"),
+        }
+    }
+    /// The field's name inside a sentence ("Edit keywords", "Confirm name").
+    fn object(self) -> &'static str {
+        match self {
+            Field::Name => tc("object", "name"),
+            Field::Keywords => tc("object", "keywords"),
+            Field::Emojis => tc("object", "emojis"),
+            Field::Vibe => tc("object", "vibe"),
+            Field::Tags => tc("object", "tags"),
         }
     }
     fn hint(self) -> &'static str {
         match self {
             Field::Name => "",
-            Field::Keywords => "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.",
-            Field::Emojis => "Separate with spaces.",
-            Field::Vibe => "The mood in one word, e.g. tired or smug. Empty clears it.",
-            Field::Tags => "Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.",
+            Field::Keywords => t("What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words."),
+            Field::Emojis => t("Separate with spaces."),
+            Field::Vibe => t("The mood in one word, e.g. tired or smug. Empty clears it."),
+            Field::Tags => t("Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram."),
         }
     }
     fn source(self, item: &Item) -> FieldSource {
@@ -172,7 +183,7 @@ pub fn field_block(ctx: &Ctx, item: &Item, f: Field, editable: bool) -> Markup {
     let empty = f.is_empty(item);
     let ai = f.source(item) == FieldSource::Ai && !empty;
     let base = format!("/items/{}", item.id);
-    let label = f.label().to_lowercase();
+    let label = f.object();
     html! {
         div class=(field_class(f, ai, empty, false)) id=(field_id(item, f)) {
             dt {
@@ -186,16 +197,16 @@ pub fn field_block(ctx: &Ctx, item: &Item, f: Field, editable: bool) -> Markup {
                         // The set editor shows the pencil only; the text
                         // stays for screen readers ("Edit keywords").
                         a.edit href=(format!("{base}?edit=1#edit")) hx-get=(format!("{base}/field/{}/edit", f.key()))
-                            hx-target="closest .field" hx-swap="outerHTML" title=(format!("Edit {label}")) {
-                            (icon(Icon::Edit)) span.edit-text { "Edit" } span.sr-only { " " (label) }
+                            hx-target="closest .field" hx-swap="outerHTML" title=(tf("Edit {field}", &[("field", &label)])) {
+                            (icon(Icon::Edit)) span.edit-text { (t("Edit")) } span.sr-only { " " (label) }
                         }
                         @if ai {
                             form.inline method="post" action=(format!("{base}/confirm/{}", f.key()))
                                 hx-post=(format!("{base}/confirm/{}", f.key())) hx-target="closest .field" hx-swap="outerHTML" {
                                 (ctx.csrf_input())
                                 input type="hidden" name="next" value=(ctx.here);
-                                button.link.confirm type="submit" title="Keep the AI suggestion as yours" {
-                                    span aria-hidden="true" { "✓" } span.confirm-text { " Confirm" } span.sr-only { " " (label) }
+                                button.link.confirm type="submit" title=(t("Keep the AI suggestion as yours")) {
+                                    span aria-hidden="true" { "✓" } span.confirm-text { " " (t("Confirm")) } span.sr-only { " " (label) }
                                 }
                             }
                         }
@@ -240,9 +251,9 @@ fn field_form(ctx: &Ctx, vibes: &[String], item: &Item, f: Field, value: &str, e
                     (field_input(vibes, item, f, value))
                     @if let Some(e) = error { span.error-text role="alert" { (e) } }
                     span.form-buttons {
-                        button.primary.small type="submit" { "Save" }
+                        button.primary.small type="submit" { (t("Save")) }
                         a.button.small.cancel href=(item_url(&item.id)) hx-get=(action) hx-target="closest .field" hx-swap="outerHTML" {
-                            "Cancel"
+                            (t("Cancel"))
                         }
                     }
                 }
@@ -324,7 +335,7 @@ pub fn editor_card_in(
                 (kind_badge(item.media.kind, item.media.format))
                 (quality_badge(item.media.quality))
                 @if is_cover {
-                    span.badge.cover-badge title="The set's cover: shown in set lists and on Telegram" { "Cover" }
+                    span.badge.cover-badge title=(t("The set's cover: shown in set lists and on Telegram")) { (t("Cover")) }
                 }
             }
             div.card-body {
@@ -333,7 +344,7 @@ pub fn editor_card_in(
                         (field_block(ctx, item, f, rights.edit))
                         @if let (Field::Name, Some((sid, sname))) = (f, set) {
                             div.field.field-set {
-                                dt { span.field-label { "Set" } }
+                                dt { span.field-label { (t("Set")) } }
                                 dd { a href=(set_url(sid)) { (sname) } }
                             }
                         }
@@ -345,7 +356,7 @@ pub fn editor_card_in(
                     @if rights.remove || movable.is_some() {
                         div.manage {
                             @if movable.is_some() {
-                                @for (dir, label, ico, off) in [("up", "Move up", Icon::Up, first), ("down", "Move down", Icon::Down, last)] {
+                                @for (dir, label, ico, off) in [("up", t("Move up"), Icon::Up, first), ("down", t("Move down"), Icon::Down, last)] {
                                     form.inline method="post" action=(move_url) hx-post=(move_url) hx-target="#set-items" hx-swap="outerHTML" {
                                         (ctx.csrf_input())
                                         input type="hidden" name="dir" value=(dir);
@@ -357,17 +368,17 @@ pub fn editor_card_in(
                             }
                             @if rights.remove {
                                 a.button.icon-btn.danger href=(delete_url) hx-post=(delete_url)
-                                    hx-confirm=(format!("Delete “{}” from this set?", item.name))
-                                    hx-target="closest .card" hx-swap="delete" title="Delete" {
-                                    (icon(Icon::Delete)) span.sr-only { "Delete " (item.name) }
+                                    hx-confirm=(tf("Delete “{name}” from this set?", &[("name", &item.name)]))
+                                    hx-target="closest .card" hx-swap="delete" title=(t("Delete")) {
+                                    (icon(Icon::Delete)) span.sr-only { (tf("Delete {name}", &[("name", &item.name)])) }
                                 }
                             }
                         }
                     }
                     // Opens the context menu; needs app.js, hidden without it.
                     button.icon-btn.card-menu-btn type="button" hidden data-menu-button="" aria-haspopup="menu"
-                        aria-expanded="false" title="More actions" {
-                        (icon(Icon::More)) span.sr-only { "More actions for " (item.name) }
+                        aria-expanded="false" title=(t("More actions")) {
+                        (icon(Icon::More)) span.sr-only { (tf("More actions for {name}", &[("name", &item.name)])) }
                     }
                 }
             }
@@ -393,7 +404,7 @@ fn preview(item: &Item) -> Markup {
         figure.preview {
             @if item.media.kind == MediaKind::Video {
                 video src=(src) controls loop muted playsinline preload="metadata" aria-label=(item.name) {
-                    a href=(src) { "Download the video" }
+                    a href=(src) { (t("Download the video")) }
                 }
             } @else {
                 img src=(src) alt=(item.name) width=(item.media.width) height=(item.media.height);
@@ -422,10 +433,10 @@ fn full_form(ctx: &Ctx, vibes: &[String], item: &Item) -> Markup {
                     @if !f.hint().is_empty() { p.hint { (f.hint()) } }
                 }
             }
-            p.hint { "Only fields you change are saved; AI suggestions you leave alone stay marked as AI." }
+            p.hint { (t("Only fields you change are saved; AI suggestions you leave alone stay marked as AI.")) }
             div.inline-row {
-                button.primary type="submit" { "Save" }
-                a.button href=(item_url(&item.id)) { "Cancel" }
+                button.primary type="submit" { (t("Save")) }
+                a.button href=(item_url(&item.id)) { (t("Cancel")) }
             }
         }
     }
@@ -434,17 +445,22 @@ fn full_form(ctx: &Ctx, vibes: &[String], item: &Item) -> Markup {
 fn quality_section(d: &ItemDetail) -> Markup {
     html! {
         section aria-labelledby="q-head" {
-            h2 #q-head { "Quality" " " (quality_badge(d.item.media.quality)) }
+            h2 #q-head { (t("Quality")) " " (quality_badge(d.item.media.quality)) }
             @match &d.quality {
-                None => p.muted { "No quality report yet." },
+                None => p.muted { (t("No quality report yet.")) },
                 Some(q) => {
                     table.data {
-                        caption.sr-only { "Quality score components" }
-                        thead { tr { th scope="col" { "Component" } th scope="col" { "Score" } th scope="col" { "Weight" } th scope="col" { "Detail" } } }
+                        caption.sr-only { (t("Quality score components")) }
+                        thead {
+                            tr {
+                                th scope="col" { (t("Component")) } th scope="col" { (t("Score")) }
+                                th scope="col" { (t("Weight")) } th scope="col" { (t("Detail")) }
+                            }
+                        }
                         tbody {
                             @for c in &q.components {
                                 tr {
-                                    th scope="row" { (c.name.replace('_', " ")) }
+                                    th scope="row" { (component_label(&c.name)) }
                                     td {
                                         meter class=(quality_class(c.score)) min="0" max="100" low="40" high="85" optimum="100" value=(c.score) {}
                                         " " (c.score)
@@ -454,7 +470,7 @@ fn quality_section(d: &ItemDetail) -> Markup {
                                 }
                             }
                         }
-                        tfoot { tr { th scope="row" { "Total" } td { (q.score) } td {} td.muted { "weighted mean of the components" } } }
+                        tfoot { tr { th scope="row" { (t("Total")) } td { (q.score) } td {} td.muted { (t("weighted mean of the components")) } } }
                     }
                 }
             }
@@ -462,12 +478,34 @@ fn quality_section(d: &ItemDetail) -> Markup {
     }
 }
 
+/// A quality component's name (`jpeg_quality`) for people.
+fn component_label(name: &str) -> String {
+    let label = match name {
+        "resolution" => t("resolution"),
+        "jpeg_quality" => t("jpeg quality"),
+        "recompression" => t("recompression"),
+        "blockiness" => t("blockiness"),
+        "ringing" => t("ringing"),
+        "sharpness" => t("sharpness"),
+        "alpha" => t("alpha"),
+        "frame_rate" => t("frame rate"),
+        "palette" => t("palette"),
+        other => return other.replace('_', " "),
+    };
+    label.to_string()
+}
+
 fn variants_section(item: &Item) -> Markup {
     html! {
         section aria-labelledby="v-head" {
-            h2 #v-head { "Files" }
+            h2 #v-head { (t("Files")) }
             table.data {
-                thead { tr { th scope="col" { "Variant" } th scope="col" { "Type" } th scope="col" { "Size" } th scope="col" { "Pixels" } th scope="col" { span.sr-only { "Download" } } } }
+                thead {
+                    tr {
+                        th scope="col" { (t("Variant")) } th scope="col" { (t("Type")) } th scope="col" { (t("Size")) }
+                        th scope="col" { (t("Pixels")) } th scope="col" { span.sr-only { (t("Download")) } }
+                    }
+                }
                 tbody {
                     @for v in &item.media.variants {
                         tr {
@@ -475,13 +513,13 @@ fn variants_section(item: &Item) -> Markup {
                             td { code { (v.mime) } }
                             td { (fmt_bytes(v.size_bytes)) }
                             td { (v.width) "×" (v.height) }
-                            td { a href=(file_url(&item.id, v.variant)) download { "Download" span.sr-only { " " (variant_label(v.variant)) } } }
+                            td { a href=(file_url(&item.id, v.variant)) download { (t("Download")) span.sr-only { " " (variant_label(v.variant)) } } }
                         }
                     }
                 }
             }
             @if item.media.variants.len() <= 2 {
-                p.muted.small { "More variants (Telegram sticker, Discord GIF, …) are generated in the background shortly after upload." }
+                p.muted.small { (t("More variants (Telegram sticker, Discord GIF, …) are generated in the background shortly after upload.")) }
             }
         }
     }
@@ -489,11 +527,11 @@ fn variants_section(item: &Item) -> Markup {
 
 fn variant_label(v: Variant) -> &'static str {
     match v {
-        Variant::Original => "Original",
-        Variant::Thumb => "Thumbnail",
+        Variant::Original => t("Original"),
+        Variant::Thumb => t("Thumbnail"),
         Variant::Png => "PNG",
-        Variant::TgSticker => "Telegram sticker (WebP)",
-        Variant::TgVideoSticker => "Telegram video sticker",
+        Variant::TgSticker => t("Telegram sticker (WebP)"),
+        Variant::TgVideoSticker => t("Telegram video sticker"),
         Variant::DiscordGif => "Discord GIF",
         Variant::Mp4 => "MP4",
     }
@@ -526,7 +564,10 @@ pub async fn page(
     let ai_ready = state.ai_status() == AiStatus::Ready;
     let m = &item.media;
     let body = html! {
-        p.crumbs { a href=(set_url(&d.set.id)) { "← " (d.set.name) } " by " (d.set.owner_username) }
+        p.crumbs {
+            a href=(set_url(&d.set.id)) { "← " (d.set.name) }
+            " " (tf("by {owner}", &[("owner", &d.set.owner_username)]))
+        }
         div.item-layout {
             (preview(item))
             div.item-side {
@@ -535,7 +576,7 @@ pub async fn page(
                     @if item.name_source == FieldSource::Ai { " " (ai_mark()) }
                 }
                 p.badges { (kind_badge(m.kind, m.format)) " " (quality_badge(m.quality)) }
-                @if q.saved.is_some() { (layout::alert("success", "Saved.")) }
+                @if q.saved.is_some() { (layout::alert("success", t("Saved."))) }
                 (copy_controls(&card, true, false))
                 div.inline-row.like-row {
                     (like_form(&ctx, &item.id, item.liked_by_me, item.likes, &ctx.here))
@@ -543,12 +584,14 @@ pub async fn page(
                 }
                 p.meta {
                     (m.format.extension().to_uppercase()) " · " (m.width) "×" (m.height) " · " (fmt_bytes(m.size_bytes))
-                    @if let Some(ms) = m.duration_ms { " · " (format!("{:.1}", ms as f64 / 1000.0)) " s" }
-                    @if let Some(fps) = m.fps { " · " (format!("{fps:.0}")) " fps" }
-                    @if m.has_alpha { " · transparent" }
+                    @if let Some(ms) = m.duration_ms {
+                        " · " (tf("{seconds} s", &[("seconds", &format!("{:.1}", ms as f64 / 1000.0))]))
+                    }
+                    @if let Some(fps) = m.fps { " · " (tf("{fps} fps", &[("fps", &format!("{fps:.0}"))])) }
+                    @if m.has_alpha { " · " (t("transparent")) }
                 }
                 @if editing {
-                    h2 { "Edit" }
+                    h2 { (t("Edit")) }
                     (full_form(&ctx, &vibes, item))
                 } @else {
                     dl.fields.wide {
@@ -556,7 +599,7 @@ pub async fn page(
                     }
                 }
                 @if !editable && super::collab::can_propose(&access_set) {
-                    p { a.button href=(format!("/items/{}/suggest", item.id)) { "Suggest changes…" } }
+                    p { a.button href=(format!("/items/{}/suggest", item.id)) { (t("Suggest changes…")) } }
                 }
                 @if editable || removable {
                     div.item-actions {
@@ -564,28 +607,31 @@ pub async fn page(
                             form.inline method="post" action=(format!("/items/{}/enrich", item.id))
                                 hx-post=(format!("/items/{}/enrich", item.id)) hx-target="#job-slot" hx-swap="innerHTML" {
                                 (ctx.csrf_input())
-                                button type="submit" title="Suggest keywords, emojis and vibe again (fields you wrote or confirmed are kept)" { "Re-run AI" }
+                                button type="submit"
+                                    title=(t("Suggest keywords, emojis and vibe again (fields you wrote or confirmed are kept)")) {
+                                    (t("Re-run AI"))
+                                }
                             }
                         }
                         @if !move_targets.is_empty() {
                             form.inline-row method="post" action=(format!("/items/{}/move", item.id)) {
                                 (ctx.csrf_input())
-                                label for="move-to" { "Move to" }
+                                label for="move-to" { (t("Move to")) }
                                 select #move-to name="set_id" {
                                     @for s in &move_targets { option value=(s.id) { (s.name) } }
                                 }
-                                button type="submit" { "Move" }
+                                button type="submit" { (t("Move")) }
                             }
                         }
                         @if removable {
-                            a.button.danger href=(format!("/items/{}/delete", item.id)) { "Delete…" }
+                            a.button.danger href=(format!("/items/{}/delete", item.id)) { (t("Delete…")) }
                         }
                     }
                     div #job-slot {}
                 }
                 @if !d.incompatible.is_empty() {
                     section.incompatible aria-labelledby="inc-head" {
-                        h2 #inc-head { "Cannot be sent to" }
+                        h2 #inc-head { (t("Cannot be sent to")) }
                         ul {
                             @for i in &d.incompatible {
                                 li { strong { (target_label(i.target)) } ": " (i.reason) }
@@ -597,16 +643,21 @@ pub async fn page(
         }
         (quality_section(&d))
         section aria-labelledby="dup-head" {
-            h2 #dup-head { "Looks the same" }
+            h2 #dup-head { (t("Looks the same")) }
             @if d.near_duplicates.is_empty() {
-                p.muted { "No near-duplicates in your library." }
+                p.muted { (t("No near-duplicates in your library.")) }
             } @else {
                 ul.dups {
                     @for n in &d.near_duplicates {
                         li {
                             a href=(item_url(&n.existing.id)) { (n.existing.name) }
-                            " in " a href=(set_url(&n.existing.set_id)) { (n.existing.set_name) }
-                            " · " @if n.same_content { "same file" } @else { "distance " (n.distance) }
+                            " " (t("in")) " " a href=(set_url(&n.existing.set_id)) { (n.existing.set_name) }
+                            " · "
+                            @if n.same_content {
+                                (t("same file"))
+                            } @else {
+                                (tf("distance {distance}", &[("distance", &n.distance)]))
+                            }
                             " · " (quality_badge(n.existing.quality))
                         }
                     }
@@ -614,7 +665,7 @@ pub async fn page(
             }
             div #better-slot {
                 a.button href=(format!("/items/{}/better", item.id)) hx-get=(format!("/items/{}/better", item.id))
-                    hx-target="#better-slot" hx-swap="innerHTML" { "Find a better version" }
+                    hx-target="#better-slot" hx-swap="innerHTML" { (t("Find a better version")) }
             }
         }
         (variants_section(item))
@@ -622,15 +673,15 @@ pub async fn page(
     Ok(ctx.page(&item.name, Nav::Sets, body))
 }
 
-fn target_label(t: stickpile_api::TargetApp) -> &'static str {
+fn target_label(target: stickpile_api::TargetApp) -> &'static str {
     use stickpile_api::TargetApp as T;
-    match t {
+    match target {
         T::Telegram => "Telegram",
         T::Discord => "Discord",
         T::Signal => "Signal",
         T::Whatsapp => "WhatsApp",
         T::Slack => "Slack",
-        T::Generic => "Other apps",
+        T::Generic => t("Other apps"),
     }
 }
 
@@ -803,17 +854,17 @@ pub async fn delete_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path
     }
     let body = html! {
         p.crumbs { a href=(item_url(&item.id)) { "← " (item.name) } }
-        h1 { "Delete “" (item.name) "”?" }
-        p { "The item is removed from its set. Other sets that contain the same file keep their copy." }
+        h1 { (tf("Delete “{name}”?", &[("name", &item.name)])) }
+        p { (t("The item is removed from its set. Other sets that contain the same file keep their copy.")) }
         div.preview-small { (thumb(&item.id, &item.name, item.media.width, item.media.height)) }
         form.inline-row method="post" action=(format!("/items/{}/delete", item.id)) {
             (ctx.csrf_input())
             input type="hidden" name="next" value=(set_url(&item.set_id));
-            button.danger type="submit" { "Delete item" }
-            a.button href=(item_url(&item.id)) { "Cancel" }
+            button.danger type="submit" { (t("Delete item")) }
+            a.button href=(item_url(&item.id)) { (t("Cancel")) }
         }
     };
-    Ok(ctx.page("Delete item", Nav::Sets, body))
+    Ok(ctx.page(t("Delete item"), Nav::Sets, body))
 }
 
 pub async fn delete_submit(
@@ -840,13 +891,13 @@ pub async fn better(State(state): State<AppState>, ctx: Ctx, Path(id): Path<Stri
     let list = svc::better(&state, &ctx.user, &id).await?;
     let fragment = html! {
         div.better {
-            h3 { "Better versions" }
+            h3 { (t("Better versions")) }
             @if list.is_empty() {
-                p.muted { "No higher-quality copy of this picture in your library or in public sets." }
+                p.muted { (t("No higher-quality copy of this picture in your library or in public sets.")) }
             } @else {
                 (grid(html! {
                     @for s in &list {
-                        (item_card(&ctx, &Card::from_summary(s), Some(html! { "by " (s.owner_username) })))
+                        (item_card(&ctx, &Card::from_summary(s), Some(html! { (tf("by {owner}", &[("owner", &s.owner_username)])) })))
                     }
                 }))
             }
@@ -856,9 +907,9 @@ pub async fn better(State(state): State<AppState>, ctx: Ctx, Path(id): Path<Stri
         Ok(fragment)
     } else {
         Ok(ctx.page(
-            "Better versions",
+            t("Better versions"),
             Nav::Sets,
-            html! { p.crumbs { a href=(item_url(&id)) { "← back to the item" } } (fragment) },
+            html! { p.crumbs { a href=(item_url(&id)) { "← " (t("back to the item")) } } (fragment) },
         ))
     }
 }

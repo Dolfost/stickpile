@@ -1,0 +1,97 @@
+# Ukrainian: web-problems. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+Warning	Попередження
+Info	Примітка
+Exact duplicates	Точні дублікати
+Near-duplicates	Майже дублікати
+Look alike (AI hint)	Схожі (підказка ШІ)
+Also in other sets	Також в інших наборах
+Missing files	Бракує файлів
+Processing failed	Обробка не вдалася
+Very small pictures	Дуже малі зображення
+AI suggestions to review	Пропозиції ШІ на перевірку
+Emoji entries that are not emoji	Записи емодзі, що не є емодзі
+No emoji	Без емодзі
+Too many stickers for Telegram	Забагато стікерів для Telegram
+Cannot become Telegram stickers	Не можуть стати стікерами Telegram
+Cut short on Telegram	Обрізані в Telegram
+Telegram pack out of date	Набір у Telegram застарів
+Publishing to Telegram failed	Не вдалося опублікувати в Telegram
+Git sync failed	Не вдалося синхронізувати з git
+Empty set	Порожній набір
+{n} error|{n} errors	{n} помилка|{n} помилки|{n} помилок
+{n} warning|{n} warnings	{n} попередження|{n} попередження|{n} попереджень
+{n} info|{n} info	{n} примітка|{n} примітки|{n} приміток
+{n} set|{n} sets	{n} набір|{n} набори|{n} наборів
+Checking the set for problems…	Перевіряємо набір на проблеми…
+Open the list	Відкрити список
+Hide dismissed	Сховати відхилені
+Show {n} dismissed	Показати відхилені ({n})
+No problems found.	Проблем не знайдено.
+Checked just now. Near-duplicates are compared picture by picture; “look alike” is an AI hint and often fine. Mark anything intentional as “Not a problem”; it comes back if those items change.	Перевірено щойно. Майже дублікати порівнюються зображення за зображенням; “схожі” є лише підказкою ШІ, і часто це нормально. Позначте все навмисне як “Не проблема”; якщо ці стікери зміняться, проблема з'явиться знову.
+Problems in “{set}”	Проблеми набору “{set}”
+Item of a private set	Стікер із приватного набору
+Private item	Приватний стікер
+anim	анім.
+Edit emojis	Редагувати емодзі
+Review	Перевірити
+Dismissed	Відхилено
+Perceptual hash distance {d} of 64.	Відстань перцептивного хешу: {d} із 64.
+AI similarity {s}. A hint, not a verdict.	Схожість за оцінкою ШІ: {s}. Це підказка, а не вирок.
+Show again	Показати знову
+Not a problem	Не проблема
+Pull again	Отримати зміни знову
+Open the items	Відкрити стікери
+Move items to another set with “Move to” on their pages.	Перенесіть стікери в інший набір за допомогою “Перемістити до” на їхніх сторінках.
+Nothing left to show here.	Тут більше нічого показувати.
+Whose sets	Чиї набори
+My sets	Мої набори
+Whole server	Увесь сервер
+Everything	Усе
+Errors and warnings	Помилки й попередження
+Errors only	Лише помилки
+All kinds	Усі типи
+Show dismissed	Показувати відхилені
+Checked {sets} on this server.	Перевірено {sets} на цьому сервері.
+Checked {sets}.	Перевірено {sets}.
+{n} dismissed.	Відхилено: {n}.
+Every set on the server. Items of other users' private sets are not shown, and only owners can dismiss problems.	Усі набори на сервері. Стікери з приватних наборів інших користувачів не показано, а відхиляти проблеми можуть лише власники.
+Nothing matches these filters.	Ніщо не відповідає цим фільтрам.
+Near-duplicates are compared picture by picture. “Look alike” comes from the AI and is only a hint. Problems marked “Not a problem” stay hidden until the items change.	Майже дублікати порівнюються зображення за зображенням. “Схожі” визначає ШІ, і це лише підказка. Проблеми, позначені як “Не проблема”, залишаються прихованими, доки ці стікери не зміняться.
+Near-duplicates are compared picture by picture. “Look alike” comes from the AI (off on this server right now) and is only a hint. Problems marked “Not a problem” stay hidden until the items change.	Майже дублікати порівнюються зображення за зображенням. “Схожі” визначає ШІ (зараз він вимкнений на цьому сервері), і це лише підказка. Проблеми, позначені як “Не проблема”, залишаються прихованими, доки ці стікери не зміняться.
+{w}×{h} px, quality {q}	{w}×{h} пкс, якість {q}
+{w}×{h} px	{w}×{h} пкс
+{s} s	{s} с
+name	назва
+videos longer than {duration} cannot become stickers	відео, довші за {duration}, не можуть стати стікерами
+animated stickers need ffmpeg on the server	для анімованих стікерів на сервері потрібен ffmpeg
+no Telegram sticker could be made from it	з нього не вдалося зробити стікер Telegram
+cannot be made into a Telegram video sticker (at most 3 s, 512 px, 256 KB)	з нього не можна зробити відеостікер Telegram (щонайбільше 3 с, 512 пкс, 256 КБ)
+also in {sets}	також у: {sets}
+no original	немає оригіналу
+no thumbnail	немає мініатюри
+processing failed	обробка не вдалася
+never processed	ще не оброблявся
+unknown error	невідома помилка
+The set has no items yet.	У наборі ще немає стікерів.
+{n} item stores the same file.|{n} items store the same file.	{n} стікер зберігає той самий файл.|{n} стікери зберігають той самий файл.|{n} стікерів зберігають той самий файл.
+These items look identical (the files differ).	Ці стікери виглядають однаково (хоча файли різні).
+These items show the same picture (resized, recompressed or slightly cropped).	Ці стікери показують те саме зображення (зі зміненим розміром, повторно стиснене або трохи обрізане).
+These items look alike to the AI. Only a hint: variations of one character often do.	На думку ШІ, ці стікери схожі. Це лише підказка: варіації одного персонажа часто схожі.
+{n} item is also in other sets of yours (added there first).|{n} items are also in other sets of yours (added there first).	{n} стікер є також в інших ваших наборах (туди його додали раніше).|{n} стікери є також в інших ваших наборах (туди їх додали раніше).|{n} стікерів є також в інших ваших наборах (туди їх додали раніше).
+{n} item is missing files; delete and upload them again.|{n} items are missing files; delete and upload them again.	{n} стікеру бракує файлів; видаліть його й завантажте знову.|{n} стікерам бракує файлів; видаліть їх і завантажте знову.|{n} стікерам бракує файлів; видаліть їх і завантажте знову.
+Processing of {n} item did not finish: some downloads and conversions are missing.|Processing of {n} items did not finish: some downloads and conversions are missing.	Обробку {n} стікера не завершено: бракує деяких файлів для звантаження й конвертацій.|Обробку {n} стікерів не завершено: бракує деяких файлів для звантаження й конвертацій.|Обробку {n} стікерів не завершено: бракує деяких файлів для звантаження й конвертацій.
+{n} item is very small (under {px} px) and may look blurry.|{n} items are very small (under {px} px) and may look blurry.	{n} стікер дуже малий (менше {px} пкс) і може виглядати розмитим.|{n} стікери дуже малі (менше {px} пкс) і можуть виглядати розмитими.|{n} стікерів дуже малі (менше {px} пкс) і можуть виглядати розмитими.
+Telegram scales stickers up to 512 px.	Telegram збільшує стікери до 512 пкс.
+{n} item has emoji entries that are not emoji (Telegram leaves them out).|{n} items have emoji entries that are not emoji (Telegram leaves them out).	{n} стікер має серед емодзі записи, що не є емодзі (Telegram їх пропускає).|{n} стікери мають серед емодзі записи, що не є емодзі (Telegram їх пропускає).|{n} стікерів мають серед емодзі записи, що не є емодзі (Telegram їх пропускає).
+{n} item has no emoji; on Telegram they get {emoji}, which makes them hard to find.|{n} items have no emoji; on Telegram they get {emoji}, which makes them hard to find.	{n} стікер не має емодзі; у Telegram він отримає {emoji}, тож його буде важко знайти.|{n} стікери не мають емодзі; у Telegram вони отримають {emoji}, тож їх буде важко знайти.|{n} стікерів не мають емодзі; у Telegram вони отримають {emoji}, тож їх буде важко знайти.
+{n} item has AI suggestions nobody confirmed yet.|{n} items have AI suggestions nobody confirmed yet.	{n} стікер має пропозиції ШІ, які ще ніхто не підтвердив.|{n} стікери мають пропозиції ШІ, які ще ніхто не підтвердив.|{n} стікерів мають пропозиції ШІ, які ще ніхто не підтвердив.
+The last publish to Telegram failed: {error}	Остання публікація в Telegram не вдалася: {error}
+The set has {n} sticker; a Telegram pack holds at most {max}, so publishing fails. Move some items to another set.|The set has {n} stickers; a Telegram pack holds at most {max}, so publishing fails. Move some items to another set.	У наборі {n} стікер; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.|У наборі {n} стікери; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.|У наборі {n} стікерів; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.
+{n} item cannot become Telegram stickers and is left out when the set is published.|{n} items cannot become Telegram stickers and are left out when the set is published.	{n} стікер не може стати стікером Telegram, тож під час публікації набору його буде пропущено.|{n} стікери не можуть стати стікерами Telegram, тож під час публікації набору їх буде пропущено.|{n} стікерів не можуть стати стікерами Telegram, тож під час публікації набору їх буде пропущено.
+{n} animation or video is longer than {max}: Telegram gets only the first {max}.|{n} animations or videos are longer than {max}: Telegram gets only the first {max}.	{n} анімація або відео триває довше за {max}: Telegram отримає лише перші {max}.|{n} анімації або відео тривають довше за {max}: Telegram отримає лише перші {max}.|{n} анімацій або відео тривають довше за {max}: Telegram отримає лише перші {max}.
+{n} item not on Telegram yet|{n} items not on Telegram yet	{n} стікер ще не в Telegram|{n} стікери ще не в Telegram|{n} стікерів ще не в Telegram
+{n} item with a new file|{n} items with a new file	{n} стікер із новим файлом|{n} стікери з новим файлом|{n} стікерів з новим файлом
+{n} sticker removed here but still in the pack|{n} stickers removed here but still in the pack	{n} стікер видалено тут, але він досі в наборі|{n} стікери видалено тут, але вони досі в наборі|{n} стікерів видалено тут, але вони досі в наборі
+The set changed after its last publish to Telegram; publish again to update the pack.	Набір змінився після останньої публікації в Telegram; опублікуйте його знову, щоб оновити набір у Telegram.
+The Telegram pack is out of date: {changes}. Publish again to update it.	Набір у Telegram застарів: {changes}. Опублікуйте знову, щоб оновити його.
+The last git pull or push failed: {error}	Остання синхронізація з git (pull або push) не вдалася: {error}

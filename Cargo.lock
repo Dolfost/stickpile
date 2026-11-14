@@ -3728,6 +3728,7 @@ dependencies = [
  "libadwaita",
  "stickpile-api",
  "stickpile-core",
+ "stickpile-i18n",
  "stickpile-quick",
  "tempfile",
  "tokio",
@@ -3750,6 +3751,14 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "stickpile-i18n"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3777,6 +3786,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stickpile-api",
+ "stickpile-i18n",
  "tempfile",
  "thiserror 2.0.21",
  "x11rb",
@@ -3824,6 +3834,7 @@ dependencies = [
  "stickpile-ai",
  "stickpile-api",
  "stickpile-gitpack",
+ "stickpile-i18n",
  "stickpile-media",
  "stickpile-search",
  "stickpile-setfmt",

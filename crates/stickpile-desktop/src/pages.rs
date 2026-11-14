@@ -6,6 +6,8 @@ use std::path::Path;
 
 use stickpile_api::TargetApp;
 use stickpile_core::ClientConfig;
+use stickpile_i18n::global::{t, t_dyn, tf, tp};
+use stickpile_i18n::Lang;
 use stickpile_quick::model::target_name;
 use stickpile_quick::{HelpSection, Tab};
 
@@ -31,7 +33,7 @@ pub fn who(p: &Profile) -> String {
     p.display_name
         .clone()
         .or_else(|| p.username.clone())
-        .unwrap_or_else(|| "Not signed in".into())
+        .unwrap_or_else(|| t("Not signed in").into())
 }
 
 /// The line under the heading: "@alice, admin".
@@ -41,7 +43,7 @@ pub fn who_detail(p: &Profile) -> String {
         parts.push(format!("@{u}"));
     }
     if p.admin {
-        parts.push("admin".into());
+        parts.push(t("admin").into());
     }
     parts.join(", ")
 }
@@ -49,9 +51,9 @@ pub fn who_detail(p: &Profile) -> String {
 /// How the popup is signed in.
 pub fn auth_text(p: &Profile) -> &'static str {
     match p.auth {
-        AuthKind::Token => "With a token stored on this device",
-        AuthKind::Tailnet => "By tailnet identity, no token stored",
-        AuthKind::None => "Not signed in",
+        AuthKind::Token => t("With a token stored on this device"),
+        AuthKind::Tailnet => t("By tailnet identity, no token stored"),
+        AuthKind::None => t("Not signed in"),
     }
 }
 
@@ -59,19 +61,19 @@ pub fn auth_text(p: &Profile) -> &'static str {
 pub fn stat_tiles(p: &Profile) -> Vec<(String, &'static str)> {
     let count = |v: Option<u64>, caption| v.map(|n| (n.to_string(), caption));
     let mut tiles: Vec<_> = [
-        count(p.copies, "Copies"),
-        count(p.copies_last_7d, "This week"),
-        count(p.likes, "Likes given"),
-        count(p.likes_received, "Likes received"),
-        count(p.packs, "Packs"),
-        count(p.items, "Items"),
-        p.storage_bytes.map(|b| (human_bytes(b), "Storage")),
+        count(p.copies, t("Copies")),
+        count(p.copies_last_7d, t("This week")),
+        count(p.likes, t("Likes given")),
+        count(p.likes_received, t("Likes received")),
+        count(p.packs, t("Packs")),
+        count(p.items, t("Items")),
+        p.storage_bytes.map(|b| (human_bytes(b), t("Storage"))),
     ]
     .into_iter()
     .flatten()
     .collect();
     if p.pending_usage > 0 {
-        tiles.push((p.pending_usage.to_string(), "Copies not yet uploaded"));
+        tiles.push((p.pending_usage.to_string(), t("Copies not yet uploaded")));
     }
     tiles
 }
@@ -79,18 +81,22 @@ pub fn stat_tiles(p: &Profile) -> Vec<(String, &'static str)> {
 /// Display text of a choice value of the setting `key`.
 pub fn choice_label(key: &str, value: &str) -> String {
     let named = match key {
-        "ui.start_tab" if value == "last" => Some("Last used".to_string()),
-        "ui.start_tab" => Tab::from_key(value).map(|t| t.label().to_string()),
+        "ui.start_tab" if value == "last" => Some(t("Last used tab").to_string()),
+        "ui.start_tab" => Tab::from_key(value).map(|tab| tab.label().to_string()),
+        "ui.language" if value == "auto" => Some(t("Automatic").to_string()),
+        "ui.language" => Lang::parse(value).map(|l| l.native_name().to_string()),
         "default_target" => TargetApp::parse(value).map(target_name),
         _ => None,
     };
     named.unwrap_or_else(|| {
         let text = value.replace('_', " ");
         let mut chars = text.chars();
-        match chars.next() {
+        let shown: String = match chars.next() {
             Some(first) => first.to_uppercase().chain(chars).collect(),
             None => text,
-        }
+        };
+        // "Transparent", "White", ...: translated when the catalog has them.
+        t_dyn(&shown)
     })
 }
 
@@ -98,9 +104,9 @@ pub fn choice_label(key: &str, value: &str) -> String {
 pub fn lock_reason(config_path: &Path) -> &'static str {
     let in_store = std::fs::canonicalize(config_path).is_ok_and(|p| p.starts_with("/nix/store"));
     if in_store {
-        "Set by home-manager"
+        t("Set by home-manager")
     } else {
-        "Set in config.toml"
+        t("Set in config.toml")
     }
 }
 
@@ -111,17 +117,19 @@ pub fn save_note(config_path: &Path, write_path: &Path, home: Option<&Path>) -> 
         None => p.display().to_string(),
     };
     if config_path == write_path {
-        return format!("Changes are saved to {}.", short(config_path));
+        return tf("Changes are saved to {file}.", &[("file", &short(config_path))]);
     }
     let name = |p: &Path| {
         p.file_name()
             .map_or_else(|| short(p), |n| n.to_string_lossy().into_owned())
     };
-    format!(
-        "{} is read-only, so changes are saved to {} next to it; the keys {} sets are locked.",
-        short(config_path),
-        name(write_path),
-        name(config_path)
+    tf(
+        "{config} is read-only, so changes are saved to {settings} next to it; the keys {name} sets are locked.",
+        &[
+            ("config", &short(config_path)),
+            ("settings", &name(write_path)),
+            ("name", &name(config_path)),
+        ],
     )
 }
 
@@ -147,11 +155,7 @@ pub fn account_changed(old: &ClientConfig, new: &ClientConfig) -> bool {
 
 /// "1 item", "12 items".
 pub fn item_count(n: u64) -> String {
-    if n == 1 {
-        "1 item".into()
-    } else {
-        format!("{n} items")
-    }
+    tp(n, "{n} item", "{n} items")
 }
 
 /// The key help in two columns of about the same height, sections kept in order.
@@ -255,10 +259,58 @@ mod tests {
         assert!(stat_tiles(&out).is_empty());
     }
 
+    /// The Settings rows (labels from the core config) and the key help
+    /// are shown through `t_dyn`: each text needs a Ukrainian one.
+    #[test]
+    fn ukrainian_covers_the_settings_and_the_help() {
+        use stickpile_core::settings::{settings_schema, SettingKind, GROUPS};
+        use stickpile_i18n::{lookup, Lang};
+        let mut missing = Vec::new();
+        let mut need = |text: &str| {
+            if lookup(Lang::Uk, text).is_none() {
+                missing.push(text.to_string());
+            }
+        };
+        for g in GROUPS {
+            need(g);
+        }
+        for spec in settings_schema() {
+            need(spec.label);
+            need(spec.help);
+            if let SettingKind::Choice(names) = spec.kind {
+                for n in names {
+                    // Under English (the tests' language) the label is the
+                    // catalog key; tabs and languages are named elsewhere.
+                    let shown = choice_label(spec.key, n);
+                    let named = matches!(spec.key, "ui.start_tab" | "default_target")
+                        || (spec.key == "ui.language" && *n != "auto");
+                    if !named {
+                        need(&shown);
+                    }
+                }
+            }
+        }
+        for section in stickpile_quick::HELP {
+            need(section.title);
+            for (keys, what) in section.keys {
+                need(keys);
+                need(what);
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "{} texts without Ukrainian:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
+    }
+
     #[test]
     fn choice_labels() {
         assert_eq!(choice_label("ui.start_tab", "most_used"), "Most used");
-        assert_eq!(choice_label("ui.start_tab", "last"), "Last used");
+        assert_eq!(choice_label("ui.start_tab", "last"), "Last used tab");
         assert_eq!(choice_label("ui.start_mode", "normal"), "Normal");
         assert_eq!(choice_label("default_target", "whatsapp"), "WhatsApp");
         assert_eq!(

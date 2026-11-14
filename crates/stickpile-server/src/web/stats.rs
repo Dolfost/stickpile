@@ -5,11 +5,13 @@
 use axum::extract::State;
 use maud::{html, Markup};
 use stickpile_api::{TargetApp, UserStats};
+use stickpile_i18n::fill;
 
 use super::components::{fmt_bytes, fmt_date, item_url, plural, set_url, thumb};
 use super::layout::Nav;
 use super::Ctx;
 use crate::error::AppResult;
+use crate::i18n::{t, tp};
 use crate::ids::now;
 use crate::service::stats;
 use crate::state::AppState;
@@ -78,17 +80,29 @@ pub fn daily_chart(daily: &[u64], first_day: i64) -> Markup {
         .max_by_key(|(i, v)| (**v, std::cmp::Reverse(*i)))
         .filter(|(_, v)| **v > 0)
         .map(|(i, v)| (fmt_date((first_day + i as i64) * DAY), *v));
+    let days = n as u64;
     let summary = match &busiest {
-        Some((d, v)) => format!(
-            "{} in the last {n} days; busiest day {d} with {}.",
-            plural(total, "copy", "copies"),
-            plural(*v, "copy", "copies")
+        Some((d, v)) => fill(
+            &tp(
+                days,
+                "{copies} in the last {n} day; busiest day {day} with {busiest}.",
+                "{copies} in the last {n} days; busiest day {day} with {busiest}.",
+            ),
+            &[
+                ("copies", &plural(total, "copy", "copies")),
+                ("day", d),
+                ("busiest", &plural(*v, "copy", "copies")),
+            ],
         ),
-        None => format!("No copies in the last {n} days."),
+        None => tp(
+            days,
+            "No copies in the last {n} day.",
+            "No copies in the last {n} days.",
+        ),
     };
     html! {
         figure.chart {
-            figcaption { "Copies per day (UTC), last " (n) " days" }
+            figcaption { (tp(days, "Copies per day (UTC), last {n} day", "Copies per day (UTC), last {n} days")) }
             p.chart-summary { (summary) }
             svg.bar-chart viewBox=(format!("0 0 {W} {H}")) preserveAspectRatio="xMidYMid meet" aria-hidden="true"
                 focusable="false" {
@@ -116,8 +130,8 @@ pub fn daily_chart(daily: &[u64], first_day: i64) -> Markup {
                 }
             }
             table.sr-only {
-                caption { "Copies per day" }
-                thead { tr { th scope="col" { "Day" } th scope="col" { "Copies" } } }
+                caption { (t("Copies per day")) }
+                thead { tr { th scope="col" { (t("Day")) } th scope="col" { (t("Copies")) } } }
                 tbody {
                     @for (i, v) in daily.iter().enumerate() {
                         tr { th scope="row" { (fmt_date((first_day + i as i64) * DAY)) } td { (v) } }
@@ -128,26 +142,26 @@ pub fn daily_chart(daily: &[u64], first_day: i64) -> Markup {
     }
 }
 
-fn target_name(t: TargetApp) -> &'static str {
-    match t {
+fn target_name(app: TargetApp) -> &'static str {
+    match app {
         TargetApp::Telegram => "Telegram",
         TargetApp::Discord => "Discord",
         TargetApp::Signal => "Signal",
         TargetApp::Whatsapp => "WhatsApp",
         TargetApp::Slack => "Slack",
-        TargetApp::Generic => "Other apps",
+        TargetApp::Generic => t("Other apps"),
     }
 }
 
 fn tiles(s: &UserStats) -> Markup {
     let tiles: [(&str, String); 7] = [
-        ("Sets", s.sets.to_string()),
-        ("Items", s.items.to_string()),
-        ("Storage", fmt_bytes(s.storage_bytes)),
-        ("Copies", s.copies_total.to_string()),
-        ("Copies, last 7 days", s.copies_last_7d.to_string()),
-        ("Likes given", s.likes_given.to_string()),
-        ("Likes received", s.likes_received.to_string()),
+        (t("Sets"), s.sets.to_string()),
+        (t("Items"), s.items.to_string()),
+        (t("Storage"), fmt_bytes(s.storage_bytes)),
+        (t("Copies"), s.copies_total.to_string()),
+        (t("Copies, last 7 days"), s.copies_last_7d.to_string()),
+        (t("Likes given"), s.likes_given.to_string()),
+        (t("Likes received"), s.likes_received.to_string()),
     ];
     html! {
         dl.tiles {
@@ -162,14 +176,14 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> 
     let s = stats::user_stats(&state, &ctx.user).await?;
     let first_day = now().div_euclid(DAY) - (s.daily_copies.len() as i64 - 1);
     let body = html! {
-        h1 { "Your stats" }
+        h1 { (t("Your stats")) }
         (tiles(&s))
         (daily_chart(&s.daily_copies, first_day))
         div.two-col {
             section aria-labelledby="top-items" {
-                h2 #top-items { "Your most copied items" }
+                h2 #top-items { (t("Your most copied items")) }
                 @if s.top_items.is_empty() {
-                    p.muted { "Nothing copied yet." }
+                    p.muted { (t("Nothing copied yet.")) }
                 } @else {
                     ol.pop-list {
                         @for e in &s.top_items {
@@ -187,12 +201,12 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> 
                 }
             }
             section aria-labelledby="top-targets" {
-                h2 #top-targets { "Where you paste" }
+                h2 #top-targets { (t("Where you paste")) }
                 @if s.top_targets.is_empty() {
-                    p.muted { "No target apps reported yet (the desktop client reports them)." }
+                    p.muted { (t("No target apps reported yet (the desktop client reports them).")) }
                 } @else {
                     table.data {
-                        thead { tr { th scope="col" { "App" } th scope="col" { "Copies" } } }
+                        thead { tr { th scope="col" { (t("App")) } th scope="col" { (t("Copies")) } } }
                         tbody {
                             @for (t, n) in &s.top_targets {
                                 tr { th scope="row" { (target_name(*t)) } td { (n) } }
@@ -203,7 +217,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> 
             }
         }
     };
-    Ok(ctx.page("Stats", Nav::Stats, body))
+    Ok(ctx.page(t("Stats"), Nav::Stats, body))
 }
 
 #[cfg(test)]

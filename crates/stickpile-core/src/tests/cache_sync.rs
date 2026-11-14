@@ -16,6 +16,7 @@ fn user(id: &str, name: &str) -> User {
         created_at: 0,
         telegram_user_id: None,
         theme: Default::default(),
+        language: None,
     }
 }
 

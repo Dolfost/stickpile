@@ -194,6 +194,7 @@ impl MockState {
             created_at: self.clock,
             telegram_user_id: None,
             theme: Default::default(),
+            language: None,
         };
         self.users.push(MockUser {
             user: user.clone(),
@@ -663,7 +664,7 @@ pub fn router(state: Shared) -> Router {
     Router::new()
         .route(r::HEALTH, get(|| async { "ok" }))
         .route(r::AUTH_TOKEN, post(login))
-        .route(r::ME, get(me))
+        .route(r::ME, get(me).patch(patch_me))
         .route(r::TOKENS, get(list_tokens).post(create_token))
         .route(r::TOKEN, axum::routing::delete(revoke_token))
         .route(r::SETS, get(list_sets).post(create_set))
@@ -715,6 +716,21 @@ async fn login(State(s): State<Shared>, Json(req): Json<TokenRequest>) -> HResul
 
 async fn me(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<User>> {
     Ok(Json(auth(&lock(&s), &h)?))
+}
+
+/// The language only (what the clients change).
+async fn patch_me(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    Json(req): Json<stickpile_api::UpdateMe>,
+) -> HResult<Json<User>> {
+    let mut st = lock(&s);
+    let u = auth(&st, &h)?;
+    let user = st.users.iter_mut().find(|m| m.user.id == u.id).expect("authenticated");
+    if let Some(lang) = req.language {
+        user.user.language = lang;
+    }
+    Ok(Json(user.user.clone()))
 }
 
 async fn list_tokens(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<Vec<ApiToken>>> {

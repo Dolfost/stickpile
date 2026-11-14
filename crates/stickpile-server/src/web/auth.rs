@@ -27,6 +27,7 @@ use crate::auth::{session, AuthMethod, AuthOutcome, ClientIp, CurrentUser};
 use crate::config::Registration;
 use crate::db::UserRow;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, t_dyn};
 use crate::ids::{random_base32, sha256_hex};
 use crate::security::check_same_origin;
 use crate::state::AppState;
@@ -120,65 +121,64 @@ fn pending_fail(token: &str) -> bool {
 pub fn login_form(username: &str, next: &str, error: Option<&str>) -> Markup {
     let body = html! {
         section.auth-box {
-            h1 { "Sign in" }
+            h1 { (t("Sign in")) }
             @if let Some(e) = error { (layout::alert("error", e)) }
             form.stack method="post" action="/login" {
                 input type="hidden" name="next" value=(next);
                 div.field-row {
-                    label for="login-username" { "Username" }
+                    label for="login-username" { (t("Username")) }
                     input #login-username type="text" name="username" value=(username) required
                         autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" autofocus;
                 }
                 div.field-row {
-                    label for="login-password" { "Password" }
+                    label for="login-password" { (t("Password")) }
                     input #login-password type="password" name="password" required autocomplete="current-password";
                 }
-                button.primary type="submit" { "Sign in" }
+                button.primary type="submit" { (t("Sign in")) }
             }
             p.muted {
-                "On the tailnet? Open stickpile through its tailnet address and you are signed in automatically. "
-                a href="/register" { "Create an account" } " if the server allows it."
+                (t("On the tailnet? Open stickpile through its tailnet address and you are signed in automatically."))
+                " " a href="/register" { (t("Create an account")) } " " (t("if the server allows it."))
             }
             // No email here: the ways back in are the tailnet, an admin, or
             // the operator's command (docs/deployment.md).
             details.forgot {
-                summary { "Forgot your password?" }
+                summary { (t("Forgot your password?")) }
                 ul {
                     li {
-                        "If your account has a tailnet login, open stickpile through its tailnet address from one of your "
-                        "own devices: you are signed in, and Settings sets a new password without the old one."
+                        (t("If your account has a tailnet login, open stickpile through its tailnet address from one of your own devices: you are signed in, and Settings sets a new password without the old one."))
                     }
-                    li { "Otherwise ask an administrator: the admin panel resets passwords." }
+                    li { (t("Otherwise ask an administrator: the admin panel resets passwords.")) }
                     li {
-                        "Whoever runs the server can set one with "
+                        (t("Whoever runs the server can set one with")) " "
                         code { "stickpile-server reset-password <username> --password-file <file>" } "."
                     }
                 }
             }
         }
     };
-    layout::page(None, "Sign in", Nav::None, body)
+    layout::page(None, t("Sign in"), Nav::None, body)
 }
 
 fn totp_form(token: &str, error: Option<&str>) -> Markup {
     let body = html! {
         section.auth-box {
-            h1 { "Two-step verification" }
+            h1 { (t("Two-step verification")) }
             @if let Some(e) = error { (layout::alert("error", e)) }
-            p { "Enter the 6-digit code from your authenticator app." }
+            p { (t("Enter the 6-digit code from your authenticator app.")) }
             form.stack method="post" action="/login/totp" {
                 input type="hidden" name="token" value=(token);
                 div.field-row {
-                    label for="login-totp" { "Code" }
+                    label for="login-totp" { (t("Code")) }
                     input #login-totp type="text" name="code" required inputmode="numeric" pattern="[0-9 ]{6,7}"
                         maxlength="7" autocomplete="one-time-code" autofocus;
                 }
-                button.primary type="submit" { "Verify" }
+                button.primary type="submit" { (t("Verify")) }
             }
-            p.muted { a href="/login" { "Start over" } }
+            p.muted { a href="/login" { (t("Start over")) } }
         }
     };
-    layout::page(None, "Two-step verification", Nav::None, body)
+    layout::page(None, t("Two-step verification"), Nav::None, body)
 }
 
 fn html_status(status: StatusCode, markup: Markup) -> Response {
@@ -253,9 +253,9 @@ pub async fn login_submit(
         Err(e) if e.status.is_server_error() => Err(e),
         Err(e) => {
             let msg = if e.code == "rate_limited" {
-                "Too many sign-in attempts. Wait a minute and try again."
+                t("Too many sign-in attempts. Wait a minute and try again.")
             } else {
-                "Wrong username or password."
+                t("Wrong username or password.")
             };
             Ok(html_status(e.status, login_form(&f.username, &next, Some(msg))))
         }
@@ -280,7 +280,7 @@ pub async fn login_totp(
     let Some((username, password, next)) = pending_get(&f.token) else {
         return Ok(html_status(
             StatusCode::UNAUTHORIZED,
-            login_form("", "/", Some("The sign-in expired. Please start again.")),
+            login_form("", "/", Some(t("The sign-in expired. Please start again."))),
         ));
     };
     let code: String = f.code.chars().filter(|c| !c.is_whitespace()).collect();
@@ -292,18 +292,18 @@ pub async fn login_totp(
         Err(e) if e.status.is_server_error() => Err(e),
         Err(e) if e.code == "rate_limited" => Ok(html_status(
             e.status,
-            totp_form(&f.token, Some("Too many attempts. Wait a minute and try again.")),
+            totp_form(&f.token, Some(t("Too many attempts. Wait a minute and try again."))),
         )),
         Err(e) => {
             if pending_fail(&f.token) {
                 Ok(html_status(
                     e.status,
-                    totp_form(&f.token, Some("That code is not valid.")),
+                    totp_form(&f.token, Some(t("That code is not valid."))),
                 ))
             } else {
                 Ok(html_status(
                     e.status,
-                    login_form(&username, &next, Some("Too many wrong codes. Please sign in again.")),
+                    login_form(&username, &next, Some(t("Too many wrong codes. Please sign in again."))),
                 ))
             }
         }
@@ -351,50 +351,50 @@ pub struct RegisterForm {
 fn register_form(policy: Registration, min_pw: usize, f: &RegisterForm, error: Option<&str>) -> Markup {
     let body = html! {
         section.auth-box {
-            h1 { "Create an account" }
+            h1 { (t("Create an account")) }
             @if policy == Registration::Closed {
-                (layout::alert("info", "Registration is closed on this server. Ask an administrator for an account or an invitation."))
-                p { a href="/login" { "Sign in" } }
+                (layout::alert("info", t("Registration is closed on this server. Ask an administrator for an account or an invitation.")))
+                p { a href="/login" { (t("Sign in")) } }
             } @else {
                 @if let Some(e) = error { (layout::alert("error", e)) }
                 form.stack method="post" action="/register" {
                     @if policy == Registration::Invite {
                         div.field-row {
-                            label for="reg-code" { "Invitation code" }
+                            label for="reg-code" { (t("Invitation code")) }
                             input #reg-code type="text" name="invite_code" value=(f.invite_code) required
                                 autocomplete="off" spellcheck="false";
                         }
                     }
                     div.field-row {
-                        label for="reg-username" { "Username" }
+                        label for="reg-username" { (t("Username")) }
                         input #reg-username type="text" name="username" value=(f.username) required minlength="2"
                             maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{1,31}" autocomplete="username"
                             autocapitalize="none" spellcheck="false" aria-describedby="reg-username-hint";
-                        p.hint #reg-username-hint { "2–32 letters, digits, _ . or -, starting with a letter or digit." }
+                        p.hint #reg-username-hint { (t("2–32 letters, digits, _ . or -, starting with a letter or digit.")) }
                     }
                     div.field-row {
-                        label for="reg-display" { "Display name (optional)" }
+                        label for="reg-display" { (t("Display name (optional)")) }
                         input #reg-display type="text" name="display_name" value=(f.display_name) maxlength="100"
                             autocomplete="nickname";
                     }
                     div.field-row {
-                        label for="reg-password" { "Password" }
+                        label for="reg-password" { (t("Password")) }
                         input #reg-password type="password" name="password" required minlength=(min_pw)
                             autocomplete="new-password" aria-describedby="reg-password-hint";
-                        p.hint #reg-password-hint { "At least 8 characters." }
+                        p.hint #reg-password-hint { (t("At least 8 characters.")) }
                     }
                     div.field-row {
-                        label for="reg-password2" { "Repeat the password" }
+                        label for="reg-password2" { (t("Repeat the password")) }
                         input #reg-password2 type="password" name="password2" required minlength=(min_pw)
                             autocomplete="new-password";
                     }
-                    button.primary type="submit" { "Create account" }
+                    button.primary type="submit" { (t("Create account")) }
                 }
-                p.muted { "Already have an account? " a href="/login" { "Sign in" } }
+                p.muted { (t("Already have an account?")) " " a href="/login" { (t("Sign in")) } }
             }
         }
     };
-    layout::page(None, "Create an account", Nav::None, body)
+    layout::page(None, t("Create an account"), Nav::None, body)
 }
 
 pub async fn register_page(
@@ -437,7 +437,7 @@ pub async fn register_submit(
                 policy,
                 state.config.auth.min_password_length,
                 &f,
-                Some("The passwords do not match."),
+                Some(t("The passwords do not match.")),
             ),
         ));
     }
@@ -467,13 +467,11 @@ pub async fn register_submit(
 
 fn register_message(e: &AppError) -> String {
     match e.code {
-        "conflict" => "That username is taken.".to_string(),
-        "rate_limited" => "Too many attempts. Wait a minute and try again.".to_string(),
+        "conflict" => t("That username is taken.").to_string(),
+        "rate_limited" => t("Too many attempts. Wait a minute and try again.").to_string(),
         _ => {
-            let mut m = e.message.clone();
-            if let Some(first) = m.get_mut(0..1) {
-                first.make_ascii_uppercase();
-            }
+            // In the request's language when the catalog has the message.
+            let mut m = super::settings::capitalize(&t_dyn(&e.message));
             if !m.ends_with('.') {
                 m.push('.');
             }

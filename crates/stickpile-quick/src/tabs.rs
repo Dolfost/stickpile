@@ -3,6 +3,7 @@
 //! Tabs are numbered 1..=7 in [`Tab::ALL`] order (the `1`-`7` and Alt+1..7
 //! keys) and have a stable [`Tab::key`] for the config (`ui.start_tab`).
 
+use stickpile_i18n::global::t;
 /// One page of the popup, in tab bar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Tab {
@@ -57,15 +58,16 @@ impl Tab {
         Tab::ALL.into_iter().find(|t| t.key() == s)
     }
 
+    /// The tab's name in the current language.
     pub fn label(self) -> &'static str {
         match self {
-            Tab::Search => "Search",
-            Tab::Recent => "Recent",
-            Tab::MostUsed => "Most used",
-            Tab::Packs => "Packs",
-            Tab::Favorites => "Favorites",
-            Tab::Me => "Me",
-            Tab::Settings => "Settings",
+            Tab::Search => t("Search"),
+            Tab::Recent => t("Recent"),
+            Tab::MostUsed => t("Most used"),
+            Tab::Packs => t("Packs"),
+            Tab::Favorites => t("Favorites"),
+            Tab::Me => t("Me"),
+            Tab::Settings => t("Settings"),
         }
     }
 
@@ -123,8 +125,8 @@ impl Mode {
     /// Footer text, as vim shows it.
     pub fn label(self) -> &'static str {
         match self {
-            Mode::Insert => "INSERT",
-            Mode::Normal => "NORMAL",
+            Mode::Insert => t("INSERT"),
+            Mode::Normal => t("NORMAL"),
         }
     }
 }

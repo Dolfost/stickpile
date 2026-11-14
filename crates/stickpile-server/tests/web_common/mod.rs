@@ -216,8 +216,9 @@ pub fn assert_page(r: &Resp) {
     assert!(r.header("content-security-policy").is_some(), "CSP header");
     let html = r.text();
     assert!(html.starts_with("<!DOCTYPE html>"), "doctype");
-    // `data-theme` follows when the user chose a theme.
-    assert!(html.contains("<html lang=\"en\""));
+    // `data-theme` follows when the user chose a theme; `lang` is the
+    // request's language.
+    assert!(html.contains("<html lang=\"en\"") || html.contains("<html lang=\"uk\""));
     assert_clean_html(&html);
 }
 

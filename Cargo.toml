@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/stickpile-api",
+    "crates/stickpile-i18n",
     "crates/stickpile-search",
     "crates/stickpile-setfmt",
     "crates/stickpile-media",
@@ -27,6 +28,7 @@ authors = ["Vladyslav Rehan <rehanvladyslav@gmail.com>"]
 [workspace.dependencies]
 # internal
 stickpile-api = { path = "crates/stickpile-api" }
+stickpile-i18n = { path = "crates/stickpile-i18n" }
 stickpile-search = { path = "crates/stickpile-search" }
 stickpile-setfmt = { path = "crates/stickpile-setfmt" }
 stickpile-media = { path = "crates/stickpile-media" }

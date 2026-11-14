@@ -1,0 +1,118 @@
+# Ukrainian: web-items. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+
+# components.rs: badges
+Quality {q} of 100	Якість {q} зі 100
+Quality	Якість
+animated	анімація
+video	відео
+Still	Статичне зображення
+Animation	Анімація
+Video	Відео
+Suggested by AI: confirm or edit it	Запропоновано ШІ: підтвердьте або змініть
+private	приватний
+unlisted	за посиланням
+public	публічний
+Imported from Telegram	Імпортовано з Telegram
+
+# components.rs: copy controls
+Copy frame	Копіювати кадр
+Copy a still frame as a PNG: browsers cannot copy GIFs or videos	Копіювати нерухомий кадр як PNG: браузери не вміють копіювати GIF і відео
+Copy the address of the file	Копіювати адресу файлу
+Download the original file	Звантажити оригінальний файл
+Browsers can put only still images on the clipboard, so “Copy still frame” copies the frame the thumbnail shows, as a PNG without motion.	Браузери можуть класти в буфер обміну лише нерухомі зображення, тож “Копіювати нерухомий кадр” копіює кадр, показаний на мініатюрі, як PNG без руху.
+To send the video, download it and drag the file into the chat.	Щоб надіслати відео, звантажте його й перетягніть файл у чат.
+To send the animation, download it and drag the file into the chat.	Щоб надіслати анімацію, звантажте її й перетягніть файл у чат.
+“Copy link” copies the file's address, which opens only for people signed in to this server.	“Копіювати посилання” копіює адресу файлу, яка відкривається лише тим, хто ввійшов на цей сервер.
+The desktop client pastes GIFs and videos directly.	Настільний клієнт вставляє GIF і відео напряму.
+Copying images needs HTTPS: this page was opened over plain http://, where browsers do not let pages put images on the clipboard. Open the image and use your browser's own “Copy Image”, or download it.	Для копіювання зображень потрібен HTTPS: цю сторінку відкрито через звичайний http://, а там браузери не дозволяють сторінкам класти зображення в буфер обміну. Відкрийте зображення й скористайтеся пунктом браузера “Копіювати зображення” або звантажте його.
+Copy a still frame	Копіювати нерухомий кадр
+
+# components.rs: likes, cards
+Remove your like	Прибрати вподобання
+Liked	Вподобано
+likes|likes	вподобання|вподобання|вподобань
+Likes	Вподобання
+in	у наборі
+More actions	Інші дії
+More actions for {name}	Інші дії для {name}
+
+# components.rs: display options of set lists
+Item count	Кількість стікерів
+visibility, source	видимість, джерело
+Owner	Власник
+Regular cards	Звичайні картки
+cover, name and details	обкладинка, назва й подробиці
+smaller cards, more per row	менші картки, більше в рядку
+View	Вигляд
+Style	Стиль
+fields::Show	Показувати
+never	ніколи
+
+# items.rs: fields
+# The field inside "Edit ..." / "Confirm ..." (accusative).
+object::name	назву
+object::keywords	ключові слова
+object::emojis	емодзі
+object::vibe	настрій
+object::tags	теги
+The mood in one word, e.g. tired or smug. Empty clears it.	Настрій одним словом, напр. втомлений або самовдоволений. Порожнє поле його очищає.
+Edit {field}	Редагувати {field}
+Edit	Редагувати
+Keep the AI suggestion as yours	Залишити пропозицію ШІ як вашу
+Confirm	Підтвердити
+
+# items.rs: set editor cards
+The set's cover: shown in set lists and on Telegram	Обкладинка набору: показується в списках наборів і в Telegram
+Delete {name}	Видалити {name}
+
+# items.rs: item page
+Download the video	Звантажити відео
+Only fields you change are saved; AI suggestions you leave alone stay marked as AI.	Зберігаються лише змінені поля; пропозиції ШІ, яких ви не торкалися, лишаються позначеними як ШІ.
+No quality report yet.	Звіту про якість ще немає.
+Quality score components	Складники оцінки якості
+Component	Складник
+Score	Оцінка
+Weight	Вага
+Detail	Подробиці
+Total	Разом
+weighted mean of the components	зважене середнє складників
+resolution	роздільність
+jpeg quality	якість JPEG
+recompression	повторне стиснення
+blockiness	блочність
+ringing	ореоли
+sharpness	різкість
+alpha	альфа-канал
+frame rate	частота кадрів
+palette	палітра
+Files	Файли
+Variant	Варіант
+Type	Тип
+Size	Розмір
+Pixels	Пікселі
+More variants (Telegram sticker, Discord GIF, …) are generated in the background shortly after upload.	Інші варіанти (стікер Telegram, Discord GIF, …) створюються у фоні невдовзі після завантаження.
+Original	Оригінал
+Thumbnail	Мініатюра
+Telegram sticker (WebP)	Стікер Telegram (WebP)
+Telegram video sticker	Відеостікер Telegram
+{seconds} s	{seconds} с
+{fps} fps	{fps} кадр/с
+transparent	з прозорістю
+Suggest changes…	Запропонувати зміни…
+Suggest keywords, emojis and vibe again (fields you wrote or confirmed are kept)	Знову запропонувати ключові слова, емодзі й настрій (поля, які ви написали чи підтвердили, залишаться)
+Re-run AI	Перезапустити ШІ
+Move to	Перемістити до
+Move	Перемістити
+Cannot be sent to	Не можна надіслати в
+Looks the same	Схожі на вигляд
+No near-duplicates in your library.	У вашій бібліотеці немає майже дублікатів.
+same file	той самий файл
+distance {distance}	відстань {distance}
+Find a better version	Знайти кращу версію
+
+# items.rs: delete, better versions
+The item is removed from its set. Other sets that contain the same file keep their copy.	Стікер буде прибрано з його набору. Інші набори з тим самим файлом збережуть свою копію.
+Delete item	Видалити стікер
+Better versions	Кращі версії
+No higher-quality copy of this picture in your library or in public sets.	Ні у вашій бібліотеці, ні в публічних наборах немає якіснішої копії цього зображення.
+back to the item	назад до стікера

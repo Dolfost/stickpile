@@ -21,6 +21,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod files;
+pub mod i18n;
 pub mod ids;
 pub mod index;
 pub mod jobs;

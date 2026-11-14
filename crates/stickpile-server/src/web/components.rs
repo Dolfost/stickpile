@@ -9,6 +9,7 @@ use stickpile_api::{
 use time::OffsetDateTime;
 
 use super::Ctx;
+use crate::i18n::{t, tc, tf, tp};
 
 pub fn item_url(id: &str) -> String {
     format!("/items/{id}")
@@ -147,8 +148,8 @@ pub fn quality_class(q: u8) -> &'static str {
 pub fn quality_badge(q: Option<u8>) -> Markup {
     html! {
         @if let Some(q) = q {
-            span class=(format!("badge quality {}", quality_class(q))) title=(format!("Quality {q} of 100")) {
-                span.sr-only { "Quality " } (q)
+            span class=(format!("badge quality {}", quality_class(q))) title=(tf("Quality {q} of 100", &[("q", &q)])) {
+                span.sr-only { (t("Quality")) " " } (q)
             }
         }
     }
@@ -158,29 +159,38 @@ pub fn kind_label(kind: MediaKind, format: MediaFormat) -> Option<&'static str> 
     match (kind, format) {
         (MediaKind::Still, _) => None,
         (MediaKind::Animation, MediaFormat::Gif) => Some("GIF"),
-        (MediaKind::Animation, _) => Some("animated"),
+        (MediaKind::Animation, _) => Some(t("animated")),
         (MediaKind::Video, MediaFormat::Webm) => Some("WebM"),
-        (MediaKind::Video, _) => Some("video"),
+        (MediaKind::Video, _) => Some(t("video")),
+    }
+}
+
+/// The kind's name for the badge's tooltip ("Animation (gif)").
+fn kind_name(kind: MediaKind) -> &'static str {
+    match kind {
+        MediaKind::Still => t("Still"),
+        MediaKind::Animation => t("Animation"),
+        MediaKind::Video => t("Video"),
     }
 }
 
 pub fn kind_badge(kind: MediaKind, format: MediaFormat) -> Markup {
     html! {
         @if let Some(label) = kind_label(kind, format) {
-            span.badge.kind title=(format!("{kind:?} ({})", format.extension())) { (label) }
+            span.badge.kind title=(format!("{} ({})", kind_name(kind), format.extension())) { (label) }
         }
     }
 }
 
 pub fn ai_mark() -> Markup {
-    html! { abbr.ai title="Suggested by AI: confirm or edit it" { "AI" } }
+    html! { abbr.ai title=(t("Suggested by AI: confirm or edit it")) { (t("AI")) } }
 }
 
 pub fn visibility_badge(v: Visibility) -> Markup {
     let (label, class) = match v {
-        Visibility::Private => ("private", "vis-private"),
-        Visibility::Unlisted => ("unlisted", "vis-unlisted"),
-        Visibility::Public => ("public", "vis-public"),
+        Visibility::Private => (t("private"), "vis-private"),
+        Visibility::Unlisted => (t("unlisted"), "vis-unlisted"),
+        Visibility::Public => (t("public"), "vis-public"),
     };
     html! { span class=(format!("badge {class}")) { (label) } }
 }
@@ -189,8 +199,8 @@ pub fn source_badge(s: SetSource) -> Markup {
     html! {
         @match s {
             SetSource::Local => {},
-            SetSource::Git => span.badge.src title="Git pack" { "git" },
-            SetSource::Telegram => span.badge.src title="Imported from Telegram" { "telegram" },
+            SetSource::Git => span.badge.src title=(t("Git pack")) { "git" },
+            SetSource::Telegram => span.badge.src title=(t("Imported from Telegram")) { "telegram" },
         }
     }
 }
@@ -274,45 +284,51 @@ pub fn copy_controls(c: &Card<'_>, long: bool, dense: bool) -> Markup {
     let original = file_url(c.id, Variant::Original);
     let source = copy_source(c);
     let label = match (source.frame, long) {
-        (false, false) => "Copy",
-        (false, true) => "Copy image",
-        (true, false) => "Copy frame",
-        (true, true) => "Copy still frame",
+        (false, false) => t("Copy"),
+        (false, true) => t("Copy image"),
+        (true, false) => t("Copy frame"),
+        (true, true) => t("Copy still frame"),
     };
     html! {
         div.copy-controls data-copy-item=(c.id) data-copy-name=(c.name) data-copy-kind=(kind_key(c.kind))
             data-copy-src=(source.src) data-copy-variant=(source.variant.as_str())
             data-copy-thumb=(file_url(c.id, Variant::Thumb)) data-copy-original=(original) data-copy-page[long] {
             button.copy.primary[!source.frame] type="button" hidden data-copy="image"
-                title=[source.frame.then_some("Copy a still frame as a PNG: browsers cannot copy GIFs or videos")] {
+                title=[source.frame.then(|| t("Copy a still frame as a PNG: browsers cannot copy GIFs or videos"))] {
                 (label)
             }
             @if long && source.frame {
-                button.copy type="button" hidden data-copy="link" title="Copy the address of the file" { "Copy link" }
+                button.copy type="button" hidden data-copy="link" title=(t("Copy the address of the file")) { (t("Copy link")) }
             }
             @if dense {
-                a.button.download.icon-btn href=(original) download title="Download the original file" {
-                    (icon(Icon::Download)) span.sr-only { "Download" }
+                a.button.download.icon-btn href=(original) download title=(t("Download the original file")) {
+                    (icon(Icon::Download)) span.sr-only { (t("Download")) }
                 }
             } @else {
-                a.button.download href=(original) download { "Download" }
+                a.button.download href=(original) download { (t("Download")) }
             }
             @if long && source.frame {
                 p.hint {
-                    "Browsers can put only still images on the clipboard, so “Copy still frame” copies the frame "
-                    "the thumbnail shows, as a PNG without motion. To send the "
-                    (if c.kind == MediaKind::Video { "video" } else { "animation" })
-                    ", download it and drag the file into the chat. “Copy link” copies the file's address, "
-                    "which opens only for people signed in to this server. The desktop client pastes GIFs "
-                    "and videos directly."
+                    (t("Browsers can put only still images on the clipboard, so “Copy still frame” copies the frame \
+                        the thumbnail shows, as a PNG without motion."))
+                    " "
+                    (if c.kind == MediaKind::Video {
+                        t("To send the video, download it and drag the file into the chat.")
+                    } else {
+                        t("To send the animation, download it and drag the file into the chat.")
+                    })
+                    " "
+                    (t("“Copy link” copies the file's address, which opens only for people signed in to this server."))
+                    " "
+                    (t("The desktop client pastes GIFs and videos directly."))
                 }
             }
             @if long {
                 // Shown by app.js on plain http:// pages (no Clipboard API there).
                 p.warning.copy-insecure hidden data-copy-insecure="" {
-                    "Copying images needs HTTPS: this page was opened over plain http://, where browsers do not "
-                    "let pages put images on the clipboard. Open the image and use your browser's own "
-                    "“Copy Image”, or download it."
+                    (t("Copying images needs HTTPS: this page was opened over plain http://, where browsers do not \
+                        let pages put images on the clipboard. Open the image and use your browser's own \
+                        “Copy Image”, or download it."))
                 }
             }
         }
@@ -326,9 +342,9 @@ pub fn copy_controls(c: &Card<'_>, long: bool, dense: bool) -> Markup {
 /// menu, so it is out of the tab order and hidden from them.
 pub fn quick_copy(c: &Card<'_>) -> Markup {
     let title = if c.kind == MediaKind::Still {
-        "Copy image"
+        t("Copy image")
     } else {
-        "Copy a still frame"
+        t("Copy a still frame")
     };
     html! {
         button.quick-copy type="button" hidden data-copy="image" tabindex="-1" aria-hidden="true" title=(title) {
@@ -346,14 +362,20 @@ pub fn like_form(ctx: &Ctx, id: &str, liked: bool, likes: u64, next: &str) -> Ma
             input type="hidden" name="next" value=(next);
             input type="hidden" name="liked" value=(if liked { "0" } else { "1" });
             button.like type="submit" aria-pressed=(if liked { "true" } else { "false" })
-                title=(if liked { "Remove your like" } else { "Like" }) {
+                title=(if liked { t("Remove your like") } else { t("Like") }) {
                 span aria-hidden="true" { (if liked { "♥" } else { "♡" }) }
-                span.sr-only { (if liked { "Liked" } else { "Like" }) ", " }
+                span.sr-only { (if liked { t("Liked") } else { t("Like") }) ", " }
                 span.count { (likes) }
-                span.sr-only { " likes" }
+                span.sr-only { " " (likes_word(likes)) }
             }
         }
     }
+}
+
+/// "likes" after a count shown apart from it (English says "likes" for any
+/// count; other languages need the count's form).
+fn likes_word(n: u64) -> String {
+    tp(n, "likes", "likes")
 }
 
 /// Read-only grid card (home, search, better versions): thumb, badges,
@@ -379,7 +401,7 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
                     @if c.name_ai { " " (ai_mark()) }
                 }
                 @if let Some((sid, sname)) = c.set {
-                    p.meta { "in " a href=(set_url(sid)) { (sname) } }
+                    p.meta { (t("in")) " " a href=(set_url(sid)) { (sname) } }
                 }
                 @if let Some(e) = extra {
                     p.meta { (e) }
@@ -388,7 +410,9 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
                     @if let Some(liked) = c.liked {
                         (like_form(ctx, c.id, liked, c.likes, &ctx.here))
                     } @else {
-                        span.likes title="Likes" { span aria-hidden="true" { "♥ " } (c.likes) span.sr-only { " likes" } }
+                        span.likes title=(t("Likes")) {
+                            span aria-hidden="true" { "♥ " } (c.likes) span.sr-only { " " (likes_word(c.likes)) }
+                        }
                     }
                     (copy_controls(c, false, false))
                     (menu_button(c.name))
@@ -402,8 +426,8 @@ pub fn item_card(ctx: &Ctx, c: &Card<'_>, extra: Option<Markup>) -> Markup {
 pub fn menu_button(name: &str) -> Markup {
     html! {
         button.icon-btn.card-menu-btn type="button" hidden data-menu-button="" aria-haspopup="menu"
-            aria-expanded="false" title="More actions" {
-            (icon(Icon::More)) span.sr-only { "More actions for " (name) }
+            aria-expanded="false" title=(t("More actions")) {
+            (icon(Icon::More)) span.sr-only { (tf("More actions for {name}", &[("name", &name)])) }
         }
     }
 }
@@ -435,7 +459,7 @@ pub fn set_card(s: &SetSummary) -> Markup {
                     span.set-badges { (visibility_badge(s.visibility)) " " (source_badge(s.source)) }
                 }
                 p.meta.small.set-facts {
-                    span.set-owner { "by " (s.owner_username) }
+                    span.set-owner { (tf("by {owner}", &[("owner", &s.owner_username)])) }
                     span.set-slug { code { (s.slug) } }
                 }
             }
@@ -451,20 +475,24 @@ pub fn grid(cards: Markup) -> Markup {
 
 /// Show/hide toggles of set lists: (key, label, hint). prefs.js puts
 /// `hide-{key}` on the list.
-pub const SET_PARTS: [(&str, &str, &str); 6] = [
-    ("cover", "Cover", ""),
-    ("description", "Description", ""),
-    ("count", "Item count", ""),
-    ("badges", "Labels", "visibility, source"),
-    ("owner", "Owner", ""),
-    ("slug", "Slug", ""),
-];
+pub fn set_parts() -> [(&'static str, &'static str, &'static str); 6] {
+    [
+        ("cover", t("Cover"), ""),
+        ("description", t("Description"), ""),
+        ("count", t("Item count"), ""),
+        ("badges", t("Labels"), t("visibility, source")),
+        ("owner", t("Owner"), ""),
+        ("slug", t("Slug"), ""),
+    ]
+}
 
 /// Styles of set lists: (value, label, hint).
-const SET_STYLES: [(&str, &str, &str); 2] = [
-    ("regular", "Regular cards", "cover, name and details"),
-    ("compact", "Compact", "smaller cards, more per row"),
-];
+fn set_styles() -> [(&'static str, &'static str, &'static str); 2] {
+    [
+        ("regular", t("Regular cards"), t("cover, name and details")),
+        ("compact", t("Compact"), t("smaller cards, more per row")),
+    ]
+}
 
 /// Set cards (`/sets`, home) in a wrapper that carries the list's display
 /// options. The script as its first child applies the remembered options
@@ -481,7 +509,7 @@ pub fn set_list(sets: &[SetSummary]) -> Markup {
 /// The "View" control of set lists. All of it needs JavaScript (the styles
 /// are not in the URL), so it is hidden without.
 pub fn set_list_view() -> Markup {
-    view_menu("sets", "sets-view", &SET_STYLES, "regular", &SET_PARTS, true)
+    view_menu("sets", "sets-view", &set_styles(), "regular", &set_parts(), true)
 }
 
 /// A "View" disclosure: a style (radio buttons named `style_name`) and
@@ -500,10 +528,10 @@ pub fn view_menu(
 ) -> Markup {
     html! {
         details.view-menu id=(format!("{kind}-view")) data-view-menu=(kind) hidden[needs_js] {
-            summary.button { (icon(Icon::View)) "View" }
+            summary.button { (icon(Icon::View)) (t("View")) }
             div.view-panel {
                 fieldset.view-style {
-                    legend { "Style" }
+                    legend { (t("Style")) }
                     @for (value, label, hint) in styles {
                         label.radio {
                             input type="radio" name=(style_name) value=(value) checked[*value == current];
@@ -512,13 +540,13 @@ pub fn view_menu(
                     }
                 }
                 fieldset.view-show hidden data-view-show="" {
-                    legend { "Show" }
+                    legend { (tc("fields", "Show")) }
                     @for (key, label, hint) in parts {
                         label.check {
                             input type="checkbox" value=(key) checked data-view-part="";
                             // "Show emojis", not "Emojis": the upload tray on the
                             // same page has fields with those names.
-                            span.opt { span.opt-name { span.sr-only { "Show " } (label) } @if !hint.is_empty() { span.opt-hint { (hint) } } }
+                            span.opt { span.opt-name { span.sr-only { (tc("fields", "Show")) " " } (label) } @if !hint.is_empty() { span.opt-hint { (hint) } } }
                         }
                     }
                     p.view-note hidden data-view-note="" {}
@@ -578,7 +606,7 @@ pub fn opt_time(ts: Option<i64>) -> Markup {
     html! {
         @match ts {
             Some(t) => (time_el(t)),
-            None => span.muted { "never" },
+            None => span.muted { (t("never")) },
         }
     }
 }
@@ -598,8 +626,19 @@ pub fn fmt_bytes(n: u64) -> String {
     }
 }
 
+/// "1 item", "3 items", in the request's language: the catalog key is
+/// `{n} item|{n} items`.
 pub fn plural(n: u64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
+    let key = format!("{{n}} {one}|{{n}} {many}");
+    let lang = crate::i18n::current();
+    match stickpile_i18n::lookup(lang, &key) {
+        Some(forms) => {
+            let forms: Vec<&str> = forms.split('|').collect();
+            let i = stickpile_i18n::plural_form(lang, n).min(forms.len().saturating_sub(1));
+            forms[i].replace("{n}", &n.to_string())
+        }
+        None => format!("{n} {}", if n == 1 { one } else { many }),
+    }
 }
 
 /// Trusted markup produced by this module (never user input).

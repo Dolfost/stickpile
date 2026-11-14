@@ -84,7 +84,14 @@ pub struct UiConfig {
     pub show_emojis: bool,
     /// An item's tags on its tile.
     pub show_tags: bool,
+    /// The popup's language: `auto` (the account's language when it has
+    /// one, else the system's), or one of [`LANGUAGES`]. Choosing one in
+    /// the popup also sets the account's, so the web UI follows.
+    pub language: String,
 }
+
+/// Values of `ui.language`: `auto`, then the translated languages.
+pub const LANGUAGES: &[&str] = &["auto", "en", "uk"];
 
 /// The popup's tabs in display order.
 pub const TABS: &[&str] = &["search", "recent", "most_used", "packs", "favorites", "me", "settings"];
@@ -138,6 +145,7 @@ impl Default for UiConfig {
             mark_favorites: true,
             show_emojis: true,
             show_tags: true,
+            language: "auto".into(),
         }
     }
 }
@@ -378,6 +386,13 @@ impl ClientConfig {
                 "ui.columns must be > 0 and ui.thumb_px >= 32".into(),
             ));
         }
+        if !LANGUAGES.contains(&self.ui.language.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "ui.language must be one of {}, got {:?}",
+                LANGUAGES.join(", "),
+                self.ui.language
+            )));
+        }
         if !START_TABS.contains(&self.ui.start_tab.as_str()) {
             return Err(ConfigError::Invalid(format!(
                 "ui.start_tab must be one of {}, got {:?}",
@@ -497,6 +512,12 @@ mod tests {
         assert_eq!(d.ui.start_tab, "last");
         assert_eq!(d.ui.start_mode, StartMode::Normal);
         assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags);
+        assert_eq!(d.ui.language, "auto");
+        for l in LANGUAGES {
+            let c = ClientConfig::from_toml(&format!("[ui]\nlanguage = {l:?}")).unwrap();
+            assert_eq!(c.ui.language, *l);
+        }
+        assert!(ClientConfig::from_toml("[ui]\nlanguage = \"de\"").is_err());
         assert_eq!((d.copy.square, d.copy.background), (SquarePad::Off, Background::Keep));
         for name in SquarePad::NAMES {
             let c = ClientConfig::from_toml(&format!("[copy]\nsquare = {name:?}")).unwrap();

@@ -94,6 +94,7 @@ start_mode = "normal"   # normal | insert: the mode the popup opens in
 mark_favorites = true   # a heart on the items you liked
 show_emojis = true      # an item's emojis on its tile
 show_tags = true        # an item's tags on its tile
+language = "auto"       # auto | en | uk: the popup's language (auto: the account's, else the system's)
 
 [copy]                  # `copy` and the popup
 square = "off"          # off | transparent | white: pad non-square stills and stickers to a square
@@ -160,6 +161,7 @@ sticker = ["text/uri-list"]
 | `ui.mark_favorites` | `true` | a heart on the tiles of items you liked |
 | `ui.show_emojis` | `true` | an item's emojis on its tile |
 | `ui.show_tags` | `true` | an item's tags on its tile |
+| `ui.language` | `"auto"` | the popup's language: `auto` (the account's, else the system's), `en` or `uk`; see [languages.md](languages.md) |
 | `copy.square` | `"off"` | pad non-square stills and sticker renditions to a square: `off`, `transparent` or `white` margins |
 | `copy.background` | `"keep"` | `white` fills the transparent pixels of stills copied as images |
 | `focus.detect` | `true` | detect the focused window |

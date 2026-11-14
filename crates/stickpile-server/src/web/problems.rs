@@ -22,6 +22,7 @@ use super::components::{file_url, item_url, plural, set_url, visibility_badge};
 use super::layout::Nav;
 use super::{safe_next, Ctx};
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, tf};
 use crate::service::items as items_svc;
 use crate::service::problems::{self as svc, Filter, ProblemScope};
 use crate::service::{gitpack, telegram};
@@ -87,31 +88,31 @@ impl View {
 
 pub fn severity_label(s: ProblemSeverity) -> &'static str {
     match s {
-        ProblemSeverity::Error => "Error",
-        ProblemSeverity::Warning => "Warning",
-        ProblemSeverity::Info => "Info",
+        ProblemSeverity::Error => t("Error"),
+        ProblemSeverity::Warning => t("Warning"),
+        ProblemSeverity::Info => t("Info"),
     }
 }
 
 pub fn kind_label(k: ProblemKind) -> &'static str {
     match k {
-        ProblemKind::ExactDuplicate => "Exact duplicates",
-        ProblemKind::NearDuplicate => "Near-duplicates",
-        ProblemKind::Similar => "Look alike (AI hint)",
-        ProblemKind::InOtherSet => "Also in other sets",
-        ProblemKind::MissingFiles => "Missing files",
-        ProblemKind::ProcessingFailed => "Processing failed",
-        ProblemKind::LowResolution => "Very small pictures",
-        ProblemKind::AiUnreviewed => "AI suggestions to review",
-        ProblemKind::NotEmoji => "Emoji entries that are not emoji",
-        ProblemKind::NoEmoji => "No emoji",
-        ProblemKind::TelegramTooMany => "Too many stickers for Telegram",
-        ProblemKind::TelegramUnsupported => "Cannot become Telegram stickers",
-        ProblemKind::TelegramTrimmed => "Cut short on Telegram",
-        ProblemKind::TelegramOutdated => "Telegram pack out of date",
-        ProblemKind::TelegramFailed => "Publishing to Telegram failed",
-        ProblemKind::GitFailed => "Git sync failed",
-        ProblemKind::EmptySet => "Empty set",
+        ProblemKind::ExactDuplicate => t("Exact duplicates"),
+        ProblemKind::NearDuplicate => t("Near-duplicates"),
+        ProblemKind::Similar => t("Look alike (AI hint)"),
+        ProblemKind::InOtherSet => t("Also in other sets"),
+        ProblemKind::MissingFiles => t("Missing files"),
+        ProblemKind::ProcessingFailed => t("Processing failed"),
+        ProblemKind::LowResolution => t("Very small pictures"),
+        ProblemKind::AiUnreviewed => t("AI suggestions to review"),
+        ProblemKind::NotEmoji => t("Emoji entries that are not emoji"),
+        ProblemKind::NoEmoji => t("No emoji"),
+        ProblemKind::TelegramTooMany => t("Too many stickers for Telegram"),
+        ProblemKind::TelegramUnsupported => t("Cannot become Telegram stickers"),
+        ProblemKind::TelegramTrimmed => t("Cut short on Telegram"),
+        ProblemKind::TelegramOutdated => t("Telegram pack out of date"),
+        ProblemKind::TelegramFailed => t("Publishing to Telegram failed"),
+        ProblemKind::GitFailed => t("Git sync failed"),
+        ProblemKind::EmptySet => t("Empty set"),
     }
 }
 
@@ -155,10 +156,10 @@ pub fn set_section(set_id: &str) -> Markup {
     let url = format!("/sets/{set_id}/problems");
     html! {
         section #problems .problems-section aria-labelledby="problems-head" {
-            h2 #problems-head { "Problems" }
+            h2 #problems-head { (t("Problems")) }
             div #problems-block .problems-block hx-get=(url) hx-swap="innerHTML"
                 hx-trigger="load, htmx:afterRequest from:#items-section delay:800ms, htmx:afterRequest from:.uploader delay:800ms" {
-                p.muted { "Checking the set for problems… " a href=(url) { "Open the list" } }
+                p.muted { (t("Checking the set for problems…")) " " a href=(url) { (t("Open the list")) } }
             }
         }
     }
@@ -168,11 +169,11 @@ pub fn set_section(set_id: &str) -> Markup {
 fn set_block(ctx: &Ctx, state: &AppState, sp: &SetProblems, view: &View) -> Markup {
     let url = format!("/sets/{}/problems", sp.set.id);
     let toggle = if view.show_dismissed() {
-        Some((url.clone(), "Hide dismissed".to_string()))
+        Some((url.clone(), t("Hide dismissed").to_string()))
     } else if sp.counts.dismissed > 0 {
         Some((
             format!("{url}?dismissed=1"),
-            format!("Show {} dismissed", sp.counts.dismissed),
+            tf("Show {n} dismissed", &[("n", &sp.counts.dismissed)]),
         ))
     } else {
         None
@@ -180,7 +181,7 @@ fn set_block(ctx: &Ctx, state: &AppState, sp: &SetProblems, view: &View) -> Mark
     html! {
         div.problems-summary {
             @if sp.counts.open() == 0 {
-                p.problems-none { "No problems found." }
+                p.problems-none { (t("No problems found.")) }
             } @else {
                 p { (count_line(&sp.counts)) }
             }
@@ -192,8 +193,8 @@ fn set_block(ctx: &Ctx, state: &AppState, sp: &SetProblems, view: &View) -> Mark
             div.problem-list { @for p in &sp.problems { (card(ctx, state, sp, p, view)) } }
         }
         p.hint {
-            "Checked just now. Near-duplicates are compared picture by picture; “look alike” is an AI hint and "
-            "often fine. Mark anything intentional as “Not a problem”; it comes back if those items change."
+            (t("Checked just now. Near-duplicates are compared picture by picture; “look alike” is an AI hint and \
+                often fine. Mark anything intentional as “Not a problem”; it comes back if those items change."))
         }
     }
 }
@@ -213,10 +214,10 @@ pub async fn set_page(
     }
     let body = html! {
         p.crumbs { a href=(set_url(&sp.set.id)) { "← " (sp.set.name) } }
-        h1 { "Problems in “" (sp.set.name) "”" }
+        h1 { (tf("Problems in “{set}”", &[("set", &sp.set.name)])) }
         div #problems-block .problems-block { (block) }
     };
-    Ok(ctx.page("Problems", Nav::Sets, body).into_response())
+    Ok(ctx.page(t("Problems"), Nav::Sets, body).into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ pub async fn set_page(
 fn thumb(it: &ProblemItem, size: u32) -> Markup {
     html! {
         @if it.hidden {
-            span.problem-thumb.hidden-item title="Item of a private set" { "private" }
+            span.problem-thumb.hidden-item title=(t("Item of a private set")) { (t("private")) }
         } @else {
             a.problem-thumb href=(item_url(&it.item_id)) tabindex="-1" {
                 img src=(file_url(&it.item_id, Variant::Thumb)) alt="" loading="lazy" decoding="async"
@@ -239,13 +240,13 @@ fn thumb(it: &ProblemItem, size: u32) -> Markup {
 fn item_name(it: &ProblemItem) -> Markup {
     html! {
         @if it.hidden {
-            span.muted { "Private item" }
+            span.muted { (t("Private item")) }
         } @else {
             a href=(item_url(&it.item_id)) { (it.name) }
             @match it.kind {
                 MediaKind::Still => {},
-                MediaKind::Animation => { " " span.badge.kind { "anim" } },
-                MediaKind::Video => { " " span.badge.kind { "video" } },
+                MediaKind::Animation => { " " span.badge.kind { (t("anim")) } },
+                MediaKind::Video => { " " span.badge.kind { (t("video")) } },
             }
         }
     }
@@ -259,9 +260,9 @@ fn item_action(sp: &SetProblems, p: &Problem, it: &ProblemItem) -> Markup {
     let page = item_url(&it.item_id);
     html! {
         @match p.action {
-            Some(ProblemAction::EditEmojis) if sp.can_edit => a.small href=(format!("{page}?edit=1#edit")) { "Edit emojis" },
-            Some(ProblemAction::ReviewAi) if sp.can_edit => a.small href=(page) { "Review" },
-            Some(ProblemAction::FindBetter) => a.small href=(page) { "Find a better version" },
+            Some(ProblemAction::EditEmojis) if sp.can_edit => a.small href=(format!("{page}?edit=1#edit")) { (t("Edit emojis")) },
+            Some(ProblemAction::ReviewAi) if sp.can_edit => a.small href=(page) { (t("Review")) },
+            Some(ProblemAction::FindBetter) => a.small href=(page) { (t("Find a better version")) },
             _ => {},
         }
     }
@@ -284,8 +285,8 @@ fn delete_button(sp: &SetProblems, it: &ProblemItem, view: &View) -> Markup {
     html! {
         // Without JavaScript: the item's delete confirmation page.
         a.button.small.danger href=(format!("/items/{}/delete", it.item_id)) hx-post=(url) hx-vals=(vals)
-            hx-confirm=(format!("Delete “{}” from this set?", it.name)) hx-target=(target.0) hx-swap=(target.1) {
-            "Delete" span.sr-only { " " (it.name) }
+            hx-confirm=(tf("Delete “{name}” from this set?", &[("name", &it.name)])) hx-target=(target.0) hx-swap=(target.1) {
+            (t("Delete")) span.sr-only { " " (it.name) }
         }
     }
 }
@@ -314,7 +315,7 @@ fn card(ctx: &Ctx, state: &AppState, sp: &SetProblems, p: &Problem, view: &View)
             div.problem-head {
                 span class=(format!("badge sev {}", sev_class(p.severity))) { (severity_label(p.severity)) }
                 strong id=(format!("{head_id}-title")) { (kind_label(p.kind)) }
-                @if p.dismissed { span.badge { "Dismissed" } }
+                @if p.dismissed { span.badge { (t("Dismissed")) } }
             }
             p.problem-msg { (p.message) }
             @if pair {
@@ -331,10 +332,10 @@ fn card(ctx: &Ctx, state: &AppState, sp: &SetProblems, p: &Problem, view: &View)
                     }
                 }
                 @if let (ProblemKind::NearDuplicate, Some(s)) = (p.kind, p.score) {
-                    p.hint { "Perceptual hash distance " (s) " of 64." }
+                    p.hint { (tf("Perceptual hash distance {d} of 64.", &[("d", &s)])) }
                 }
                 @if let (ProblemKind::Similar, Some(s)) = (p.kind, p.score) {
-                    p.hint { "AI similarity " (format!("{s:.2}")) ". A hint, not a verdict." }
+                    p.hint { (tf("AI similarity {s}. A hint, not a verdict.", &[("s", &format!("{s:.2}"))])) }
                 }
             } @else if !p.items.is_empty() {
                 ul.problem-items {
@@ -351,7 +352,7 @@ fn card(ctx: &Ctx, state: &AppState, sp: &SetProblems, p: &Problem, view: &View)
             div.problem-actions {
                 (set_action(ctx, state, sp, p))
                 @if sp.can_dismiss {
-                    @let (path, label) = if p.dismissed { ("restore", "Show again") } else { ("dismiss", "Not a problem") };
+                    @let (path, label) = if p.dismissed { ("restore", t("Show again")) } else { ("dismiss", t("Not a problem")) };
                     @let url = format!("/sets/{set_id}/problems/{}/{path}", p.id);
                     form.inline method="post" action=(url) hx-post=(url) hx-target=(tgt) hx-swap=(swap) {
                         (view.fields(ctx))
@@ -369,20 +370,20 @@ fn set_action(ctx: &Ctx, state: &AppState, sp: &SetProblems, p: &Problem) -> Mar
     html! {
         @match p.action {
             Some(ProblemAction::PublishTelegram) if sp.can_dismiss && telegram::enabled(state) => {
-                a.button.small.primary href=(format!("/sets/{set_id}/telegram")) { "Publish to Telegram" }
+                a.button.small.primary href=(format!("/sets/{set_id}/telegram")) { (t("Publish to Telegram")) }
             },
             Some(ProblemAction::PullGit) if sp.can_dismiss && gitpack::enabled(state) => {
                 form.inline method="post" action=(format!("/sets/{set_id}/pull")) {
                     (ctx.csrf_input())
-                    button.small.primary type="submit" { "Pull again" }
+                    button.small.primary type="submit" { (t("Pull again")) }
                 }
             },
             Some(ProblemAction::AddItems) if sp.can_edit => {
-                a.button.small.primary href=(format!("{}#upload-head", set_url(set_id))) { "Add items" }
+                a.button.small.primary href=(format!("{}#upload-head", set_url(set_id))) { (t("Add items")) }
             },
             Some(ProblemAction::SplitSet) if sp.can_edit => {
-                a.button.small href=(format!("{}#items-section", set_url(set_id))) { "Open the items" }
-                span.hint { " Move items to another set with “Move to” on their pages." }
+                a.button.small href=(format!("{}#items-section", set_url(set_id))) { (t("Open the items")) }
+                span.hint { " " (t("Move items to another set with “Move to” on their pages.")) }
             },
             _ => {},
         }
@@ -406,12 +407,12 @@ fn tab_group(ctx: &Ctx, state: &AppState, sp: &SetProblems, view: &View) -> Mark
                         a href=(set_url(&sp.set.id)) { (sp.set.name) }
                     }
                 }
-                @if sp.owner_id != ctx.id() { span.muted { "by " (sp.set.owner_username) } }
+                @if sp.owner_id != ctx.id() { span.muted { (tf("by {owner}", &[("owner", &sp.set.owner_username)])) } }
                 (visibility_badge(sp.set.visibility))
                 (count_line(&sp.counts))
             }
             @if sp.problems.is_empty() {
-                p.muted { "Nothing left to show here." }
+                p.muted { (t("Nothing left to show here.")) }
             } @else {
                 div.problem-list { @for p in &sp.problems { (card(ctx, state, sp, p, view)) } }
             }
@@ -436,27 +437,27 @@ pub async fn tab(State(state): State<AppState>, ctx: Ctx, Query(mut view): Query
         }
     };
     let body = html! {
-        div.section-head { h1 { "Problems" } }
+        div.section-head { h1 { (t("Problems")) } }
         @if ctx.user.is_admin() {
-            nav.tabs aria-label="Whose sets" {
-                a href=(base("mine")) aria-current=[(!server).then_some("page")] { "My sets" }
-                a href=(base("server")) aria-current=[server.then_some("page")] { "Whole server" }
+            nav.tabs aria-label=(t("Whose sets")) {
+                a href=(base("mine")) aria-current=[(!server).then_some("page")] { (t("My sets")) }
+                a href=(base("server")) aria-current=[server.then_some("page")] { (t("Whole server")) }
             }
         }
         form.filters.problem-filters method="get" action="/problems" {
             @if server { input type="hidden" name="scope" value="server"; }
             span.filter-field {
-                label for="pf-severity" { "Show" }
+                label for="pf-severity" { (t("Show")) }
                 select #pf-severity name="severity" {
-                    @for (value, label) in [("", "Everything"), ("warning", "Errors and warnings"), ("error", "Errors only")] {
+                    @for (value, label) in [("", t("Everything")), ("warning", t("Errors and warnings")), ("error", t("Errors only"))] {
                         option value=(value) selected[view.severity == value || (value.is_empty() && ProblemSeverity::parse(&view.severity).is_none_or(|s| s == ProblemSeverity::Info))] { (label) }
                     }
                 }
             }
             span.filter-field {
-                label for="pf-kind" { "Kind" }
+                label for="pf-kind" { (t("Kind")) }
                 select #pf-kind name="kind" {
-                    option value="" selected[ProblemKind::parse(&view.kind).is_none()] { "All kinds" }
+                    option value="" selected[ProblemKind::parse(&view.kind).is_none()] { (t("All kinds")) }
                     @for k in ProblemKind::ALL {
                         option value=(k.as_str()) selected[view.kind == k.as_str()] { (kind_label(k)) }
                     }
@@ -464,38 +465,47 @@ pub async fn tab(State(state): State<AppState>, ctx: Ctx, Query(mut view): Query
             }
             label.check {
                 input type="checkbox" name="dismissed" value="1" checked[view.show_dismissed()];
-                "Show dismissed"
+                (t("Show dismissed"))
             }
-            button type="submit" { "Apply" }
+            button type="submit" { (t("Apply")) }
         }
         p.problems-total {
-            "Checked " (plural(u64::from(report.sets_checked), "set", "sets"))
-            @if server { " on this server" }
-            ". "
+            @let sets = plural(u64::from(report.sets_checked), "set", "sets");
+            @if server {
+                (tf("Checked {sets} on this server.", &[("sets", &sets)]))
+            } @else {
+                (tf("Checked {sets}.", &[("sets", &sets)]))
+            }
+            " "
             @if report.counts.open() == 0 {
-                "No problems found."
+                (t("No problems found."))
             } @else {
                 (count_line(&report.counts)) "."
             }
-            @if report.counts.dismissed > 0 { " " (report.counts.dismissed) " dismissed." }
+            @if report.counts.dismissed > 0 { " " (tf("{n} dismissed.", &[("n", &report.counts.dismissed)])) }
         }
         @if server {
             p.hint {
-                "Every set on the server. Items of other users' private sets are not shown, and only owners can "
-                "dismiss problems."
+                (t("Every set on the server. Items of other users' private sets are not shown, and only owners can \
+                    dismiss problems."))
             }
         }
         @if report.sets.is_empty() && report.counts.open() > 0 {
-            p.muted { "Nothing matches these filters." }
+            p.muted { (t("Nothing matches these filters.")) }
         }
         @for sp in &report.sets { (tab_group(&ctx, &state, sp, &view)) }
         p.hint {
-            "Near-duplicates are compared picture by picture. “Look alike” comes from the AI"
-            @if !report.similar_available { " (off on this server right now)" }
-            " and is only a hint. Problems marked “Not a problem” stay hidden until the items change."
+            @if report.similar_available {
+                (t("Near-duplicates are compared picture by picture. “Look alike” comes from the AI and is only a \
+                    hint. Problems marked “Not a problem” stay hidden until the items change."))
+            } @else {
+                (t("Near-duplicates are compared picture by picture. “Look alike” comes from the AI (off on this \
+                    server right now) and is only a hint. Problems marked “Not a problem” stay hidden until the items \
+                    change."))
+            }
         }
     };
-    Ok(ctx.page("Problems", Nav::Problems, body).into_response())
+    Ok(ctx.page(t("Problems"), Nav::Problems, body).into_response())
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,94 @@
+# Ukrainian: web-admin. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+# Admin panel (admin.rs). Shared words (Role, Username, admin, user, statuses...) are in web-account.tsv.
+Overview	Огляд
+Users	Користувачі
+Invitations	Запрошення
+Audit log	Журнал аудиту
+Admin sections	Розділи адміністрування
+closed (admins create accounts)	закрита (облікові записи створюють адміністратори)
+by invitation	за запрошенням
+open to anyone who can reach the server	відкрита для всіх, хто має доступ до сервера
+variants	варіанти
+enrich	збагачення
+git pull	оновлення з git
+git push	надсилання в git
+telegram import	імпорт із Telegram
+telegram export	експорт у Telegram
+off	вимкнено
+loading	завантажується
+ready	працює
+failed to load (see the server log)	не вдалося завантажити (див. журнал сервера)
+Media on disk	Медіа на диску
+Database	База даних
+Media files	Медіафайли
+Jobs waiting or running	Завдання в черзі або у виконанні
+Registration	Реєстрація
+(set in the configuration)	(задається в конфігурації)
+AI enrichment	Збагачення ШІ
+Public URL	Публічний URL
+Storage per user	Сховище за користувачами
+Media referenced by each user's items; shared files count for every user.	Медіа, на які посилаються стікери кожного користувача; спільні файли враховуються для кожного з них.
+User	Користувач
+Bytes	Байти
+Job queue	Черга завдань
+No jobs.	Завдань немає.
+Kind	Тип
+Status	Стан
+Jobs	Завдання
+Finished jobs are kept for 30 days.	Завершені завдання зберігаються 30 днів.
+Recent failures	Останні збої
+None.	Немає.
+When	Коли
+Subject	Об'єкт
+Attempts	Спроби
+Error	Помилка
+User created.	Користувача створено.
+User updated.	Користувача оновлено.
+User deleted.	Користувача видалено.
+disabled	вимкнений
+active	активний
+No password: tailnet sign-in only	Без пароля: вхід лише через tailnet
+no password	без пароля
+Manage	Керувати
+Set role	Призначити роль
+Enable account	Увімкнути обліковий запис
+Disable account	Вимкнути обліковий запис
+Reset password	Скинути пароль
+Reset TOTP (lost device)	Скинути TOTP (втрачений пристрій)
+Bind	Прив'язати
+Last sign-in	Останній вхід
+Sets / items	Набори / стікери
+Create a user	Створити користувача
+Password (optional)	Пароль (необов'язково)
+Leave empty for tailnet-only accounts.	Залиште порожнім для облікових записів із входом лише через tailnet.
+Tailnet login (optional)	Логін у tailnet (необов'язково)
+Create user	Створити користувача
+Delete {username}?	Видалити {username}?
+This deletes the account and everything it owns: {sets} sets with {items} items, its tokens and sessions. It cannot be undone.	Буде видалено обліковий запис і все, що йому належить (наборів: {sets}, стікерів у них: {items}), а також його токени й сеанси. Це не можна скасувати.
+Delete user	Видалити користувача
+deleted user	видалений користувач
+Registration is	Реєстрація:
+Invitation links only work while registration is set to “invite”.	Посилання-запрошення працюють, лише поки для реєстрації задано значення “invite”.
+Invitation created	Запрошення створено
+Send this link to the person.	Надішліть це посилання людині, яку запрошуєте.
+It is shown only now.	Воно показується лише зараз.
+Valid for	Дійсне протягом
+1 day	1 дня
+7 days	7 днів
+30 days	30 днів
+1 year	1 року
+Create invitation	Створити запрошення
+No invitations.	Запрошень немає.
+By	Автор
+used by {user}	використано: {user}
+open	активне
+expires	спливає
+Invitation revoked.	Запрошення відкликано.
+Who	Хто
+Action	Дія
+Target	Ціль
+Details	Подробиці
+No entries.	Записів немає.
+Audit log pages	Сторінки журналу аудиту
+Newest	Найновіші
+Older entries	Старіші записи

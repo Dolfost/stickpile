@@ -41,6 +41,38 @@
 
   // ---- helpers ---------------------------------------------------------
 
+  // Texts in the page's language (docs/languages.md): the server puts the
+  // translations into <body data-i18n>; English needs none.
+  var I18N = null;
+  function tr(s) {
+    if (I18N === null) {
+      try {
+        I18N = JSON.parse((document.body && document.body.getAttribute("data-i18n")) || "{}");
+      } catch (e) {
+        I18N = {};
+      }
+    }
+    return I18N[s] || s;
+  }
+  function trf(s, args) {
+    return tr(s).replace(/\{(\w+)\}/g, function (m, k) {
+      return Object.prototype.hasOwnProperty.call(args, k) ? args[k] : m;
+    });
+  }
+  // A count: `forms` is tr() of a plural key, "{n} emoji|{n} emojis", whose
+  // translation has the language's forms (Ukrainian: one|few|many), chosen
+  // as the server's stickpile_i18n::plural_form does; {n} is filled in.
+  function trp(n, forms) {
+    var f = forms.split("|");
+    var i = n === 1 ? 0 : 1;
+    if (document.documentElement.lang === "uk") {
+      var m10 = n % 10;
+      var m100 = n % 100;
+      i = m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2;
+    }
+    return f[Math.min(i, f.length - 1)].replace(/\{n\}/g, n);
+  }
+
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -125,6 +157,22 @@
 
   var UNRANKED = 1e6;
 
+  // A category's name in the page's language (emoji.json has the English).
+  function groupName(name) {
+    var names = {
+      "Smileys & Emotion": tr("Smileys & Emotion"),
+      "People & Body": tr("People & Body"),
+      "Animals & Nature": tr("Animals & Nature"),
+      "Food & Drink": tr("Food & Drink"),
+      "Travel & Places": tr("Travel & Places"),
+      Activities: tr("Activities"),
+      Objects: tr("Objects"),
+      Symbols: tr("Symbols"),
+      Flags: tr("Flags"),
+    };
+    return Object.prototype.hasOwnProperty.call(names, name) ? names[name] : name;
+  }
+
   function prepare(json) {
     var all = [];
     var byBare = {};
@@ -136,7 +184,7 @@
     });
     var groups = json.groups.map(function (g) {
       return {
-        name: g[0],
+        name: groupName(g[0]),
         icon: g[1],
         items: g[2].map(function (r) {
           var plain = plainWords(r[1]);
@@ -353,8 +401,8 @@
     wrap.appendChild(input);
     var toggle = el("button", "emoji-toggle");
     toggle.type = "button";
-    toggle.setAttribute("aria-label", "Choose emojis");
-    toggle.title = "Choose emojis";
+    toggle.setAttribute("aria-label", tr("Choose emojis"));
+    toggle.title = tr("Choose emojis");
     toggle.setAttribute("aria-expanded", "false");
     toggle.appendChild(smiley());
     wrap.appendChild(toggle);
@@ -395,23 +443,23 @@
     var panel = el("div", "emoji-panel");
     panel.id = id;
     panel.setAttribute("role", "group");
-    panel.setAttribute("aria-label", "Emoji picker");
+    panel.setAttribute("aria-label", tr("Emoji picker"));
     panel.hidden = true;
 
     var searchBox = el("input", "emoji-search");
     searchBox.type = "search";
-    searchBox.placeholder = "Search emojis";
-    searchBox.setAttribute("aria-label", "Search emojis");
+    searchBox.placeholder = tr("Search emojis");
+    searchBox.setAttribute("aria-label", tr("Search emojis"));
     searchBox.autocomplete = "off";
     searchBox.spellcheck = false;
     searchBox.setAttribute("enterkeyhint", "done");
 
     var tabs = el("div", "emoji-tabs");
     tabs.setAttribute("role", "tablist");
-    tabs.setAttribute("aria-label", "Categories");
+    tabs.setAttribute("aria-label", tr("Categories"));
 
     var recentBox = el("div", "emoji-recent");
-    var recentLabel = el("span", "emoji-label", "Recently used");
+    var recentLabel = el("span", "emoji-label", tr("Recently used"));
     recentLabel.id = id + "-recent";
     var recentRow = el("div", "emoji-row");
     recentRow.setAttribute("role", "group");
@@ -592,12 +640,12 @@
     var list;
     if (q) {
       list = search(p.data, q);
-      p.grid.setAttribute("aria-label", "Search results");
+      p.grid.setAttribute("aria-label", tr("Search results"));
       p.status.textContent = list.length
-        ? list.length === 1
-          ? "1 emoji"
-          : list.length + (list.length === MAX_RESULTS ? "+" : "") + " emojis"
-        : "No emoji matches “" + q + "”.";
+        ? list.length === MAX_RESULTS
+          ? trf("{n}+ emojis", { n: MAX_RESULTS })
+          : trp(list.length, tr("{n} emoji|{n} emojis"))
+        : trf("No emoji matches “{query}”.", { query: q });
     } else {
       list = g.items;
       p.grid.setAttribute("aria-label", g.name);
@@ -623,7 +671,7 @@
       showResults(p);
       return;
     }
-    p.status.textContent = "Loading emojis…";
+    p.status.textContent = tr("Loading emojis…");
     load().then(
       function (data) {
         if (p.data) return;
@@ -635,7 +683,7 @@
       },
       function (err) {
         var why = err && err.message ? err.message : String(err);
-        p.status.textContent = "Could not load the emojis (" + why + "). Close the panel and try again.";
+        p.status.textContent = trf("Could not load the emojis ({error}). Close the panel and try again.", { error: why });
       }
     );
   }
@@ -656,12 +704,12 @@
       return x && bare(x) === bare(e.char);
     });
     if (have) {
-      p.status.textContent = e.char + " is already in the field.";
+      p.status.textContent = trf("{emoji} is already in the field.", { emoji: e.char });
     } else {
       var v = input.value.replace(/\s+$/, "");
       input.value = v ? v + " " + e.char : e.char;
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      p.status.textContent = "Added " + e.char + " " + e.name + ".";
+      p.status.textContent = trf("Added {emoji} {name}.", { emoji: e.char, name: e.name });
     }
     // The recent row updates on the next open, so nothing jumps now.
     remember(e.char);
@@ -714,8 +762,8 @@
     var list = el("ul", "emoji-suggest-list");
     list.id = id;
     list.setAttribute("role", "listbox");
-    list.setAttribute("aria-label", "Emoji suggestions");
-    var keys = el("p", "emoji-suggest-keys", "Space or Enter inserts, Esc closes");
+    list.setAttribute("aria-label", tr("Emoji suggestions"));
+    var keys = el("p", "emoji-suggest-keys", tr("Space or Enter inserts, Esc closes"));
     keys.setAttribute("aria-hidden", "true");
     box.appendChild(note);
     box.appendChild(list);
@@ -887,8 +935,8 @@
         return data.byBare[bare(ch)];
       })
       .filter(fresh);
-    if (list.length) return { items: list, label: "Recently used" };
-    return { items: data.common.filter(fresh), label: "Common emojis" };
+    if (list.length) return { items: list, label: tr("Recently used"), recent: true };
+    return { items: data.common.filter(fresh), label: tr("Common emojis"), recent: false };
   }
 
   function acRender(p) {
@@ -896,10 +944,10 @@
     var data = loaded;
     var items = [];
     var note = "";
-    var label = "Emoji suggestions";
+    var label = tr("Emoji suggestions");
     var say;
     if (!data) {
-      note = ac.failed ? ac.failed : "Loading emojis…";
+      note = ac.failed ? ac.failed : tr("Loading emojis…");
       say = note;
       if (!ac.failed && !ac.waiting) {
         ac.waiting = true;
@@ -910,7 +958,7 @@
           },
           function (err) {
             ac.waiting = false;
-            ac.failed = "Could not load the emojis (" + (err && err.message ? err.message : String(err)) + ").";
+            ac.failed = trf("Could not load the emojis ({error}).", { error: err && err.message ? err.message : String(err) });
             if (ac.open) acRender(p);
           }
         );
@@ -920,17 +968,24 @@
       items = d.items.slice(0, AC_MAX);
       note = items.length ? d.label : "";
       label = d.label;
-      say = items.length ? plural(items.length, "emoji") + ", " + d.label.toLowerCase() : "";
+      say = !items.length
+        ? ""
+        : d.recent
+          ? trp(items.length, tr("{n} emoji, recently used|{n} emojis, recently used"))
+          : trp(items.length, tr("{n} emoji, common emojis|{n} emojis, common emojis"));
     } else {
       var found = search(data, ac.query);
       items = found.slice(0, AC_MAX);
       if (items.length) {
         say =
           found.length > items.length
-            ? items.length + " of " + found.length + (found.length === MAX_RESULTS ? "+" : "") + " emojis"
-            : plural(items.length, "emoji");
+            ? trf("{n} of {total} emojis", {
+                n: items.length,
+                total: found.length + (found.length === MAX_RESULTS ? "+" : ""),
+              })
+            : trp(items.length, tr("{n} emoji|{n} emojis"));
       } else {
-        note = "No emoji matches “" + ac.query + "”.";
+        note = trf("No emoji matches “{query}”.", { query: ac.query });
         say = note;
       }
     }
@@ -960,10 +1015,6 @@
     acHighlight(p, items.length ? 0 : -1);
     acPlace(p);
     announce(p, say || "", true);
-  }
-
-  function plural(n, word) {
-    return n + " " + word + (n === 1 ? "" : "s");
   }
 
   function acHighlight(p, i) {
@@ -1036,7 +1087,13 @@
     }
     input.dispatchEvent(new Event("input", { bubbles: true }));
     remember(e.char);
-    announce(p, have ? e.char + " is already in the field." : "Added " + e.char + " " + e.name + ".", false);
+    announce(
+      p,
+      have
+        ? trf("{emoji} is already in the field.", { emoji: e.char })
+        : trf("Added {emoji} {name}.", { emoji: e.char, name: e.name }),
+      false
+    );
   }
 
   // ---- page-wide -----------------------------------------------------------

@@ -5,6 +5,7 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::glib;
+use stickpile_i18n::global::{t, t_dyn, tf};
 use stickpile_quick::PageKey;
 
 use crate::backend::{AuthKind, Credentials, LoginError, Profile};
@@ -42,6 +43,7 @@ pub struct MePage {
     on_action: RefCell<Option<Handler<MeAction>>>,
 
     loading: gtk::Box,
+    loading_label: gtk::Label,
     avatar: adw::Avatar,
     name: gtk::Label,
     detail: gtk::Label,
@@ -70,8 +72,8 @@ pub struct MePage {
     retry: gtk::Button,
 }
 
-fn button(label: &str) -> gtk::Button {
-    let b = gtk::Button::with_label(label);
+fn button() -> gtk::Button {
+    let b = gtk::Button::new();
     b.add_css_class("pill");
     b
 }
@@ -89,7 +91,8 @@ impl MePage {
 
         let loading = gtk::Box::builder().spacing(8).halign(gtk::Align::Center).build();
         loading.append(&adw::Spinner::new());
-        loading.append(&gtk::Label::new(Some("Loading...")));
+        let loading_label = gtk::Label::new(None);
+        loading.append(&loading_label);
         column.append(&loading);
 
         let avatar = adw::Avatar::new(48, None, true);
@@ -116,22 +119,21 @@ impl MePage {
         column.append(&header);
 
         let account = adw::PreferencesGroup::new();
-        let row = |title: &str| {
-            let r = adw::ActionRow::builder().title(title).subtitle_selectable(true).build();
+        let row = || {
+            let r = adw::ActionRow::builder().subtitle_selectable(true).build();
             r.add_css_class("property");
             r
         };
-        let server_row = row("Server");
+        let server_row = row();
         let open_server = gtk::Button::builder()
             .icon_name("web-browser-symbolic")
-            .tooltip_text("Open the web UI")
             .valign(gtk::Align::Center)
             .build();
         open_server.add_css_class("flat");
         server_row.add_suffix(&open_server);
-        let auth_row = row("Signed in");
-        let tailnet_row = row("Tailnet account");
-        let totp_row = row("Two-factor login");
+        let auth_row = row();
+        let tailnet_row = row();
+        let totp_row = row();
         for r in [&server_row, &auth_row, &tailnet_row, &totp_row] {
             account.add(r);
         }
@@ -148,31 +150,28 @@ impl MePage {
             .build();
         column.append(&stats);
 
-        let logout = button("Log out");
+        let logout = button();
         logout.add_css_class("destructive-action");
-        let keep_token = button("Store a token");
-        keep_token.set_tooltip_text(Some(
-            "Turn the tailnet identity into a token, so this device stays signed in off the tailnet",
-        ));
+        let keep_token = button();
         let signed_in_buttons = gtk::Box::builder().spacing(8).build();
         signed_in_buttons.append(&logout);
         signed_in_buttons.append(&keep_token);
         column.append(&signed_in_buttons);
 
-        let form = adw::PreferencesGroup::builder().title("Log in").build();
-        let username = adw::EntryRow::builder().title("Username").build();
+        let form = adw::PreferencesGroup::new();
+        let username = adw::EntryRow::new();
         username.set_input_purpose(gtk::InputPurpose::FreeForm);
-        let password = adw::PasswordEntryRow::builder().title("Password").build();
-        let totp = adw::EntryRow::builder().title("Two-factor code").build();
+        let password = adw::PasswordEntryRow::new();
+        let totp = adw::EntryRow::new();
         totp.set_input_purpose(gtk::InputPurpose::Digits);
         form.add(&username);
         form.add(&password);
         form.add(&totp);
         column.append(&form);
 
-        let login = button("Log in");
+        let login = button();
         login.add_css_class("suggested-action");
-        let tailnet_login = button("Log in with tailnet");
+        let tailnet_login = button();
         let signed_out_buttons = gtk::Box::builder().spacing(8).build();
         signed_out_buttons.append(&login);
         signed_out_buttons.append(&tailnet_login);
@@ -185,7 +184,7 @@ impl MePage {
             .selectable(true)
             .build();
         column.append(&message);
-        let retry = button("Try again");
+        let retry = button();
         retry.set_halign(gtk::Align::Start);
         column.append(&retry);
 
@@ -206,6 +205,7 @@ impl MePage {
             }),
             on_action: RefCell::new(None),
             loading,
+            loading_label,
             avatar,
             name,
             detail,
@@ -230,9 +230,38 @@ impl MePage {
             message,
             retry,
         });
+        page.labels();
         page.connect_signals();
         page.render();
         page
+    }
+
+    /// The fixed texts, in the current language.
+    fn labels(&self) {
+        self.loading_label.set_label(t("Loading..."));
+        self.server_row.set_title(t("Server"));
+        self.open_server.set_tooltip_text(Some(t("Open the web UI")));
+        self.auth_row.set_title(t("Signed in"));
+        self.tailnet_row.set_title(t("Tailnet account"));
+        self.totp_row.set_title(t("Two-factor login"));
+        self.logout.set_label(t("Log out"));
+        self.keep_token.set_label(t("Store a token"));
+        self.keep_token.set_tooltip_text(Some(t(
+            "Turn the tailnet identity into a token, so this device stays signed in off the tailnet",
+        )));
+        self.form.set_title(t("Log in"));
+        self.username.set_title(t("Username"));
+        self.password.set_title(t("Password"));
+        self.totp.set_title(t("Two-factor code"));
+        self.login.set_label(t("Log in"));
+        self.tailnet_login.set_label(t("Log in with tailnet"));
+        self.retry.set_label(t("Try again"));
+    }
+
+    /// Show the page in the current language.
+    pub fn relabel(&self) {
+        self.labels();
+        self.render();
     }
 
     pub fn connect_action(&self, f: impl Fn(MeAction) + 'static) {
@@ -296,7 +325,7 @@ impl MePage {
         let username = self.username.text().trim().to_string();
         let password = self.password.text().to_string();
         if username.is_empty() || password.is_empty() {
-            self.state.borrow_mut().message = Some(("Enter a username and a password".into(), true));
+            self.state.borrow_mut().message = Some((t("Enter a username and a password").into(), true));
             self.render();
             return;
         }
@@ -317,8 +346,8 @@ impl MePage {
             s.busy = true;
             s.message = Some((
                 match action {
-                    MeAction::Logout => "Logging out...",
-                    _ => "Logging in...",
+                    MeAction::Logout => t("Logging out..."),
+                    _ => t("Logging in..."),
                 }
                 .into(),
                 false,
@@ -377,7 +406,7 @@ impl MePage {
                 Err(LoginError::TotpRequired) => {
                     let first = !s.totp;
                     s.totp = true;
-                    s.message = Some(("Enter the code from your authenticator app".into(), !first));
+                    s.message = Some((t("Enter the code from your authenticator app").into(), !first));
                     true
                 }
                 Err(LoginError::Failed(e)) => {
@@ -418,7 +447,9 @@ impl MePage {
         {
             let mut s = self.state.borrow_mut();
             s.busy = false;
-            s.message = outcome.err().map(|e| (format!("Logout failed: {e}"), true));
+            s.message = outcome
+                .err()
+                .map(|e| (tf("Logout failed: {error}", &[("error", &t_dyn(&e))]), true));
         }
         self.nav.reset();
         self.render();
@@ -486,7 +517,8 @@ impl MePage {
             self.tailnet_row.set_visible(p.tailscale_login.is_some());
             self.tailnet_row
                 .set_subtitle(p.tailscale_login.as_deref().unwrap_or_default());
-            self.totp_row.set_subtitle(if p.totp_enabled { "On" } else { "Off" });
+            self.totp_row
+                .set_subtitle(if p.totp_enabled { t("On") } else { t("Off") });
             while let Some(child) = self.stats.first_child() {
                 self.stats.remove(&child);
             }
@@ -503,8 +535,10 @@ impl MePage {
         self.tailnet_login
             .set_visible(profile.is_some_and(|p| p.tailnet_login_available));
         if let Some(p) = profile.filter(|_| signed_out) {
-            self.form
-                .set_description(Some(&format!("Server: {}", glib::markup_escape_text(&p.server_url))));
+            self.form.set_description(Some(&tf(
+                "Server: {server}",
+                &[("server", &glib::markup_escape_text(&p.server_url))],
+            )));
         }
         for b in [&self.login, &self.tailnet_login, &self.logout, &self.keep_token] {
             b.set_sensitive(!s.busy);
@@ -512,7 +546,7 @@ impl MePage {
 
         let (text, error) = match (&s.message, &s.error) {
             (Some((m, e)), _) => (m.clone(), *e),
-            (None, Some(e)) => (format!("Could not load the profile: {e}"), true),
+            (None, Some(e)) => (tf("Could not load the profile: {error}", &[("error", &t_dyn(e))]), true),
             (None, None) => (String::new(), false),
         };
         self.message.set_label(&text);

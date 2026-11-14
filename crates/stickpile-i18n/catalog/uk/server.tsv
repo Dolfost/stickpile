@@ -1,0 +1,135 @@
+# Ukrainian: server. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+not found	не знайдено
+a TOTP code is required	потрібен код TOTP
+too many requests, slow down	забагато запитів, пригальмуйте
+internal server error	внутрішня помилка сервера
+already exists	уже існує
+unsupported or unrecognised file type	непідтримуваний або нерозпізнаний тип файлу
+no file part in the request	у запиті немає частини з файлом
+send exactly one image	надішліть рівно одне зображення
+webhook payload too large	дані вебхука завеликі
+query too long	запит задовгий
+severity must be error, warning or info	severity має бути error, warning або info
+an invitation code is required	потрібен код запрошення
+invalid credentials	неправильні облікові дані
+invalid or expired invitation code	недійсний або прострочений код запрошення
+registration is closed	реєстрацію закрито
+CSRF token mismatch	токен CSRF не збігається
+account disabled	обліковий запис вимкнено
+admin role required	потрібна роль адміністратора
+authentication required	потрібна автентифікація
+form body too large	дані форми завеликі
+invalid, expired or revoked token	недійсний, прострочений або відкликаний токен
+missing CSRF token (X-CSRF-Token header)	бракує токена CSRF (заголовок X-CSRF-Token)
+unsupported Authorization scheme (use Bearer)	непідтримувана схема Authorization (використовуйте Bearer)
+password too long	пароль задовгий
+expires_at must be in the future	expires_at має бути в майбутньому
+token name must be 1..=100 characters	назва токена має містити від 1 до 100 символів
+only the owner can do this	це може зробити лише власник
+this set is a read-only git pack; edit it upstream	цей набір є git-набором лише для читання; редагуйте його в джерельному репозиторії
+cross-origin request rejected	запит з іншого походження відхилено
+cross-site request rejected	міжсайтовий запит відхилено
+invalid Origin header	недійсний заголовок Origin
+opaque origin rejected	запит із непрозорим походженням відхилено
+TOTP is already enabled; disable it first	TOTP уже ввімкнено; спершу вимкніть його
+TOTP is not enabled	TOTP не ввімкнено
+account no longer exists	обліковий запис більше не існує
+current password is wrong	поточний пароль неправильний
+invalid TOTP code	неправильний код TOTP
+no TOTP enrolment in progress	налаштування TOTP не розпочато
+telegram_user_id must be a positive number	telegram_user_id має бути додатним числом
+cannot delete the last active admin	не можна видалити останнього активного адміністратора
+cannot demote or disable the last active admin	не можна понизити чи вимкнути останнього активного адміністратора
+expires_in must be between 60 seconds and 365 days	expires_in має бути від 60 секунд до 365 днів
+that tailscale login is bound to another user	цей логін Tailscale прив'язано до іншого користувача
+you cannot delete your own account	ви не можете видалити власний обліковий запис
+AI is turned off on this server	ШІ вимкнено на цьому сервері
+the AI model could not be loaded on this server	не вдалося завантажити модель ШІ на цьому сервері
+the AI model is still loading; try again in a few seconds	модель ШІ ще завантажується; спробуйте знову за кілька секунд
+a cover image is one file	зображення обкладинки має бути одним файлом
+choose an image to upload	виберіть зображення для завантаження
+subdir must be a relative path inside the repository (no `..`, hidden components or backslashes)	subdir має бути відносним шляхом усередині репозиторію (без `..`, прихованих частин і зворотних скісних рисок)
+this set is not a git pack	цей набір не є git-набором
+webhook secret or signature does not match	секрет або підпис вебхука не збігається
+webhook secret or signature required (X-Stickpile-Webhook-Secret, X-Gitlab-Token or X-Hub-Signature-256)	потрібен секрет або підпис вебхука (X-Stickpile-Webhook-Secret, X-Gitlab-Token або X-Hub-Signature-256)
+git packs are disabled on this server (git.enabled = false)	git-набори вимкнено на цьому сервері (git.enabled = false)
+invalid cursor	недійсний курсор
+name must not be empty	назва не може бути порожньою
+the target set already contains this media	цільовий набір уже містить цей файл
+only the owner and contributors see who contributes	бачити учасників можуть лише власник і учасники
+only the owner can choose contributors	обирати учасників може лише власник
+only the owner can remove contributors	прибирати учасників може лише власник
+the owner can already do everything	власник і так може все
+only the owner of a set sees its problems	проблеми набору бачить лише його власник
+the server-wide problems report needs the admin role	для звіту про проблеми всього сервера потрібна роль адміністратора
+no such problem in this set (it may have changed or been fixed)	у цьому наборі немає такої проблеми (можливо, вона змінилася або її виправлено)
+a sticker has no description or cover; propose those for its set	у стікера немає опису чи обкладинки; запропонуйте їх для його набору
+choose at least one file	виберіть принаймні один файл
+keywords, emojis, tags and vibe belong to stickers; propose them for one	ключові слова, емодзі, теги й настрій належать стікерам; запропонуйте їх для стікера
+no files to propose	немає файлів для пропозиції
+nothing to change: the values are the same	нічого змінювати: значення ті самі
+only its proposer can withdraw a proposal	відкликати пропозицію може лише її автор
+the cover must be a sticker of this set	обкладинкою має бути стікер цього набору
+the proposed cover image is gone	запропонованого зображення обкладинки вже немає
+the proposed cover is no longer in the set	запропонованої обкладинки вже немає в наборі
+the sticker moved to another set	стікер перенесено в інший набір
+the sticker was removed	стікер видалено
+this is your own set: change it directly	це ваш власний набір: змінюйте його напряму
+this proposal is not open any more	ця пропозиція вже не відкрита
+this set is a read-only git pack; it cannot take changes	цей набір є git-набором лише для читання; його не можна змінювати
+this set is a read-only git pack; propose the change upstream	цей набір є git-набором лише для читання; запропонуйте зміну в джерельному репозиторії
+withdraw your own proposal instead	натомість відкличте власну пропозицію
+you cannot accept your own proposal; the owner or another reviewer decides	ви не можете прийняти власну пропозицію; рішення ухвалює власник або інший рецензент
+you may change the cover directly	ви можете змінити обкладинку напряму
+you may edit this set directly	ви можете редагувати цей набір напряму
+you may edit this sticker directly	ви можете редагувати цей стікер напряму
+you may not review proposals for this set	ви не можете розглядати пропозиції для цього набору
+aspect_ratio components must be 1..=10000	складники aspect_ratio мають бути від 1 до 10000
+description must be at most 5000 characters	опис має містити щонайбільше 5000 символів
+item_ids must list every item of the set exactly once	item_ids має містити кожен стікер набору рівно один раз
+name must be 1..=200 printable characters	назва має містити від 1 до 200 друкованих символів
+recommended_px must be 16..=16384	recommended_px має бути від 16 до 16384
+slug must be 1..=64 characters of a-z 0-9 - (no leading/trailing dash)	slug має містити від 1 до 64 символів a-z 0-9 - (без дефіса на початку чи в кінці)
+the cover must be an item of this set	обкладинкою має бути стікер із цього набору
+scope=set needs set=<id>	для scope=set потрібен set=<id>
+pack_name must be a sticker pack short name (1-64 of A-Z a-z 0-9 _, starting with a letter) or a t.me/addstickers/ link	pack_name має бути коротким ім'ям набору стікерів (1-64 символи A-Z a-z 0-9 _, на початку літера) або посиланням t.me/addstickers/
+title must be at most 64 printable characters	назва має містити щонайбільше 64 друковані символи
+the Telegram integration is disabled on this server (telegram.enabled or the bot token is missing)	інтеграцію з Telegram вимкнено на цьому сервері (бракує telegram.enabled або токена бота)
+no Telegram user id to own the pack: set yours in your profile (telegram_user_id, PATCH /api/v1/me) or ask the admin to set telegram.default_owner_user_id	немає ідентифікатора користувача Telegram, якому належатиме набір: вкажіть свій у профілі (telegram_user_id, PATCH /api/v1/me) або попросіть адміністратора задати telegram.default_owner_user_id
+archive too large	архів завеликий
+expected a set.toml part and file parts, or an archive part	очікувалися частина set.toml і частини з файлами або частина з архівом
+form field is not UTF-8	поле форми не в кодуванні UTF-8
+form field too large	поле форми завелике
+item name must be at most 200 printable characters	назва стікера має містити щонайбільше 200 друкованих символів
+no file parts in the upload	у завантаженні немає частин із файлами
+request body too large	тіло запиту завелике
+vibe must be at most 50 printable characters	настрій має містити щонайбільше 50 друкованих символів
+could not derive a free username	не вдалося дібрати вільне ім'я користувача
+display name must be at most 100 printable characters	показане ім'я має містити щонайбільше 100 друкованих символів
+invalid tailscale login	недійсний логін Tailscale
+that username is already taken	це ім'я користувача вже зайняте
+username must be 2..=32 characters of A-Z a-z 0-9 _ . - starting with a letter or digit	ім'я користувача має містити від 2 до 32 символів A-Z a-z 0-9 _ . - і починатися з літери або цифри
+username or tailscale login already taken	ім'я користувача або логін Tailscale уже зайняті
+unknown action	невідома дія
+choose one image	виберіть одне зображення
+you cannot propose changes to this set	ви не можете пропонувати зміни до цього набору
+only the owner can publish this set	опублікувати цей набір може лише власник
+tags are never AI suggestions	теги ніколи не бувають пропозиціями ШІ
+you cannot delete this item	ви не можете видалити цей стікер
+you cannot edit this item	ви не можете редагувати цей стікер
+missing CSRF token (it must be the first form field)	бракує токена CSRF (він має бути першим полем форми)
+missing CSRF token	бракує токена CSRF
+the admin panel needs the admin role	для панелі адміністрування потрібна роль адміністратора
+the query is too long (at most 1000 bytes)	запит задовгий (щонайбільше 1000 байтів)
+aspect ratio must look like 1:1 or 16:9	співвідношення сторін має мати вигляд 1:1 або 16:9
+dir must be up, down, top or bottom	dir має бути up, down, top або bottom
+only the owner can change this set	змінювати цей набір може лише власник
+recommended size must be a number of pixels	рекомендований розмір має бути числом пікселів
+visibility must be private, unlisted or public	видимість має бути private, unlisted або public
+you cannot change this set	ви не можете змінювати цей набір
+invalid expiry	недійсний термін дії
+the Telegram user id must be a number	ідентифікатор користувача Telegram має бути числом
+the new passwords do not match	нові паролі не збігаються
+the theme must be system, light or dark	тема має бути системною, світлою або темною
+choose a set before the files	виберіть набір перед файлами
+choose a set	виберіть набір

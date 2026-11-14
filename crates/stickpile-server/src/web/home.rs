@@ -8,6 +8,7 @@ use super::layout::Nav;
 use super::{auth, items, sets as set_pages, MaybeCtx};
 use crate::assets;
 use crate::error::AppResult;
+use crate::i18n::{t, tf};
 use crate::service::sets::{self, SetScope};
 use crate::service::ui;
 use crate::state::AppState;
@@ -16,14 +17,16 @@ use crate::state::AppState;
 
 /// Show/hide toggles of the recently copied items (`hide-{key}` on their
 /// section): the set page's, plus the item's set. The name always shows.
-const RECENT_PARTS: [(&str, &str, &str); 6] = [
-    ("set", "Set", ""),
-    ("emojis", "Emojis", ""),
-    ("keywords", "Keywords", ""),
-    ("vibe", "Vibe", ""),
-    ("tags", "Tags", ""),
-    ("labels", "Labels", "kind, quality"),
-];
+fn recent_parts() -> [(&'static str, &'static str, &'static str); 6] {
+    [
+        ("set", t("Set"), ""),
+        ("emojis", t("Emojis"), ""),
+        ("keywords", t("Keywords"), ""),
+        ("vibe", t("Vibe"), ""),
+        ("tags", t("Tags"), ""),
+        ("labels", t("Labels"), t("kind, quality")),
+    ]
+}
 
 /// The "View" control of the recently copied items: the set page's styles
 /// and toggles, remembered apart from them (`stickpile.home.*`). Not in the
@@ -34,7 +37,7 @@ fn recent_view_menu() -> Markup {
         "home-view",
         &set_pages::item_styles(),
         "regular",
-        &RECENT_PARTS,
+        &recent_parts(),
         true,
     )
 }
@@ -51,13 +54,13 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
     let recent = ui::recently_copied(&state, &ctx.user, 12).await?;
     let body = html! {
         section.hero {
-            h1 { "Hi, " (ctx.user.user.display_name) }
+            h1 { (tf("Hi, {name}", &[("name", &ctx.user.user.display_name)])) }
             form.bigsearch role="search" method="get" action="/search" {
-                label for="home-q" { "Search your library and public sets" }
+                label for="home-q" { (t("Search your library and public sets")) }
                 div.inline-row {
                     input #home-q type="search" name="q" placeholder="cat, e:😂, vibe:tired, type:gif …" autofocus
                         autocomplete="off";
-                    button.primary type="submit" { "Search" }
+                    button.primary type="submit" { (t("Search")) }
                 }
             }
         }
@@ -67,11 +70,11 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
         section #recent-section .items-section data-view-prefs="home" aria-labelledby="recent-head" {
             script src=(assets::url("prefs.js")) {}
             div.section-head {
-                h2 #recent-head { "Recently copied" }
+                h2 #recent-head { (t("Recently copied")) }
                 @if !recent.is_empty() { (recent_view_menu()) }
             }
             @if recent.is_empty() {
-                p.muted { "Nothing copied yet. Copy an item and it shows up here." }
+                p.muted { (t("Nothing copied yet. Copy an item and it shows up here.")) }
             } @else {
                 div.grid.editor-grid {
                     @for (item, set_name) in &recent {
@@ -82,22 +85,27 @@ pub async fn page(State(state): State<AppState>, MaybeCtx(ctx): MaybeCtx) -> App
         }
         section {
             div.section-head {
-                h2 { "Your sets" }
-                a.button href="/sets/new" { "New set" }
-                a.button href="/upload" { "Upload" }
+                h2 { (t("Your sets")) }
+                a.button href="/sets/new" { (t("New set")) }
+                a.button href="/upload" { (t("Upload")) }
                 @if !my_sets.is_empty() { (set_list_view()) }
             }
             @if my_sets.is_empty() {
                 p.muted {
-                    "You have no sets yet. "
-                    a href="/sets/new" { "Create one" } ", "
-                    a href="/upload" { "import a set directory" } ", or browse "
-                    a href="/sets?tab=public" { "public sets" } "."
+                    (t("You have no sets yet.")) " "
+                    (set_pages::rich(
+                        t("{create}, {import}, or browse {public}."),
+                        &[
+                            ("create", html! { a href="/sets/new" { (t("Create one")) } }),
+                            ("import", html! { a href="/upload" { (t("import a set directory")) } }),
+                            ("public", html! { a href="/sets?tab=public" { (t("public sets")) } }),
+                        ],
+                    ))
                 }
             } @else {
                 (set_list(&my_sets))
             }
         }
     };
-    Ok(ctx.page("Home", Nav::Home, body))
+    Ok(ctx.page(t("Home"), Nav::Home, body))
 }

@@ -429,6 +429,7 @@ start_mode = "normal" # normal | insert: the mode the popup opens in
 mark_favorites = true # a heart on the items you liked (zf)
 show_emojis = true   # an item's emojis on its tile (ze)
 show_tags = true     # an item's tags on its tile (zt)
+language = "auto"    # auto | en | uk: the popup's language (docs/languages.md)
 
 [copy]
 square = "off"       # off | transparent | white: pad non-square stills and stickers to a square

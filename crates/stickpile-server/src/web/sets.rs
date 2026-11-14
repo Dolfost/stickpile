@@ -5,7 +5,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Form;
-use maud::{html, Markup};
+use maud::{html, Markup, PreEscaped};
 use serde::Deserialize;
 use stickpile_api::routes as r;
 use stickpile_api::{
@@ -19,6 +19,7 @@ use super::layout::{self, Nav};
 use super::{collab, integrations, items, problems, upload, Ctx, MultipartCaller};
 use crate::assets;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, t_dyn, tc, tf};
 use crate::service::sets::{self, SetScope};
 use crate::service::{cover, members};
 use crate::state::AppState;
@@ -39,37 +40,37 @@ pub async fn list(State(state): State<AppState>, ctx: Ctx, Query(q): Query<ListQ
     let list = sets::list(&state, &ctx.user, scope).await?;
     let body = html! {
         div.section-head {
-            h1 { "Sets" }
-            a.button.primary href="/sets/new" { "New set" }
-            a.button href="/upload#import" { "Import a set directory" }
+            h1 { (t("Sets")) }
+            a.button.primary href="/sets/new" { (t("New set")) }
+            a.button href="/upload#import" { (t("Import a set directory")) }
             (integrations::set_list_links(&state))
         }
-        nav.tabs aria-label="Which sets" {
+        nav.tabs aria-label=(t("Which sets")) {
             @if public {
-                a href="/sets" { "Mine" }
-                a href="/sets?tab=public" aria-current="page" { "Public" }
+                a href="/sets" { (t("Mine")) }
+                a href="/sets?tab=public" aria-current="page" { (tc("tab", "Public")) }
             } @else {
-                a href="/sets" aria-current="page" { "Mine" }
-                a href="/sets?tab=public" { "Public" }
+                a href="/sets" aria-current="page" { (t("Mine")) }
+                a href="/sets?tab=public" { (tc("tab", "Public")) }
             }
         }
         div.list-head {
             p.muted.small {
                 @if public {
-                    "Public sets of every user on this server. Unlisted sets are only reachable by their link."
+                    (t("Public sets of every user on this server. Unlisted sets are only reachable by their link."))
                 } @else {
-                    "Your own sets, most recently changed first."
+                    (t("Your own sets, most recently changed first."))
                 }
             }
             @if !list.is_empty() { (set_list_view()) }
         }
         @if list.is_empty() {
-            p.muted { @if public { "No public sets yet." } @else { "You have no sets yet." } }
+            p.muted { @if public { (t("No public sets yet.")) } @else { (t("You have no sets yet.")) } }
         } @else {
             (set_list(&list))
         }
     };
-    Ok(ctx.page("Sets", Nav::Sets, body))
+    Ok(ctx.page(t("Sets"), Nav::Sets, body))
 }
 
 // ---------------------------------------------------------------------------
@@ -161,28 +162,31 @@ fn set_fields(ctx: &Ctx, f: &SetForm, new: bool) -> Markup {
     let _ = ctx;
     html! {
         div.field-row {
-            label for="set-name" { "Name" }
+            label for="set-name" { (t("Name")) }
             input #set-name type="text" name="name" value=(f.name) required maxlength="200";
         }
         div.field-row {
-            label for="set-slug" { "Slug" }
+            label for="set-slug" { (t("Slug")) }
             input #set-slug type="text" name="slug" value=(f.slug) maxlength="64" pattern="[a-z0-9][a-z0-9\\-]*"
                 required[!new] aria-describedby="set-slug-hint" spellcheck="false" autocapitalize="none";
             p.hint #set-slug-hint {
-                "Lowercase letters, digits and dashes; used in " code { "set:" } " searches and as the export folder name."
-                @if new { " Leave empty to derive it from the name." }
+                (rich(
+                    t("Lowercase letters, digits and dashes; used in {filter} searches and as the export folder name."),
+                    &[("filter", html! { code { "set:" } })],
+                ))
+                @if new { " " (t("Leave empty to derive it from the name.")) }
             }
         }
         div.field-row {
-            label for="set-desc" { "Description" }
+            label for="set-desc" { (t("Description")) }
             textarea #set-desc name="description" rows="3" maxlength="5000" { (f.description) }
         }
         fieldset.field-row {
-            legend { "Visibility" }
+            legend { (t("Visibility")) }
             @for (value, label, hint) in [
-                ("private", "Private", "only you"),
-                ("unlisted", "Unlisted", "anyone signed in who has the link; not listed or searchable"),
-                ("public", "Public", "listed and searchable by every user of this server"),
+                ("private", t("Private"), t("only you")),
+                ("unlisted", t("Unlisted"), t("anyone signed in who has the link; not listed or searchable")),
+                ("public", t("Public"), t("listed and searchable by every user of this server")),
             ] {
                 label.radio {
                     input type="radio" name="visibility" value=(value)
@@ -193,16 +197,16 @@ fn set_fields(ctx: &Ctx, f: &SetForm, new: bool) -> Markup {
         }
         div.two-col {
             div.field-row {
-                label for="set-aspect" { "Recommended aspect ratio" }
+                label for="set-aspect" { (t("Recommended aspect ratio")) }
                 input #set-aspect type="text" name="aspect" value=(f.aspect) placeholder="1:1" maxlength="11"
                     aria-describedby="set-aspect-hint";
-                p.hint #set-aspect-hint { "Width:height, e.g. 1:1. Empty for none." }
+                p.hint #set-aspect-hint { (t("Width:height, e.g. 1:1. Empty for none.")) }
             }
             div.field-row {
-                label for="set-px" { "Recommended size (px)" }
+                label for="set-px" { (t("Recommended size (px)")) }
                 input #set-px type="number" name="recommended_px" value=(f.recommended_px) min="16" max="16384"
                     placeholder="512" aria-describedby="set-px-hint";
-                p.hint #set-px-hint { "Longest side; 512 for Telegram stickers. Drives the quality score." }
+                p.hint #set-px-hint { (t("Longest side; 512 for Telegram stickers. Drives the quality score.")) }
             }
         }
     }
@@ -212,11 +216,11 @@ fn set_fields(ctx: &Ctx, f: &SetForm, new: bool) -> Markup {
 fn pack_fields(f: &SetForm) -> Markup {
     html! {
         div.field-row {
-            label for="set-name" { "Name" }
+            label for="set-name" { (t("Name")) }
             input #set-name type="text" name="name" value=(f.name) required maxlength="200";
         }
         div.field-row {
-            label for="set-desc" { "Description" }
+            label for="set-desc" { (t("Description")) }
             textarea #set-desc name="description" rows="3" maxlength="5000" { (f.description) }
         }
     }
@@ -224,28 +228,32 @@ fn pack_fields(f: &SetForm) -> Markup {
 
 fn new_form(ctx: &Ctx, f: &SetForm, error: Option<&str>) -> Markup {
     let body = html! {
-        h1 { "New set" }
+        h1 { (t("New set")) }
         @if let Some(e) = error { (layout::alert("error", e)) }
         form.stack.narrow method="post" action="/sets" {
             (ctx.csrf_input())
             (set_fields(ctx, f, true))
-            button.primary type="submit" { "Create set" }
+            button.primary type="submit" { (t("Create set")) }
         }
-        p.muted { "Have a set directory or an export tar? " a href="/upload#import" { "Import it instead" } "." }
+        p.muted {
+            (t("Have a set directory or an export tar?")) " " a href="/upload#import" { (t("Import it instead")) } "."
+        }
     };
-    ctx.page("New set", Nav::Sets, body)
+    ctx.page(t("New set"), Nav::Sets, body)
 }
 
 pub async fn new_page(ctx: Ctx) -> Markup {
     new_form(&ctx, &SetForm::default(), None)
 }
 
+/// The message of `e` in the request's language, as a sentence.
 fn form_error(e: &AppError) -> String {
-    let mut m = e.message.clone();
-    if let Some(first) = m.get_mut(0..1) {
-        first.make_ascii_uppercase();
+    let m = t_dyn(&e.message);
+    let mut chars = m.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => m,
     }
-    m
 }
 
 pub async fn create(State(state): State<AppState>, ctx: Ctx, Form(f): Form<SetForm>) -> AppResult<Response> {
@@ -288,19 +296,29 @@ pub enum Sort {
 }
 
 impl Sort {
-    const ALL: [(Sort, &'static str, &'static str); 5] = [
-        (Sort::Position, "position", "Set order"),
-        (Sort::Likes, "likes", "Most liked"),
-        (Sort::Copies, "copies", "Most copied"),
-        (Sort::Quality, "quality", "Best quality"),
-        (Sort::Recent, "recent", "Recently changed"),
+    const ALL: [(Sort, &'static str); 5] = [
+        (Sort::Position, "position"),
+        (Sort::Likes, "likes"),
+        (Sort::Copies, "copies"),
+        (Sort::Quality, "quality"),
+        (Sort::Recent, "recent"),
     ];
     fn parse(s: Option<&str>) -> Sort {
         Sort::ALL
             .iter()
-            .find(|(_, k, _)| Some(*k) == s)
-            .map(|(s, _, _)| *s)
+            .find(|(_, k)| Some(*k) == s)
+            .map(|(s, _)| *s)
             .unwrap_or(Sort::Position)
+    }
+    /// The sort's name in the "Sort" select.
+    fn label(self) -> &'static str {
+        match self {
+            Sort::Position => t("Set order"),
+            Sort::Likes => t("Most liked"),
+            Sort::Copies => t("Most copied"),
+            Sort::Quality => t("Best quality"),
+            Sort::Recent => t("Recently changed"),
+        }
     }
 }
 
@@ -328,51 +346,92 @@ pub enum ItemsView {
 }
 
 impl ItemsView {
-    /// (view, `view` value, label, hint).
-    const ALL: [(ItemsView, &'static str, &'static str, &'static str); 3] = [
-        (ItemsView::Regular, "regular", "Regular", "every field and button"),
-        (
-            ItemsView::Compact,
-            "compact",
-            "Compact",
-            "the name, emojis at the bottom",
-        ),
-        (ItemsView::Grid, "grid", "Grid", "thumbnails only"),
+    /// (view, `view` value).
+    const ALL: [(ItemsView, &'static str); 3] = [
+        (ItemsView::Regular, "regular"),
+        (ItemsView::Compact, "compact"),
+        (ItemsView::Grid, "grid"),
     ];
     fn parse(s: Option<&str>) -> ItemsView {
         ItemsView::ALL
             .iter()
-            .find(|(_, k, _, _)| Some(*k) == s)
-            .map_or(ItemsView::Regular, |(v, _, _, _)| *v)
+            .find(|(_, k)| Some(*k) == s)
+            .map_or(ItemsView::Regular, |(v, _)| *v)
     }
     fn key(self) -> &'static str {
         ItemsView::ALL
             .iter()
-            .find(|(v, _, _, _)| *v == self)
-            .map_or("regular", |(_, k, _, _)| k)
+            .find(|(v, _)| *v == self)
+            .map_or("regular", |(_, k)| k)
+    }
+    /// Label and hint in the "View" control.
+    fn label(self) -> (&'static str, &'static str) {
+        match self {
+            ItemsView::Regular => (t("Regular"), t("every field and button")),
+            ItemsView::Compact => (t("Compact"), t("the name, emojis at the bottom")),
+            ItemsView::Grid => (t("Grid"), t("thumbnails only")),
+        }
     }
 }
 
 /// Show/hide toggles of the set page (`hide-{key}` on the items section).
 /// The name always shows; "Labels" are the badges on the thumbnail.
-const ITEM_PARTS: [(&str, &str, &str); 5] = [
-    ("emojis", "Emojis", ""),
-    ("keywords", "Keywords", ""),
-    ("vibe", "Vibe", ""),
-    ("tags", "Tags", ""),
-    ("labels", "Labels", "kind, quality, cover"),
-];
+fn item_parts() -> [(&'static str, &'static str, &'static str); 5] {
+    [
+        ("emojis", t("Emojis"), ""),
+        ("keywords", t("Keywords"), ""),
+        ("vibe", t("Vibe"), ""),
+        ("tags", t("Tags"), ""),
+        ("labels", t("Labels"), t("kind, quality, cover")),
+    ]
+}
 
 /// The set page's "View" control, inside the filter form: without
 /// JavaScript the style radios are submitted by "Apply" (`?view=`).
 fn items_view_menu(view: ItemsView) -> Markup {
-    view_menu("items", "view", &item_styles(), view.key(), &ITEM_PARTS, false)
+    view_menu("items", "view", &item_styles(), view.key(), &item_parts(), false)
 }
 
 /// The item card styles for a "View" control: (value, label, hint). The
 /// start page's recently copied items offer the same.
 pub(super) fn item_styles() -> Vec<(&'static str, &'static str, &'static str)> {
-    ItemsView::ALL.iter().map(|(_, k, l, h)| (*k, *l, *h)).collect()
+    ItemsView::ALL
+        .iter()
+        .map(|(v, k)| {
+            let (label, hint) = v.label();
+            (*k, label, hint)
+        })
+        .collect()
+}
+
+/// A translated sentence with markup in it: `text` escaped, its `{name}`
+/// placeholders replaced by `parts` (links, code). In English the same
+/// HTML as writing the pieces one after the other in `html!`.
+pub(super) fn rich(text: &str, parts: &[(&str, Markup)]) -> Markup {
+    let text = html! { (text) }.into_string();
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    // One pass, so a part's own text is never taken for a placeholder.
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let part = after.find('}').and_then(|close| {
+            let name = &after[..close];
+            parts.iter().find(|(n, _)| *n == name).map(|(_, m)| (m, close))
+        });
+        match part {
+            Some((markup, close)) => {
+                out.push_str(&markup.0);
+                rest = &after[close + 1..];
+            }
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    PreEscaped(out)
 }
 
 // ---- display options (end) ------------------------------------------------
@@ -401,17 +460,17 @@ fn git_box(set: &Set) -> Markup {
     html! {
         @if let Some(g) = &set.git {
             aside.git-box {
-                h2.small-head { "Git pack" }
+                h2.small-head { (t("Git pack")) }
                 dl.kv {
-                    dt { "Repository" } dd { code { (g.url) } }
-                    @if let Some(b) = &g.branch { dt { "Branch" } dd { code { (b) } } }
-                    dt { "Mode" } dd { (match g.mode { stickpile_api::GitMode::ReadOnly => "read-only (edit upstream)", stickpile_api::GitMode::Push => "edits are pushed back" }) }
-                    dt { "Last pull" } dd { (opt_time(g.last_pull_at)) }
-                    @if let Some(c) = &g.last_commit { dt { "Commit" } dd { code { (c.chars().take(12).collect::<String>()) } } }
-                    @if let Some(e) = &g.last_error { dt { "Last error" } dd.error-text { (e) } }
+                    dt { (t("Repository")) } dd { code { (g.url) } }
+                    @if let Some(b) = &g.branch { dt { (t("Branch")) } dd { code { (b) } } }
+                    dt { (t("Mode")) } dd { (match g.mode { stickpile_api::GitMode::ReadOnly => t("read-only (edit upstream)"), stickpile_api::GitMode::Push => t("edits are pushed back") }) }
+                    dt { (t("Last pull")) } dd { (opt_time(g.last_pull_at)) }
+                    @if let Some(c) = &g.last_commit { dt { (t("Commit")) } dd { code { (c.chars().take(12).collect::<String>()) } } }
+                    @if let Some(e) = &g.last_error { dt { (t("Last error")) } dd.error-text { (e) } }
                 }
                 @if let Some(web) = &g.web_url {
-                    p { a.button href=(web) rel="noopener noreferrer" target="_blank" { "Edit upstream" } }
+                    p { a.button href=(web) rel="noopener noreferrer" target="_blank" { (t("Edit upstream")) } }
                 }
             }
         }
@@ -444,8 +503,9 @@ pub async fn page(
             }
             @if !set.description.is_empty() { p.description { (set.description) } }
             p.meta {
-                "by " (set.owner_username) " · " (plural(set.item_count, "item", "items"))
-                " · version " (set.version) " · updated " (fmt_time(set.updated_at))
+                (tf("by {owner}", &[("owner", &set.owner_username)])) " · " (plural(set.item_count, "item", "items"))
+                " · " (tf("version {version}", &[("version", &set.version)]))
+                " · " (tf("updated {time}", &[("time", &fmt_time(set.updated_at))]))
                 " · " code { (set.slug) }
                 @if let Some(tg) = &set.telegram_pack {
                     " · Telegram: " a href=(format!("https://t.me/addstickers/{tg}")) rel="noopener noreferrer" target="_blank" { (tg) }
@@ -453,33 +513,36 @@ pub async fn page(
             }
             @if set.role == SetRole::Contributor {
                 p.contrib-note {
-                    "You contribute to this pack: " (collab::permissions_summary(&set.permissions)) "."
+                    (tf("You contribute to this pack: {permissions}.", &[(
+                        "permissions",
+                        &collab::permissions_summary(&set.permissions),
+                    )]))
                 }
             }
-            nav.actions aria-label="Set actions" {
-                @if is_owner { a.button href=(format!("/sets/{}/settings", set.id)) { "Settings" } }
+            nav.actions aria-label=(t("Set actions")) {
+                @if is_owner { a.button href=(format!("/sets/{}/settings", set.id)) { (t("Settings")) } }
                 @if !is_owner && set.permissions.edit_pack {
-                    a.button href=(format!("/sets/{}/settings", set.id)) { "Edit pack" }
+                    a.button href=(format!("/sets/{}/settings", set.id)) { (t("Edit pack")) }
                 }
                 @if collab::can_propose(set) {
-                    a.button href=(format!("/sets/{}/propose", set.id)) { "Propose…" }
+                    a.button href=(format!("/sets/{}/propose", set.id)) { (t("Propose…")) }
                 }
-                a.button href=(r::path(r::SET_EXPORT, &[&set.id])) download { "Export (.tar)" }
-                a.button href=(format!("/popular?scope=set&set={}", set.id)) { "Popular in this set" }
+                a.button href=(r::path(r::SET_EXPORT, &[&set.id])) download { (t("Export (.tar)")) }
+                a.button href=(format!("/popular?scope=set&set={}", set.id)) { (t("Popular in this set")) }
                 @if is_owner { (integrations::set_actions(&state, &ctx, set)) }
             }
             (git_box(set))
             @if set.source == SetSource::Git && !set.editable {
-                p.muted { "This set mirrors a git repository and is read-only here. Edit it upstream; changes arrive with the next pull." }
+                p.muted { (t("This set mirrors a git repository and is read-only here. Edit it upstream; changes arrive with the next pull.")) }
             }
         }
         @if set.permissions.add {
             section.uploader aria-labelledby="upload-head" {
-                h2 #upload-head { "Add items" }
+                h2 #upload-head { (t("Add items")) }
                 (upload::upload_form(&ctx, &state, &set.id, set.aspect_ratio))
                 @if set.editable {
                     details.import-into {
-                        summary { "Replace from a set directory" }
+                        summary { (t("Replace from a set directory")) }
                         (upload::import_form(&ctx, Some(&set.id)))
                     }
                 }
@@ -493,22 +556,22 @@ pub async fn page(
             data-view-prefs="items" aria-labelledby="items-head" {
             script src=(assets::url("prefs.js")) {}
             div.section-head {
-                h2 #items-head { "Items" }
+                h2 #items-head { (t("Items")) }
                 // One GET form: Apply keeps the filter, the sort and the view
                 // style together. With JavaScript the View control applies
                 // at once.
                 form.filters method="get" action=(set_url(&set.id)) {
-                    label for="f-min-likes" { "Hide below" }
+                    label for="f-min-likes" { (t("Hide below")) }
                     input #f-min-likes type="number" name="min_likes" min="0" value=(min_likes) class="narrow-num";
-                    span { "likes" }
-                    label for="f-sort" { "Sort" }
+                    span { (t("likes")) }
+                    label for="f-sort" { (t("Sort")) }
                     select #f-sort name="sort" {
-                        @for (s, key, label) in Sort::ALL {
-                            option value=(key) selected[s == sort] { (label) }
+                        @for (s, key) in Sort::ALL {
+                            option value=(key) selected[s == sort] { (s.label()) }
                         }
                     }
                     (items_view_menu(view))
-                    button type="submit" { "Apply" }
+                    button type="submit" { (t("Apply")) }
                 }
             }
             (editor_grid(&ctx, &detail, sort, min_likes, false))
@@ -529,7 +592,7 @@ fn head_cover(set: &Set, oob: bool) -> Markup {
     html! {
         span #set-cover .set-cover hx-swap-oob=[oob.then_some("true")] {
             @if let Some(img) = &set.cover_image {
-                img src=(img.thumb_url) alt="" title="The set's cover image" width="64" height="64" decoding="async";
+                img src=(img.thumb_url) alt="" title=(t("The set's cover image")) width="64" height="64" decoding="async";
             }
         }
     }
@@ -548,10 +611,15 @@ pub fn editor_grid(ctx: &Ctx, detail: &SetDetail, sort: Sort, min_likes: u64, oo
     html! {
         div #set-items hx-swap-oob=[oob.then_some("true")] data-cover-image[has_image] {
             @if detail.items.is_empty() {
-                p.muted { "This set is empty." @if detail.set.permissions.add { " Upload files above." } }
+                p.muted { (t("This set is empty.")) @if detail.set.permissions.add { " " (t("Upload files above.")) } }
             } @else {
                 @if hidden > 0 {
-                    p.muted.small { (plural(hidden as u64, "item is", "items are")) " hidden by the likes filter." }
+                    p.muted.small {
+                        (tf("{items} hidden by the likes filter.", &[(
+                            "items",
+                            &plural(hidden as u64, "item is", "items are"),
+                        )]))
+                    }
                 }
                 div.grid.editor-grid {
                     // When movable, nothing is filtered or re-sorted, so the
@@ -679,11 +747,11 @@ fn cover_choice(f: &SetForm, set: &Set, items: &[Item]) -> Markup {
     let chosen = f.cover.as_deref().unwrap_or("");
     html! {
         fieldset.field-row.cover-choice aria-describedby="set-cover-hint" {
-            legend { "Cover" }
+            legend { (t("Cover")) }
             p.hint #set-cover-hint {
-                "Shown for the set in lists, and the pack's thumbnail when it is published to Telegram."
+                (t("Shown for the set in lists, and the pack's thumbnail when it is published to Telegram."))
                 @if set.cover_image.is_some() {
-                    " Choosing an item instead removes the cover image when you save."
+                    " " (t("Choosing an item instead removes the cover image when you save."))
                 }
             }
             div.cover-grid {
@@ -691,12 +759,12 @@ fn cover_choice(f: &SetForm, set: &Set, items: &[Item]) -> Markup {
                     label.cover-option {
                         input type="radio" name="cover" value=(COVER_IMAGE) checked[chosen == COVER_IMAGE];
                         img src=(img.thumb_url) alt="" decoding="async";
-                        span.cover-name { "Cover image" }
+                        span.cover-name { (t("Cover image")) }
                     }
                 }
                 label.cover-option {
                     input type="radio" name="cover" value="" checked[chosen.is_empty()];
-                    span.cover-default { "First item" }
+                    span.cover-default { (t("First item")) }
                 }
                 @for item in items {
                     label.cover-option {
@@ -708,8 +776,8 @@ fn cover_choice(f: &SetForm, set: &Set, items: &[Item]) -> Markup {
             }
             @if set.cover_image.is_none() {
                 p.hint {
-                    "Or use a picture that is not one of the items: "
-                    a href="#cover-image" { "upload a cover image" } "."
+                    (t("Or use a picture that is not one of the items:")) " "
+                    a href="#cover-image" { (t("upload a cover image")) } "."
                 }
             }
         }
@@ -732,31 +800,33 @@ fn cover_image_section(ctx: &Ctx, set: &Set, items: &[Item], notice: Notice) -> 
         .map(|i| i.name.as_str());
     html! {
         section.cover-image #cover-image aria-labelledby="cover-image-head" {
-            h2 #cover-image-head { "Cover image" }
+            h2 #cover-image-head { (t("Cover image")) }
             @match notice {
                 Notice::Cover(m) => (layout::alert("success", m)),
                 Notice::CoverError(m) => (layout::alert("error", m)),
                 _ => {}
             }
             p.hint {
-                "A picture of its own for the cover, instead of one of the items. It is not an item: it is not "
-                "listed with the items, searched or counted. Telegram shows it at 100 × 100 px, so a square "
-                "works best."
+                (t("A picture of its own for the cover, instead of one of the items. It is not an item: it is not \
+                    listed with the items, searched or counted. Telegram shows it at 100 × 100 px, so a square \
+                    works best."))
             }
             @if let Some(img) = image {
                 div.cover-current {
-                    img.cover-preview src=(img.thumb_url) alt="The current cover image" width="128" height="128"
+                    img.cover-preview src=(img.thumb_url) alt=(t("The current cover image")) width="128" height="128"
                         decoding="async";
                     div.cover-current-info {
                         p.small.muted { (img.width) " × " (img.height) " px " (format_name(img.format)) }
                         form method="post" action=(format!("/sets/{}/cover/image/delete#cover-image", set.id)) {
                             (ctx.csrf_input())
-                            button.danger type="submit" aria-describedby="cover-remove-hint" { "Remove image" }
+                            button.danger type="submit" aria-describedby="cover-remove-hint" { (t("Remove image")) }
                         }
                         p.hint #cover-remove-hint {
-                            "The cover goes back to "
-                            @if let Some(name) = fallback { "“" (name) "”" } @else { "the first item" }
-                            "."
+                            @if let Some(name) = fallback {
+                                (tf("The cover goes back to “{name}”.", &[("name", &name)]))
+                            } @else {
+                                (t("The cover goes back to the first item."))
+                            }
                         }
                     }
                 }
@@ -766,15 +836,15 @@ fn cover_image_section(ctx: &Ctx, set: &Set, items: &[Item], notice: Notice) -> 
                 (ctx.csrf_input())
                 div.dropzone data-dropzone="" {
                     label for="cover-file" {
-                        strong { @if image.is_some() { "Choose another image" } @else { "Choose an image" } }
-                        " or drop it here"
-                        span.paste-hint hidden { ", or paste one with Ctrl+V" }
+                        strong { @if image.is_some() { (t("Choose another image")) } @else { (t("Choose an image")) } }
+                        " " (t("or drop it here"))
+                        span.paste-hint hidden { ", " (t("or paste one with Ctrl+V")) }
                     }
                     input #cover-file type="file" name="file" required accept=(COVER_ACCEPT)
                         aria-describedby="cover-file-hint";
-                    p.hint #cover-file-hint { "A still PNG, JPEG or WebP; not an animation or a video." }
+                    p.hint #cover-file-hint { (t("A still PNG, JPEG or WebP; not an animation or a video.")) }
                 }
-                button.primary type="submit" { @if image.is_some() { "Replace image" } @else { "Upload image" } }
+                button.primary type="submit" { @if image.is_some() { (t("Replace image")) } @else { (t("Upload image")) } }
             }
         }
     }
@@ -804,9 +874,9 @@ enum Notice<'a> {
 fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Notice) -> Markup {
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
-        h1 { @if set.role == SetRole::Owner { "Set settings" } @else { "Edit pack" } }
+        h1 { @if set.role == SetRole::Owner { (t("Set settings")) } @else { (t("Edit pack")) } }
         @match notice {
-            Notice::Saved => (layout::alert("success", "Saved.")),
+            Notice::Saved => (layout::alert("success", t("Saved."))),
             Notice::Error(e) => (layout::alert("error", e)),
             _ => {}
         }
@@ -815,7 +885,7 @@ fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Noti
                 (ctx.csrf_input())
                 (set_fields(ctx, f, false))
                 @if !items.is_empty() || set.cover_image.is_some() { (cover_choice(f, set, items)) }
-                button.primary type="submit" { "Save" }
+                button.primary type="submit" { (t("Save")) }
             }
             (cover_image_section(ctx, set, items, notice))
         } @else if set.permissions.edit_pack {
@@ -824,21 +894,21 @@ fn settings_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetForm, notice: Noti
                 (ctx.csrf_input())
                 (pack_fields(f))
                 @if !items.is_empty() || set.cover_image.is_some() { (cover_choice(f, set, items)) }
-                button.primary type="submit" { "Save" }
+                button.primary type="submit" { (t("Save")) }
             }
             (cover_image_section(ctx, set, items, notice))
         } @else {
-            p { "This set is a read-only git pack: its metadata comes from the repository's set.toml." }
+            p { (t("This set is a read-only git pack: its metadata comes from the repository's set.toml.")) }
         }
         @if set.role == SetRole::Owner {
             section.danger {
-                h2 { "Delete" }
-                p { "Deleting the set removes it and all its items for everyone. This cannot be undone." }
-                a.button.danger href=(format!("/sets/{}/delete", set.id)) { "Delete this set…" }
+                h2 { (t("Delete")) }
+                p { (t("Deleting the set removes it and all its items for everyone. This cannot be undone.")) }
+                a.button.danger href=(format!("/sets/{}/delete", set.id)) { (t("Delete this set…")) }
             }
         }
     };
-    ctx.page("Set settings", Nav::Sets, body)
+    ctx.page(t("Set settings"), Nav::Sets, body)
 }
 
 async fn owned(state: &AppState, ctx: &Ctx, id: &str) -> AppResult<SetDetail> {
@@ -873,8 +943,8 @@ pub async fn settings_page(
     let d = pack_editor(&state, &ctx, &id).await?;
     let notice = match q.saved.as_deref() {
         None => Notice::None,
-        Some("cover") => Notice::Cover("The new cover image is in place."),
-        Some("nocover") => Notice::Cover("The cover image is removed."),
+        Some("cover") => Notice::Cover(t("The new cover image is in place.")),
+        Some("nocover") => Notice::Cover(t("The cover image is removed.")),
         Some(_) => Notice::Saved,
     };
     Ok(settings_form(
@@ -988,15 +1058,20 @@ pub async fn delete_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path
     let set = owned(&state, &ctx, &id).await?.set;
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
-        h1 { "Delete “" (set.name) "”?" }
-        p { "This removes the set and its " (plural(set.item_count, "item", "items")) ". Exported copies are not affected." }
+        h1 { (tf("Delete “{name}”?", &[("name", &set.name)])) }
+        p {
+            (tf(
+                "This removes the set and its {items}. Exported copies are not affected.",
+                &[("items", &plural(set.item_count, "item", "items"))],
+            ))
+        }
         form.inline-row method="post" action=(format!("/sets/{}/delete", set.id)) {
             (ctx.csrf_input())
-            button.danger type="submit" { "Delete set" }
-            a.button href=(set_url(&set.id)) { "Cancel" }
+            button.danger type="submit" { (t("Delete set")) }
+            a.button href=(set_url(&set.id)) { (t("Cancel")) }
         }
     };
-    Ok(ctx.page("Delete set", Nav::Sets, body))
+    Ok(ctx.page(t("Delete set"), Nav::Sets, body))
 }
 
 pub async fn delete_submit(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {

@@ -74,8 +74,6 @@
     "video/mp4": ".mp4",
     "video/webm": ".webm",
   };
-  var ACCEPTED = "PNG, JPEG, WebP, GIF, MP4 or WebM";
-  var COVER_ACCEPTED = "a cover image is one still PNG, JPEG or WebP, not an animation or a video.";
   var MIN_CROP = 4; // smallest crop side, image pixels
   var STAGE_MIN_H = 320; // the editor preview may always be this tall, CSS pixels
   var STAGE_VH = 0.7; // and up to this share of the window height
@@ -85,7 +83,7 @@
   var SUGGEST_AT_ONCE = 2; // suggestion requests in flight per tray
   var SUGGEST_TRIES = 3; // per file, when the server is busy (429 + Retry-After)
   var SUGGEST_LOAD_WAIT = 180000; // ms to keep asking while the model loads (503 ai_loading)
-  // The details AI may suggest, with the names used in sentences.
+  // The details AI may suggest (fieldName names them in sentences).
   var AI_FIELDS = ["keywords", "emojis", "vibe"];
   // Orientation as a 2×2 matrix, to notice when edits cancel out.
   var IDENTITY = [1, 0, 0, 1];
@@ -100,6 +98,42 @@
   var nextId = 1;
 
   // ---- helpers ---------------------------------------------------------
+
+  // Texts in the page's language (docs/languages.md): the server puts the
+  // translations into <body data-i18n>; English needs none.
+  var I18N = null;
+  function tr(s) {
+    if (I18N === null) {
+      try {
+        I18N = JSON.parse((document.body && document.body.getAttribute("data-i18n")) || "{}");
+      } catch (e) {
+        I18N = {};
+      }
+    }
+    return I18N[s] || s;
+  }
+  function trf(s, args) {
+    return tr(s).replace(/\{(\w+)\}/g, function (m, k) {
+      return Object.prototype.hasOwnProperty.call(args, k) ? args[k] : m;
+    });
+  }
+  // A count: `forms` is tr() of a plural key, "Upload {n} file|Upload {n}
+  // files", whose translation has the language's forms (Ukrainian:
+  // one|few|many), chosen as the server's stickpile_i18n::plural_form does;
+  // {n} and `args` are filled in.
+  function trp(n, forms, args) {
+    var f = forms.split("|");
+    var i = n === 1 ? 0 : 1;
+    if (document.documentElement.lang === "uk") {
+      var m10 = n % 10;
+      var m100 = n % 100;
+      i = m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2;
+    }
+    return f[Math.min(i, f.length - 1)].replace(/\{(\w+)\}/g, function (m, k) {
+      if (k === "n") return n;
+      return args && Object.prototype.hasOwnProperty.call(args, k) ? args[k] : m;
+    });
+  }
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -124,14 +158,20 @@
     return b;
   }
 
-  function plural(n, one, many) {
-    return n + " " + (n === 1 ? one : many);
-  }
-
   // ["keywords", "emojis", "vibe"] -> "keywords, emojis and vibe"
   function sentence(words) {
     if (words.length < 2) return words.join("");
-    return words.slice(0, -1).join(", ") + " and " + words[words.length - 1];
+    return trf("{list} and {last}", { list: words.slice(0, -1).join(", "), last: words[words.length - 1] });
+  }
+
+  // A detail AI may suggest, as named in a sentence ("AI suggested the vibe").
+  function fieldName(k) {
+    return k === "keywords" ? tr("keywords") : k === "emojis" ? tr("emojis") : tr("vibe");
+  }
+
+  // Why files are not taken as a set's cover image.
+  function coverSkipped(names) {
+    return trf("Skipped {names}: a cover image is one still PNG, JPEG or WebP, not an animation or a video.", { names: names });
   }
 
   function clamp(v, lo, hi) {
@@ -298,7 +338,7 @@
     if (typeof DataTransfer === "undefined" || !window.createImageBitmap) {
       input.addEventListener("change", function () {
         var n = input.files ? input.files.length : 0;
-        zone.setAttribute("data-count", n ? plural(n, "file", "files") + " selected" : "");
+        zone.setAttribute("data-count", n ? trp(n, tr("{n} file selected|{n} files selected")) : "");
       });
       return;
     }
@@ -341,9 +381,9 @@
     tray.hidden = true;
     var head = el("div", "tray-head");
     var title = el("p", "tray-title");
-    var clearAll = button("small", "Remove all");
+    var clearAll = button("small", tr("Remove all"));
     clearAll.hidden = coverMode;
-    var approveEvery = tool("✓", "Approve AI for all files");
+    var approveEvery = tool("✓", tr("Approve AI for all files"));
     approveEvery.hidden = true;
     var headActions = el("div", "tray-head-actions");
     headActions.appendChild(approveEvery);
@@ -351,27 +391,26 @@
     head.appendChild(title);
     head.appendChild(headActions);
     var list = el("ul", "tray-list");
-    list.setAttribute("aria-label", "Files to upload");
+    list.setAttribute("aria-label", tr("Files to upload"));
 
     var editor = el("div", "tray-editor");
     editor.setAttribute("role", "group");
 
     // The selected file's details (sent as `meta`), then its image.
     var details = el("div", "tray-details");
-    var nameInput = detailField("Name", "", 200);
+    var nameInput = detailField("name", tr("Name"), "", 200);
     // AI suggestions of the selected file: progress, what was suggested,
-    // and "Approve all". The text is a live region, so it is announced.
+    // and "Approve all" (named for the file). The text is a live region, so
+    // it is announced.
     var aiBar = el("div", "tray-ai");
     aiBar.hidden = true;
     var aiText = el("p", "tray-ai-text");
     aiText.setAttribute("aria-live", "polite");
-    var approveAll = tool("✓", "Approve all");
-    var approveAllFor = el("span", "sr-only");
-    approveAll.appendChild(approveAllFor);
+    var approveAll = tool("✓", tr("Approve all"));
     approveAll.hidden = true;
     // After a failure: ask again for this file (or, after the model took
     // too long to load, for every file).
-    var aiRetry = button("small", "Try again");
+    var aiRetry = button("small", tr("Try again"));
     aiRetry.hidden = true;
     aiBar.appendChild(aiText);
     aiBar.appendChild(approveAll);
@@ -379,18 +418,18 @@
     details.appendChild(aiBar);
     // Per field: the AI badge, the ✓ toggle and a description for screen readers.
     var aiUi = {};
-    var keywordsInput = detailField("Keywords", "What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.", 0, "keywords");
-    var emojisInput = detailField("Emojis", "Separate with spaces.", 0, "emojis");
+    var keywordsInput = detailField("keywords", tr("Keywords"), tr("What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words."), 0, tr("Approve keywords"));
+    var emojisInput = detailField("emojis", tr("Emojis"), tr("Separate with spaces."), 0, tr("Approve emojis"));
     // The emoji picker (emoji.js, loaded first; else it finds the attribute).
     emojisInput.setAttribute("data-emoji-picker", "");
     if (window.stickpileEmoji) window.stickpileEmoji.attach(emojisInput);
-    var vibeInput = detailField("Vibe", "The mood in one word, e.g. tired or smug.", 50, "vibe");
+    var vibeInput = detailField("vibe", tr("Vibe"), tr("The mood in one word, e.g. tired or smug."), 50, tr("Approve vibe"));
     if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
-    var tagsInput = detailField("Tags", "Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.", 0);
+    var tagsInput = detailField("tags", tr("Tags"), tr("Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram."), 0);
     var copyRow = el("div", "tray-copy");
-    var copyAll = button("small", "Use for every file");
+    var copyAll = button("small", tr("Use for every file"));
     copyAll.id = "tray-copy-" + nextId++;
-    var copyHint = el("p", "hint", "Gives the other files these keywords, emojis, vibe and tags. Names stay.");
+    var copyHint = el("p", "hint", tr("Gives the other files these keywords, emojis, vibe and tags. Names stay."));
     copyHint.id = copyAll.id + "-hint";
     copyAll.setAttribute("aria-describedby", copyHint.id);
     copyRow.appendChild(copyAll);
@@ -398,13 +437,15 @@
     details.appendChild(copyRow);
     var detailInputs = { keywords: keywordsInput, emojis: emojisInput, vibe: vibeInput, tags: tagsInput };
 
-    // A labelled text field; `aiKey` adds the AI badge and the ✓ toggle on
-    // the label's line (outside the <label>, so the field's name stays).
-    function detailField(label, hint, maxLength, aiKey) {
+    // A labelled text field (`key`: "name" or one of detailInputs); with
+    // `approveName` ("Approve keywords"), a field AI may suggest: the AI
+    // badge and the ✓ toggle on the label's line (outside the <label>, so
+    // the field's name stays).
+    function detailField(key, label, hint, maxLength, approveName) {
       var row = el("div", "tray-field");
       var input = el("input");
       input.type = "text";
-      input.id = "tray-" + label.toLowerCase() + "-" + nextId++;
+      input.id = "tray-" + key + "-" + nextId++;
       input.autocomplete = "off";
       if (maxLength) input.maxLength = maxLength;
       var top = el("div", "tray-label");
@@ -419,29 +460,28 @@
         input.setAttribute("aria-describedby", h.id);
         row.appendChild(h);
       }
-      if (aiKey) {
-        var badge = el("abbr", "ai", "AI");
-        badge.title = "Suggested by AI: approve or edit it";
+      if (approveName) {
+        var badge = el("abbr", "ai", tr("AI"));
+        badge.title = tr("Suggested by AI: approve or edit it");
         badge.setAttribute("aria-hidden", "true");
         badge.hidden = true;
         // The field's description while its value is an unapproved
         // suggestion (hidden: only read through aria-describedby).
-        var note = el("span", null, "Suggested by AI, not approved.");
+        var note = el("span", null, tr("Suggested by AI, not approved."));
         note.id = input.id + "-ai";
         note.hidden = true;
         // A toggle: pressed = approved. Its name stays "Approve <field>".
-        var ok = tool("✓", "Approve");
+        var ok = tool("✓", tr("Approve"), approveName);
         ok.classList.add("tray-approve");
-        ok.appendChild(el("span", "sr-only", " " + label.toLowerCase()));
         ok.setAttribute("aria-pressed", "false");
         ok.hidden = true;
         ok.addEventListener("click", function () {
-          toggleApproval(aiKey);
+          toggleApproval(key);
         });
         top.appendChild(badge);
         top.appendChild(ok);
         row.appendChild(note);
-        aiUi[aiKey] = { row: row, input: input, badge: badge, toggle: ok, note: note.id };
+        aiUi[key] = { row: row, input: input, badge: badge, toggle: ok, note: note.id };
       }
       details.appendChild(row);
       return input;
@@ -456,22 +496,22 @@
     var media = el("div", "tray-media");
     var tools = el("div", "tray-tools");
     tools.setAttribute("role", "group");
-    tools.setAttribute("aria-label", "Image tools");
-    var turnLeft = tool("↺", "Rotate left");
-    var turnRight = tool("↻", "Rotate right");
-    var flipH = tool("⇆", "Flip", "Flip horizontally");
-    var flipV = tool("⇅", "Flip vertically");
-    var cropLabel = el("span", "tool-label", "Crop");
-    var presets = [{ label: "Free", ratio: null, button: button("small", "Free") }];
-    presets.push({ label: "Square", ratio: 1, button: button("small", "Square") });
+    tools.setAttribute("aria-label", tr("Image tools"));
+    var turnLeft = tool("↺", tr("Rotate left"));
+    var turnRight = tool("↻", tr("Rotate right"));
+    var flipH = tool("⇆", tr("Flip"), tr("Flip horizontally"));
+    var flipV = tool("⇅", tr("Flip vertically"));
+    var cropLabel = el("span", "tool-label", tr("Crop"));
+    var presets = [{ label: tr("Free"), ratio: null, button: button("small", tr("Free")) }];
+    presets.push({ label: tr("Square"), ratio: 1, button: button("small", tr("Square")) });
     if (aspect && Math.abs(aspect.ratio - 1) > 1e-9) {
       presets.push({
         label: aspect.label,
         ratio: aspect.ratio,
-        button: button("small", aspect.label, aspect.label + ", the set's aspect ratio"),
+        button: button("small", aspect.label, trf("{ratio}, the set's aspect ratio", { ratio: aspect.label })),
       });
     }
-    var reset = button("small", "Reset");
+    var reset = button("small", tr("Reset"));
     [turnLeft, turnRight, flipH, flipV, cropLabel].forEach(function (b) {
       tools.appendChild(b);
     });
@@ -486,7 +526,7 @@
     var box = el("div", "crop-box");
     box.tabIndex = 0;
     box.setAttribute("role", "group");
-    box.setAttribute("aria-label", "Crop area");
+    box.setAttribute("aria-label", tr("Crop area"));
     ["nw", "ne", "sw", "se"].forEach(function (c) {
       var h = el("span", "handle " + c);
       h.setAttribute("data-handle", c);
@@ -498,7 +538,7 @@
     var cropHint = el(
       "p",
       "hint",
-      "Drag the corners to crop and the inside to move it. With the crop area focused, arrow keys move it and Shift+arrow keys resize it."
+      tr("Drag the corners to crop and the inside to move it. With the crop area focused, arrow keys move it and Shift+arrow keys resize it.")
     );
     cropHint.id = "tray-crop-hint-" + nextId++;
     box.setAttribute("aria-describedby", cropHint.id);
@@ -551,17 +591,17 @@
       tray.hidden = n === 0;
       zone.classList.toggle("has-files", n > 0);
       if (n) zone.classList.remove("needs-files");
-      if (coverMode) title.textContent = n ? "The new cover image: crop it, then upload it." : "";
+      if (coverMode) title.textContent = n ? tr("The new cover image: crop it, then upload it.") : "";
       else {
         title.textContent = n
-          ? plural(n, "file", "files") + " ready. Select one to describe it or edit the image."
+          ? trp(n, tr("{n} file ready. Select one to describe it or edit the image.|{n} files ready. Select one to describe it or edit the image."))
           : "";
       }
-      if (submit && !coverMode) submit.textContent = n ? "Upload " + plural(n, "file", "files") : submitLabel;
+      if (submit && !coverMode) submit.textContent = n ? trp(n, tr("Upload {n} file|Upload {n} files")) : submitLabel;
       copyRow.hidden = n < 2;
       copyHint.textContent = form.getAttribute("data-ai-suggest")
-        ? "Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay."
-        : "Gives the other files these keywords, emojis, vibe and tags. Names stay.";
+        ? tr("Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay.")
+        : tr("Gives the other files these keywords, emojis, vibe and tags. Names stay.");
       if (!n) metaInput.value = "";
       showAiAll();
     }
@@ -575,7 +615,7 @@
         Array.prototype.forEach.call(files, function (file) {
           var t = typeOf(file);
           if (!picked && t && KINDS[t] !== "anim" && KINDS[t] !== "video") picked = file;
-          else skipped.push(file.name || "the pasted item");
+          else skipped.push(file.name || tr("the pasted item"));
         });
         if (picked) clear();
         files = picked ? [picked] : [];
@@ -583,13 +623,13 @@
       Array.prototype.forEach.call(files, function (file) {
         var type = typeOf(file);
         if (!type) {
-          skipped.push(file.name || "the pasted item");
+          skipped.push(file.name || tr("the pasted item"));
           return;
         }
         var parts = splitName(file.name);
         var stem = parts.stem;
         // Browsers name every pasted image "image.png".
-        if (pasted && (!stem || stem === "image")) stem = uniqueName("pasted image");
+        if (pasted && (!stem || stem === "image")) stem = uniqueName(tr("pasted image"));
         stem = cleanName(withoutOrder(stem)) || "item";
         var e = {
           id: nextId++,
@@ -625,7 +665,7 @@
             if (!anim || entries.indexOf(e) < 0) return;
             if (coverMode) {
               remove(e);
-              say("Skipped " + displayName(e) + ": " + COVER_ACCEPTED, true);
+              say(coverSkipped(displayName(e)), true);
               return;
             }
             e.kind = "anim";
@@ -641,12 +681,18 @@
       if (added.length) select(added[0]);
       added.forEach(askAi);
       var parts = [];
-      if (added.length) parts.push((pasted ? "Pasted " : "Added ") + plural(added.length, "file", "files") + ".");
+      if (added.length) {
+        parts.push(
+          pasted
+            ? trp(added.length, tr("Pasted {n} file.|Pasted {n} files."))
+            : trp(added.length, tr("Added {n} file.|Added {n} files."))
+        );
+      }
       if (skipped.length) {
         parts.push(
-          "Skipped " +
-            skipped.join(", ") +
-            (coverMode ? ": " + COVER_ACCEPTED : ": only " + ACCEPTED + " files can be uploaded.")
+          coverMode
+            ? coverSkipped(skipped.join(", "))
+            : trf("Skipped {names}: only PNG, JPEG, WebP, GIF, MP4 or WebM files can be uploaded.", { names: skipped.join(", ") })
         );
       }
       say(parts.join(" "), skipped.length > 0);
@@ -668,23 +714,23 @@
       }
       media.src = e.url;
       var name = el("span", "thumb-name", e.name);
-      var badge = el("span", "thumb-badge", "edited");
+      var badge = el("span", "thumb-badge", tr("edited"));
       badge.hidden = true;
       // Shown while the file has AI suggestions that are not approved.
       var aiBadge = el("span", "thumb-ai");
-      var aiMark = el("abbr", "ai", "AI");
-      aiMark.title = "AI suggestions to approve";
+      var aiMark = el("abbr", "ai", tr("AI"));
+      aiMark.title = tr("AI suggestions to approve");
       aiMark.setAttribute("aria-hidden", "true");
       aiBadge.appendChild(aiMark);
-      aiBadge.appendChild(el("span", "sr-only", ", AI suggestions to approve"));
+      aiBadge.appendChild(el("span", "sr-only", ", " + tr("AI suggestions to approve")));
       aiBadge.hidden = true;
       // Shown while its suggestions are on the way.
       var aiWait = el("span", "thumb-ai-wait");
-      aiWait.title = "AI is suggesting keywords, emojis and vibe";
+      aiWait.title = tr("AI is suggesting keywords, emojis and vibe");
       var spin = el("span", "spinner");
       spin.setAttribute("aria-hidden", "true");
       aiWait.appendChild(spin);
-      aiWait.appendChild(el("span", "sr-only", ", AI suggestions on the way"));
+      aiWait.appendChild(el("span", "sr-only", ", " + tr("AI suggestions on the way")));
       aiWait.hidden = true;
       b.appendChild(media);
       b.appendChild(name);
@@ -693,7 +739,7 @@
       b.appendChild(aiWait);
       e.aiBadge = aiBadge;
       e.aiWait = aiWait;
-      var rm = button("tray-remove", "×", "Remove " + e.name + " from the upload");
+      var rm = button("tray-remove", "×", trf("Remove {name} from the upload", { name: e.name }));
       li.appendChild(b);
       li.appendChild(rm);
       e.li = li;
@@ -716,10 +762,10 @@
       var n = displayName(e);
       e.thumbName.textContent = n;
       e.thumbButton.title = n;
-      e.removeButton.setAttribute("aria-label", "Remove " + n + " from the upload");
+      e.removeButton.setAttribute("aria-label", trf("Remove {name} from the upload", { name: n }));
       if (current === e) {
-        editor.setAttribute("aria-label", "Edit " + n);
-        approveAllFor.textContent = " suggestions for " + n;
+        editor.setAttribute("aria-label", trf("Edit {name}", { name: n }));
+        approveAll.setAttribute("aria-label", trf("Approve all suggestions for {name}", { name: n }));
       }
     }
 
@@ -764,8 +810,8 @@
       Object.keys(detailInputs).forEach(function (k) {
         detailInputs[k].value = e[k];
       });
-      editor.setAttribute("aria-label", "Edit " + displayName(e));
-      approveAllFor.textContent = " suggestions for " + displayName(e);
+      editor.setAttribute("aria-label", trf("Edit {name}", { name: displayName(e) }));
+      approveAll.setAttribute("aria-label", trf("Approve all suggestions for {name}", { name: displayName(e) }));
       // The file in view goes first among those waiting for suggestions.
       var waiting = aiQueue.indexOf(e);
       if (waiting > 0) aiQueue.unshift(aiQueue.splice(waiting, 1)[0]);
@@ -791,17 +837,17 @@
           m.loop = true;
         } else {
           m = el("img");
-          m.alt = "Preview of " + displayName(e);
+          m.alt = trf("Preview of {name}", { name: displayName(e) });
         }
         m.src = e.url;
         preview.appendChild(m);
         if (e.failed) {
-          note.textContent =
-            "This browser cannot read the image, so it cannot be edited here. It is uploaded as it is and the server checks it.";
+          note.textContent = tr("This browser cannot read the image, so it cannot be edited here. It is uploaded as it is and the server checks it.");
         } else {
           note.textContent =
-            (e.kind === "video" ? "Videos" : "Animations") +
-            " are uploaded as they are: you can rename them, but editing here would keep only the first frame.";
+            e.kind === "video"
+              ? tr("Videos are uploaded as they are: you can rename them, but editing here would keep only the first frame.")
+              : tr("Animations are uploaded as they are: you can rename them, but editing here would keep only the first frame.");
         }
         return;
       }
@@ -810,7 +856,7 @@
         return;
       }
       stage.hidden = true;
-      info.textContent = "Loading…";
+      info.textContent = tr("Loading…");
       createImageBitmap(e.file).then(
         function (bitmap) {
           if (entries.indexOf(e) < 0 || e.kind !== "still") {
@@ -885,10 +931,17 @@
     function describe(e) {
       if (isEdited(e)) {
         var r = pixels(e.crop, e.work.width, e.work.height);
-        info.textContent =
-          "Original " + e.size.w + " × " + e.size.h + " px. Uploaded as a " + r.w + " × " + r.h + " px PNG.";
+        info.textContent = trf("Original {width} × {height} px. Uploaded as a {cropWidth} × {cropHeight} px PNG.", {
+          width: e.size.w,
+          height: e.size.h,
+          cropWidth: r.w,
+          cropHeight: r.h,
+        });
       } else {
-        info.textContent = "No changes: the original file is uploaded (" + e.size.w + " × " + e.size.h + " px).";
+        info.textContent = trf("No changes: the original file is uploaded ({width} × {height} px).", {
+          width: e.size.w,
+          height: e.size.h,
+        });
       }
     }
 
@@ -970,7 +1023,7 @@
       unload(e.thumbMedia);
       URL.revokeObjectURL(e.url);
       sync();
-      say("Removed " + displayName(e) + ".");
+      say(trf("Removed {name}.", { name: displayName(e) }));
     }
 
     function clear() {
@@ -1000,7 +1053,7 @@
         return new Promise(function (resolve, reject) {
           out.toBlob(function (blob) {
             if (blob) resolve(new File([blob], name + ".png", { type: "image/png" }));
-            else reject(new Error("the browser could not encode " + name));
+            else reject(new Error(trf("the browser could not encode {name}", { name: name })));
           }, "image/png");
         });
       }
@@ -1044,7 +1097,7 @@
       var edited = entries.filter(function (e) {
         return e.edited;
       }).length;
-      if (edited) say("Preparing " + plural(edited, "edited image", "edited images") + "…");
+      if (edited) say(trp(edited, tr("Preparing {n} edited image…|Preparing {n} edited images…")));
       Promise.all(entries.map(fileFor)).then(
         function (files) {
           // Submit again in a task of its own. Without edits every promise
@@ -1074,7 +1127,7 @@
         function (err) {
           busy = false;
           if (submit) submit.disabled = false;
-          say("Could not prepare the upload: " + err.message, true);
+          say(trf("Could not prepare the upload: {error}", { error: err.message }), true);
         }
       );
     }
@@ -1390,38 +1443,37 @@
       var ai = e.ai;
       if (ai.status === "queued" || ai.status === "busy") {
         if (aiWaitWhy === "loading") {
-          return ["The server is still loading its AI model; suggestions follow when it is ready…", "waiting"];
+          return [tr("The server is still loading its AI model; suggestions follow when it is ready…"), "waiting"];
         }
-        if (aiWaitWhy === "busy") return ["The server asked to wait a moment (many suggestions at once)…", "waiting"];
-        return ["Suggesting keywords, emojis and vibe…", "waiting"];
+        if (aiWaitWhy === "busy") return [tr("The server asked to wait a moment (many suggestions at once)…"), "waiting"];
+        return [tr("Suggesting keywords, emojis and vibe…"), "waiting"];
       }
       if (ai.status === "done") {
         if (ai.filled.length) {
+          var fields = { fields: sentence(ai.filled.map(fieldName)) };
           return [
-            "AI suggested the " +
-              sentence(ai.filled) +
-              (pendingOf(e).length
-                ? ai.filled.length > 1
-                  ? ". Approve or edit them; unapproved ones are uploaded marked AI."
-                  : ". Approve or edit it; unapproved, it is uploaded marked AI."
-                : ". Nothing left to approve."),
+            pendingOf(e).length
+              ? ai.filled.length > 1
+                ? trf("AI suggested the {fields}. Approve or edit them; unapproved ones are uploaded marked AI.", fields)
+                : trf("AI suggested the {fields}. Approve or edit it; unapproved, it is uploaded marked AI.", fields)
+              : trf("AI suggested the {fields}. Nothing left to approve.", fields),
             "",
           ];
         }
-        if (ai.got) return ["AI's suggestions were for fields you had filled in; your values stay.", "note"];
-        return ["AI had no confident suggestions for this file.", "note"];
+        if (ai.got) return [tr("AI's suggestions were for fields you had filled in; your values stay."), "note"];
+        return [tr("AI had no confident suggestions for this file."), "note"];
       }
       if (ai.status === "failed") {
-        if (ai.error === "read") return ["No AI suggestions: this browser cannot read the file.", "note"];
-        if (ai.error === "busy") return ["No AI suggestions: the server is busy. Try again in a minute.", "note", true];
-        if (ai.error === "network") return ["No AI suggestions: the server could not be reached.", "note", true];
-        return ["No AI suggestions: something went wrong on the server.", "note", true];
+        if (ai.error === "read") return [tr("No AI suggestions: this browser cannot read the file."), "note"];
+        if (ai.error === "busy") return [tr("No AI suggestions: the server is busy. Try again in a minute."), "note", true];
+        if (ai.error === "network") return [tr("No AI suggestions: the server could not be reached."), "note", true];
+        return [tr("No AI suggestions: something went wrong on the server."), "note", true];
       }
       var why = aiUnavailable();
-      if (why === "off") return ["AI suggestions are off on this server.", "note"];
-      if (why === "failed") return ["AI suggestions are not available: the server could not load its AI model.", "note"];
-      if (why === "session") return ["AI suggestions stopped: your session has ended. Sign in again.", "note"];
-      if (why === "slow") return ["The server's AI model is taking long to load; the fields stay as they are.", "note", true];
+      if (why === "off") return [tr("AI suggestions are off on this server."), "note"];
+      if (why === "failed") return [tr("AI suggestions are not available: the server could not load its AI model."), "note"];
+      if (why === "session") return [tr("AI suggestions stopped: your session has ended. Sign in again."), "note"];
+      if (why === "slow") return [tr("The server's AI model is taking long to load; the fields stay as they are."), "note", true];
       return ["", ""];
     }
 
@@ -1479,7 +1531,7 @@
 
     clearAll.addEventListener("click", function () {
       clear();
-      say("Removed all files.");
+      say(tr("Removed all files."));
       input.focus();
     });
 
@@ -1508,7 +1560,7 @@
       var e = current;
       if (!e || !pendingOf(e).length) return;
       approveFile(e);
-      say("Approved the AI suggestions for " + displayName(e) + ".");
+      say(trf("Approved the AI suggestions for {name}.", { name: displayName(e) }));
     });
 
     aiRetry.addEventListener("click", retryAi);
@@ -1518,7 +1570,7 @@
     // instead. The submit listener below covers browsers without the check.
     function nothingToUpload() {
       zone.classList.add("needs-files");
-      say("Nothing to upload yet: choose files, drop them here or paste an image.", true);
+      say(tr("Nothing to upload yet: choose files, drop them here or paste an image."), true);
     }
     input.addEventListener("invalid", function (ev) {
       ev.preventDefault();
@@ -1531,7 +1583,7 @@
       });
       if (!files.length) return;
       files.forEach(approveFile);
-      say("Approved the AI suggestions for " + plural(files.length, "file", "files") + ".");
+      say(trp(files.length, tr("Approved the AI suggestions for {n} file.|Approved the AI suggestions for {n} files.")));
     });
 
     // Enter in a detail field would submit the form, i.e. upload every file
@@ -1562,11 +1614,11 @@
         showAi(x);
       });
       say(
-        "The other " +
-          plural(entries.length - 1, "file has", "files have") +
-          " the keywords, emojis, vibe and tags of " +
-          displayName(e) +
-          " now."
+        trp(
+          entries.length - 1,
+          tr("The other {n} file has the keywords, emojis, vibe and tags of {name} now.|The other {n} files have the keywords, emojis, vibe and tags of {name} now."),
+          { name: displayName(e) }
+        )
       );
     });
 
@@ -1602,7 +1654,7 @@
       start(e);
       draw();
       commit(e);
-      say("Reset " + displayName(e) + " to the original.");
+      say(trf("Reset {name} to the original.", { name: displayName(e) }));
     });
 
     box.addEventListener("pointerdown", function (ev) {

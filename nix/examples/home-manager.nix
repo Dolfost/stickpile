@@ -27,6 +27,7 @@
         mark_favorites = false;
         show_emojis = false;
         show_tags = true;
+        language = "uk";
       };
       copy = {
         square = "white";

@@ -1,0 +1,208 @@
+# Ukrainian: desktop. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+# The popup model (stickpile-quick)
+INSERT	ВСТАВКА
+NORMAL	ЗВИЧАЙНИЙ
+Added to favorites	Додано до вибраного
+Copied {name} as sticker for {target}	{name} скопійовано як стікер для {target}
+Copied {name} for {target}	{name} скопійовано для {target}
+Copy failed: {error}	Не вдалося скопіювати: {error}
+Could not load {what}: {error}	Не вдалося завантажити {what}: {error}
+favorites	вибране
+most used items	найчастіші стікери
+packs	набори
+the pack	набір
+Dropped {name}	{name} перетягнуто
+Emojis hidden	Емодзі приховано
+Emojis shown	Емодзі показано
+Favorite failed: {error}	Не вдалося змінити вибране: {error}
+Favorite marks hidden	Позначки вибраного приховано
+Favorite marks shown	Позначки вибраного показано
+No favorites yet	Вибраного ще немає
+No matches for “{query}”	Нічого не знайдено за “{query}”
+No packs yet	Наборів ще немає
+Nothing selected	Нічого не вибрано
+Nothing used yet — type to search	Ви ще нічого не використовували — почніть вводити для пошуку
+Nothing used yet	Ви ще нічого не використовували
+Offline — showing cached results	Офлайн — показано результати з кешу
+Packs / {name}	Набори / {name}
+Preparing {name}…	Готуємо {name}…
+Removed from favorites	Прибрано з вибраного
+Search failed: {error}	Пошук не вдався: {error}
+Searching…	Пошук…
+Tags hidden	Теги приховано
+Tags shown	Теги показано
+This pack is empty	Цей набір порожній
+auto: {class}	авто: {class}
+chosen	вибрано
+default	типово
+# The key help (stickpile_quick::HELP)
+Normal mode	Звичайний режим
+Insert mode	Режим вставки
+Tabs	Вкладки
+Me, Settings	Я, Налаштування
+h j k l, arrows	h j k l, стрілки
+3j, 2l	3j, 2l
+gg / G, 5G	gg / G, 5G
+0 / $	0 / $
+Ctrl+d / Ctrl+u	Ctrl+d / Ctrl+u
+y, Enter	y, Enter
+Y, Shift+Enter	Y, Shift+Enter
+f	f
+gx	gx
+t / T	t / T
+s	s
+zf / ze / zt	zf / ze / zt
+/	/
+i, a	i, a
+?	?
+q, Esc	q, Esc
+1-7, Alt+1-7	1-7, Alt+1-7
+gt / gT	gt / gT
+Tab / Shift+Tab	Tab / Shift+Tab
+Enter, o	Enter, o
+-, Backspace, Esc	-, Backspace, Esc
+typing	набір тексту
+arrows, Page Up / Down, Home / End	стрілки, Page Up / Down, Home / End
+Enter / Shift+Enter	Enter / Shift+Enter
+Ctrl+T / Ctrl+S / Ctrl+D	Ctrl+T / Ctrl+S / Ctrl+D
+Esc	Esc
+j k, arrows	j k, стрілки
+h l	h l
+Enter, Space	Enter, пробіл
+i	i
+move	переміщення
+move with a count	переміщення на кілька кроків
+first / last / fifth item	перший / останній / п'ятий стікер
+start / end of the row	початок / кінець рядка
+half a page down / up	пів сторінки вниз / вгору
+copy for the target app	копіювати для застосунку-адресата
+copy with sticker mode flipped	копіювати з перемкнутим режимом стікерів
+add to / remove from favorites	додати до вибраного / прибрати з вибраного
+open the item in the browser	відкрити стікер у браузері
+next / previous target app	наступний / попередній застосунок-адресат
+toggle sticker mode	перемкнути режим стікерів
+favorite marks / emojis / tags on the tiles	позначки вибраного / емодзі / теги на плитках
+new search	новий пошук
+edit the query	редагувати запит
+this help	ця довідка
+hide	сховати
+go to a tab	перейти до вкладки
+next / previous tab	наступна / попередня вкладка
+open the pack	відкрити набір
+back to the pack list	назад до списку наборів
+search, filter packs	пошук, фільтр наборів
+copy / copy with sticker mode flipped	копіювати / копіювати з перемкнутим режимом стікерів
+target app / sticker mode / favorite	застосунок-адресат / режим стікерів / вибране
+move between rows	переміщення між рядками
+change a choice or a number	змінити вибір або число
+press, toggle, open a choice	натиснути, перемкнути, відкрити список
+edit the field; Esc leaves it	редагувати поле; Esc — вийти з нього
+? or Esc closes this	? або Esc закриває довідку
+# The Settings page (stickpile_core::settings)
+Popup	Спливне вікно
+Copying	Копіювання
+auto follows your account's language (else the system's); a choice here sets the account's too.	auto — мова вашого облікового запису (або системи); вибрана тут мова стає й мовою облікового запису.
+Start tab	Початкова вкладка
+Tab shown when the popup opens; last is the tab it was closed on.	Вкладка, з якої відкривається вікно; last — та, на якій його закрили.
+Start mode	Початковий режим
+Mode the popup opens in: normal (vim keys), or insert to type a search right away.	Режим, у якому відкривається вікно: normal (клавіші vim) або insert, щоб одразу вводити пошук.
+Vim-style modes	Режими як у vim
+Insert and Normal modes with vim keys; off keeps the plain keys.	Режими вставки та звичайний із клавішами vim; вимкнено — звичайні клавіші.
+Grid columns	Стовпці сітки
+Thumbnails per row at the default window size; resizing reflows the grid.	Мініатюр у рядку за типового розміру вікна; зміна розміру перебудовує сітку.
+Thumbnail size	Розмір мініатюр
+Grid cell size in logical pixels.	Розмір клітинки сітки в логічних пікселях.
+Mark favorites	Позначати вибране
+A heart on the items you liked (zf in Normal mode).	Серце на вподобаних стікерах (zf у звичайному режимі).
+Show emojis	Показувати емодзі
+An item's emojis on its tile (ze in Normal mode).	Емодзі стікера на його плитці (ze у звичайному режимі).
+Show tags	Показувати теги
+An item's tags on its tile (zt in Normal mode).	Теги стікера на його плитці (zt у звичайному режимі).
+Recent items	Нещодавні стікери
+Recently copied items shown before typing.	Нещодавно скопійовані стікери, які видно до введення запиту.
+Most results shown for a search.	Найбільша кількість результатів пошуку.
+Hide after copying	Ховати після копіювання
+Close the popup once an item is copied or dropped.	Закривати вікно, щойно стікер скопійовано або перетягнуто.
+Start hidden	Запускати прихованим
+A first bare stickpile-desktop starts resident without showing the popup.	Перший запуск stickpile-desktop без параметрів лишає програму у фоні, не показуючи вікна.
+Default target	Типовий адресат
+Chat app assumed when the focused window is not recognised.	Застосунок для чату, якщо активне вікно не розпізнано.
+Detect the focused window	Визначати активне вікно
+Pick the target app from the focused window (Hyprland, Sway, X11).	Обирати застосунок-адресат за активним вікном (Hyprland, Sway, X11).
+Prefer stickers	Надавати перевагу стікерам
+Copy the Telegram sticker rendition by default.	Типово копіювати варіант стікера для Telegram.
+Square padding	Доповнення до квадрата
+Pad non-square stills and stickers to a square: off, transparent or white.	Доповнювати неквадратні зображення й стікери до квадрата: вимкнено, прозорим або білим.
+Background	Тло
+Fill transparent pixels of stills copied as images: keep or white.	Заповнювати прозорі пікселі зображень, скопійованих як картинки: залишити або білим.
+Server URL	Адреса сервера
+Base URL of the stickpile server (http or https).	Базова адреса сервера stickpile (http або https).
+Timeout	Час очікування
+Seconds to wait for the server before using the offline cache.	Скільки секунд чекати на сервер, перш ніж брати дані з офлайн-кешу.
+Cache size	Розмір кешу
+MiB of thumbnails and copied files kept for offline use.	МіБ мініатюр і скопійованих файлів для роботи офлайн.
+Transparent	Прозорий
+White	Білий
+Keep	Залишити
+Normal	Звичайний
+Insert	Вставка
+Reset to the default	Повернути типове значення
+# The window
+Search, or try e:😂 set:cats type:gif vibe:tired	Шукайте, наприклад e:😂 set:cats type:gif vibe:tired
+Filter packs by name	Фільтр наборів за назвою
+Filter {pack} by name, keyword or emoji	Фільтр {pack} за назвою, ключовим словом або емодзі
+sticker: on	стікер: увімк.
+sticker: off	стікер: вимк.
+Send as sticker (Ctrl+S)	Надіслати як стікер (Ctrl+S)
+Send as sticker	Надіслати як стікер
+Target app — Ctrl+T / Ctrl+Shift+T to change\nCtrl+S: sticker mode · Shift+Enter: copy with sticker mode flipped	Застосунок-адресат — Ctrl+T / Ctrl+Shift+T, щоб змінити\nCtrl+S: режим стікерів · Shift+Enter: копіювати з перемкнутим режимом стікерів
+Back to the packs (-, Backspace)	Назад до наборів (-, Backspace)
+Config: {file}	Конфігурація: {file}
+Not saved: {error}	Не збережено: {error}
+internal error (see log)	внутрішня помилка (див. журнал)
+not connected	немає з'єднання
+nothing to offer (check [clipboard] in config.toml)	нічого запропонувати (перевірте [clipboard] у config.toml)
+opening the local cache timed out	час відкриття локального кешу вичерпано
+stickpile cannot start	stickpile не може запуститися
+stickpile-core failed: {error}	збій stickpile-core: {error}
+the popup lost focus before the item was ready — press Enter again	вікно втратило фокус, поки стікер готувався — натисніть Enter ще раз
+the popup was closed before the item was ready	вікно закрито, поки стікер готувався
+Keys (? or F1)	Клавіші (? або F1)
+Keys	Клавіші
+# The Me page
+Could not load the profile: {error}	Не вдалося завантажити профіль: {error}
+Enter a username and a password	Введіть ім'я користувача й пароль
+Enter the code from your authenticator app	Введіть код із застосунку автентифікації
+Log in with tailnet	Увійти через tailnet
+Logging in...	Вхід...
+Logging out...	Вихід...
+Logout failed: {error}	Не вдалося вийти: {error}
+Open the web UI	Відкрити вебінтерфейс
+Server: {server}	Сервер: {server}
+Signed in	Спосіб входу
+Store a token	Зберегти токен
+Tailnet account	Обліковий запис tailnet
+Turn the tailnet identity into a token, so this device stays signed in off the tailnet	Перетворити ідентифікацію tailnet на токен, щоб цей пристрій лишався в системі й поза tailnet
+Two-factor code	Код двоетапної перевірки
+Two-factor login	Двоетапна перевірка
+By tailnet identity, no token stored	За ідентифікацією tailnet, токен не збережено
+With a token stored on this device	Токеном, збереженим на цьому пристрої
+Not signed in	Ви не ввійшли
+Changes are saved to {file}.	Зміни зберігаються в {file}.
+{config} is read-only, so changes are saved to {settings} next to it; the keys {name} sets are locked.	{config} доступний лише для читання, тож зміни зберігаються в {settings} поруч; ключі, задані в {name}, заблоковано.
+Copies not yet uploaded	Копіювання, ще не надіслані на сервер
+Last used tab	Остання відкрита
+This week	Цього тижня
+Set by home-manager	Задано в home-manager
+Set in config.toml	Задано в config.toml
+# Client messages (stickpile-desktop backend)
+A TOTP code is required	Потрібен код TOTP
+Not logged in; log in on the Me tab (6)	Ви не ввійшли; увійдіть на вкладці "Я" (6)
+Server unreachable	Сервер недоступний
+Server unreachable and no packs are cached	Сервер недоступний, а наборів у кеші немає
+Server unreachable and the cover is not cached	Сервер недоступний, а обкладинки в кеші немає
+Server unreachable and the item is not cached	Сервер недоступний, а стікера в кеші немає
+Server unreachable and the pack is not cached	Сервер недоступний, а набору в кеші немає
+Server unreachable; favorites need the server	Сервер недоступний; для вибраного потрібен сервер
+The server did not accept this client; log in on the Me tab (6)	Сервер не прийняв цей клієнт; увійдіть на вкладці "Я" (6)
+The server does not know this device by its tailnet identity; sign in with a username and password	Сервер не знає цей пристрій за ідентифікацією tailnet; увійдіть з іменем користувача й паролем

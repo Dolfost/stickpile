@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use stickpile_core::settings::{self, LayeredConfig, SettingKind, SettingSpec, GROUPS};
+use stickpile_i18n::global::{t, t_dyn};
 use stickpile_quick::PageKey;
 
 use crate::pages;
@@ -89,6 +90,8 @@ pub struct SettingsPage {
     warnings: gtk::Label,
     error: gtk::Label,
     rows: Vec<Row>,
+    /// The groups' boxes, for their titles.
+    groups: Vec<(&'static str, adw::PreferencesGroup)>,
     /// Filling the controls from the config: their signals are not edits.
     updating: Cell<bool>,
     /// The values last shown, to tell an edit from a repeated signal.
@@ -128,14 +131,14 @@ impl SettingsPage {
 
         let schema = settings::settings_schema();
         let mut rows = Vec::new();
+        let mut groups = Vec::new();
         for group in GROUPS {
-            let g = adw::PreferencesGroup::builder().title(*group).build();
+            let g = adw::PreferencesGroup::new();
             for spec in schema.iter().filter(|s| s.group == *group) {
-                let row = adw::ActionRow::builder().title(spec.label).subtitle(spec.help).build();
+                let row = adw::ActionRow::new();
                 let input = input_for(spec);
                 let reset = gtk::Button::builder()
                     .icon_name("edit-undo-symbolic")
-                    .tooltip_text("Reset to the default")
                     .valign(gtk::Align::Center)
                     .build();
                 reset.add_css_class("flat");
@@ -160,6 +163,7 @@ impl SettingsPage {
                 });
             }
             column.append(&g);
+            groups.push((*group, g));
         }
 
         let clamp = adw::Clamp::builder().maximum_size(720).child(&column).build();
@@ -179,13 +183,37 @@ impl SettingsPage {
             warnings,
             error,
             rows,
+            groups,
             updating: Cell::new(false),
             shown: RefCell::new(vec![None; n]),
             write_path: RefCell::new(PathBuf::new()),
             on_action: RefCell::new(None),
         });
+        page.relabel();
         page.connect_signals();
         page
+    }
+
+    /// Titles, help and choice names in the current language; the next
+    /// [`SettingsPage::show`] adds the lock notes again.
+    pub fn relabel(&self) {
+        self.updating.set(true);
+        for (group, g) in &self.groups {
+            g.set_title(&t_dyn(group));
+        }
+        for row in &self.rows {
+            row.row.set_title(&t_dyn(row.spec.label));
+            row.row.set_subtitle(&t_dyn(row.spec.help));
+            row.reset.set_tooltip_text(Some(t("Reset to the default")));
+            if let Input::Choice(dd, names) = &row.input {
+                let selected = dd.selected();
+                let labels: Vec<String> = names.iter().map(|n| pages::choice_label(row.spec.key, n)).collect();
+                let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+                dd.set_model(Some(&gtk::StringList::new(&labels)));
+                dd.set_selected(selected);
+            }
+        }
+        self.updating.set(false);
     }
 
     pub fn connect_action(&self, f: impl Fn(SettingsAction) + 'static) {
@@ -285,11 +313,9 @@ impl SettingsPage {
             shown[i] = value.clone();
             let locked = layered.locked.contains(row.spec.key);
             row.widget().set_sensitive(!locked);
-            row.row.set_subtitle(&if locked {
-                format!("{} {reason}.", row.spec.help)
-            } else {
-                row.spec.help.to_string()
-            });
+            let help = t_dyn(row.spec.help);
+            row.row
+                .set_subtitle(&if locked { format!("{help} {reason}.") } else { help });
             set_class(&row.row, "stickpile-locked", locked);
             row.reset
                 .set_visible(!locked && value.as_ref() != Some(&row.spec.default));

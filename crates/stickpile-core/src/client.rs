@@ -290,6 +290,11 @@ impl ApiClient {
         self.get(routes::ME, &[]).await
     }
 
+    /// PATCH the caller's account (`UpdateMe`: absent fields stay).
+    pub async fn update_me(&self, req: &stickpile_api::UpdateMe) -> Result<User> {
+        self.patch(routes::ME, req).await
+    }
+
     pub async fn change_password(&self, req: &ChangePassword) -> Result<()> {
         self.empty(self.request(Method::PUT, routes::ME_PASSWORD, true)?.json(req))
             .await

@@ -26,6 +26,25 @@
 (function () {
   "use strict";
 
+  // Texts in the page's language (docs/languages.md): the server puts the
+  // translations into <body data-i18n>; English needs none.
+  var I18N = null;
+  function tr(s) {
+    if (I18N === null) {
+      try {
+        I18N = JSON.parse((document.body && document.body.getAttribute("data-i18n")) || "{}");
+      } catch (e) {
+        I18N = {};
+      }
+    }
+    return I18N[s] || s;
+  }
+  function trf(s, args) {
+    return tr(s).replace(/\{(\w+)\}/g, function (m, k) {
+      return Object.prototype.hasOwnProperty.call(args, k) ? args[k] : m;
+    });
+  }
+
   function csrfToken() {
     return document.body ? document.body.getAttribute("data-csrf") : null;
   }
@@ -187,13 +206,13 @@
 
   function fetchBlob(src) {
     return fetch(src, { credentials: "same-origin" }).then(function (r) {
-      if (!r.ok) throw new Error("the download failed (HTTP " + r.status + ")");
+      if (!r.ok) throw new Error(trf("the download failed (HTTP {status})", { status: r.status }));
       return r.blob();
     });
   }
 
   function canvasPng(source, width, height) {
-    if (!width || !height) return Promise.reject(new Error("the image has no size"));
+    if (!width || !height) return Promise.reject(new Error(tr("the image has no size")));
     var canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -201,7 +220,7 @@
     return new Promise(function (resolve, reject) {
       canvas.toBlob(function (png) {
         if (png) resolve(png);
-        else reject(new Error("the PNG conversion failed"));
+        else reject(new Error(tr("the PNG conversion failed")));
       }, "image/png");
     });
   }
@@ -216,7 +235,7 @@
         resolve(canvasPng(img, img.naturalWidth, img.naturalHeight));
       };
       img.onerror = function () {
-        reject(new Error("the browser cannot decode this image"));
+        reject(new Error(tr("the browser cannot decode this image")));
       };
       img.src = url;
     }).finally(function () {
@@ -251,7 +270,7 @@
       var v = document.createElement("video");
       var finished = false;
       var timer = setTimeout(function () {
-        finish(new Error("the video took too long to load"));
+        finish(new Error(tr("the video took too long to load")));
       }, 20000);
       function finish(err) {
         if (finished) return;
@@ -275,7 +294,7 @@
         finish(null);
       });
       v.addEventListener("error", function () {
-        finish(new Error("the browser cannot play this video"));
+        finish(new Error(tr("the browser cannot play this video")));
       });
       v.src = src;
     });
@@ -303,24 +322,23 @@
   function copyFailed(info, err) {
     var why = err && err.message ? err.message.replace(/\.$/, "") : String(err);
     if (err && err.name === "NotAllowedError") {
-      why = "the browser did not allow it (the window must have focus, and the site needs clipboard access)";
+      why = tr("the browser did not allow it (the window must have focus, and the site needs clipboard access)");
     }
-    return "Could not copy “" + info.name + "”: " + why + ". Try again, or use Download.";
+    return trf("Could not copy “{name}”: {reason}. Try again, or use Download.", { name: info.name, reason: why });
   }
 
   function copiedMessage(info, used) {
-    var name = "“" + info.name + "”";
-    if (info.kind === "still") return "Copied " + name + ". Paste it into your chat.";
-    var what = info.kind === "video" ? "video" : "animation";
+    var name = { name: info.name };
+    if (info.kind === "still") return trf("Copied “{name}”. Paste it into your chat.", name);
+    var video = info.kind === "video";
     if (used.small) {
-      return (
-        "Copied a small still frame of " + name + ": this browser cannot decode the " + what +
-        ". Download keeps the " + what + "."
-      );
+      return video
+        ? trf("Copied a small still frame of “{name}”: this browser cannot decode the video. Download keeps the video.", name)
+        : trf("Copied a small still frame of “{name}”: this browser cannot decode the animation. Download keeps the animation.", name);
     }
-    return (
-      "Copied a still frame of " + name + " (browsers copy only still images). Download keeps the " + what + "."
-    );
+    return video
+      ? trf("Copied a still frame of “{name}” (browsers copy only still images). Download keeps the video.", name)
+      : trf("Copied a still frame of “{name}” (browsers copy only still images). Download keeps the animation.", name);
   }
 
   // Where "Copied" shows when the copy came from the menu or the keyboard:
@@ -370,7 +388,7 @@
     write
       .then(
         function () {
-          if (shown) flashButton(shown, "Copied ✓");
+          if (shown) flashButton(shown, tr("Copied ✓"));
           toast(copiedMessage(info, used));
           reportUsage(info.item, used.variant);
         },
@@ -420,11 +438,11 @@
     var url = new URL(info.original, window.location.href).href;
     copyText(url).then(
       function () {
-        if (btn) flashButton(btn, "Link copied ✓");
-        toast("Link copied. It opens for people signed in to this server.");
+        if (btn) flashButton(btn, tr("Link copied ✓"));
+        toast(tr("Link copied. It opens for people signed in to this server."));
       },
       function () {
-        window.prompt("Copy this link:", url);
+        window.prompt(tr("Copy this link:"), url);
       }
     );
   }
@@ -448,26 +466,25 @@
       });
       return el;
     }
-    var title = why === "insecure" ? "Copying images needs HTTPS" : "This browser cannot copy images";
+    var title = why === "insecure" ? tr("Copying images needs HTTPS") : tr("This browser cannot copy images");
     d.appendChild(add("h2", title, { id: "copy-help-title" }));
     var text = add("div", "", { id: "copy-help-text" });
     text.appendChild(
       add(
         "p",
         why === "insecure"
-          ? "Browsers let web pages put images on the clipboard only on https:// addresses (and on localhost). " +
-              "This page was opened over plain http://, so stickpile cannot copy “" + info.name + "”."
-          : "This browser does not let web pages put images on the clipboard, so stickpile cannot copy “" +
-              info.name + "”."
+          ? trf("Browsers let web pages put images on the clipboard only on https:// addresses (and on localhost). This page was opened over plain http://, so stickpile cannot copy “{name}”.", { name: info.name })
+          : trf("This browser does not let web pages put images on the clipboard, so stickpile cannot copy “{name}”.", {
+              name: info.name,
+            })
       )
     );
     text.appendChild(
       add(
         "p",
         video
-          ? "Open the video, or download it and drag the file into your chat."
-          : "Open the image and use your browser's own “Copy Image” (right-click it), or download it " +
-              "and drag the file into your chat."
+          ? tr("Open the video, or download it and drag the file into your chat.")
+          : tr("Open the image and use your browser's own “Copy Image” (right-click it), or download it and drag the file into your chat.")
       )
     );
     d.appendChild(text);
@@ -475,21 +492,20 @@
       d.appendChild(
         add(
           "p",
-          "Copy works when stickpile is opened over https://, for example through tailscale serve. " +
-            "The desktop client copies without a browser, GIFs and videos included.",
+          tr("Copy works when stickpile is opened over https://, for example through tailscale serve. The desktop client copies without a browser, GIFs and videos included."),
           { class: "hint" }
         )
       );
     }
     var row = add("div", "", { class: "inline-row" });
-    var open = add("a", video ? "Open video" : "Open image", {
+    var open = add("a", video ? tr("Open video") : tr("Open image"), {
       class: "button primary",
       href: info.kind === "still" ? info.src : info.original,
       target: "_blank",
       rel: "noopener",
     });
-    var download = add("a", "Download", { class: "button", href: info.original, download: "" });
-    var close = add("button", "Close", { type: "button" });
+    var download = add("a", tr("Download"), { class: "button", href: info.original, download: "" });
+    var close = add("button", tr("Close"), { type: "button" });
     row.appendChild(open);
     row.appendChild(download);
     row.appendChild(close);
@@ -516,7 +532,7 @@
     } else {
       // No <dialog> support: say it in the alert region instead.
       d.remove();
-      toast(title + ". Open the image or download it instead.", true);
+      toast(trf("{title}. Open the image or download it instead.", { title: title }), true);
     }
   }
 
@@ -562,11 +578,11 @@
       var b = document.createElement("button");
       b.type = "button";
       b.className = "small copy-secret";
-      b.textContent = "Copy";
+      b.textContent = tr("Copy");
       b.addEventListener("click", function () {
         copyText(code.textContent.trim()).then(
           function () {
-            flashButton(b, "Copied ✓");
+            flashButton(b, tr("Copied ✓"));
           },
           function () {
             var range = document.createRange();
@@ -574,7 +590,7 @@
             var sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            toast("Selected; press Ctrl+C to copy.", false);
+            toast(tr("Selected; press Ctrl+C to copy."), false);
           }
         );
       });
@@ -704,7 +720,7 @@
     if (
       !clear &&
       card.closest("[data-cover-image]") &&
-      !window.confirm("Use “" + cardName(card) + "” as the cover? This removes the set's cover image.")
+      !window.confirm(trf("Use “{name}” as the cover? This removes the set's cover image.", { name: cardName(card) }))
     ) {
       focusCard(id, false);
       return;
@@ -715,7 +731,7 @@
     }
     htmx.ajax("POST", url, { source: card, target: "#set-items", swap: "outerHTML", values: { item: item } }).then(
       function () {
-        toast(clear ? "The first item is the cover again." : "“" + cardName(card) + "” is the cover now.");
+        toast(clear ? tr("The first item is the cover again.") : trf("“{name}” is the cover now.", { name: cardName(card) }));
         setTimeout(function () {
           focusCard(id, byKeyboard);
         }, 30);
@@ -729,7 +745,7 @@
       window.location.href = url; // the confirmation page
       return;
     }
-    if (!window.confirm("Delete “" + cardName(card) + "” from this set?")) {
+    if (!window.confirm(trf("Delete “{name}” from this set?", { name: cardName(card) }))) {
       focusCard(card.id, false);
       return;
     }
@@ -758,7 +774,7 @@
     if (scope) {
       var frame = scope.getAttribute("data-copy-kind") !== "still";
       first.push({
-        label: frame ? "Copy still frame" : "Copy image",
+        label: frame ? tr("Copy still frame") : tr("Copy image"),
         icon: "copy",
         keys: COPY_KEYS,
         ariaKeys: COPY_KEYS_ARIA,
@@ -768,7 +784,7 @@
       });
       if (frame) {
         first.push({
-          label: "Copy link",
+          label: tr("Copy link"),
           icon: "link",
           run: function () {
             copyLink(scope, null);
@@ -780,7 +796,7 @@
     if (like) {
       var liked = like.getAttribute("aria-pressed") === "true";
       first.push({
-        label: liked ? "Unlike" : "Like",
+        label: liked ? tr("Unlike") : tr("Like"),
         icon: "like",
         run: function () {
           like.click();
@@ -790,15 +806,15 @@
     groups.push(first);
     var open = [];
     var page = card.getAttribute("data-item-url");
-    if (page) open.push({ label: "Open item page", icon: "open", href: page });
+    if (page) open.push({ label: tr("Open item page"), icon: "open", href: page });
     var download = card.getAttribute("data-download-url");
-    if (download) open.push({ label: "Download original", icon: "download", href: download, download: true });
+    if (download) open.push({ label: tr("Download original"), icon: "download", href: download, download: true });
     groups.push(open);
     var edit = [];
     var rename = card.querySelector(".field-name a.edit");
     if (rename && htmxReady()) {
       edit.push({
-        label: "Rename",
+        label: tr("Rename"),
         icon: "edit",
         run: function () {
           rename.click();
@@ -807,11 +823,11 @@
       });
     }
     var editUrl = card.getAttribute("data-edit-url");
-    if (editUrl) edit.push({ label: "Edit all fields…", icon: "fields", href: editUrl });
+    if (editUrl) edit.push({ label: tr("Edit all fields…"), icon: "fields", href: editUrl });
     if (card.hasAttribute("data-cover-url")) {
       var isCover = card.hasAttribute("data-cover");
       edit.push({
-        label: isCover ? "Stop using as cover" : "Use as cover",
+        label: isCover ? tr("Stop using as cover") : tr("Use as cover"),
         icon: "cover",
         keepFocus: true,
         run: function (byKeyboard) {
@@ -825,10 +841,10 @@
       var isLast = card.hasAttribute("data-last");
       groups.push(
         [
-          ["up", "Move up", "up", isFirst],
-          ["down", "Move down", "down", isLast],
-          ["top", "Move to top", "top", isFirst],
-          ["bottom", "Move to bottom", "bottom", isLast],
+          ["up", tr("Move up"), "up", isFirst],
+          ["down", tr("Move down"), "down", isLast],
+          ["top", tr("Move to top"), "top", isFirst],
+          ["bottom", tr("Move to bottom"), "bottom", isLast],
         ].map(function (m) {
           return {
             label: m[1],
@@ -845,7 +861,7 @@
     if (card.hasAttribute("data-delete-url")) {
       groups.push([
         {
-          label: "Delete…",
+          label: tr("Delete…"),
           icon: "delete",
           danger: true,
           keepFocus: true,
@@ -896,7 +912,7 @@
     m.className = "ctx-menu";
     m.id = "item-menu";
     m.setAttribute("role", "menu");
-    m.setAttribute("aria-label", "Actions for " + name);
+    m.setAttribute("aria-label", trf("Actions for {name}", { name: name }));
     m.tabIndex = -1;
     var head = document.createElement("div");
     head.className = "menu-head";
@@ -1195,7 +1211,7 @@
     if (flash) flash.textContent = "";
   });
   document.addEventListener("htmx:sendError", function () {
-    toast("The server could not be reached. Check your connection and try again.", true);
+    toast(tr("The server could not be reached. Check your connection and try again."), true);
   });
 
   toastRegion(false);

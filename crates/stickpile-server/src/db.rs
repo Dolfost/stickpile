@@ -81,7 +81,7 @@ pub fn i64_to_u64(v: i64) -> u64 {
 // ---------------------------------------------------------------------------
 
 pub const USER_COLUMNS: &str = "id, username, display_name, password_hash, totp_secret, totp_pending_secret, \
-     totp_last_step, role, tailscale_login, telegram_user_id, disabled, created_at, last_login_at, theme";
+     totp_last_step, role, tailscale_login, telegram_user_id, disabled, created_at, last_login_at, theme, language";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRow {
@@ -100,6 +100,8 @@ pub struct UserRow {
     pub last_login_at: Option<i64>,
     /// `system`, `light` or `dark` (see [`UserRow::theme`]).
     pub theme: String,
+    /// A language code, or empty for automatic (see [`UserRow::lang`]).
+    pub language: String,
 }
 
 impl UserRow {
@@ -128,7 +130,12 @@ impl UserRow {
             created_at: self.created_at,
             telegram_user_id: self.telegram_user_id,
             theme: self.theme(),
+            language: self.lang().map(|l| l.code().to_string()),
         }
+    }
+    /// The chosen UI language (`None`: automatic).
+    pub fn lang(&self) -> Option<stickpile_i18n::Lang> {
+        stickpile_i18n::Lang::parse(&self.language)
     }
 }
 

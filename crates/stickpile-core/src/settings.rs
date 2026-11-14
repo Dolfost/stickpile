@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{DocumentMut, Item, TableLike};
 
-use crate::config::{Background, ClientConfig, ConfigError, SquarePad, StartMode, START_TABS};
+use crate::config::{Background, ClientConfig, ConfigError, SquarePad, StartMode, LANGUAGES, START_TABS};
 
 /// The GUI's settings file, next to `config.toml`.
 pub const SETTINGS_FILE: &str = "settings.toml";
@@ -125,6 +125,14 @@ pub fn settings_schema() -> Vec<SettingSpec> {
     let b = toml::Value::Boolean;
     let i = toml::Value::Integer;
     vec![
+        spec(
+            "ui.language",
+            "Popup",
+            "Language",
+            "auto follows your account's language (else the system's); a choice here sets the account's too.",
+            Choice(LANGUAGES),
+            s("auto"),
+        ),
         spec(
             "ui.start_tab",
             "Popup",

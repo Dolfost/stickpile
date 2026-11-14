@@ -1,11 +1,39 @@
 //! The key help drawn over the popup (`?`, F1), from `stickpile_quick::HELP`.
 
 use gtk::prelude::*;
+use stickpile_i18n::global::{t, t_dyn};
 use stickpile_quick::HELP;
 
 use crate::pages;
 
 pub fn build() -> gtk::Widget {
+    let card = gtk::Box::builder()
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    card.add_css_class("stickpile-help");
+    card.set_visible(false);
+    fill(&card);
+    card.upcast()
+}
+
+/// Draw the help again in the current language.
+pub fn relabel(card: &gtk::Widget) {
+    let Some(card) = card.downcast_ref::<gtk::Box>() else {
+        return;
+    };
+    while let Some(child) = card.first_child() {
+        card.remove(&child);
+    }
+    fill(card);
+}
+
+/// The key tables (from `stickpile_quick::HELP`, translated) into `card`.
+fn fill(card: &gtk::Box) {
     let grid = gtk::Box::builder().spacing(24).build();
     for column in pages::help_columns(HELP) {
         let col = gtk::Box::builder()
@@ -14,7 +42,7 @@ pub fn build() -> gtk::Widget {
             .build();
         for (n, section) in column.into_iter().enumerate() {
             let title = gtk::Label::builder()
-                .label(section.title)
+                .label(t_dyn(section.title))
                 .xalign(0.0)
                 .margin_top(if n == 0 { 0 } else { 10 })
                 .margin_bottom(2)
@@ -24,7 +52,7 @@ pub fn build() -> gtk::Widget {
             let keys = gtk::Grid::builder().column_spacing(14).row_spacing(2).build();
             for (row, (k, what)) in section.keys.iter().enumerate() {
                 let key = gtk::Label::builder()
-                    .label(*k)
+                    .label(t_dyn(k))
                     .xalign(0.0)
                     .yalign(0.0)
                     .wrap(true)
@@ -33,7 +61,7 @@ pub fn build() -> gtk::Widget {
                     .build();
                 key.add_css_class("stickpile-help-key");
                 let what = gtk::Label::builder()
-                    .label(*what)
+                    .label(t_dyn(what))
                     .xalign(0.0)
                     .yalign(0.0)
                     .wrap(true)
@@ -49,7 +77,7 @@ pub fn build() -> gtk::Widget {
         grid.append(&col);
     }
     let hint = gtk::Label::builder()
-        .label("? or Esc closes this")
+        .label(t("? or Esc closes this"))
         .xalign(1.0)
         .margin_top(10)
         .build();
@@ -72,16 +100,5 @@ pub fn build() -> gtk::Widget {
         .propagate_natural_width(true)
         .child(&content)
         .build();
-    let card = gtk::Box::builder()
-        .halign(gtk::Align::Center)
-        .valign(gtk::Align::Center)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-    card.add_css_class("stickpile-help");
     card.append(&scroller);
-    card.set_visible(false);
-    card.upcast()
 }

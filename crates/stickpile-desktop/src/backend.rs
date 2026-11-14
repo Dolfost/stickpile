@@ -13,6 +13,7 @@ use std::sync::Arc;
 use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats};
 use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
+use stickpile_i18n::global::t;
 use stickpile_quick::model::Results;
 
 pub type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -47,7 +48,7 @@ pub enum LoginError {
 impl std::fmt::Display for LoginError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LoginError::TotpRequired => f.write_str("A TOTP code is required"),
+            LoginError::TotpRequired => f.write_str(t("A TOTP code is required")),
             LoginError::Failed(text) => f.write_str(text),
         }
     }
@@ -93,6 +94,8 @@ pub struct Profile {
     pub tailscale_login: Option<String>,
     /// Copies on this device not yet reported to the server.
     pub pending_usage: usize,
+    /// The account's language (`en`, `uk`); `None`: automatic.
+    pub language: Option<String>,
 }
 
 impl Profile {
@@ -114,6 +117,7 @@ impl Profile {
             totp_enabled: false,
             tailscale_login: None,
             pending_usage: 0,
+            language: None,
         }
     }
 
@@ -125,6 +129,7 @@ impl Profile {
             admin: user.role == Role::Admin,
             totp_enabled: user.totp_enabled,
             tailscale_login: user.tailscale_login.clone(),
+            language: user.language.clone(),
             ..Profile::signed_out(server_url)
         }
     }
@@ -180,6 +185,9 @@ pub trait Backend: Send + Sync + 'static {
     fn logout(self: Arc<Self>) -> BoxFut<Result<(), String>>;
     /// Where the browser shows the item (`gx`).
     fn web_url(&self, item_id: &str) -> Option<String>;
+    /// Set the account's language (`None`: automatic), so the web UI and
+    /// other clients follow the one chosen here.
+    fn set_account_language(self: Arc<Self>, code: Option<String>) -> BoxFut<Result<(), String>>;
 }
 
 /// The item's page in the web UI of the server at `server_url`.
@@ -194,32 +202,47 @@ pub fn item_page_url(server_url: &str, item_id: &str) -> Option<String> {
 
 /// User-facing text for a core error.
 pub fn describe(e: &CoreError) -> String {
-    describe_with(e, ITEM_NOT_CACHED)
+    describe_with(e, ITEM_NOT_CACHED())
 }
 
 /// [`describe`] with the text for an unreachable server.
 fn describe_with(e: &CoreError, offline: &str) -> String {
     match e {
-        CoreError::NotLoggedIn => NOT_LOGGED_IN.into(),
+        CoreError::NotLoggedIn => NOT_LOGGED_IN().into(),
         CoreError::Offline(_) => offline.into(),
-        e if e.is_unauthorized() => REJECTED.into(),
+        e if e.is_unauthorized() => REJECTED().into(),
         other => other.to_string(),
     }
 }
 
-const NOT_LOGGED_IN: &str = "Not logged in; log in on the Me tab (6)";
-const REJECTED: &str = "The server did not accept this client; log in on the Me tab (6)";
-const ITEM_NOT_CACHED: &str = "Server unreachable and the item is not cached";
-const UNREACHABLE: &str = "Server unreachable";
-const NO_TAILNET: &str =
-    "The server does not know this device by its tailnet identity; sign in with a username and password";
+// The messages, in the current language when they are made.
+#[allow(non_snake_case)]
+fn NOT_LOGGED_IN() -> &'static str {
+    t("Not logged in; log in on the Me tab (6)")
+}
+#[allow(non_snake_case)]
+fn REJECTED() -> &'static str {
+    t("The server did not accept this client; log in on the Me tab (6)")
+}
+#[allow(non_snake_case)]
+fn ITEM_NOT_CACHED() -> &'static str {
+    t("Server unreachable and the item is not cached")
+}
+#[allow(non_snake_case)]
+fn UNREACHABLE() -> &'static str {
+    t("Server unreachable")
+}
+#[allow(non_snake_case)]
+fn NO_TAILNET() -> &'static str {
+    t("The server does not know this device by its tailnet identity; sign in with a username and password")
+}
 
 /// User-facing text for a failed login: the server's own message (wrong
 /// password, wrong code) rather than the token hints of [`describe`].
 fn login_failure(e: &CoreError) -> String {
     let text = match e {
         CoreError::Api { error, .. } => error.message.clone(),
-        CoreError::Offline(_) => UNREACHABLE.into(),
+        CoreError::Offline(_) => UNREACHABLE().into(),
         other => other.to_string(),
     };
     let mut chars = text.chars();
@@ -293,7 +316,7 @@ impl Backend for CoreBackend {
     fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Results, String>> {
         Box::pin(async move {
             let r = self.session.search(&query, Some(target), limit).await;
-            let out = self.track(r, |o| !o.offline, ITEM_NOT_CACHED)?;
+            let out = self.track(r, |o| !o.offline, ITEM_NOT_CACHED())?;
             Ok(Results {
                 hits: out.hits,
                 offline: out.offline,
@@ -313,7 +336,7 @@ impl Backend for CoreBackend {
     fn thumbnail(self: Arc<Self>, item: ItemSummary) -> BoxFut<Result<PathBuf, String>> {
         Box::pin(async move {
             let r = self.session.thumbnail(&item).await;
-            self.track(r, |_| false, ITEM_NOT_CACHED)
+            self.track(r, |_| false, ITEM_NOT_CACHED())
         })
     }
 
@@ -325,7 +348,7 @@ impl Backend for CoreBackend {
     ) -> BoxFut<Result<PreparedCopy, String>> {
         Box::pin(async move {
             let r = self.session.prepare_copy(&item, target, sticker).await;
-            self.track(r, |_| false, ITEM_NOT_CACHED)
+            self.track(r, |_| false, ITEM_NOT_CACHED())
         })
     }
 
@@ -340,49 +363,49 @@ impl Backend for CoreBackend {
     fn sync(self: Arc<Self>) -> BoxFut<Result<(), String>> {
         Box::pin(async move {
             let r = self.session.sync().await;
-            self.track(r, |_| true, UNREACHABLE)
+            self.track(r, |_| true, UNREACHABLE())
         })
     }
 
     fn most_used(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>> {
         Box::pin(async move {
             let r = self.session.most_used(limit).await;
-            self.listing(r, UNREACHABLE)
+            self.listing(r, UNREACHABLE())
         })
     }
 
     fn favorites(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>> {
         Box::pin(async move {
             let r = self.session.favorites(limit).await;
-            self.track(r, |_| true, "Server unreachable; favorites need the server")
+            self.track(r, |_| true, t("Server unreachable; favorites need the server"))
         })
     }
 
     fn packs(self: Arc<Self>) -> BoxFut<Result<Vec<SetSummary>, String>> {
         Box::pin(async move {
             let r = self.session.packs().await;
-            self.listing(r, "Server unreachable and no packs are cached")
+            self.listing(r, t("Server unreachable and no packs are cached"))
         })
     }
 
     fn pack_items(self: Arc<Self>, set_id: String) -> BoxFut<Result<Vec<ItemSummary>, String>> {
         Box::pin(async move {
             let r = self.session.pack_items(&set_id).await;
-            self.listing(r, "Server unreachable and the pack is not cached")
+            self.listing(r, t("Server unreachable and the pack is not cached"))
         })
     }
 
     fn pack_cover(self: Arc<Self>, set: SetSummary) -> BoxFut<Result<Option<PathBuf>, String>> {
         Box::pin(async move {
             let r = self.session.pack_cover(&set).await;
-            self.track(r, |_| false, "Server unreachable and the cover is not cached")
+            self.track(r, |_| false, t("Server unreachable and the cover is not cached"))
         })
     }
 
     fn toggle_favorite(self: Arc<Self>, item_id: String) -> BoxFut<Result<bool, String>> {
         Box::pin(async move {
             let r = self.session.toggle_like(&item_id).await;
-            self.track(r, |_| true, UNREACHABLE)
+            self.track(r, |_| true, UNREACHABLE())
         })
     }
 
@@ -394,7 +417,7 @@ impl Backend for CoreBackend {
             let user = match client.me().await {
                 Ok(user) => Some(user),
                 Err(e) if e.is_unauthorized() => None,
-                Err(e) => return Err(describe_with(&e, UNREACHABLE)),
+                Err(e) => return Err(describe_with(&e, UNREACHABLE())),
             };
             self.login_required.store(user.is_none(), Ordering::Relaxed);
             let auth = match (&user, has_token) {
@@ -449,7 +472,7 @@ impl Backend for CoreBackend {
             };
             let user = match r {
                 Ok(Some(user)) => user,
-                Ok(None) => return Err(LoginError::Failed(NO_TAILNET.into())),
+                Ok(None) => return Err(LoginError::Failed(NO_TAILNET().into())),
                 Err(e) if e.is_totp_required() => return Err(LoginError::TotpRequired),
                 Err(e) => return Err(LoginError::Failed(login_failure(&e))),
             };
@@ -483,7 +506,7 @@ impl Backend for CoreBackend {
             // Whether the server still knows us (tailnet) decides the login prompt.
             if !matches!(&out.revoked, Err(e) if e.is_offline()) {
                 let r = self.session.client().me().await;
-                let _ = self.track(r, |_| true, UNREACHABLE);
+                let _ = self.track(r, |_| true, UNREACHABLE());
             }
             Ok(())
         })
@@ -491,6 +514,21 @@ impl Backend for CoreBackend {
 
     fn web_url(&self, item_id: &str) -> Option<String> {
         item_page_url(&self.session.config().server_url, item_id)
+    }
+
+    fn set_account_language(self: Arc<Self>, code: Option<String>) -> BoxFut<Result<(), String>> {
+        Box::pin(async move {
+            let req = stickpile_api::UpdateMe {
+                language: Some(code),
+                ..Default::default()
+            };
+            self.session
+                .client()
+                .update_me(&req)
+                .await
+                .map(|_| ())
+                .map_err(|e| describe_with(&e, UNREACHABLE()))
+        })
     }
 }
 

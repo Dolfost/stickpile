@@ -19,6 +19,7 @@ use stickpile_media::hash::hamming;
 use stickpile_media::signature::Signature;
 use stickpile_telegram::{PackMapping, DEFAULT_EMOJI, MAX_PACK_STICKERS};
 
+use crate::i18n::{t, tf, tp};
 use crate::ids::sha256_hex;
 
 /// pHash distance up to which two items are near-duplicate candidates.
@@ -230,22 +231,54 @@ fn item(it: &ItemFacts, detail: Option<String>) -> ProblemItem {
 /// "512×512 px, quality 85": helps choosing which copy to keep.
 fn size_detail(it: &ItemFacts) -> String {
     match it.quality {
-        Some(q) => format!("{}×{} px, quality {q}", it.width, it.height),
-        None => format!("{}×{} px", it.width, it.height),
+        Some(q) => tf(
+            "{w}×{h} px, quality {q}",
+            &[("w", &it.width), ("h", &it.height), ("q", &q)],
+        ),
+        None => pixels(it),
     }
 }
 
-fn seconds(ms: u64) -> String {
+/// "100×60 px".
+fn pixels(it: &ItemFacts) -> String {
+    tf("{w}×{h} px", &[("w", &it.width), ("h", &it.height)])
+}
+
+/// The number of seconds in `ms`: "3", "2.5".
+fn seconds_number(ms: u64) -> String {
     let s = ms as f64 / 1000.0;
     if s.fract() < 0.05 {
-        format!("{s:.0} s")
+        format!("{s:.0}")
     } else {
-        format!("{s:.1} s")
+        format!("{s:.1}")
     }
 }
 
-fn count(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
+/// "3 s" in English: part of problem ids, which must not depend on the
+/// language.
+fn seconds_en(ms: u64) -> String {
+    format!("{} s", seconds_number(ms))
+}
+
+/// "3 s" in the request's language, for display.
+fn seconds(ms: u64) -> String {
+    tf("{s} s", &[("s", &seconds_number(ms))])
+}
+
+/// A counted sentence ([`tp`]) with more placeholders than `{n}`.
+fn tpf(n: usize, one: &'static str, many: &'static str, args: &[(&str, &dyn std::fmt::Display)]) -> String {
+    stickpile_i18n::fill(&tp(n as u64, one, many), args)
+}
+
+/// An item field holding AI values (`ItemFacts::ai_fields`), for display.
+fn field_label(field: &'static str) -> &'static str {
+    match field {
+        "name" => t("name"),
+        "keywords" => t("keywords"),
+        "emojis" => t("emojis"),
+        "vibe" => t("vibe"),
+        other => other,
+    }
 }
 
 struct Builder<'a> {
@@ -304,23 +337,29 @@ impl Builder<'_> {
     }
 }
 
-/// Why the Telegram export skips this item, if it does.
-fn telegram_skip_reason(it: &ItemFacts, env: &Env) -> Option<String> {
+/// Why the Telegram export skips this item, if it does: the reason in
+/// English (it goes into the problem id) and the reason to show.
+fn telegram_skip_reason(it: &ItemFacts, env: &Env) -> Option<(String, String)> {
+    let fixed = |en: &'static str| Some((en.to_string(), t(en).to_string()));
     match it.kind {
-        MediaKind::Video if it.duration_ms.is_some_and(|d| d > stickpile_media::SHORT_VIDEO_MS) => Some(format!(
-            "videos longer than {} cannot become stickers",
-            seconds(stickpile_media::SHORT_VIDEO_MS)
+        MediaKind::Video if it.duration_ms.is_some_and(|d| d > stickpile_media::SHORT_VIDEO_MS) => Some((
+            format!(
+                "videos longer than {} cannot become stickers",
+                seconds_en(stickpile_media::SHORT_VIDEO_MS)
+            ),
+            tf(
+                "videos longer than {duration} cannot become stickers",
+                &[("duration", &seconds(stickpile_media::SHORT_VIDEO_MS))],
+            ),
         )),
-        MediaKind::Animation | MediaKind::Video if !env.ffmpeg => {
-            Some("animated stickers need ffmpeg on the server".into())
-        }
+        MediaKind::Animation | MediaKind::Video if !env.ffmpeg => fixed("animated stickers need ffmpeg on the server"),
         MediaKind::Still if it.variants_done && !it.variants.contains(&Variant::TgSticker) => {
-            Some("no Telegram sticker could be made from it".into())
+            fixed("no Telegram sticker could be made from it")
         }
         MediaKind::Animation | MediaKind::Video
             if it.variants_done && !it.variants.contains(&Variant::TgVideoSticker) =>
         {
-            Some("cannot be made into a Telegram video sticker (at most 3 s, 512 px, 256 KB)".into())
+            fixed("cannot be made into a Telegram video sticker (at most 3 s, 512 px, 256 KB)")
         }
         _ => None,
     }
@@ -340,7 +379,7 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         b.push(
             ProblemKind::EmptySet,
             ProblemSeverity::Info,
-            "The set has no items yet.".into(),
+            t("The set has no items yet.").into(),
             Vec::new(),
             Some(ProblemAction::AddItems),
             None,
@@ -358,7 +397,11 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         b.push(
             ProblemKind::ExactDuplicate,
             ProblemSeverity::Warning,
-            format!("{} items store the same file.", group.len()),
+            tp(
+                group.len() as u64,
+                "{n} item stores the same file.",
+                "{n} items store the same file.",
+            ),
             group.iter().map(|it| item(it, Some(size_detail(it)))).collect(),
             Some(ProblemAction::DeleteOne),
             None,
@@ -379,9 +422,9 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         };
         if let Some(d) = pixels {
             let message = if d < 2.0 && c.phash == 0 && c.dhash == 0 {
-                "These items look identical (the files differ)."
+                t("These items look identical (the files differ).")
             } else {
-                "These items show the same picture (resized, recompressed or slightly cropped)."
+                t("These items show the same picture (resized, recompressed or slightly cropped).")
             };
             b.push(
                 ProblemKind::NearDuplicate,
@@ -401,7 +444,7 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         b.push(
             ProblemKind::Similar,
             ProblemSeverity::Info,
-            "These items look alike to the AI. Only a hint: variations of one character often do.".into(),
+            t("These items look alike to the AI. Only a hint: variations of one character often do.").into(),
             vec![item(x, None), item(y, None)],
             Some(ProblemAction::Compare),
             Some((cos * 1000.0).round() / 1000.0),
@@ -414,16 +457,20 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::OpenItem,
         |n| {
-            format!(
-                "{} also in other sets of yours (added there first).",
-                count(n, "item is", "items are")
+            tp(
+                n as u64,
+                "{n} item is also in other sets of yours (added there first).",
+                "{n} items are also in other sets of yours (added there first).",
             )
         },
         |it| {
             (!it.earlier_in.is_empty()).then(|| {
                 let names: Vec<&str> = it.earlier_in.iter().map(|(_, n)| n.as_str()).collect();
                 let ids: Vec<&str> = it.earlier_in.iter().map(|(i, _)| i.as_str()).collect();
-                (Some(format!("also in {}", names.join(", "))), ids.join(","))
+                (
+                    Some(tf("also in {sets}", &[("sets", &names.join(", "))])),
+                    ids.join(","),
+                )
             })
         },
     );
@@ -435,18 +482,25 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::OpenItem,
         |n| {
-            format!(
-                "{} missing files; delete and upload them again.",
-                count(n, "item is", "items are")
+            tp(
+                n as u64,
+                "{n} item is missing files; delete and upload them again.",
+                "{n} items are missing files; delete and upload them again.",
             )
         },
         |it| {
-            let missing: Vec<&str> = [(Variant::Original, "original"), (Variant::Thumb, "thumbnail")]
-                .into_iter()
-                .filter(|(v, _)| !it.variants.contains(v))
-                .map(|(_, n)| n)
-                .collect();
-            (!missing.is_empty()).then(|| (Some(format!("no {}", missing.join(", no "))), missing.join(",")))
+            // (name in the problem id, what is shown)
+            let missing: Vec<(&str, &str)> = [
+                (Variant::Original, "original", t("no original")),
+                (Variant::Thumb, "thumbnail", t("no thumbnail")),
+            ]
+            .into_iter()
+            .filter(|(v, ..)| !it.variants.contains(v))
+            .map(|(_, n, shown)| (n, shown))
+            .collect();
+            let names: Vec<&str> = missing.iter().map(|(n, _)| *n).collect();
+            let shown: Vec<&str> = missing.iter().map(|(_, s)| *s).collect();
+            (!missing.is_empty()).then(|| (Some(shown.join(", ")), names.join(",")))
         },
     );
     b.per_item(
@@ -455,9 +509,10 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::OpenItem,
         |n| {
-            format!(
-                "Processing of {} did not finish: some downloads and conversions are missing.",
-                count(n, "item", "items")
+            tp(
+                n as u64,
+                "Processing of {n} item did not finish: some downloads and conversions are missing.",
+                "Processing of {n} items did not finish: some downloads and conversions are missing.",
             )
         },
         |it| {
@@ -468,10 +523,10 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
                 // Still in the queue: not a problem (yet).
                 Some(j) if matches!(j.status, JobStatus::Queued | JobStatus::Running) => None,
                 Some(j) => Some((
-                    Some(j.error.clone().unwrap_or_else(|| "processing failed".into())),
+                    Some(j.error.clone().unwrap_or_else(|| t("processing failed").into())),
                     j.id.clone(),
                 )),
-                None => Some((Some("never processed".into()), String::new())),
+                None => Some((Some(t("never processed").into()), String::new())),
             }
         },
     );
@@ -485,20 +540,19 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::FindBetter,
         |n| {
-            let tg = if bound {
-                " Telegram scales stickers up to 512 px."
+            let small = tpf(
+                n,
+                "{n} item is very small (under {px} px) and may look blurry.",
+                "{n} items are very small (under {px} px) and may look blurry.",
+                &[("px", &LOW_RES_PX)],
+            );
+            if bound {
+                format!("{small} {}", t("Telegram scales stickers up to 512 px."))
             } else {
-                ""
-            };
-            format!(
-                "{} very small (under {LOW_RES_PX} px) and may look blurry.{tg}",
-                count(n, "item is", "items are")
-            )
+                small
+            }
         },
-        |it| {
-            (it.width.max(it.height) < LOW_RES_PX)
-                .then(|| (Some(format!("{}×{} px", it.width, it.height)), String::new()))
-        },
+        |it| (it.width.max(it.height) < LOW_RES_PX).then(|| (Some(pixels(it)), String::new())),
     );
 
     // --- metadata ---------------------------------------------------------
@@ -512,9 +566,10 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::EditEmojis,
         |n| {
-            format!(
-                "{} emoji entries that are not emoji (Telegram leaves them out).",
-                count(n, "item has", "items have")
+            tp(
+                n as u64,
+                "{n} item has emoji entries that are not emoji (Telegram leaves them out).",
+                "{n} items have emoji entries that are not emoji (Telegram leaves them out).",
             )
         },
         |it| {
@@ -534,9 +589,11 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             items,
             ProblemAction::EditEmojis,
             |n| {
-                format!(
-                    "{} no emoji; on Telegram they get {DEFAULT_EMOJI}, which makes them hard to find.",
-                    count(n, "item has", "items have")
+                tpf(
+                    n,
+                    "{n} item has no emoji; on Telegram they get {emoji}, which makes them hard to find.",
+                    "{n} items have no emoji; on Telegram they get {emoji}, which makes them hard to find.",
+                    &[("emoji", &DEFAULT_EMOJI)],
                 )
             },
             |it| {
@@ -551,12 +608,18 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         items,
         ProblemAction::ReviewAi,
         |n| {
-            format!(
-                "{} AI suggestions nobody confirmed yet.",
-                count(n, "item has", "items have")
+            tp(
+                n as u64,
+                "{n} item has AI suggestions nobody confirmed yet.",
+                "{n} items have AI suggestions nobody confirmed yet.",
             )
         },
-        |it| (!it.ai_fields.is_empty()).then(|| (Some(it.ai_fields.join(", ")), it.ai_fields.join(","))),
+        |it| {
+            (!it.ai_fields.is_empty()).then(|| {
+                let shown: Vec<&str> = it.ai_fields.iter().map(|f| field_label(f)).collect();
+                (Some(shown.join(", ")), it.ai_fields.join(","))
+            })
+        },
     );
 
     // --- Telegram and git -------------------------------------------------
@@ -565,9 +628,9 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             b.push(
                 ProblemKind::TelegramFailed,
                 ProblemSeverity::Error,
-                format!(
-                    "The last publish to Telegram failed: {}",
-                    job.error.as_deref().unwrap_or("unknown error")
+                tf(
+                    "The last publish to Telegram failed: {error}",
+                    &[("error", &job.error.as_deref().unwrap_or(t("unknown error")))],
                 ),
                 Vec::new(),
                 Some(ProblemAction::PublishTelegram),
@@ -578,7 +641,7 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
     }
     if bound {
         let spec = profile(TargetApp::Telegram).sticker.expect("telegram has stickers");
-        let skipped: HashMap<&str, String> = items
+        let skipped: HashMap<&str, (String, String)> = items
             .iter()
             .filter_map(|it| telegram_skip_reason(it, env).map(|r| (it.id.as_str(), r)))
             .collect();
@@ -587,9 +650,13 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             b.push(
                 ProblemKind::TelegramTooMany,
                 ProblemSeverity::Error,
-                format!(
-                    "The set has {exportable} stickers; a Telegram pack holds at most {MAX_PACK_STICKERS}, so publishing \
-                     fails. Move some items to another set."
+                tpf(
+                    exportable,
+                    "The set has {n} sticker; a Telegram pack holds at most {max}, so publishing fails. Move some \
+                     items to another set.",
+                    "The set has {n} stickers; a Telegram pack holds at most {max}, so publishing fails. Move some \
+                     items to another set.",
+                    &[("max", &MAX_PACK_STICKERS)],
                 ),
                 Vec::new(),
                 Some(ProblemAction::SplitSet),
@@ -603,13 +670,17 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             items,
             ProblemAction::OpenItem,
             |n| {
-                format!(
-                    "{} cannot become Telegram stickers and {} left out when the set is published.",
-                    count(n, "item", "items"),
-                    if n == 1 { "is" } else { "are" }
+                tp(
+                    n as u64,
+                    "{n} item cannot become Telegram stickers and is left out when the set is published.",
+                    "{n} items cannot become Telegram stickers and are left out when the set is published.",
                 )
             },
-            |it| skipped.get(it.id.as_str()).map(|r| (Some(r.clone()), r.clone())),
+            |it| {
+                skipped
+                    .get(it.id.as_str())
+                    .map(|(key, shown)| (Some(shown.clone()), key.clone()))
+            },
         );
         b.per_item(
             ProblemKind::TelegramTrimmed,
@@ -617,11 +688,11 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             items,
             ProblemAction::OpenItem,
             |n| {
-                format!(
-                    "{} longer than {}: Telegram gets only the first {}.",
-                    count(n, "animation or video is", "animations or videos are"),
-                    seconds(spec.video_max_ms),
-                    seconds(spec.video_max_ms)
+                tpf(
+                    n,
+                    "{n} animation or video is longer than {max}: Telegram gets only the first {max}.",
+                    "{n} animations or videos are longer than {max}: Telegram gets only the first {max}.",
+                    &[("max", &seconds(spec.video_max_ms))],
                 )
             },
             |it| {
@@ -649,23 +720,33 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             if missing + replaced + removed > 0 || later {
                 let mut parts = Vec::new();
                 if missing > 0 {
-                    parts.push(format!("{} not on Telegram yet", count(missing, "item", "items")));
+                    parts.push(tp(
+                        missing as u64,
+                        "{n} item not on Telegram yet",
+                        "{n} items not on Telegram yet",
+                    ));
                 }
                 if replaced > 0 {
-                    parts.push(format!("{} with a new file", count(replaced, "item", "items")));
+                    parts.push(tp(
+                        replaced as u64,
+                        "{n} item with a new file",
+                        "{n} items with a new file",
+                    ));
                 }
                 if removed > 0 {
-                    parts.push(format!(
-                        "{} removed here but still in the pack",
-                        count(removed, "sticker", "stickers")
+                    parts.push(tp(
+                        removed as u64,
+                        "{n} sticker removed here but still in the pack",
+                        "{n} stickers removed here but still in the pack",
                     ));
                 }
                 let message = if parts.is_empty() {
-                    "The set changed after its last publish to Telegram; publish again to update the pack.".to_string()
+                    t("The set changed after its last publish to Telegram; publish again to update the pack.")
+                        .to_string()
                 } else {
-                    format!(
-                        "The Telegram pack is out of date: {}. Publish again to update it.",
-                        parts.join(", ")
+                    tf(
+                        "The Telegram pack is out of date: {changes}. Publish again to update it.",
+                        &[("changes", &parts.join(", "))],
                     )
                 };
                 b.push(
@@ -688,7 +769,7 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
         b.push(
             ProblemKind::GitFailed,
             ProblemSeverity::Error,
-            format!("The last git pull or push failed: {err}"),
+            tf("The last git pull or push failed: {error}", &[("error", err)]),
             Vec::new(),
             Some(ProblemAction::PullGit),
             None,

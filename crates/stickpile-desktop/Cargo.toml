@@ -24,6 +24,7 @@ x11 = ["stickpile-quick/x11"]
 stickpile-api.workspace = true
 stickpile-core.workspace = true
 stickpile-quick.workspace = true
+stickpile-i18n.workspace = true
 gtk.workspace = true
 adw.workspace = true
 anyhow.workspace = true

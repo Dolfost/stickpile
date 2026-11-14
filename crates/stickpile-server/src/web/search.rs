@@ -8,8 +8,10 @@ use serde::Deserialize;
 
 use super::components::{item_card, Card};
 use super::layout::Nav;
+use super::sets::rich;
 use super::Ctx;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, tc};
 use crate::service::search::{self, SearchParams};
 use crate::state::{AiStatus, AppState};
 
@@ -34,40 +36,46 @@ fn more_url(q: &str, offset: usize) -> String {
 }
 
 pub fn cheat_sheet() -> Markup {
-    const ROWS: [(&str, &str); 12] = [
+    let rows: [(&str, &str); 12] = [
         (
             "cat \"big chungus\"",
-            "words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)",
+            t("words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)"),
         ),
-        ("-word", "exclude a word"),
-        ("e:😂", "has this emoji"),
-        ("set:cats", "in a set (slug or name)"),
-        ("vibe:tired", "AI or user vibe label"),
-        ("tag:reaction  -tag:nsfw", "has / has not this tag"),
+        ("-word", t("exclude a word")),
+        ("e:😂", t("has this emoji")),
+        ("set:cats", t("in a set (slug or name)")),
+        ("vibe:tired", t("AI or user vibe label")),
+        ("tag:reaction  -tag:nsfw", t("has / has not this tag")),
         (
             "type:gif",
-            "still, animated, video, or a format: png jpeg webp gif mp4 webm",
+            t("still, animated, video, or a format: png jpeg webp gif mp4 webm"),
         ),
-        ("by:alice", "owner"),
-        ("is:mine  is:liked  is:public", "your items, your likes, public sets"),
-        ("q>70", "quality score (also >= < <= =)"),
-        ("likes>=2  copies<5", "like and copy counts"),
-        ("sort:likes", "relevance (default), recent, likes, copies, quality"),
+        ("by:alice", t("owner")),
+        ("is:mine  is:liked  is:public", t("your items, your likes, public sets")),
+        ("q>70", t("quality score (also >= < <= =)")),
+        ("likes>=2  copies<5", t("like and copy counts")),
+        ("sort:likes", t("relevance (default), recent, likes, copies, quality")),
     ];
     html! {
         details.cheatsheet {
-            summary { "Search syntax" }
+            summary { (t("Search syntax")) }
             table.data {
-                caption.sr-only { "Search syntax" }
-                thead { tr { th scope="col" { "Type" } th scope="col" { "Finds" } } }
+                caption.sr-only { (t("Search syntax")) }
+                thead { tr { th scope="col" { (tc("instruction", "Type")) } th scope="col" { (t("Finds")) } } }
                 tbody {
-                    @for (syntax, meaning) in ROWS {
+                    @for (syntax, meaning) in rows {
                         tr { td { code { (syntax) } } td { (meaning) } }
                     }
                 }
             }
-            p.hint { "Repeating a filter means OR (" code { "set:cats set:dogs" } "); different filters must all match. "
-                "Example: " code { "e:😂 set:cats vibe:tired q>70 type:gif tag:reaction -tag:x likes>=2 sort:likes" } }
+            p.hint {
+                (rich(
+                    t("Repeating a filter means OR ({example}); different filters must all match."),
+                    &[("example", html! { code { "set:cats set:dogs" } })],
+                ))
+                " " (t("Example:")) " "
+                code { "e:😂 set:cats vibe:tired q>70 type:gif tag:reaction -tag:x likes>=2 sort:likes" }
+            }
         }
     }
 }
@@ -100,13 +108,13 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Searc
         html! {
             @for h in &r.hits {
                 (item_card(&ctx, &Card::from_summary(&h.item), Some(html! {
-                    @if !h.matched.is_empty() { span.matched title="Why this matched" { (h.matched.join(", ")) } }
+                    @if !h.matched.is_empty() { span.matched title=(t("Why this matched")) { (h.matched.join(", ")) } }
                 })))
             }
             @if (next as u64) < r.total && !r.hits.is_empty() {
                 div.more-cell {
                     a.button href=(more_url(&query, next)) hx-get=(format!("{}&more=1", more_url(&query, next)))
-                        hx-target="closest .more-cell" hx-swap="outerHTML" { "More results" }
+                        hx-target="closest .more-cell" hx-swap="outerHTML" { (t("More results")) }
                 }
             }
         }
@@ -115,24 +123,27 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Searc
         return Ok(results.as_ref().map(cards).unwrap_or_else(|| html! {}));
     }
     let semantic_note = match state.ai_status() {
-        AiStatus::Ready => "Semantic search is on: results also match image content and related words.",
-        AiStatus::Loading => "Semantic search is still loading; these results match metadata only.",
-        _ => "Semantic search is off on this server; results match metadata only.",
+        AiStatus::Ready => t("Semantic search is on: results also match image content and related words."),
+        AiStatus::Loading => t("Semantic search is still loading; these results match metadata only."),
+        _ => t("Semantic search is off on this server; results match metadata only."),
     };
     let results_block = html! {
         div #results aria-live="polite" {
             @if let Some(r) = &results {
                 p.result-head {
-                    strong { (r.total) } " results for " code { (r.query) }
+                    (rich(
+                        t("{n} results for {query}"),
+                        &[("n", html! { strong { (r.total) } }), ("query", html! { code { (r.query) } })],
+                    ))
                     " "
                     @if r.semantic {
-                        span.badge.semantic title=(semantic_note) { "semantic" }
+                        span.badge.semantic title=(semantic_note) { (t("semantic")) }
                     } @else {
-                        span.badge.lexical title=(semantic_note) { "metadata only" }
+                        span.badge.lexical title=(semantic_note) { (t("metadata only")) }
                     }
                 }
                 @if r.hits.is_empty() {
-                    p.muted { "Nothing found. Try fewer words or remove a filter." }
+                    p.muted { (t("Nothing found. Try fewer words or remove a filter.")) }
                 } @else {
                     div.grid { (cards(r)) }
                 }
@@ -143,19 +154,19 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Searc
         return Ok(results_block);
     }
     let body = html! {
-        h1 { "Search" }
+        h1 { (t("Search")) }
         form.bigsearch role="search" method="get" action="/search" hx-get="/search" hx-target="#results"
             hx-swap="outerHTML" hx-push-url="true" hx-trigger="submit, input changed delay:400ms from:#search-q" {
-            label for="search-q" { "Search your items and public sets" }
+            label for="search-q" { (t("Search your items and public sets")) }
             div.inline-row {
                 input #search-q type="search" name="q" value=(query) autofocus autocomplete="off"
                     placeholder="cat e:😂 type:gif q>70";
-                button.primary type="submit" { "Search" }
+                button.primary type="submit" { (t("Search")) }
             }
         }
         p.muted.small { (semantic_note) }
         (cheat_sheet())
         (results_block)
     };
-    Ok(ctx.page(if query.is_empty() { "Search" } else { &query }, Nav::Search, body))
+    Ok(ctx.page(if query.is_empty() { t("Search") } else { &query }, Nav::Search, body))
 }

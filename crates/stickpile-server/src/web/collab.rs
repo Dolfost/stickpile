@@ -17,6 +17,7 @@ use super::components::{file_url, fmt_time, item_url, plural, set_url, thumb};
 use super::layout::{self, Nav};
 use super::{Ctx, MultipartCaller};
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, tc, tf};
 use crate::service::sets::{self, SetScope};
 use crate::service::{items as item_svc, members, proposals};
 use crate::state::AppState;
@@ -30,19 +31,29 @@ pub fn can_propose(set: &Set) -> bool {
     set.role != SetRole::Owner && !set.git.as_ref().is_some_and(|g| g.mode == GitMode::ReadOnly)
 }
 
-/// The permissions with their labels, in display order.
-pub const PERMISSIONS: [(&str, &str, &str); 6] = [
-    ("add", "Add stickers", "upload new stickers to the set"),
-    (
-        "edit_own",
-        "Edit their stickers",
-        "edit and remove the stickers they added",
-    ),
-    ("edit_all", "Edit all stickers", "edit everyone's stickers, yours too"),
-    ("remove_all", "Remove any sticker", "remove everyone's stickers"),
-    ("edit_pack", "Edit the pack", "name, description, cover and order"),
-    ("review", "Review proposals", "accept or decline what others propose"),
-];
+/// The permissions with their labels (key, label, hint), in display order.
+pub fn permissions() -> [(&'static str, &'static str, &'static str); 6] {
+    [
+        ("add", t("Add stickers"), t("upload new stickers to the set")),
+        (
+            "edit_own",
+            t("Edit their stickers"),
+            t("edit and remove the stickers they added"),
+        ),
+        (
+            "edit_all",
+            t("Edit all stickers"),
+            t("edit everyone's stickers, yours too"),
+        ),
+        ("remove_all", t("Remove any sticker"), t("remove everyone's stickers")),
+        ("edit_pack", t("Edit the pack"), t("name, description, cover and order")),
+        (
+            "review",
+            t("Review proposals"),
+            t("accept or decline what others propose"),
+        ),
+    ]
+}
 
 fn perm(p: &Permissions, key: &str) -> bool {
     match key {
@@ -58,13 +69,13 @@ fn perm(p: &Permissions, key: &str) -> bool {
 
 /// "Add stickers, Edit their stickers" or "View only".
 pub fn permissions_summary(p: &Permissions) -> String {
-    let on: Vec<&str> = PERMISSIONS
+    let on: Vec<&str> = permissions()
         .iter()
         .filter(|(k, ..)| perm(p, k))
         .map(|(_, label, _)| *label)
         .collect();
     if on.is_empty() {
-        "View only".to_string()
+        t("View only").to_string()
     } else {
         on.join(", ")
     }
@@ -99,76 +110,79 @@ pub async fn tab(State(state): State<AppState>, ctx: Ctx) -> AppResult<Markup> {
     decided.sort_by_key(|p| std::cmp::Reverse(p.decided_at));
     decided.truncate(30);
     let body = html! {
-        h1 { "Collaboration" }
+        h1 { (t("Collaboration")) }
         p.muted {
-            "Proposals for your packs, the ones you sent to others, and the packs you contribute to. "
-            "To propose something, open someone's pack or sticker and choose " em { "Propose" } "."
+            (t("Proposals for your packs, the ones you sent to others, and the packs you contribute to."))
+            " "
+            (t("To propose something, open someone's pack or sticker and choose")) " " em { (t("Propose")) } "."
         }
         section aria-labelledby="incoming-head" {
-            h2 #incoming-head { "Incoming" @if !inc_open.is_empty() { " " span.count { "(" (inc_open.len()) ")" } } }
+            h2 #incoming-head { (t("Incoming")) @if !inc_open.is_empty() { " " span.count { "(" (inc_open.len()) ")" } } }
             @if inc_open.is_empty() {
-                p.muted { "Nothing waits for you." }
+                p.muted { (t("Nothing waits for you.")) }
             } @else {
                 div.proposals { @for p in &inc_open { (proposal_card(&ctx, p, true)) } }
             }
         }
         section aria-labelledby="outgoing-head" {
-            h2 #outgoing-head { "Your proposals" @if !out_open.is_empty() { " " span.count { "(" (out_open.len()) ")" } } }
+            h2 #outgoing-head { (t("Your proposals")) @if !out_open.is_empty() { " " span.count { "(" (out_open.len()) ")" } } }
             @if out_open.is_empty() {
-                p.muted { "You have no open proposals." }
+                p.muted { (t("You have no open proposals.")) }
             } @else {
                 div.proposals { @for p in &out_open { (proposal_card(&ctx, p, true)) } }
             }
         }
         section aria-labelledby="contrib-head" {
-            h2 #contrib-head { "Packs you contribute to" }
+            h2 #contrib-head { (t("Packs you contribute to")) }
             @if contributing.is_empty() {
-                p.muted { "None yet. A pack's owner can add you on its page." }
+                p.muted { (t("None yet. A pack's owner can add you on its page.")) }
             } @else {
                 ul.contrib-list { @for s in &contributing { li { (set_link(s)) } } }
             }
         }
         section aria-labelledby="history-head" {
-            h2 #history-head { "Decided" }
+            h2 #history-head { (t("Decided")) }
             @if decided.is_empty() {
-                p.muted { "No decided proposals yet." }
+                p.muted { (t("No decided proposals yet.")) }
             } @else {
                 div.proposals { @for p in &decided { (proposal_card(&ctx, p, true)) } }
             }
         }
     };
-    Ok(ctx.page("Collaboration", Nav::Collaboration, body))
+    Ok(ctx.page(t("Collaboration"), Nav::Collaboration, body))
 }
 
 fn set_link(s: &SetSummary) -> Markup {
     html! {
         a href=(set_url(&s.id)) { (s.name) }
-        " " span.muted { "by " (s.owner_username) " · " (plural(s.item_count, "sticker", "stickers")) }
+        " " span.muted {
+            (tf("by {owner}", &[("owner", &s.owner_username)])) " · " (plural(s.item_count, "sticker", "stickers"))
+        }
     }
 }
 
 fn kind_label(p: &Proposal) -> &'static str {
     match p.kind {
-        ProposalKind::AddItems => "New stickers",
-        ProposalKind::EditItem => "Sticker changes",
-        ProposalKind::EditSet if p.cover_image_url.is_some() || p.changes.is_empty() => "New cover image",
-        ProposalKind::EditSet => "Pack changes",
+        ProposalKind::AddItems => t("New stickers"),
+        ProposalKind::EditItem => t("Sticker changes"),
+        ProposalKind::EditSet if p.cover_image_url.is_some() || p.changes.is_empty() => t("New cover image"),
+        ProposalKind::EditSet => t("Pack changes"),
     }
 }
 
 fn status_badge(s: ProposalStatus) -> Markup {
     let (class, label) = match s {
-        ProposalStatus::Open => ("badge vis-unlisted", "Open"),
-        ProposalStatus::Accepted => ("badge vis-public", "Accepted"),
-        ProposalStatus::Declined => ("badge", "Declined"),
-        ProposalStatus::Withdrawn => ("badge", "Withdrawn"),
+        ProposalStatus::Open => ("badge vis-unlisted", tc("status", "Open")),
+        ProposalStatus::Accepted => ("badge vis-public", t("Accepted")),
+        ProposalStatus::Declined => ("badge", t("Declined")),
+        ProposalStatus::Withdrawn => ("badge", t("Withdrawn")),
     };
     html! { span class=(class) { (label) } }
 }
 
 fn list_text(v: &[String]) -> String {
     if v.is_empty() {
-        "(none)".to_string()
+        t("(none)").to_string()
     } else {
         v.join(", ")
     }
@@ -179,23 +193,23 @@ fn diff_rows(c: &ProposedChanges, b: &ProposedChanges) -> Vec<(&'static str, Str
     let text = |s: &Option<String>| s.clone().unwrap_or_default();
     let mut rows = Vec::new();
     if let Some(n) = &c.name {
-        rows.push(("Name", text(&b.name), n.clone()));
+        rows.push((t("Name"), text(&b.name), n.clone()));
     }
     if let Some(d) = &c.description {
-        rows.push(("Description", text(&b.description), d.clone()));
+        rows.push((t("Description"), text(&b.description), d.clone()));
     }
     for (label, after, before) in [
-        ("Keywords", &c.keywords, &b.keywords),
-        ("Emojis", &c.emojis, &b.emojis),
-        ("Tags", &c.tags, &b.tags),
+        (t("Keywords"), &c.keywords, &b.keywords),
+        (t("Emojis"), &c.emojis, &b.emojis),
+        (t("Tags"), &c.tags, &b.tags),
     ] {
         if let Some(a) = after {
             rows.push((label, list_text(before.as_deref().unwrap_or(&[])), list_text(a)));
         }
     }
     if let Some(v) = &c.vibe {
-        let shown = |v: &Option<String>| v.clone().unwrap_or_else(|| "(none)".into());
-        rows.push(("Vibe", shown(&b.vibe.clone().flatten()), shown(v)));
+        let shown = |v: &Option<String>| v.clone().unwrap_or_else(|| t("(none)").into());
+        rows.push((t("Vibe"), shown(&b.vibe.clone().flatten()), shown(v)));
     }
     rows
 }
@@ -204,7 +218,7 @@ fn cover_thumb(item_id: &Option<String>) -> Markup {
     html! {
         @match item_id {
             Some(id) => { a.mini-thumb href=(item_url(id)) { img src=(file_url(id, Variant::Thumb)) alt="" width="64" height="64" loading="lazy"; } }
-            None => { span.muted { "the first sticker" } }
+            None => { span.muted { (t("the first sticker")) } }
         }
     }
 }
@@ -218,17 +232,21 @@ pub fn proposal_card(ctx: &Ctx, p: &Proposal, link: bool) -> Markup {
                 strong {
                     @if link { a href=(here) { (kind_label(p)) } } @else { (kind_label(p)) }
                 }
-                " for " a href=(set_url(&p.set.id)) { (p.set.name) }
+                " " (t("for")) " " a href=(set_url(&p.set.id)) { (p.set.name) }
                 " " span.muted { "(" (p.set.owner_username) ")" }
                 " " (status_badge(p.status))
                 p.meta.muted {
-                    "from " (p.proposer_username) " · " (fmt_time(p.created_at))
+                    (tf("from {user}", &[("user", &p.proposer_username)])) " · " (fmt_time(p.created_at))
                     @if let (Some(r), Some(at)) = (&p.reviewer_username, p.decided_at) {
-                        " · " (match p.status { ProposalStatus::Accepted => "accepted", _ => "declined" })
-                        " by " (r) " · " (fmt_time(at))
+                        " · "
+                        (match p.status {
+                            ProposalStatus::Accepted => tf("accepted by {user}", &[("user", r)]),
+                            _ => tf("declined by {user}", &[("user", r)]),
+                        })
+                        " · " (fmt_time(at))
                     }
                     @if p.status == ProposalStatus::Withdrawn {
-                        @if let Some(at) = p.decided_at { " · withdrawn " (fmt_time(at)) }
+                        @if let Some(at) = p.decided_at { " · " (tf("withdrawn {time}", &[("time", &fmt_time(at))])) }
                     }
                 }
             }
@@ -243,7 +261,7 @@ pub fn proposal_card(ctx: &Ctx, p: &Proposal, link: bool) -> Markup {
                                 } @else if let Some(url) = &it.thumb_url {
                                     span.mini-thumb { img src=(url) alt=(it.name) width="96" height="96" loading="lazy"; }
                                 } @else {
-                                    span.mini-thumb.gone { "no file" }
+                                    span.mini-thumb.gone { (t("no file")) }
                                 }
                                 div {
                                     strong { (it.name) }
@@ -260,21 +278,21 @@ pub fn proposal_card(ctx: &Ctx, p: &Proposal, link: bool) -> Markup {
                             a.mini-thumb href=(item_url(&item.id)) { img src=(file_url(&item.id, Variant::Thumb)) alt=(item.name) width="64" height="64" loading="lazy"; }
                             a href=(item_url(&item.id)) { (item.name) }
                         } @else {
-                            span.muted { "The sticker was removed." }
+                            span.muted { (t("The sticker was removed.")) }
                         }
                     }
                     (diff_table(&p.changes, &p.before, false))
                 }
                 ProposalKind::EditSet => {
                     @if let Some(url) = &p.cover_image_url {
-                        p { "As the cover image:" }
-                        span.mini-thumb { img src=(url) alt="the proposed cover" width="96" height="96" loading="lazy"; }
+                        p { (t("As the cover image:")) }
+                        span.mini-thumb { img src=(url) alt=(t("the proposed cover")) width="96" height="96" loading="lazy"; }
                     }
                     (diff_table(&p.changes, &p.before, true))
                 }
             }
             @if !p.review_note.is_empty() {
-                p.review-note { strong { "Note: " } (p.review_note) }
+                p.review-note { strong { (t("Note:")) " " } (p.review_note) }
             }
             @if p.can_decide || p.can_withdraw {
                 div.proposal-actions {
@@ -282,17 +300,18 @@ pub fn proposal_card(ctx: &Ctx, p: &Proposal, link: bool) -> Markup {
                         form.inline-row method="post" action=(format!("{here}/accept")) {
                             (ctx.csrf_input())
                             input type="hidden" name="next" value=(ctx.here);
-                            label.sr-only for=(format!("note-{}", p.id)) { "Note for " (p.proposer_username) }
-                            input id=(format!("note-{}", p.id)) type="text" name="note" maxlength="1000" placeholder="A note (optional)";
-                            button.primary type="submit" { "Accept" }
-                            button type="submit" formaction=(format!("{here}/decline")) { "Decline" }
+                            label.sr-only for=(format!("note-{}", p.id)) { (tf("Note for {user}", &[("user", &p.proposer_username)])) }
+                            input id=(format!("note-{}", p.id)) type="text" name="note" maxlength="1000"
+                                placeholder=(t("A note (optional)"));
+                            button.primary type="submit" { (t("Accept")) }
+                            button type="submit" formaction=(format!("{here}/decline")) { (t("Decline")) }
                         }
                     }
                     @if p.can_withdraw {
                         form.inline method="post" action=(format!("{here}/withdraw")) {
                             (ctx.csrf_input())
                             input type="hidden" name="next" value=(ctx.here);
-                            button type="submit" { "Withdraw" }
+                            button type="submit" { (t("Withdraw")) }
                         }
                     }
                 }
@@ -306,13 +325,13 @@ fn diff_table(c: &ProposedChanges, b: &ProposedChanges, set: bool) -> Markup {
     html! {
         @if !rows.is_empty() || (set && c.cover_item_id.is_some()) {
             table.diff {
-                thead { tr { th { "Field" } th { "Now" } th { "Proposed" } } }
+                thead { tr { th { (t("Field")) } th { (t("Now")) } th { (t("Proposed")) } } }
                 tbody {
                     @for (field, before, after) in &rows {
                         tr { th scope="row" { (field) } td.before { (before) } td.after { (after) } }
                     }
                     @if set && c.cover_item_id.is_some() {
-                        tr { th scope="row" { "Cover" } td.before { (cover_thumb(&b.cover_item_id)) } td.after { (cover_thumb(&c.cover_item_id)) } }
+                        tr { th scope="row" { (t("Cover")) } td.before { (cover_thumb(&b.cover_item_id)) } td.after { (cover_thumb(&c.cover_item_id)) } }
                     }
                 }
             }
@@ -323,7 +342,7 @@ fn diff_table(c: &ProposedChanges, b: &ProposedChanges, set: bool) -> Markup {
 pub async fn page(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {
     let p = proposals::get(&state, &ctx.user, &id).await?;
     let body = html! {
-        p.crumbs { a href="/collaboration" { "← Collaboration" } }
+        p.crumbs { a href="/collaboration" { "← " (t("Collaboration")) } }
         h1 { (kind_label(&p)) }
         (proposal_card(&ctx, &p, false))
     };
@@ -374,7 +393,7 @@ pub async fn withdraw(
 
 fn permission_checks(prefix: &str, p: &Permissions) -> Markup {
     html! {
-        @for (key, label, hint) in PERMISSIONS {
+        @for (key, label, hint) in permissions() {
             label.check title=(hint) {
                 input type="checkbox" name=(key) id=(format!("{prefix}-{key}")) checked[perm(p, key)];
                 " " (label)
@@ -389,15 +408,16 @@ pub fn contributors_section(ctx: &Ctx, set: &Set, members: &[Member]) -> Markup 
     let owner = set.role == SetRole::Owner;
     html! {
         section.contributors aria-labelledby="contrib-head" {
-            h2 #contrib-head { "Contributors" }
+            h2 #contrib-head { (t("Contributors")) }
             @if owner {
                 p.muted {
-                    "People you add here see this set (also when it is private) and may change it as you allow. "
-                    "Settings, visibility, contributors and deleting stay yours."
+                    (t("People you add here see this set (also when it is private) and may change it as you allow."))
+                    " "
+                    (t("Settings, visibility, contributors and deleting stay yours."))
                 }
             }
             @if members.is_empty() {
-                p.muted { "No contributors yet." }
+                p.muted { (t("No contributors yet.")) }
             } @else {
                 ul.member-list {
                     @for m in members {
@@ -407,15 +427,15 @@ pub fn contributors_section(ctx: &Ctx, set: &Set, members: &[Member]) -> Markup 
                                 form.inline-row.member-perms method="post" action=(format!("{base}/{}", m.username)) {
                                     (ctx.csrf_input())
                                     (permission_checks(&format!("m-{}", m.username), &m.permissions))
-                                    button type="submit" { "Save" }
-                                    button.danger type="submit" formaction=(format!("{base}/{}/remove", m.username)) { "Remove" }
+                                    button type="submit" { (t("Save")) }
+                                    button.danger type="submit" formaction=(format!("{base}/{}/remove", m.username)) { (t("Remove")) }
                                 }
                             } @else {
                                 " · " span.small { (permissions_summary(&m.permissions)) }
                                 @if m.username.eq_ignore_ascii_case(&ctx.user.user.username) {
                                     form.inline method="post" action=(format!("{base}/{}/remove", m.username)) {
                                         (ctx.csrf_input())
-                                        button type="submit" { "Leave" }
+                                        button type="submit" { (t("Leave")) }
                                     }
                                 }
                             }
@@ -427,15 +447,15 @@ pub fn contributors_section(ctx: &Ctx, set: &Set, members: &[Member]) -> Markup 
                 form.stack.add-member method="post" action=(base) {
                     (ctx.csrf_input())
                     div.field-row {
-                        label for="new-member" { "Add a contributor" }
-                        input #new-member type="text" name="username" required maxlength="64" placeholder="username"
+                        label for="new-member" { (t("Add a contributor")) }
+                        input #new-member type="text" name="username" required maxlength="64" placeholder=(t("username"))
                             autocomplete="off" spellcheck="false" autocapitalize="none";
                     }
                     fieldset.checks {
-                        legend { "They may" }
+                        legend { (t("They may")) }
                         (permission_checks("new", &Permissions::CONTRIBUTOR_DEFAULT))
                     }
-                    button.primary type="submit" { "Add" }
+                    button.primary type="submit" { (t("Add")) }
                 }
             }
         }
@@ -520,46 +540,47 @@ pub async fn remove_member(
 fn propose_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetChangeForm, error: Option<&str>) -> Markup {
     let base = format!("/sets/{}/propose", set.id);
     html! {
-        p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } " by " (set.owner_username) }
-        h1 { "Propose to “" (set.name) "”" }
+        p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } " " (tf("by {owner}", &[("owner", &set.owner_username)])) }
+        h1 { (tf("Propose to “{set}”", &[("set", &set.name)])) }
         p.muted {
-            (set.owner_username) " decides; you see the answer under " a href="/collaboration" { "Collaboration" } ". "
-            "To change one sticker, open it and choose " em { "Suggest changes" } "."
+            (tf("{owner} decides; you see the answer under", &[("owner", &set.owner_username)]))
+            " " a href="/collaboration" { (t("Collaboration")) } ". "
+            (t("To change one sticker, open it and choose")) " " em { (t("Suggest changes")) } "."
         }
         @if let Some(e) = error { (layout::alert("error", e)) }
         section aria-labelledby="p-items" {
-            h2 #p-items { "New stickers" }
+            h2 #p-items { (t("New stickers")) }
             form.stack.narrow method="post" action=(format!("{base}/items")) enctype="multipart/form-data" {
                 (ctx.csrf_input())
                 div.field-row {
-                    label for="p-files" { "Files" }
+                    label for="p-files" { (t("Files")) }
                     input #p-files type="file" name="file" multiple required
                         accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm";
                 }
                 div.field-row {
-                    label for="p-items-msg" { "Message (optional)" }
+                    label for="p-items-msg" { (t("Message (optional)")) }
                     textarea #p-items-msg name="message" rows="2" maxlength="1000" {}
                 }
-                button.primary type="submit" { "Propose stickers" }
+                button.primary type="submit" { (t("Propose stickers")) }
             }
         }
         section aria-labelledby="p-set" {
-            h2 #p-set { "Name, description, cover" }
+            h2 #p-set { (t("Name, description, cover")) }
             form.stack.narrow method="post" action=(format!("{base}/changes")) {
                 (ctx.csrf_input())
                 div.field-row {
-                    label for="p-name" { "Name" }
+                    label for="p-name" { (t("Name")) }
                     input #p-name type="text" name="name" value=(f.name) maxlength="200";
                 }
                 div.field-row {
-                    label for="p-desc" { "Description" }
+                    label for="p-desc" { (t("Description")) }
                     textarea #p-desc name="description" rows="3" maxlength="5000" { (f.description) }
                 }
                 @if !items.is_empty() {
                     div.field-row {
-                        label for="p-cover" { "Cover" }
+                        label for="p-cover" { (t("Cover")) }
                         select #p-cover name="cover" {
-                            option value="" selected[f.cover.is_empty()] { "(keep the cover)" }
+                            option value="" selected[f.cover.is_empty()] { (t("(keep the cover)")) }
                             @for it in items {
                                 option value=(it.id) selected[f.cover == it.id] { (it.name) }
                             }
@@ -567,25 +588,25 @@ fn propose_form(ctx: &Ctx, set: &Set, items: &[Item], f: &SetChangeForm, error: 
                     }
                 }
                 div.field-row {
-                    label for="p-set-msg" { "Message (optional)" }
+                    label for="p-set-msg" { (t("Message (optional)")) }
                     textarea #p-set-msg name="message" rows="2" maxlength="1000" { (f.message) }
                 }
-                button.primary type="submit" { "Propose changes" }
+                button.primary type="submit" { (t("Propose changes")) }
             }
         }
         section aria-labelledby="p-cover-img" {
-            h2 #p-cover-img { "A cover image" }
+            h2 #p-cover-img { (t("A cover image")) }
             form.stack.narrow method="post" action=(format!("{base}/cover")) enctype="multipart/form-data" {
                 (ctx.csrf_input())
                 div.field-row {
-                    label for="p-cover-file" { "Image (PNG, JPEG or WebP)" }
+                    label for="p-cover-file" { (t("Image (PNG, JPEG or WebP)")) }
                     input #p-cover-file type="file" name="file" required accept="image/png,image/jpeg,image/webp";
                 }
                 div.field-row {
-                    label for="p-cover-msg" { "Message (optional)" }
+                    label for="p-cover-msg" { (t("Message (optional)")) }
                     textarea #p-cover-msg name="message" rows="2" maxlength="1000" {}
                 }
-                button.primary type="submit" { "Propose cover image" }
+                button.primary type="submit" { (t("Propose cover image")) }
             }
         }
     }
@@ -618,7 +639,7 @@ pub async fn propose_page(State(state): State<AppState>, ctx: Ctx, Path(id): Pat
         description: d.set.description.clone(),
         ..Default::default()
     };
-    Ok(ctx.page("Propose", Nav::Sets, propose_form(&ctx, &d.set, &d.items, &f, None)))
+    Ok(ctx.page(t("Propose"), Nav::Sets, propose_form(&ctx, &d.set, &d.items, &f, None)))
 }
 
 /// A client error: the propose page again with the message.
@@ -628,7 +649,7 @@ async fn propose_error(state: &AppState, ctx: &Ctx, id: &str, f: &SetChangeForm,
     }
     let d = proposable(state, ctx, id).await?;
     let page = ctx.page(
-        "Propose",
+        t("Propose"),
         Nav::Sets,
         propose_form(ctx, &d.set, &d.items, f, Some(&e.message)),
     );
@@ -727,37 +748,39 @@ fn split_list(s: &str) -> Vec<String> {
 fn suggest_form(ctx: &Ctx, item: &Item, f: &SuggestForm, error: Option<&str>) -> Markup {
     html! {
         p.crumbs { a href=(item_url(&item.id)) { "← " (item.name) } }
-        h1 { "Suggest changes to “" (item.name) "”" }
-        p.muted { "The pack's owner decides; you see the answer under " a href="/collaboration" { "Collaboration" } "." }
+        h1 { (tf("Suggest changes to “{name}”", &[("name", &item.name)])) }
+        p.muted {
+            (t("The pack's owner decides; you see the answer under")) " " a href="/collaboration" { (t("Collaboration")) } "."
+        }
         @if let Some(e) = error { (layout::alert("error", e)) }
         div.preview-small { (thumb(&item.id, &item.name, item.media.width, item.media.height)) }
         form.stack.narrow method="post" action=(format!("/items/{}/suggest", item.id)) {
             (ctx.csrf_input())
             div.field-row {
-                label for="s-name" { "Name" }
+                label for="s-name" { (t("Name")) }
                 input #s-name type="text" name="name" value=(f.name) maxlength="200";
             }
             div.field-row {
-                label for="s-keywords" { "Keywords (comma separated)" }
+                label for="s-keywords" { (t("Keywords (comma separated)")) }
                 input #s-keywords type="text" name="keywords" value=(f.keywords);
             }
             div.field-row {
-                label for="s-emojis" { "Emojis (comma separated)" }
+                label for="s-emojis" { (t("Emojis (comma separated)")) }
                 input #s-emojis type="text" name="emojis" value=(f.emojis);
             }
             div.field-row {
-                label for="s-tags" { "Tags (comma separated)" }
+                label for="s-tags" { (t("Tags (comma separated)")) }
                 input #s-tags type="text" name="tags" value=(f.tags);
             }
             div.field-row {
-                label for="s-vibe" { "Vibe" }
+                label for="s-vibe" { (t("Vibe")) }
                 input #s-vibe type="text" name="vibe" value=(f.vibe) maxlength="64";
             }
             div.field-row {
-                label for="s-msg" { "Message (optional)" }
+                label for="s-msg" { (t("Message (optional)")) }
                 textarea #s-msg name="message" rows="2" maxlength="1000" { (f.message) }
             }
-            button.primary type="submit" { "Send suggestion" }
+            button.primary type="submit" { (t("Send suggestion")) }
         }
     }
 }
@@ -778,7 +801,7 @@ impl SuggestForm {
 pub async fn suggest_page(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {
     let item = item_svc::detail(&state, &ctx.user, &id).await?.item;
     Ok(ctx.page(
-        "Suggest changes",
+        t("Suggest changes"),
         Nav::Sets,
         suggest_form(&ctx, &item, &SuggestForm::from_item(&item), None),
     ))
@@ -808,7 +831,7 @@ pub async fn suggest_submit(
         Ok(p) => Ok(ctx.redirect(&proposal_url(&p.id))),
         Err(e) if e.status.is_client_error() && e.status != StatusCode::NOT_FOUND => {
             let page = ctx.page(
-                "Suggest changes",
+                t("Suggest changes"),
                 Nav::Sets,
                 suggest_form(&ctx, &item, &f, Some(&e.message)),
             );

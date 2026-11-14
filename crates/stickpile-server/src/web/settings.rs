@@ -17,6 +17,7 @@ use super::{safe_next, Ctx};
 use crate::auth::AuthMethod;
 use crate::db::UserRow;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, t_dyn, tf};
 use crate::ids::now;
 use crate::service::users::USERNAME_PATTERN;
 use crate::service::{account, telegram, ui};
@@ -38,21 +39,32 @@ pub fn qr_svg(data: &str) -> Option<String> {
             }
         }
     }
+    let label = html! { (t("QR code for your authenticator app")) }.into_string();
     Some(format!(
-        r##"<svg class="qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="220" height="220" role="img" aria-label="QR code for your authenticator app" shape-rendering="crispEdges"><rect width="{size}" height="{size}" fill="#ffffff"/><path d="{d}" fill="#000000"/></svg>"##
+        r##"<svg class="qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="220" height="220" role="img" aria-label="{label}" shape-rendering="crispEdges"><rect width="{size}" height="{size}" fill="#ffffff"/><path d="{d}" fill="#000000"/></svg>"##
     ))
 }
 
 fn notice_for(done: Option<&str>) -> Option<&'static str> {
     Some(match done? {
-        "profile" => "Profile saved.",
-        "theme" => "Theme saved.",
-        "password" => "Password changed. Your other web sessions were signed out.",
-        "totp-on" => "Two-step verification is on.",
-        "totp-off" => "Two-step verification is off.",
-        "revoked" => "Token revoked.",
+        "profile" => t("Profile saved."),
+        "theme" => t("Theme saved."),
+        "language" => t("Language saved."),
+        "password" => t("Password changed. Your other web sessions were signed out."),
+        "totp-on" => t("Two-step verification is on."),
+        "totp-off" => t("Two-step verification is off."),
+        "revoked" => t("Token revoked."),
         _ => return None,
     })
+}
+
+/// A role (`admin`, `user`) in the request's language.
+fn role_label(role: &str) -> &str {
+    match role {
+        "admin" => t("admin"),
+        "user" => t("user"),
+        other => other,
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -83,151 +95,167 @@ async fn render(
         html! { @if let Some((sec, msg)) = error { @if sec == s { (layout::alert("error", msg)) } } }
     };
     let tailnet = matches!(ctx.user.method, AuthMethod::Tailscale { .. });
-    let t = now();
+    let now_ts = now();
     let body = html! {
-        h1 { "Settings" }
+        h1 { (t("Settings")) }
         @if let Some(n) = notice { (layout::alert("success", n)) }
         section #profile aria-labelledby="s-profile" {
-            h2 #s-profile { "Profile" }
+            h2 #s-profile { (t("Profile")) }
             (err(Section::Profile))
             dl.kv {
-                dt { "Role" } dd { (me.role) }
-                @if let Some(l) = &me.tailscale_login { dt { "Tailnet login" } dd { code { (l) } } }
+                dt { (t("Role")) } dd { (role_label(&me.role)) }
+                @if let Some(l) = &me.tailscale_login { dt { (t("Tailnet login")) } dd { code { (l) } } }
             }
             form.stack.narrow method="post" action="/settings" {
                 (ctx.csrf_input())
                 div.field-row {
-                    label for="s-username" { "Username" }
+                    label for="s-username" { (t("Username")) }
                     input #s-username type="text" name="username" value=(me.username) required
                         minlength="2" maxlength="32" pattern=(USERNAME_PATTERN) autocomplete="username"
                         spellcheck="false" autocapitalize="none" aria-describedby="s-username-hint";
                     p.hint #s-username-hint {
-                        "Shown as the owner of your sets (“by " (me.username) "”), matched by "
-                        code { "by:" } " in search, and used to sign in with a password. "
-                        "2–32 letters, digits, " code { "_" } ", " code { "." } " or " code { "-" } "."
+                        (tf("Shown as the owner of your sets (“by {username}”), matched by", &[("username", &me.username)]))
+                        " " code { "by:" } " " (t("in search, and used to sign in with a password.")) " "
+                        (t("2–32 letters, digits,")) " " code { "_" } ", " code { "." } " " (t("or")) " " code { "-" } "."
                     }
                 }
                 div.field-row {
-                    label for="s-display" { "Display name" }
+                    label for="s-display" { (t("Display name")) }
                     input #s-display type="text" name="display_name" value=(me.display_name) maxlength="100";
                 }
                 div.field-row {
-                    label for="s-tg" { "Telegram user id" }
+                    label for="s-tg" { (t("Telegram user id")) }
                     input #s-tg type="text" inputmode="numeric" pattern="[0-9]*" name="telegram_user_id"
                         value=(me.telegram_user_id.map(|v| v.to_string()).unwrap_or_default()) aria-describedby="s-tg-hint";
                     p.hint #s-tg-hint {
-                        "Numeric id of your Telegram account; sticker packs you publish belong to it. "
-                        "Ask @userinfobot in Telegram for it. Empty clears it."
-                        @if !telegram::enabled(state) { " (Telegram publishing is not enabled on this server.)" }
+                        (t("Numeric id of your Telegram account; sticker packs you publish belong to it."))
+                        " " (t("Ask @userinfobot in Telegram for it. Empty clears it."))
+                        @if !telegram::enabled(state) { " " (t("(Telegram publishing is not enabled on this server.)")) }
                     }
                 }
-                button.primary type="submit" { "Save profile" }
+                button.primary type="submit" { (t("Save profile")) }
             }
         }
         section #appearance aria-labelledby="s-appearance" {
-            h2 #s-appearance { "Appearance" }
+            h2 #s-appearance { (t("Appearance")) }
             (err(Section::Appearance))
             form.stack.narrow method="post" action="/settings/theme" {
                 (ctx.csrf_input())
                 input type="hidden" name="next" value="/settings?done=theme#appearance";
                 fieldset.field-row aria-describedby="s-theme-hint" {
-                    legend { "Theme" }
-                    @for (t, label, hint) in [
-                        (Theme::System, "System", "follow the light or dark setting of your device"),
-                        (Theme::Light, "Light", "always light"),
-                        (Theme::Dark, "Dark", "always dark"),
+                    legend { (t("Theme")) }
+                    @for (theme, label, hint) in [
+                        (Theme::System, t("System"), t("follow the light or dark setting of your device")),
+                        (Theme::Light, t("Light"), t("always light")),
+                        (Theme::Dark, t("Dark"), t("always dark")),
                     ] {
                         label.radio {
-                            input type="radio" name="theme" value=(t.as_str()) checked[me.theme() == t];
+                            input type="radio" name="theme" value=(theme.as_str()) checked[me.theme() == theme];
                             " " strong { (label) } " — " (hint)
                         }
                     }
                     p.hint #s-theme-hint {
-                        "Saved with your account, so it follows you to other devices. "
-                        "The moon or sun button in the top bar switches between light and dark at once."
+                        (t("Saved with your account, so it follows you to other devices."))
+                        " " (t("The moon or sun button in the top bar switches between light and dark at once."))
                     }
                 }
-                button.primary type="submit" { "Save theme" }
+                button.primary type="submit" { (t("Save theme")) }
+            }
+            form.stack.narrow method="post" action="/settings/language" {
+                (ctx.csrf_input())
+                div.field-row {
+                    label for="s-language" { (t("Language")) }
+                    select #s-language name="language" aria-describedby="s-language-hint" {
+                        option value="" selected[me.lang().is_none()] { (t("Automatic (your browser's language)")) }
+                        @for l in crate::i18n::Lang::ALL {
+                            option value=(l.code()) selected[me.lang() == Some(l)] lang=(l.code()) { (l.native_name()) }
+                        }
+                    }
+                    p.hint #s-language-hint {
+                        (t("Saved with your account: the desktop client follows it unless it has a language of its own."))
+                    }
+                }
+                button.primary type="submit" { (t("Save language")) }
             }
         }
         section #password aria-labelledby="s-password" {
-            h2 #s-password { "Password" }
+            h2 #s-password { (t("Password")) }
             (err(Section::Password))
             @if tailnet && me.password_hash.is_none() {
-                p.muted { "You sign in through the tailnet. Set a password to also sign in from elsewhere or to create tokens with the CLI's login." }
+                p.muted { (t("You sign in through the tailnet. Set a password to also sign in from elsewhere or to create tokens with the CLI's login.")) }
             } @else if tailnet {
-                p.muted { "You are signed in through the tailnet, so the current password is not needed to set a new one." }
+                p.muted { (t("You are signed in through the tailnet, so the current password is not needed to set a new one.")) }
             }
             form.stack.narrow method="post" action="/settings/password" {
                 (ctx.csrf_input())
                 input.sr-only type="text" name="username" value=(me.username) autocomplete="username" tabindex="-1" aria-hidden="true";
                 @if me.password_hash.is_some() && !tailnet {
                     div.field-row {
-                        label for="s-cur" { "Current password" }
+                        label for="s-cur" { (t("Current password")) }
                         input #s-cur type="password" name="current_password" required autocomplete="current-password";
                     }
                 }
                 div.field-row {
-                    label for="s-new" { "New password" }
+                    label for="s-new" { (t("New password")) }
                     input #s-new type="password" name="new_password" required minlength=(state.config.auth.min_password_length) autocomplete="new-password";
                 }
                 div.field-row {
-                    label for="s-new2" { "Repeat the new password" }
+                    label for="s-new2" { (t("Repeat the new password")) }
                     input #s-new2 type="password" name="new_password2" required minlength=(state.config.auth.min_password_length) autocomplete="new-password";
                 }
-                button.primary type="submit" { "Change password" }
-                p.hint { "Changing it signs out your other browser sessions. API tokens keep working; revoke them below if needed." }
+                button.primary type="submit" { (t("Change password")) }
+                p.hint { (t("Changing it signs out your other browser sessions. API tokens keep working; revoke them below if needed.")) }
             }
         }
         section #totp aria-labelledby="s-totp" {
-            h2 #s-totp { "Two-step verification (TOTP)" }
+            h2 #s-totp { (t("Two-step verification (TOTP)")) }
             (err(Section::Totp))
             @if me.totp_secret.is_some() {
-                p { "On. Signing in with a password also needs a code from your authenticator app." }
+                p { (t("On. Signing in with a password also needs a code from your authenticator app.")) }
                 form.inline-row method="post" action="/settings/totp/disable" {
                     (ctx.csrf_input())
-                    label for="s-totp-off" { "Current code" }
+                    label for="s-totp-off" { (t("Current code")) }
                     input #s-totp-off type="text" name="code" required inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code";
-                    button.danger type="submit" { "Turn off" }
+                    button.danger type="submit" { (t("Turn off")) }
                 }
             } @else {
-                p { "Off. Add a code from an authenticator app to password sign-ins." }
+                p { (t("Off. Add a code from an authenticator app to password sign-ins.")) }
                 form.inline method="post" action="/settings/totp" {
                     (ctx.csrf_input())
-                    button type="submit" { "Set up two-step verification" }
+                    button type="submit" { (t("Set up two-step verification")) }
                 }
             }
         }
         section #tokens aria-labelledby="s-tokens" {
-            h2 #s-tokens { "API tokens" }
-            p { "For the CLI, the desktop client and scripts. A token acts as you; keep it secret." }
+            h2 #s-tokens { (t("API tokens")) }
+            p { (t("For the CLI, the desktop client and scripts. A token acts as you; keep it secret.")) }
             (err(Section::Tokens))
             @if tokens.is_empty() {
-                p.muted { "No tokens." }
+                p.muted { (t("No tokens.")) }
             } @else {
                 div.table-wrap { table.data {
                     thead { tr {
-                        th scope="col" { "Name" } th scope="col" { "Token" } th scope="col" { "Created" }
-                        th scope="col" { "Last used" } th scope="col" { "Expires" } th scope="col" { span.sr-only { "Actions" } }
+                        th scope="col" { (t("Name")) } th scope="col" { (t("Token")) } th scope="col" { (t("Created")) }
+                        th scope="col" { (t("Last used")) } th scope="col" { (t("Expires")) } th scope="col" { span.sr-only { (t("Actions")) } }
                     } }
                     tbody {
                         @for tok in &tokens {
-                            @let expired = tok.expires_at.is_some_and(|e| e <= t);
+                            @let expired = tok.expires_at.is_some_and(|e| e <= now_ts);
                             tr.revoked[tok.revoked || expired] {
                                 th scope="row" { (tok.name) }
                                 td { code { (tok.prefix) "…" } }
                                 td { (time_el(tok.created_at)) }
                                 td { (opt_time(tok.last_used_at)) }
                                 td {
-                                    @match tok.expires_at { Some(e) => (time_el(e)), None => span.muted { "never" } }
+                                    @match tok.expires_at { Some(e) => (time_el(e)), None => span.muted { (t("never")) } }
                                 }
                                 td {
-                                    @if tok.revoked { span.muted { "revoked" } }
-                                    @else if expired { span.muted { "expired" } }
+                                    @if tok.revoked { span.muted { (t("revoked")) } }
+                                    @else if expired { span.muted { (t("expired")) } }
                                     @else {
                                         form.inline method="post" action=(format!("/settings/tokens/{}/revoke", tok.id)) {
                                             (ctx.csrf_input())
-                                            button.small.danger type="submit" { "Revoke" span.sr-only { " " (tok.name) } }
+                                            button.small.danger type="submit" { (t("Revoke")) span.sr-only { " " (tok.name) } }
                                         }
                                     }
                                 }
@@ -238,24 +266,24 @@ async fn render(
             }
             // A panel of its own, apart from the list above.
             form.token-form method="post" action="/settings/tokens" aria-labelledby="s-tok-new" {
-                h3 #s-tok-new { "New token" }
+                h3 #s-tok-new { (t("New token")) }
                 (ctx.csrf_input())
                 div.inline-row {
-                    label for="s-tok-name" { "Name" }
-                    input #s-tok-name type="text" name="name" required maxlength="100" placeholder="laptop desktop client";
-                    label for="s-tok-exp" { "Expires" }
+                    label for="s-tok-name" { (t("Name")) }
+                    input #s-tok-name type="text" name="name" required maxlength="100" placeholder=(t("laptop desktop client"));
+                    label for="s-tok-exp" { (t("Expires")) }
                     select #s-tok-exp name="expires_days" {
-                        option value="" { "never" }
-                        option value="30" { "in 30 days" }
-                        option value="90" { "in 90 days" }
-                        option value="365" { "in a year" }
+                        option value="" { (t("never")) }
+                        option value="30" { (t("in 30 days")) }
+                        option value="90" { (t("in 90 days")) }
+                        option value="365" { (t("in a year")) }
                     }
-                    button.primary type="submit" { "Create token" }
+                    button.primary type="submit" { (t("Create token")) }
                 }
             }
         }
     };
-    Ok(ctx.page("Settings", Nav::Settings, body))
+    Ok(ctx.page(t("Settings"), Nav::Settings, body))
 }
 
 pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<DoneQuery>) -> AppResult<Markup> {
@@ -266,10 +294,8 @@ async fn failed(state: &AppState, ctx: &Ctx, section: Section, e: AppError) -> A
     if e.status.is_server_error() {
         return Err(e);
     }
-    let mut msg = e.message.clone();
-    if let Some(first) = msg.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
+    // In the request's language when the catalog has the message.
+    let msg = capitalize(&t_dyn(&e.message));
     let page = render(state, ctx, None, Some((section, &msg))).await?;
     let mut resp = (e.status, page).into_response();
     if let Some(s) = e.retry_after {
@@ -314,6 +340,7 @@ pub async fn profile(State(state): State<AppState>, ctx: Ctx, Form(f): Form<Prof
         display_name: Some(f.display_name.trim().to_string()),
         telegram_user_id: Some(telegram_user_id),
         theme: None,
+        language: None,
     };
     match account::update_me(&state, &ctx.user, req).await {
         Ok(_) => Ok(ctx.redirect("/settings?done=profile")),
@@ -365,6 +392,25 @@ pub async fn theme(
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub struct LanguageForm {
+    #[serde(default)]
+    language: String,
+}
+
+/// The language from the settings form (empty: automatic).
+pub async fn language(State(state): State<AppState>, ctx: Ctx, Form(f): Form<LanguageForm>) -> AppResult<Response> {
+    let code = f.language.trim();
+    let req = UpdateMe {
+        language: Some((!code.is_empty()).then(|| code.to_string())),
+        ..Default::default()
+    };
+    if let Err(e) = account::update_me(&state, &ctx.user, req).await {
+        return failed(&state, &ctx, Section::Appearance, e).await;
+    }
+    Ok(ctx.redirect("/settings?done=language#appearance"))
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub struct PasswordForm {
     #[serde(default)]
     current_password: Option<String>,
@@ -394,6 +440,15 @@ pub async fn password(State(state): State<AppState>, ctx: Ctx, Form(f): Form<Pas
     }
 }
 
+/// `s` with its first letter in upper case (any script).
+pub(super) fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 fn enrol_page(ctx: &Ctx, secret: &str, otpauth_url: &str, error: Option<&str>) -> Markup {
     let qr = qr_svg(otpauth_url);
     let grouped: String = secret
@@ -404,32 +459,32 @@ fn enrol_page(ctx: &Ctx, secret: &str, otpauth_url: &str, error: Option<&str>) -
         .collect::<Vec<_>>()
         .join(" ");
     let body = html! {
-        p.crumbs { a href="/settings#totp" { "← Settings" } }
-        h1 { "Set up two-step verification" }
+        p.crumbs { a href="/settings#totp" { "← " (t("Settings")) } }
+        h1 { (t("Set up two-step verification")) }
         @if let Some(e) = error { (layout::alert("error", e)) }
         ol.steps {
             li {
-                "Scan this code with an authenticator app (Aegis, 2FAS, Google Authenticator, …)."
+                (t("Scan this code with an authenticator app (Aegis, 2FAS, Google Authenticator, …)."))
                 @if let Some(svg) = qr { div.qr-box { (trusted(svg)) } }
             }
             li {
-                "Or enter the key by hand: " code.secret { (grouped) }
-                " (time-based, 6 digits, 30 seconds)."
+                (t("Or enter the key by hand:")) " " code.secret { (grouped) }
+                " " (t("(time-based, 6 digits, 30 seconds)."))
             }
             li {
-                "Enter the code the app shows to finish:"
+                (t("Enter the code the app shows to finish:"))
                 form.inline-row method="post" action="/settings/totp/confirm" {
                     (ctx.csrf_input())
-                    label for="totp-code" { "Code" }
+                    label for="totp-code" { (t("Code")) }
                     input #totp-code type="text" name="code" required inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"
                         autocomplete="one-time-code" autofocus;
-                    button.primary type="submit" { "Turn on" }
+                    button.primary type="submit" { (t("Turn on")) }
                 }
             }
         }
-        p.muted { "Until you confirm, sign-in works as before. Starting again replaces this key." }
+        p.muted { (t("Until you confirm, sign-in works as before. Starting again replaces this key.")) }
     };
-    ctx.page("Two-step verification", Nav::Settings, body)
+    ctx.page(t("Two-step verification"), Nav::Settings, body)
 }
 
 pub async fn totp_begin(State(state): State<AppState>, ctx: Ctx) -> AppResult<Response> {
@@ -464,7 +519,7 @@ pub async fn totp_confirm(State(state): State<AppState>, ctx: Ctx, Form(f): Form
                             &ctx,
                             secret,
                             &url,
-                            Some("That code is not valid. Check the time on your phone and try again."),
+                            Some(t("That code is not valid. Check the time on your phone and try again.")),
                         ),
                     )
                         .into_response())
@@ -506,18 +561,18 @@ pub async fn token_create(State(state): State<AppState>, ctx: Ctx, Form(f): Form
         Err(e) => return failed(&state, &ctx, Section::Tokens, e).await,
     };
     let body = html! {
-        p.crumbs { a href="/settings#tokens" { "← Settings" } }
-        h1 { "New API token" }
+        p.crumbs { a href="/settings#tokens" { "← " (t("Settings")) } }
+        h1 { (t("New API token")) }
         section.secret-box {
-            p { "Token " strong { (created.info.name) } ". " strong { "Copy it now: it is not shown again." } }
+            p { (t("Token")) " " strong { (created.info.name) } ". " strong { (t("Copy it now: it is not shown again.")) } }
             p { code.secret.copyable { (created.token) } }
             p.hint {
-                "Use it as " code { "Authorization: Bearer <token>" } ", or paste it into the CLI or desktop client settings."
+                (t("Use it as")) " " code { "Authorization: Bearer <token>" } ", " (t("or paste it into the CLI or desktop client settings."))
             }
         }
-        p { a.button href="/settings#tokens" { "Done" } }
+        p { a.button href="/settings#tokens" { (t("Done")) } }
     };
-    Ok(ctx.page("New API token", Nav::Settings, body).into_response())
+    Ok(ctx.page(t("New API token"), Nav::Settings, body).into_response())
 }
 
 pub async fn token_revoke(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {

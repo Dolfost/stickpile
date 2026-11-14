@@ -211,13 +211,15 @@ async fn load_clip(config: &Config) -> anyhow::Result<Arc<dyn Enricher>> {
 }
 
 /// The whole HTTP application: API, static assets, web UI, and the
-/// middleware stack (trace -> security headers -> auth -> API error JSON).
+/// middleware stack (trace -> security headers -> auth -> language -> API
+/// error JSON).
 pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(api::routes(&state))
         .merge(assets::routes())
         .merge(web::routes())
         .layer(from_fn(api::normalize_errors))
+        .layer(from_fn(crate::i18n::middleware))
         .layer(from_fn_with_state(state.clone(), auth::auth_middleware))
         .layer(from_fn_with_state(state.clone(), security::security_headers))
         .layer(TraceLayer::new_for_http())

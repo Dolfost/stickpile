@@ -51,6 +51,7 @@ use stickpile_api::ApiError;
 
 use crate::auth::{AuthMethod, AuthOutcome, CurrentUser, CSRF_FORM_FIELD, CSRF_HEADER};
 use crate::error::{code_for_status, AppError, AppResult};
+use crate::i18n::t;
 use crate::security::check_same_origin;
 use crate::state::AppState;
 
@@ -123,6 +124,7 @@ pub fn routes() -> Router<AppState> {
         // settings
         .route("/settings", get(settings::page).post(settings::profile))
         .route("/settings/theme", post(settings::theme))
+        .route("/settings/language", post(settings::language))
         .route("/settings/password", post(settings::password))
         .route("/settings/totp", post(settings::totp_begin))
         .route("/settings/totp/confirm", post(settings::totp_confirm))
@@ -480,7 +482,7 @@ fn login_redirect(htmx: bool, method: &Method, target: &str) -> Response {
     if htmx {
         let mut r = (
             StatusCode::UNAUTHORIZED,
-            html! { p { "Your session has ended. " a href="/login" { "Sign in again" } "." } },
+            html! { p { (t("Your session has ended.")) " " a href="/login" { (t("Sign in again")) } "." } },
         )
             .into_response();
         r.headers_mut()

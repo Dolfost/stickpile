@@ -1,0 +1,33 @@
+# Ukrainian: web. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+# Page shell (layout.rs): skip link, navigation, top bar, theme switch.
+Skip to content	Перейти до вмісту
+Main	Основна навігація
+Home	Головна
+Collaboration	Співпраця
+page::Upload	Завантаження
+Popular	Популярне
+Stats	Статистика
+Problems	Проблеми
+Admin	Адміністрування
+Search…	Пошук…
+Signed in as {username}	Ви увійшли як {username}
+Signed in through the tailnet as {login}	Ви увійшли через tailnet як {login}
+Sign out	Вийти
+Dark theme	Темна тема
+# Error pages (layout.rs, mod.rs).
+Not found	Не знайдено
+This page does not exist, or you do not have access to it.	Цієї сторінки не існує, або у вас немає до неї доступу.
+Request blocked	Запит заблоковано
+The form was submitted from another site or has expired. Reload the page and try again.	Форму надіслано з іншого сайту, або вона застаріла. Оновіть сторінку й спробуйте ще раз.
+Not allowed	Заборонено
+This address does not accept that kind of request.	Ця адреса не приймає такого запиту.
+Too many requests	Забагато запитів
+Slow down a little and try again in a minute.	Трохи зачекайте й спробуйте ще раз за хвилину.
+Something went wrong	Щось пішло не так
+The server could not complete the request. The details are in the server log.	Серверу не вдалося виконати запит. Подробиці в журналі сервера.
+Request failed	Запит не вдався
+Go to the start page	Перейти на початкову сторінку
+or	або
+sign in	увійти
+Your session has ended.	Ваш сеанс завершився.
+Sign in again	Увійти знову

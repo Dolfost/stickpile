@@ -16,9 +16,11 @@ use stickpile_api::{routes, ImportReport, NearDuplicate, SetSummary, UploadResul
 
 use super::components::{item_url, plural, set_url, thumb};
 use super::layout::{self, Nav};
+use super::sets::rich;
 use super::{integrations, Ctx, MultipartCaller};
 use crate::authz;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{t, t_dyn, tc, tf};
 use crate::service::upload::{self, field_text, field_to_file, multipart_error, UploadParts};
 use crate::service::{sets, transfer, ui};
 use crate::state::{AiStatus, AppState};
@@ -46,7 +48,9 @@ fn ai_attrs(state: &AppState) -> (&'static str, Option<&'static str>) {
 }
 
 /// What an upload without files gets, inline (htmx) or above the form.
-const NO_FILES: &str = "Choose at least one file to upload: pick them, drop them on the form or paste an image.";
+fn no_files_message() -> &'static str {
+    t("Choose at least one file to upload: pick them, drop them on the form or paste an image.")
+}
 
 /// The upload form. `set_id` fixes the target set (set page); otherwise the
 /// form has a set selector over `sets`.
@@ -85,7 +89,7 @@ fn form(
             datalist id=(vibes_id) { @for v in &vibes { option value=(v) {} } }
             @if set_id.is_none() {
                 div.field-row {
-                    label for="upload-set" { "Add to set" }
+                    label for="upload-set" { (t("Add to set")) }
                     select #upload-set name="set_id" required {
                         @for s in sets {
                             option value=(s.id) selected[selected == Some(s.id.as_str())] { (s.name) }
@@ -95,15 +99,15 @@ fn form(
             }
             div.dropzone data-dropzone="" {
                 label for=(format!("upload-files-{key}")) {
-                    strong { "Choose files" } " or drop them here"
+                    strong { (t("Choose files")) } " " (t("or drop them here"))
                     // Shown by upload.js, which handles the paste.
-                    span.paste-hint hidden { ", or paste an image with Ctrl+V" }
+                    span.paste-hint hidden { ", " (t("or paste an image with Ctrl+V")) }
                 }
                 input id=(format!("upload-files-{key}")) type="file" name="file" multiple required accept=(ACCEPT);
-                p.hint { "PNG, JPEG, WebP, GIF, MP4 or WebM. The type is detected from the content; metadata is stripped." }
+                p.hint { (t("PNG, JPEG, WebP, GIF, MP4 or WebM. The type is detected from the content; metadata is stripped.")) }
             }
-            button.primary type="submit" { "Upload" }
-            span.busy aria-hidden="true" { "Uploading…" }
+            button.primary type="submit" { (t("Upload")) }
+            span.busy aria-hidden="true" { (t("Uploading…")) }
         }
         div.upload-results id=(results_id) aria-live="polite" {}
     }
@@ -126,32 +130,39 @@ pub fn import_form(ctx: &Ctx, into: Option<&str>) -> Markup {
                 (ctx.csrf_input())
                 (input)
                 button type="submit" { (button) }
-                span.busy aria-hidden="true" { "Importing…" }
+                span.busy aria-hidden="true" { (t("Importing…")) }
             }
         }
     };
     html! {
         @if into.is_some() {
             p.warning {
-                "The set becomes equal to the directory: matching files get the directory's metadata, new files are added, "
-                strong { "items missing from the directory are removed" } ", and the order follows the file names."
+                (t("The set becomes equal to the directory: matching files get the directory's metadata, new files are added,"))
+                " " strong { (t("items missing from the directory are removed")) } ", "
+                (t("and the order follows the file names."))
             }
         } @else {
-            p.hint { "A set directory holds a " code { "set.toml" } " and the media files (" code { "001-cat.png" } ", …). Exports of other stickpile servers work too." }
+            p.hint {
+                (rich(
+                    t("A set directory holds a {file} and the media files ({example}, …)."),
+                    &[("file", html! { code { "set.toml" } }), ("example", html! { code { "001-cat.png" } })],
+                ))
+                " " (t("Exports of other stickpile servers work too."))
+            }
         }
         div.import-forms {
             (form("folder", html! {
                 div.field-row {
-                    label for=(format!("import-dir-{key}")) { "Set folder" }
+                    label for=(format!("import-dir-{key}")) { (t("Set folder")) }
                     input id=(format!("import-dir-{key}")) type="file" name="files" webkitdirectory multiple required;
                 }
-            }, "Import folder"))
+            }, t("Import folder")))
             (form("archive", html! {
                 div.field-row {
-                    label for=(format!("import-tar-{key}")) { "Or an export archive (.tar)" }
+                    label for=(format!("import-tar-{key}")) { (t("Or an export archive (.tar)")) }
                     input id=(format!("import-tar-{key}")) type="file" name="archive" accept=".tar,application/x-tar" required;
                 }
-            }, "Import archive"))
+            }, t("Import archive")))
         }
         div.import-results id=(results_id) aria-live="polite" {}
     }
@@ -171,23 +182,23 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Uploa
 async fn upload_page(state: &AppState, ctx: &Ctx, selected: Option<&str>, error: Option<&str>) -> AppResult<Markup> {
     let sets = ui::editable_sets(state, &ctx.user).await?;
     let body = html! {
-        h1 { "Upload" }
+        h1 { (tc("page", "Upload")) }
         section aria-labelledby="up-files" {
-            h2 #up-files { "Add files to a set" }
+            h2 #up-files { (t("Add files to a set")) }
             @if sets.is_empty() {
-                p { "You need a set first. " a.button href="/sets/new" { "Create a set" } }
+                p { (t("You need a set first.")) " " a.button href="/sets/new" { (t("Create a set")) } }
             } @else {
                 @if let Some(e) = error { (layout::alert("error", e)) }
                 (form(ctx, state, None, None, &sets, selected))
             }
         }
         section #import aria-labelledby="up-import" {
-            h2 #up-import { "Import a set directory as a new set" }
+            h2 #up-import { (t("Import a set directory as a new set")) }
             (import_form(ctx, None))
         }
         (integrations::upload_page_links(state))
     };
-    Ok(ctx.page("Upload", Nav::Upload, body))
+    Ok(ctx.page(tc("page", "Upload"), Nav::Upload, body))
 }
 
 /// An upload without files (the form requires them, so only a browser that
@@ -195,7 +206,7 @@ async fn upload_page(state: &AppState, ctx: &Ctx, selected: Option<&str>, error:
 /// message where the results would appear (htmx) or above the form again.
 async fn no_files(state: &AppState, ctx: &Ctx, set_id: &str, path_set: Option<&str>) -> AppResult<Response> {
     if ctx.htmx {
-        return Ok((StatusCode::BAD_REQUEST, layout::alert("error", NO_FILES)).into_response());
+        return Ok((StatusCode::BAD_REQUEST, layout::alert("error", no_files_message())).into_response());
     }
     let page = match path_set {
         Some(id) => {
@@ -203,13 +214,13 @@ async fn no_files(state: &AppState, ctx: &Ctx, set_id: &str, path_set: Option<&s
             let set = sets::detail(state, &ctx.user, id).await?.set;
             let body = html! {
                 p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
-                h1 { "Add items to “" (set.name) "”" }
-                (layout::alert("error", NO_FILES))
+                h1 { (tf("Add items to “{name}”", &[("name", &set.name)])) }
+                (layout::alert("error", no_files_message()))
                 (upload_form(ctx, state, &set.id, set.aspect_ratio))
             };
-            ctx.page("Upload", Nav::Upload, body)
+            ctx.page(tc("page", "Upload"), Nav::Upload, body)
         }
-        None => upload_page(state, ctx, Some(set_id), Some(NO_FILES)).await?,
+        None => upload_page(state, ctx, Some(set_id), Some(no_files_message())).await?,
     };
     Ok((StatusCode::BAD_REQUEST, page).into_response())
 }
@@ -292,11 +303,11 @@ async fn do_upload(
         Ok(html! { (fragment) (grid) }.into_response())
     } else {
         let body = html! {
-            p.crumbs { a href=(set_url(&set_id)) { "← back to the set" } }
-            h1 { "Upload results" }
+            p.crumbs { a href=(set_url(&set_id)) { "← " (t("back to the set")) } }
+            h1 { (t("Upload results")) }
             (fragment)
         };
-        Ok(ctx.page("Upload results", Nav::Upload, body).into_response())
+        Ok(ctx.page(t("Upload results"), Nav::Upload, body).into_response())
     }
 }
 
@@ -328,11 +339,17 @@ pub async fn upload_to_set(
 fn near_dup_line(n: &NearDuplicate) -> Markup {
     html! {
         li.near-dup {
-            "You already have this in set "
+            (t("You already have this in set")) " "
             a href=(set_url(&n.existing.set_id)) { (n.existing.set_name) }
             ": "
             a href=(item_url(&n.existing.id)) { (n.existing.name) }
-            @if n.same_content { " (the same file)" } @else { " (looks the same, distance " (n.distance) ")" }
+            " ("
+            @if n.same_content {
+                (t("the same file"))
+            } @else {
+                (tf("looks the same, distance {distance}", &[("distance", &n.distance)]))
+            }
+            ")"
         }
     }
 }
@@ -345,9 +362,9 @@ pub fn upload_results(results: &[UploadResult], set_id: &str) -> Markup {
         div.results {
             p.summary {
                 strong { (plural(added, "file added", "files added")) }
-                @if present > 0 { ", " (present) " already in the set" }
-                @if failed > 0 { ", " span.error-text { (failed) " failed" } }
-                " · " a href=(set_url(set_id)) { "open the set" }
+                @if present > 0 { ", " (tf("{n} already in the set", &[("n", &present)])) }
+                @if failed > 0 { ", " span.error-text { (tf("{n} failed", &[("n", &failed)])) } }
+                " · " a href=(set_url(set_id)) { (t("open the set")) }
             }
             ul.result-list {
                 @for r in results {
@@ -358,11 +375,11 @@ pub fn upload_results(results: &[UploadResult], set_id: &str) -> Markup {
                         div {
                             strong { (r.file) }
                             @if let Some(e) = &r.error {
-                                " — " span.error-text { (e) }
+                                " — " span.error-text { (t_dyn(e)) }
                             } @else if r.already_in_set {
-                                " — already in this set"
+                                " — " (t("already in this set"))
                             } @else if let Some(item) = &r.item {
-                                " — added as " a href=(item_url(&item.id)) { (item.name) }
+                                " — " (t("added as")) " " a href=(item_url(&item.id)) { (item.name) }
                             }
                             @if !r.near_duplicates.is_empty() {
                                 ul.near-dups { @for n in &r.near_duplicates { (near_dup_line(n)) } }
@@ -395,10 +412,10 @@ async fn do_import(state: &AppState, caller: MultipartCaller, req: Request, into
         Ok(html! { (fragment) (grid) }.into_response())
     } else {
         let body = html! {
-            h1 { "Import results" }
+            h1 { (t("Import results")) }
             (fragment)
         };
-        Ok(ctx.page("Import results", Nav::Upload, body).into_response())
+        Ok(ctx.page(t("Import results"), Nav::Upload, body).into_response())
     }
 }
 
@@ -419,28 +436,28 @@ pub fn import_report(r: &ImportReport) -> Markup {
     html! {
         div.results {
             @if let Some(set) = &r.set {
-                (layout::alert("success", &format!("Imported into “{}”.", set.name)))
-                p { a.button.primary href=(set_url(&set.id)) { "Open the set" } }
+                (layout::alert("success", &tf("Imported into “{name}”.", &[("name", &set.name)])))
+                p { a.button.primary href=(set_url(&set.id)) { (t("Open the set")) } }
             }
             dl.kv {
-                dt { "Added" } dd { (r.created) }
-                dt { "Updated" } dd { (r.updated) }
-                dt { "Unchanged" } dd { (r.unchanged) }
-                dt { "Removed" } dd { (r.removed) }
+                dt { (t("Added")) } dd { (r.created) }
+                dt { (t("Updated")) } dd { (r.updated) }
+                dt { (t("Unchanged")) } dd { (r.unchanged) }
+                dt { (t("Removed")) } dd { (r.removed) }
             }
             @if !r.errors.is_empty() {
-                h3 { "Problems" }
+                h3 { (t("Problems")) }
                 ul.result-list {
                     @for e in &r.errors {
                         li.err {
                             @if !e.file.is_empty() { strong { (e.file) } " — " }
-                            span.error-text { (e.message) }
+                            span.error-text { (t_dyn(&e.message)) }
                         }
                     }
                 }
             }
             @if !r.near_duplicates.is_empty() {
-                h3 { "Already in your library" }
+                h3 { (t("Already in your library")) }
                 ul.near-dups { @for n in &r.near_duplicates { (near_dup_line(n)) } }
             }
         }

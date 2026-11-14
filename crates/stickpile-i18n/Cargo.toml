@@ -1,0 +1,15 @@
+[package]
+name = "stickpile-i18n"
+description = "Translations of the web UI and the clients (English and Ukrainian)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

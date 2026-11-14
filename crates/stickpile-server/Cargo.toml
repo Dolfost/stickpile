@@ -19,6 +19,7 @@ clip = ["stickpile-ai/clip"]
 [dependencies]
 stickpile-api = { workspace = true, features = ["openapi"] }
 stickpile-search.workspace = true
+stickpile-i18n.workspace = true
 stickpile-setfmt.workspace = true
 stickpile-media.workspace = true
 stickpile-ai.workspace = true

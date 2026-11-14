@@ -1,0 +1,233 @@
+# Ukrainian: web-sets. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+
+# Sets: browse, create, settings, cover, delete (web/sets.rs)
+Mine	Мої
+Public	Публічний
+Private	Приватний
+Unlisted	За посиланням
+Which sets	Які набори
+New set	Новий набір
+Import a set directory	Імпортувати каталог набору
+Public sets of every user on this server. Unlisted sets are only reachable by their link.	Публічні набори всіх користувачів цього сервера. Набори "за посиланням" відкриваються лише за своїм посиланням.
+Your own sets, most recently changed first.	Ваші набори, спершу нещодавно змінені.
+No public sets yet.	Публічних наборів ще немає.
+You have no sets yet.	У вас ще немає наборів.
+Slug	Коротка назва
+Lowercase letters, digits and dashes; used in {filter} searches and as the export folder name.	Малі латинські літери, цифри й дефіси; використовується в пошуку {filter} і як назва теки експорту.
+Leave empty to derive it from the name.	Залиште порожньою, щоб утворити її з назви.
+Description	Опис
+Visibility	Видимість
+only you	лише ви
+anyone signed in who has the link; not listed or searchable	будь-хто, хто увійшов і має посилання; не показується в списках і пошуку
+listed and searchable by every user of this server	показується в списках і пошуку для кожного користувача цього сервера
+Recommended aspect ratio	Рекомендоване співвідношення сторін
+Width:height, e.g. 1:1. Empty for none.	Ширина:висота, наприклад 1:1. Залиште порожнім, якщо не потрібно.
+Recommended size (px)	Рекомендований розмір (px)
+Longest side; 512 for Telegram stickers. Drives the quality score.	Довша сторона; 512 для стікерів Telegram. Впливає на оцінку якості.
+Create set	Створити набір
+Have a set directory or an export tar?	Маєте каталог набору або tar-архів експорту?
+Import it instead	Імпортуйте його
+Set order	Порядок у наборі
+Most liked	Найбільше вподобань
+Most copied	Найчастіше копійовані
+Best quality	Найкраща якість
+Recently changed	Нещодавно змінені
+Regular	Звичайні
+every field and button	усі поля й кнопки
+Compact	Компактні
+the name, emojis at the bottom	назва, емодзі внизу
+Grid	Сітка
+thumbnails only	лише мініатюри
+Labels	Позначки
+kind, quality, cover	тип, якість, обкладинка
+Git pack	Набір із git
+Repository	Репозиторій
+Branch	Гілка
+Mode	Режим
+read-only (edit upstream)	лише читання (редагуйте в джерелі)
+edits are pushed back	зміни надсилаються в репозиторій
+Last pull	Останнє оновлення
+Commit	Коміт
+Last error	Остання помилка
+Edit upstream	Редагувати в джерелі
+version {version}	версія {version}
+updated {time}	оновлено {time}
+You contribute to this pack: {permissions}.	Ви учасник цього набору: {permissions}.
+Set actions	Дії з набором
+Edit pack	Редагувати набір
+Propose…	Запропонувати…
+Export (.tar)	Експорт (.tar)
+Popular in this set	Популярне в цьому наборі
+This set mirrors a git repository and is read-only here. Edit it upstream; changes arrive with the next pull.	Цей набір віддзеркалює git-репозиторій, і тут його можна лише переглядати. Редагуйте його в джерелі; зміни з'являться після наступного оновлення.
+Add items	Додати стікери
+Replace from a set directory	Замінити з каталогу набору
+Hide below	Сховати, якщо менше
+likes	вподобань
+Sort	Сортування
+Apply	Застосувати
+The set's cover image	Зображення обкладинки набору
+This set is empty.	Цей набір порожній.
+Upload files above.	Завантажте файли вище.
+{items} hidden by the likes filter.	{items} приховано фільтром вподобань.
+{n} item is|{n} items are	{n} стікер|{n} стікери|{n} стікерів
+Cover	Обкладинка
+Shown for the set in lists, and the pack's thumbnail when it is published to Telegram.	Показується для набору в списках, а після публікації в Telegram стає мініатюрою набору.
+Choosing an item instead removes the cover image when you save.	Якщо натомість вибрати стікер, зображення обкладинки буде прибрано під час збереження.
+Cover image	Зображення обкладинки
+First item	Перший стікер
+Or use a picture that is not one of the items:	Або використайте зображення, якого немає серед стікерів:
+upload a cover image	завантажте зображення обкладинки
+A picture of its own for the cover, instead of one of the items. It is not an item: it is not listed with the items, searched or counted. Telegram shows it at 100 × 100 px, so a square works best.	Окреме зображення для обкладинки замість одного зі стікерів. Це не стікер: його не показують серед стікерів, не шукають і не рахують. Telegram показує його розміром 100 × 100 px, тож найкраще підходить квадратне.
+The current cover image	Поточне зображення обкладинки
+Remove image	Прибрати зображення
+The cover goes back to “{name}”.	Обкладинкою знову стане “{name}”.
+The cover goes back to the first item.	Обкладинкою знову стане перший стікер.
+Choose another image	Виберіть інше зображення
+Choose an image	Виберіть зображення
+or drop it here	або перетягніть його сюди
+or paste one with Ctrl+V	або вставте його через Ctrl+V
+A still PNG, JPEG or WebP; not an animation or a video.	Статичне PNG, JPEG або WebP; не анімація і не відео.
+Replace image	Замінити зображення
+Upload image	Завантажити зображення
+Set settings	Налаштування набору
+Saved.	Збережено.
+Save	Зберегти
+This set is a read-only git pack: its metadata comes from the repository's set.toml.	Це набір із git лише для читання: його метадані беруться з set.toml у репозиторії.
+Delete	Видалити
+Deleting the set removes it and all its items for everyone. This cannot be undone.	Видалення набору прибирає його та всі його стікери для всіх. Цю дію не можна скасувати.
+Delete this set…	Видалити цей набір…
+The new cover image is in place.	Нове зображення обкладинки встановлено.
+The cover image is removed.	Зображення обкладинки прибрано.
+Delete “{name}”?	Видалити “{name}”?
+This removes the set and its {items}. Exported copies are not affected.	Буде видалено набір і {items} у ньому. Експортованих копій це не стосується.
+Delete set	Видалити набір
+Cancel	Скасувати
+
+# Upload and import (web/upload.rs)
+Choose at least one file to upload: pick them, drop them on the form or paste an image.	Додайте хоча б один файл для завантаження: виберіть файли, перетягніть їх на форму або вставте зображення.
+Add to set	Додати до набору
+Choose files	Виберіть файли
+or drop them here	або перетягніть їх сюди
+or paste an image with Ctrl+V	або вставте зображення через Ctrl+V
+PNG, JPEG, WebP, GIF, MP4 or WebM. The type is detected from the content; metadata is stripped.	PNG, JPEG, WebP, GIF, MP4 або WebM. Тип визначається за вмістом; метадані видаляються.
+Upload	Завантажити
+Uploading…	Завантаження…
+Importing…	Імпортування…
+The set becomes equal to the directory: matching files get the directory's metadata, new files are added,	Набір стане таким самим, як каталог: файли, що збігаються, отримають метадані з каталогу, нові файли буде додано,
+items missing from the directory are removed	стікери, яких немає в каталозі, буде видалено
+and the order follows the file names.	а порядок відповідатиме назвам файлів.
+A set directory holds a {file} and the media files ({example}, …).	Каталог набору містить {file} і медіафайли ({example}, …).
+Exports of other stickpile servers work too.	Експорти з інших серверів stickpile теж підходять.
+Set folder	Тека набору
+Import folder	Імпортувати теку
+Or an export archive (.tar)	Або архів експорту (.tar)
+Import archive	Імпортувати архів
+Add files to a set	Додати файли до набору
+You need a set first.	Спершу потрібен набір.
+Create a set	Створити набір
+Import a set directory as a new set	Імпортувати каталог набору як новий набір
+Add items to “{name}”	Додати стікери до “{name}”
+back to the set	назад до набору
+Upload results	Результати завантаження
+You already have this in set	Це вже є у вас у наборі
+the same file	той самий файл
+looks the same, distance {distance}	виглядає однаково, відстань {distance}
+{n} file added|{n} files added	{n} файл додано|{n} файли додано|{n} файлів додано
+{n} already in the set	{n} уже в наборі
+{n} failed	не вдалося: {n}
+open the set	відкрити набір
+already in this set	уже є в цьому наборі
+added as	додано як
+Import results	Результати імпорту
+Imported into “{name}”.	Імпортовано в “{name}”.
+Open the set	Відкрити набір
+Added	Додано
+Updated	Оновлено
+Unchanged	Без змін
+Removed	Видалено
+Already in your library	Уже є у вашій бібліотеці
+
+# Start page (web/home.rs)
+Set	Набір
+kind, quality	тип, якість
+Hi, {name}	Вітаємо, {name}
+Search your library and public sets	Пошук у вашій бібліотеці та публічних наборах
+Recently copied	Нещодавно скопійовані
+Nothing copied yet. Copy an item and it shows up here.	Ви ще нічого не копіювали. Скопіюйте стікер, і він з'явиться тут.
+Your sets	Ваші набори
+{create}, {import}, or browse {public}.	{create}, {import} або перегляньте {public}.
+Create one	Створіть набір
+import a set directory	імпортуйте каталог набору
+public sets	публічні набори
+
+# Search (web/search.rs)
+words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)	слова й фрази в назві, ключових словах, емодзі, тегах, настрої та наборі (друкарські помилки й naahh → nah не заважають)
+exclude a word	виключити слово
+has this emoji	має це емодзі
+in a set (slug or name)	у наборі (за короткою назвою або назвою)
+AI or user vibe label	мітка настрою від ШІ або користувача
+has / has not this tag	має / не має цього тегу
+still, animated, video, or a format: png jpeg webp gif mp4 webm	still (статичні), animated (анімовані), video (відео) або формат: png jpeg webp gif mp4 webm
+owner	власник
+your items, your likes, public sets	ваші стікери, ваші вподобання, публічні набори
+quality score (also >= < <= =)	оцінка якості (також >= < <= =)
+like and copy counts	кількість вподобань і копіювань
+relevance (default), recent, likes, copies, quality	порядок: relevance (типово), recent, likes, copies, quality
+Search syntax	Синтаксис пошуку
+instruction::Type	Введіть
+Finds	Знаходить
+Repeating a filter means OR ({example}); different filters must all match.	Кілька однакових фільтрів поєднуються через АБО ({example}); різні фільтри мають виконуватися всі.
+Example:	Приклад:
+Why this matched	Чому це знайдено
+More results	Більше результатів
+Semantic search is on: results also match image content and related words.	Семантичний пошук увімкнено: результати враховують також вміст зображень і споріднені слова.
+Semantic search is still loading; these results match metadata only.	Семантичний пошук ще завантажується; ці результати знайдено лише за метаданими.
+Semantic search is off on this server; results match metadata only.	Семантичний пошук на цьому сервері вимкнено; результати шукаються лише за метаданими.
+{n} results for {query}	Результатів за запитом {query}: {n}
+semantic	семантичний
+metadata only	лише метадані
+Nothing found. Try fewer words or remove a filter.	Нічого не знайдено. Спробуйте менше слів або приберіть фільтр.
+Search your items and public sets	Пошук серед ваших стікерів і публічних наборів
+
+# Popular (web/popular.rs)
+Nothing yet.	Поки нічого.
+{n} copy|{n} copies	{n} копіювання|{n} копіювання|{n} копіювань
+{n} like|{n} likes	{n} вподобання|{n} вподобання|{n} вподобань
+{n} copy this week|{n} copies this week	{n} копіювання цього тижня|{n} копіювання цього тижня|{n} копіювань цього тижня
+All-time likes.	Вподобання за весь час.
+Trending	У тренді
+Copied more this week than the 4 weeks before.	Цього тижня копіювали частіше, ніж за 4 тижні перед тим.
+Copies in the last day.	Копіювання за останній день.
+Copies in the last 30 days.	Копіювання за останні 30 днів.
+Copies of all time.	Копіювання за весь час.
+Copies in the last 7 days.	Копіювання за останні 7 днів.
+Popular in {set}	Популярне в наборі {set}
+Scope	Охоплення
+Whole server (yours + public)	Увесь сервер (ваші + публічні)
+My items	Мої стікери
+This set	Цей набір
+Copies in	Копіювання за
+the last day	останній день
+the last week	останній тиждень
+the last 30 days	останні 30 днів
+all time	весь час
+Show	Показати
+Three separate signals; they are never combined into one score.	Три окремі показники; їх ніколи не зводять в одну оцінку.
+
+# Stats (web/stats.rs)
+{copies} in the last {n} day; busiest day {day} with {busiest}.|{copies} in the last {n} days; busiest day {day} with {busiest}.	{copies} за останній {n} день; найактивніший день: {day} ({busiest}).|{copies} за останні {n} дні; найактивніший день: {day} ({busiest}).|{copies} за останні {n} днів; найактивніший день: {day} ({busiest}).
+No copies in the last {n} day.|No copies in the last {n} days.	За останній {n} день копіювань не було.|За останні {n} дні копіювань не було.|За останні {n} днів копіювань не було.
+Copies per day (UTC), last {n} day|Copies per day (UTC), last {n} days	Копіювання за днями (UTC), останній {n} день|Копіювання за днями (UTC), останні {n} дні|Копіювання за днями (UTC), останні {n} днів
+Copies per day	Копіювання за днями
+Day	День
+Other apps	Інші застосунки
+Copies, last 7 days	Копіювання за останні 7 днів
+Likes given	Поставлені вподобання
+Likes received	Отримані вподобання
+Your stats	Ваша статистика
+Your most copied items	Ваші найчастіше копійовані стікери
+Nothing copied yet.	Ви ще нічого не копіювали.
+Where you paste	Куди ви вставляєте
+No target apps reported yet (the desktop client reports them).	Даних про застосунки-адресати ще немає (їх надсилає настільний клієнт).
+App	Застосунок
+tab::Public	Публічні

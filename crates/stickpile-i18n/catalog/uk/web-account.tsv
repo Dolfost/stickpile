@@ -1,0 +1,170 @@
+# Ukrainian: web-account. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+# Settings (settings.rs).
+QR code for your authenticator app	QR-код для вашого застосунку автентифікації
+Profile saved.	Профіль збережено.
+Theme saved.	Тему збережено.
+Language saved.	Мову збережено.
+Password changed. Your other web sessions were signed out.	Пароль змінено. Інші ваші сеанси у вебінтерфейсі завершено.
+Two-step verification is on.	Двоетапну перевірку ввімкнено.
+Two-step verification is off.	Двоетапну перевірку вимкнено.
+Token revoked.	Токен відкликано.
+admin	адміністратор
+user	користувач
+Profile	Профіль
+Role	Роль
+Tailnet login	Логін у tailnet
+Shown as the owner of your sets (“by {username}”), matched by	Показується як власник ваших наборів (“від {username}”), знаходиться за
+in search, and used to sign in with a password.	у пошуку й використовується для входу з паролем.
+2–32 letters, digits,	2–32 літери, цифри,
+Display name	Показане ім'я
+Telegram user id	Ідентифікатор користувача Telegram
+Numeric id of your Telegram account; sticker packs you publish belong to it.	Числовий ідентифікатор вашого облікового запису Telegram; йому належать набори стікерів, які ви публікуєте.
+Ask @userinfobot in Telegram for it. Empty clears it.	Дізнатися його можна в @userinfobot у Telegram. Порожнє поле його очищає.
+(Telegram publishing is not enabled on this server.)	(Публікацію в Telegram на цьому сервері не ввімкнено.)
+Save profile	Зберегти профіль
+Appearance	Вигляд
+Theme	Тема
+System	Системна
+follow the light or dark setting of your device	як світлий чи темний режим вашого пристрою
+Light	Світла
+always light	завжди світла
+Dark	Темна
+always dark	завжди темна
+Saved with your account, so it follows you to other devices.	Зберігається у вашому обліковому записі, тож діє й на інших ваших пристроях.
+The moon or sun button in the top bar switches between light and dark at once.	Кнопка з місяцем чи сонцем на верхній панелі одразу перемикає між світлою й темною темами.
+Save theme	Зберегти тему
+Language	Мова
+Automatic (your browser's language)	Автоматично (мова вашого браузера)
+Saved with your account: the desktop client follows it unless it has a language of its own.	Зберігається у вашому обліковому записі: настільний клієнт використовує її, якщо в ньому не вибрано власну мову.
+Save language	Зберегти мову
+You sign in through the tailnet. Set a password to also sign in from elsewhere or to create tokens with the CLI's login.	Ви входите через tailnet. Задайте пароль, щоб входити й з інших місць або створювати токени командою входу в CLI.
+You are signed in through the tailnet, so the current password is not needed to set a new one.	Ви увійшли через tailnet, тож щоб задати новий пароль, поточний не потрібен.
+Current password	Поточний пароль
+New password	Новий пароль
+Repeat the new password	Повторіть новий пароль
+Change password	Змінити пароль
+Changing it signs out your other browser sessions. API tokens keep working; revoke them below if needed.	Після зміни пароля інші ваші сеанси в браузерах буде завершено. API-токени й далі працюватимуть; за потреби відкличте їх нижче.
+Two-step verification (TOTP)	Двоетапна перевірка (TOTP)
+On. Signing in with a password also needs a code from your authenticator app.	Увімкнено. Для входу з паролем потрібен також код із застосунку автентифікації.
+Current code	Поточний код
+Turn off	Вимкнути
+Off. Add a code from an authenticator app to password sign-ins.	Вимкнено. Додайте до входу з паролем код із застосунку автентифікації.
+Set up two-step verification	Налаштувати двоетапну перевірку
+API tokens	API-токени
+For the CLI, the desktop client and scripts. A token acts as you; keep it secret.	Для CLI, настільного клієнта та скриптів. Токен діє від вашого імені; тримайте його в секреті.
+No tokens.	Токенів немає.
+Token	Токен
+Created	Створено
+Last used	Востаннє використано
+Expires	Спливає
+Actions	Дії
+revoked	відкликано
+expired	термін минув
+Revoke	Відкликати
+New token	Новий токен
+laptop desktop client	настільний клієнт на ноутбуці
+in 30 days	через 30 днів
+in 90 days	через 90 днів
+in a year	через рік
+Create token	Створити токен
+Scan this code with an authenticator app (Aegis, 2FAS, Google Authenticator, …).	Відскануйте цей код застосунком автентифікації (Aegis, 2FAS, Google Authenticator, …).
+Or enter the key by hand:	Або введіть ключ вручну:
+(time-based, 6 digits, 30 seconds).	(на основі часу, 6 цифр, 30 секунд).
+Enter the code the app shows to finish:	Щоб завершити, введіть код, який показує застосунок:
+Code	Код
+Turn on	Увімкнути
+Until you confirm, sign-in works as before. Starting again replaces this key.	Доки ви не підтвердите, вхід працює як раніше. Якщо почати заново, цей ключ буде замінено.
+Two-step verification	Двоетапна перевірка
+That code is not valid. Check the time on your phone and try again.	Цей код недійсний. Перевірте час на телефоні й спробуйте ще раз.
+New API token	Новий API-токен
+Copy it now: it is not shown again.	Скопіюйте його зараз: більше він не показуватиметься.
+Use it as	Використовуйте його як
+or paste it into the CLI or desktop client settings.	або вставте його в налаштування CLI чи настільного клієнта.
+Done	Готово
+# Sign in and registration (auth.rs).
+Sign in	Увійти
+On the tailnet? Open stickpile through its tailnet address and you are signed in automatically.	У tailnet? Відкрийте stickpile за його адресою в tailnet, і вхід відбудеться автоматично.
+Create an account	Створити обліковий запис
+if the server allows it.	(якщо сервер це дозволяє).
+Forgot your password?	Забули пароль?
+If your account has a tailnet login, open stickpile through its tailnet address from one of your own devices: you are signed in, and Settings sets a new password without the old one.	Якщо ваш обліковий запис має логін у tailnet, відкрийте stickpile за його адресою в tailnet з одного зі своїх пристроїв: вхід відбудеться автоматично, а в Налаштуваннях можна задати новий пароль без старого.
+Otherwise ask an administrator: the admin panel resets passwords.	Інакше зверніться до адміністратора: у панелі адміністрування можна скинути пароль.
+Whoever runs the server can set one with	Той, хто керує сервером, може задати пароль командою
+Enter the 6-digit code from your authenticator app.	Введіть 6-значний код із застосунку автентифікації.
+Verify	Перевірити
+Start over	Почати заново
+Too many sign-in attempts. Wait a minute and try again.	Забагато спроб входу. Зачекайте хвилину й спробуйте ще раз.
+Wrong username or password.	Неправильне ім'я користувача або пароль.
+The sign-in expired. Please start again.	Час на вхід минув. Почніть заново.
+Too many attempts. Wait a minute and try again.	Забагато спроб. Зачекайте хвилину й спробуйте ще раз.
+That code is not valid.	Цей код недійсний.
+Too many wrong codes. Please sign in again.	Забагато неправильних кодів. Увійдіть знову.
+Registration is closed on this server. Ask an administrator for an account or an invitation.	Реєстрацію на цьому сервері закрито. Попросіть в адміністратора обліковий запис або запрошення.
+Invitation code	Код запрошення
+2–32 letters, digits, _ . or -, starting with a letter or digit.	2–32 літери, цифри, _ . або -; першим має бути літера або цифра.
+Display name (optional)	Показане ім'я (необов'язково)
+At least 8 characters.	Щонайменше 8 символів.
+Repeat the password	Повторіть пароль
+Create account	Створити обліковий запис
+Already have an account?	Уже маєте обліковий запис?
+The passwords do not match.	Паролі не збігаються.
+That username is taken.	Це ім'я користувача вже зайняте.
+# Git packs, Telegram, background jobs (integrations.rs).
+Add a git pack	Додати git-набір
+Import a Telegram pack	Імпортувати набір із Telegram
+More sources	Інші джерела
+Subscribe to a git repository as a set	Підписатися на git-репозиторій як на набір
+Import a Telegram sticker pack	Імпортувати набір стікерів із Telegram
+Pull now	Оновити зараз
+Update Telegram pack	Оновити набір у Telegram
+Publish to Telegram	Опублікувати в Telegram
+Generating variants	Створення варіантів
+AI suggestions	Пропозиції ШІ
+Git pull	Оновлення з git
+Git push	Надсилання в git
+Telegram import	Імпорт із Telegram
+Telegram export	Експорт у Telegram
+queued	у черзі
+running	виконується
+done	готово
+failed	не вдалося
+(attempt {n})	(спроба {n})
+Open in Telegram	Відкрити в Telegram
+Reload to see the changes	Оновіть сторінку, щоб побачити зміни
+Background job	Фонове завдання
+Started {time}.	Запущено {time}.
+back	назад
+Subscribe to a git repository that holds a set directory	Підпишіться на git-репозиторій, що містить каталог набору
+plus media	і медіафайли
+The server clones it, imports it as a new set and pulls again on a schedule or when the webhook fires.	Сервер клонує його, імпортує як новий набір і оновлює за розкладом або коли спрацьовує вебхук.
+Repository URL	URL репозиторію
+Branch (optional)	Гілка (необов'язково)
+default branch	типова гілка
+Folder in the repository (optional)	Тека в репозиторії (необов'язково)
+repository root	корінь репозиторію
+Read-only	Лише читання
+edit upstream; the web UI shows an “Edit upstream” link	зміни вносяться в джерелі; вебінтерфейс показує посилання “Редагувати в джерелі”
+Push edits back	Надсилати зміни назад
+needs push credentials on the server	потрібні облікові дані для push на сервері
+Slug (optional)	Slug (необов'язково)
+Add git pack	Додати git-набір
+Git pack added	Git-набір додано
+“{name}” is being cloned.	“{name}” клонується.
+Webhook	Вебхук
+To pull on every push, add this webhook to the repository.	Щоб набір оновлювався після кожного push, додайте цей вебхук до репозиторію.
+The secret is shown only now.	Секрет показано лише зараз.
+Secret	Секрет
+GitHub/Gitea/Forgejo: use the secret for the HMAC signature (X-Hub-Signature-256).	GitHub/Gitea/Forgejo: використайте секрет для підпису HMAC (X-Hub-Signature-256).
+Others: send it in the X-Stickpile-Webhook-Secret header.	Інші: надсилайте його в заголовку X-Stickpile-Webhook-Secret.
+The pack becomes a new set; each sticker keeps its emoji. Animated (.tgs) stickers are skipped.	Набір із Telegram стане новим набором; кожен стікер збереже своє емодзі. Анімовані стікери (.tgs) буде пропущено.
+Pack name or link	Назва набору або посилання
+Import	Імпортувати
+Publish “{name}” to Telegram	Опублікувати “{name}” у Telegram
+Every item becomes a sticker (stills as 512 px WebP, animations and videos as video stickers).	Кожен стікер стане стікером Telegram (статичні як WebP 512 px, анімації та відео як відеостікери).
+The first export creates the pack, later ones update it. Items that cannot become stickers are listed afterwards.	Перший експорт створює набір, наступні оновлюють його. Стікери, які не можуть стати стікерами Telegram, буде перелічено після експорту.
+Currently published as	Зараз опубліковано як
+Telegram packs belong to a Telegram user. Set your Telegram user id in Settings, unless the administrator configured a default owner.	Набори в Telegram належать користувачеві Telegram. Укажіть свій ідентифікатор користувача Telegram у Налаштуваннях, якщо адміністратор не налаштував типового власника.
+Pack short name (optional)	Коротка назва набору (необов'язково)
+Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug.	Літери, цифри та _, напр. my_cats; _by_<ім'я бота> додається автоматично. Якщо порожньо: прив'язаний набір або назва, утворена від slug.
+Pack title (optional)	Заголовок набору (необов'язково)
+Publish	Опублікувати

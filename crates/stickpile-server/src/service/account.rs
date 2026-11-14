@@ -33,6 +33,15 @@ pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) ->
     if req.telegram_user_id.is_some_and(|tg| tg.is_some_and(|id| id <= 0)) {
         return Err(AppError::bad_request("telegram_user_id must be a positive number"));
     }
+    let language = match &req.language {
+        None => None,
+        Some(None) => Some(""),
+        Some(Some(code)) => Some(
+            stickpile_i18n::Lang::parse(code)
+                .map(|l| l.code())
+                .ok_or_else(|| AppError::bad_request(format!("unknown language {code:?}; use en or uk")))?,
+        ),
+    };
     let mut changes = serde_json::Map::new();
     let mut renamed_from = None;
     if let Some(name) = &req.username {
@@ -73,6 +82,13 @@ pub async fn update_me(state: &AppState, viewer: &CurrentUser, req: UpdateMe) ->
     if let Some(theme) = req.theme {
         sqlx::query("UPDATE users SET theme = ? WHERE id = ?")
             .bind(theme.as_str())
+            .bind(viewer.id())
+            .execute(&state.db)
+            .await?;
+    }
+    if let Some(code) = language {
+        sqlx::query("UPDATE users SET language = ? WHERE id = ?")
+            .bind(code)
             .bind(viewer.id())
             .execute(&state.db)
             .await?;

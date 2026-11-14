@@ -37,6 +37,8 @@ pub struct DemoBackend {
     copies: Mutex<HashMap<String, u64>>,
     /// Liked item ids, newest like first.
     liked: Mutex<Vec<String>>,
+    /// The demo account's language (`Backend::set_account_language`).
+    language: Mutex<Option<String>>,
     /// The signed-in user; `None` after logout.
     user: Mutex<Option<String>>,
     settings: Mutex<DemoSettings>,
@@ -238,6 +240,7 @@ impl DemoBackend {
             recent: Mutex::new(Vec::new()),
             copies: Mutex::new(copies),
             liked: Mutex::new(liked),
+            language: Mutex::new(None),
             user: Mutex::new(Some(DEMO_USER.into())),
             settings: Mutex::new(DemoSettings {
                 clipboard: cfg.clipboard.clone(),
@@ -477,6 +480,7 @@ impl DemoBackend {
             packs: Some(self.packs.len() as u64),
             items: Some(self.items.len() as u64),
             tailnet_login_available: true,
+            language: self.language.lock().expect("not poisoned").clone(),
             ..Profile::signed_out(server_url)
         }
     }
@@ -588,6 +592,13 @@ impl Backend for DemoBackend {
 
     fn login(self: Arc<Self>, credentials: Option<Credentials>) -> BoxFut<Result<Profile, LoginError>> {
         Box::pin(async move { self.login_now(credentials) })
+    }
+
+    fn set_account_language(self: Arc<Self>, code: Option<String>) -> BoxFut<Result<(), String>> {
+        Box::pin(async move {
+            *self.language.lock().expect("not poisoned") = code;
+            Ok(())
+        })
     }
 
     fn logout(self: Arc<Self>) -> BoxFut<Result<(), String>> {

@@ -262,6 +262,19 @@ in
             show_tags = setting types.bool true ''
               An item's tags on its tile (`zt` in Normal mode).
             '';
+            language =
+              setting
+                (types.enum [
+                  "auto"
+                  "en"
+                  "uk"
+                ])
+                "auto"
+                ''
+                  The popup's language: `auto` follows the account's language
+                  (the web UI's setting), else the system's locale. Choosing
+                  one in the popup sets the account's language too.
+                '';
           };
 
           copy = section "Copy-time image adjustments (popup and `stickpile copy`)." {

@@ -11,6 +11,7 @@ use super::components::{item_url, kind_badge, plural, quality_badge, set_url, th
 use super::layout::Nav;
 use super::Ctx;
 use crate::error::AppResult;
+use crate::i18n::{t, tf};
 use crate::service::stats::{self, PopularScope, Window};
 use crate::service::ui;
 use crate::state::AppState;
@@ -25,13 +26,14 @@ pub struct PopularQuery {
     set: Option<String>,
 }
 
-fn column(title: &str, hint: &str, entries: &[PopularEntry], unit: (&str, &str)) -> Markup {
+/// One list; `count` says an entry's value with its unit (`3 copies`).
+fn column(title: &str, hint: &str, entries: &[PopularEntry], count: impl Fn(u64) -> String) -> Markup {
     html! {
         section.pop-col aria-label=(title) {
             h2 { (title) }
             p.hint { (hint) }
             @if entries.is_empty() {
-                p.muted { "Nothing yet." }
+                p.muted { (t("Nothing yet.")) }
             } @else {
                 ol.pop-list {
                     @for e in entries {
@@ -43,7 +45,7 @@ fn column(title: &str, hint: &str, entries: &[PopularEntry], unit: (&str, &str))
                                 a href=(item_url(&e.item.id)) { (e.item.name) }
                                 " " (kind_badge(e.item.kind, e.item.format)) (quality_badge(e.item.quality))
                                 p.meta {
-                                    strong { (plural(e.value, unit.0, unit.1)) }
+                                    strong { (count(e.value)) }
                                     " · " a href=(set_url(&e.item.set_id)) { (e.item.set_name) }
                                 }
                             }
@@ -55,12 +57,18 @@ fn column(title: &str, hint: &str, entries: &[PopularEntry], unit: (&str, &str))
     }
 }
 
-fn columns(p: &Popular, window_label: &str) -> Markup {
+/// The three lists; `copied_hint` says the window of "Most copied".
+fn columns(p: &Popular, copied_hint: &str) -> Markup {
     html! {
         div #popular-cols.pop-cols {
-            (column("Most copied", &format!("Copies {window_label}."), &p.most_copied, ("copy", "copies")))
-            (column("Most liked", "All-time likes.", &p.most_liked, ("like", "likes")))
-            (column("Trending", "Copied more this week than the 4 weeks before.", &p.trending, ("copy this week", "copies this week")))
+            (column(t("Most copied"), copied_hint, &p.most_copied, |n| plural(n, "copy", "copies")))
+            (column(t("Most liked"), t("All-time likes."), &p.most_liked, |n| plural(n, "like", "likes")))
+            (column(
+                t("Trending"),
+                t("Copied more this week than the 4 weeks before."),
+                &p.trending,
+                |n| plural(n, "copy this week", "copies this week"),
+            ))
         }
     }
 }
@@ -71,11 +79,11 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Popul
         Some("set") if q.set.is_some() => (PopularScope::Set, "set"),
         _ => (PopularScope::Server, "server"),
     };
-    let (window, window_key, window_label) = match q.window.as_deref() {
-        Some("day") => (Window::Day, "day", "in the last day"),
-        Some("month") => (Window::Month, "month", "in the last 30 days"),
-        Some("all") => (Window::All, "all", "of all time"),
-        _ => (Window::Week, "week", "in the last 7 days"),
+    let (window, window_key, copied_hint) = match q.window.as_deref() {
+        Some("day") => (Window::Day, "day", t("Copies in the last day.")),
+        Some("month") => (Window::Month, "month", t("Copies in the last 30 days.")),
+        Some("all") => (Window::All, "all", t("Copies of all time.")),
+        _ => (Window::Week, "week", t("Copies in the last 7 days.")),
     };
     let set_id = if scope == PopularScope::Set {
         q.set.clone()
@@ -83,7 +91,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Popul
         None
     };
     let popular = stats::popular(&state, &ctx.user, scope, set_id.as_deref(), window, Some(20)).await?;
-    let cols = columns(&popular, window_label);
+    let cols = columns(&popular, copied_hint);
     if ctx.htmx {
         return Ok(cols);
     }
@@ -93,28 +101,30 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Popul
     };
     let body = html! {
         div.section-head {
-            h1 { "Popular" @if let Some(n) = &set_name { " in " (n) } }
+            h1 {
+                @if let Some(n) = &set_name { (tf("Popular in {set}", &[("set", n)])) } @else { (t("Popular")) }
+            }
         }
         form.filters method="get" action="/popular" hx-get="/popular" hx-target="#popular-cols" hx-swap="outerHTML"
             hx-push-url="true" hx-trigger="change, submit" {
             @if let Some(id) = &set_id { input type="hidden" name="set" value=(id); }
-            label for="pop-scope" { "Scope" }
+            label for="pop-scope" { (t("Scope")) }
             select #pop-scope name="scope" {
-                option value="server" selected[scope_key == "server"] { "Whole server (yours + public)" }
-                option value="mine" selected[scope_key == "mine"] { "My items" }
-                @if set_id.is_some() { option value="set" selected[scope_key == "set"] { "This set" } }
+                option value="server" selected[scope_key == "server"] { (t("Whole server (yours + public)")) }
+                option value="mine" selected[scope_key == "mine"] { (t("My items")) }
+                @if set_id.is_some() { option value="set" selected[scope_key == "set"] { (t("This set")) } }
             }
-            label for="pop-window" { "Copies in" }
+            label for="pop-window" { (t("Copies in")) }
             select #pop-window name="window" {
-                option value="day" selected[window_key == "day"] { "the last day" }
-                option value="week" selected[window_key == "week"] { "the last week" }
-                option value="month" selected[window_key == "month"] { "the last 30 days" }
-                option value="all" selected[window_key == "all"] { "all time" }
+                option value="day" selected[window_key == "day"] { (t("the last day")) }
+                option value="week" selected[window_key == "week"] { (t("the last week")) }
+                option value="month" selected[window_key == "month"] { (t("the last 30 days")) }
+                option value="all" selected[window_key == "all"] { (t("all time")) }
             }
-            button type="submit" { "Show" }
+            button type="submit" { (t("Show")) }
         }
-        p.muted.small { "Three separate signals; they are never combined into one score." }
+        p.muted.small { (t("Three separate signals; they are never combined into one score.")) }
         (cols)
     };
-    Ok(ctx.page("Popular", Nav::Popular, body))
+    Ok(ctx.page(t("Popular"), Nav::Popular, body))
 }

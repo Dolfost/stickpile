@@ -216,7 +216,7 @@ The popup's Settings tab edits these keys:
 
 | Group | Keys |
 |---|---|
-| Popup | `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Popup | `ui.language`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 

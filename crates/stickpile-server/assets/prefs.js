@@ -28,6 +28,27 @@
 
   var root = document.documentElement;
 
+  // Texts in the page's language (docs/languages.md): the server puts the
+  // translations into <body data-i18n>; English needs none. Read when a
+  // text is needed: this script starts in <head>, before <body> exists.
+  var I18N = null;
+  function tr(s) {
+    if (I18N === null) {
+      if (!document.body) return s;
+      try {
+        I18N = JSON.parse(document.body.getAttribute("data-i18n") || "{}");
+      } catch (e) {
+        I18N = {};
+      }
+    }
+    return I18N[s] || s;
+  }
+  function trf(s, args) {
+    return tr(s).replace(/\{(\w+)\}/g, function (m, k) {
+      return Object.prototype.hasOwnProperty.call(args, k) ? args[k] : m;
+    });
+  }
+
   function load(key) {
     try {
       return window.localStorage.getItem(key);
@@ -50,6 +71,15 @@
 
   // ---- display options ---------------------------------------------------
 
+  // The notes of styles that turn toggles off; functions, so the text is
+  // looked up when shown (see tr).
+  function compactNote() {
+    return tr("Compact shows the name and the emojis.");
+  }
+  function gridNote() {
+    return tr("Grid shows the thumbnails only.");
+  }
+
   var VIEWS = {
     items: {
       styleKey: "stickpile.items.view",
@@ -62,8 +92,8 @@
       param: "view",
       // Toggles a style has no room for, and why.
       off: {
-        compact: { parts: ["keywords", "vibe", "tags"], note: "Compact shows the name and the emojis." },
-        grid: { parts: ["emojis", "keywords", "vibe", "tags"], note: "Grid shows the thumbnails only." },
+        compact: { parts: ["keywords", "vibe", "tags"], note: compactNote },
+        grid: { parts: ["emojis", "keywords", "vibe", "tags"], note: gridNote },
       },
     },
     // The start page's recently copied items: the set page's cards with
@@ -76,8 +106,8 @@
       parts: ["set", "emojis", "keywords", "vibe", "tags", "labels"],
       param: null,
       off: {
-        compact: { parts: ["set", "keywords", "vibe", "tags"], note: "Compact shows the name and the emojis." },
-        grid: { parts: ["set", "emojis", "keywords", "vibe", "tags"], note: "Grid shows the thumbnails only." },
+        compact: { parts: ["set", "keywords", "vibe", "tags"], note: compactNote },
+        grid: { parts: ["set", "emojis", "keywords", "vibe", "tags"], note: gridNote },
       },
     },
     sets: {
@@ -186,14 +216,15 @@
       radios.forEach(function (r) {
         r.checked = r.value === style;
       });
-      var off = v.off[style] || { parts: [], note: "" };
+      var off = v.off[style] || { parts: [], note: null };
       boxes.forEach(function (b) {
         b.checked = hidden.indexOf(b.value) < 0;
         b.disabled = off.parts.indexOf(b.value) >= 0;
       });
       if (note) {
-        note.textContent = off.note;
-        note.hidden = !off.note;
+        var text = off.note ? off.note() : "";
+        note.textContent = text;
+        note.hidden = !text;
       }
       if (v.param) syncUrl(v.param, style);
     }
@@ -299,7 +330,7 @@
     dismiss.type = "button";
     dismiss.className = "link dismiss";
     dismiss.setAttribute("data-dismiss", "");
-    dismiss.textContent = "Dismiss";
+    dismiss.textContent = tr("Dismiss");
     box.appendChild(dismiss);
     region.textContent = "";
     region.appendChild(box);
@@ -316,12 +347,16 @@
       body: JSON.stringify({ theme: theme }),
     })
       .then(function (r) {
-        if (!r.ok) throw new Error("the server answered " + r.status);
+        if (!r.ok) throw new Error(trf("the server answered {status}", { status: r.status }));
         var m = document.querySelector('meta[name="stickpile-theme"]');
         if (m) m.setAttribute("content", theme);
       })
       .catch(function (err) {
-        flash("The theme could not be saved (" + (err && err.message ? err.message : err) + "); it changes back when the page reloads.");
+        flash(
+          trf("The theme could not be saved ({error}); it changes back when the page reloads.", {
+            error: err && err.message ? err.message : err,
+          })
+        );
       });
   }
 
@@ -335,7 +370,7 @@
       buttons.forEach(function (b) {
         b.hidden = false;
         b.setAttribute("aria-pressed", dark ? "true" : "false");
-        b.title = dark ? "Switch to the light theme" : "Switch to the dark theme";
+        b.title = dark ? tr("Switch to the light theme") : tr("Switch to the dark theme");
         var field = b.form ? b.form.querySelector('input[name="theme"]') : null;
         if (field) field.value = dark ? "light" : "dark";
       });

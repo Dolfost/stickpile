@@ -1,0 +1,192 @@
+# Ukrainian: js. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+# The web UI's scripts (crates/stickpile-server/assets/*.js): the server sends
+# only this file's entries to the browser, so every tr()/trf() text of a
+# script must be here, not in another catalog.
+
+# prefs.js
+Compact shows the name and the emojis.	Компактний вигляд показує назву та емодзі.
+Grid shows the thumbnails only.	Сітка показує лише мініатюри.
+Dismiss	Закрити
+Switch to the light theme	Увімкнути світлу тему
+Switch to the dark theme	Увімкнути темну тему
+the server answered {status}	сервер відповів {status}
+The theme could not be saved ({error}); it changes back when the page reloads.	Не вдалося зберегти тему ({error}); після перезавантаження сторінки вона повернеться.
+
+# app.js
+the download failed (HTTP {status})	не вдалося звантажити файл (HTTP {status})
+the image has no size	зображення не має розміру
+the PNG conversion failed	не вдалося перетворити на PNG
+the browser cannot decode this image	браузер не може декодувати це зображення
+the video took too long to load	відео завантажувалося надто довго
+the browser cannot play this video	браузер не може відтворити це відео
+the browser did not allow it (the window must have focus, and the site needs clipboard access)	браузер цього не дозволив (вікно має бути активним, а сайт потребує доступу до буфера обміну)
+Could not copy “{name}”: {reason}. Try again, or use Download.	Не вдалося скопіювати “{name}”: {reason}. Спробуйте ще раз або звантажте файл.
+Copied “{name}”. Paste it into your chat.	Скопійовано “{name}”. Вставте його в чат.
+Copied a small still frame of “{name}”: this browser cannot decode the video. Download keeps the video.	Скопійовано маленький статичний кадр із “{name}”: цей браузер не може декодувати відео. Щоб отримати саме відео, звантажте його.
+Copied a small still frame of “{name}”: this browser cannot decode the animation. Download keeps the animation.	Скопійовано маленький статичний кадр із “{name}”: цей браузер не може декодувати анімацію. Щоб отримати саму анімацію, звантажте її.
+Copied a still frame of “{name}” (browsers copy only still images). Download keeps the video.	Скопійовано статичний кадр із “{name}” (браузери копіюють лише статичні зображення). Щоб отримати саме відео, звантажте його.
+Copied a still frame of “{name}” (browsers copy only still images). Download keeps the animation.	Скопійовано статичний кадр із “{name}” (браузери копіюють лише статичні зображення). Щоб отримати саму анімацію, звантажте її.
+Copied ✓	Скопійовано ✓
+Link copied ✓	Посилання скопійовано ✓
+Link copied. It opens for people signed in to this server.	Посилання скопійовано. Воно відкривається для тих, хто увійшов на цей сервер.
+Copy this link:	Скопіюйте це посилання:
+Copying images needs HTTPS	Для копіювання зображень потрібен HTTPS
+This browser cannot copy images	Цей браузер не може копіювати зображення
+Browsers let web pages put images on the clipboard only on https:// addresses (and on localhost). This page was opened over plain http://, so stickpile cannot copy “{name}”.	Браузери дозволяють вебсторінкам класти зображення в буфер обміну лише на адресах https:// (і на localhost). Цю сторінку відкрито через звичайний http://, тому stickpile не може скопіювати “{name}”.
+This browser does not let web pages put images on the clipboard, so stickpile cannot copy “{name}”.	Цей браузер не дозволяє вебсторінкам класти зображення в буфер обміну, тому stickpile не може скопіювати “{name}”.
+Open the video, or download it and drag the file into your chat.	Відкрийте відео або звантажте його й перетягніть файл у чат.
+Open the image and use your browser's own “Copy Image” (right-click it), or download it and drag the file into your chat.	Відкрийте зображення й скористайтеся командою браузера “Копіювати зображення” (клацніть по ньому правою кнопкою миші) або звантажте його й перетягніть файл у чат.
+Copy works when stickpile is opened over https://, for example through tailscale serve. The desktop client copies without a browser, GIFs and videos included.	Копіювання працює, коли stickpile відкрито через https://, наприклад за допомогою tailscale serve. Настільний клієнт копіює без браузера, зокрема GIF і відео.
+Open video	Відкрити відео
+Open image	Відкрити зображення
+Download	Звантажити
+Close	Закрити
+{title}. Open the image or download it instead.	{title}. Натомість відкрийте зображення або звантажте його.
+Copy	Копіювати
+Selected; press Ctrl+C to copy.	Виділено; натисніть Ctrl+C, щоб скопіювати.
+Use “{name}” as the cover? This removes the set's cover image.	Використати “{name}” як обкладинку? Це прибере зображення обкладинки набору.
+The first item is the cover again.	Обкладинкою знову є перший стікер.
+“{name}” is the cover now.	“{name}” тепер обкладинка.
+Delete “{name}” from this set?	Видалити “{name}” з цього набору?
+Copy still frame	Копіювати статичний кадр
+Copy image	Копіювати зображення
+Copy link	Копіювати посилання
+Unlike	Скасувати вподобання
+Like	Вподобати
+Open item page	Відкрити сторінку стікера
+Download original	Звантажити оригінал
+Rename	Перейменувати
+Edit all fields…	Редагувати всі поля…
+Stop using as cover	Не використовувати як обкладинку
+Use as cover	Використати як обкладинку
+Move up	Перемістити вище
+Move down	Перемістити нижче
+Move to top	Перемістити на початок
+Move to bottom	Перемістити в кінець
+Delete…	Видалити…
+Actions for {name}	Дії для {name}
+The server could not be reached. Check your connection and try again.	Не вдалося зв'язатися із сервером. Перевірте з'єднання й спробуйте ще раз.
+
+# emoji.js
+Smileys & Emotion	Смайлики та емоції
+People & Body	Люди та тіло
+Animals & Nature	Тварини та природа
+Food & Drink	Їжа та напої
+Travel & Places	Подорожі та місця
+Activities	Дозвілля
+Objects	Предмети
+Symbols	Символи
+Flags	Прапори
+Choose emojis	Вибрати емодзі
+Emoji picker	Вибір емодзі
+Search emojis	Пошук емодзі
+Categories	Категорії
+Recently used	Нещодавні
+Search results	Результати пошуку
+{n} emoji|{n} emojis	{n} емодзі|{n} емодзі|{n} емодзі
+{n}+ emojis	{n}+ емодзі
+No emoji matches “{query}”.	Не знайдено емодзі для “{query}”.
+Loading emojis…	Завантаження емодзі…
+Could not load the emojis ({error}). Close the panel and try again.	Не вдалося завантажити емодзі ({error}). Закрийте панель і спробуйте ще раз.
+Could not load the emojis ({error}).	Не вдалося завантажити емодзі ({error}).
+{emoji} is already in the field.	{emoji} уже є в полі.
+Added {emoji} {name}.	Додано {emoji} {name}.
+Emoji suggestions	Підказки емодзі
+Space or Enter inserts, Esc closes	Пробіл або Enter вставляє, Esc закриває
+Common emojis	Поширені емодзі
+{n} emoji, recently used|{n} emojis, recently used	{n} емодзі, нещодавні|{n} емодзі, нещодавні|{n} емодзі, нещодавні
+{n} emoji, common emojis|{n} emojis, common emojis	{n} емодзі, поширені|{n} емодзі, поширені|{n} емодзі, поширені
+{n} of {total} emojis	{n} з {total} емодзі
+
+# upload.js
+{list} and {last}	{list} та {last}
+keywords	ключові слова
+emojis	емодзі
+vibe	настрій
+Skipped {names}: a cover image is one still PNG, JPEG or WebP, not an animation or a video.	Пропущено {names}: зображення обкладинки має бути одним статичним PNG, JPEG або WebP, а не анімацією чи відео.
+Skipped {names}: only PNG, JPEG, WebP, GIF, MP4 or WebM files can be uploaded.	Пропущено {names}: завантажувати можна лише файли PNG, JPEG, WebP, GIF, MP4 або WebM.
+{n} file selected|{n} files selected	Вибрано {n} файл|Вибрано {n} файли|Вибрано {n} файлів
+Remove all	Прибрати всі
+Approve AI for all files	Схвалити пропозиції ШІ для всіх файлів
+Files to upload	Файли для завантаження
+Name	Назва
+Approve all	Схвалити всі
+Approve all suggestions for {name}	Схвалити всі пропозиції для {name}
+Try again	Спробувати ще раз
+Keywords	Ключові слова
+What is in it, e.g. cat, stare. Separate with commas. Sent to Telegram as the sticker's search words.	Що на ньому, напр. кіт, погляд. Розділяйте комами. Надсилаються в Telegram як пошукові слова стікера.
+Approve keywords	Схвалити ключові слова
+Emojis	Емодзі
+Separate with spaces.	Розділяйте пробілами.
+Approve emojis	Схвалити емодзі
+Vibe	Настрій
+The mood in one word, e.g. tired or smug.	Настрій одним словом, напр. втомлений або самовдоволений.
+Approve vibe	Схвалити настрій
+Tags	Теги
+Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.	Ваші власні позначки для сортування й фільтрування, напр. реакція, nsfw (tag:nsfw). Розділяйте комами. У Telegram не надсилаються.
+Use for every file	Використати для всіх файлів
+Gives the other files these keywords, emojis, vibe and tags. Names stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги. Назви не змінюються.
+Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги та схвалює їх. Назви не змінюються.
+AI	ШІ
+Suggested by AI: approve or edit it	Запропоновано ШІ: схваліть або відредагуйте
+Suggested by AI, not approved.	Запропоновано ШІ, не схвалено.
+Approve	Схвалити
+Image tools	Інструменти для зображення
+Rotate left	Повернути ліворуч
+Rotate right	Повернути праворуч
+Flip	Віддзеркалити
+Flip horizontally	Віддзеркалити по горизонталі
+Flip vertically	Віддзеркалити по вертикалі
+Crop	Обрізання
+Free	Довільно
+Square	Квадрат
+{ratio}, the set's aspect ratio	{ratio}, співвідношення сторін набору
+Reset	Скинути
+Crop area	Область обрізання
+Drag the corners to crop and the inside to move it. With the crop area focused, arrow keys move it and Shift+arrow keys resize it.	Перетягуйте кути, щоб обрізати, і середину, щоб перемістити область. Коли область обрізання у фокусі, клавіші зі стрілками переміщують її, а Shift+стрілки змінюють її розмір.
+The new cover image: crop it, then upload it.	Нове зображення обкладинки: обріжте його, потім завантажте.
+{n} file ready. Select one to describe it or edit the image.|{n} files ready. Select one to describe it or edit the image.	{n} файл готовий. Виберіть файл, щоб описати його або відредагувати зображення.|{n} файли готові. Виберіть файл, щоб описати його або відредагувати зображення.|{n} файлів готові. Виберіть файл, щоб описати його або відредагувати зображення.
+Upload {n} file|Upload {n} files	Завантажити {n} файл|Завантажити {n} файли|Завантажити {n} файлів
+the pasted item	вставлений елемент
+pasted image	вставлене зображення
+Pasted {n} file.|Pasted {n} files.	Вставлено {n} файл.|Вставлено {n} файли.|Вставлено {n} файлів.
+Added {n} file.|Added {n} files.	Додано {n} файл.|Додано {n} файли.|Додано {n} файлів.
+edited	змінено
+AI suggestions to approve	Пропозиції ШІ чекають схвалення
+AI is suggesting keywords, emojis and vibe	ШІ добирає ключові слова, емодзі та настрій
+AI suggestions on the way	пропозиції ШІ готуються
+Remove {name} from the upload	Прибрати {name} із завантаження
+Edit {name}	Редагування {name}
+Preview of {name}	Попередній перегляд {name}
+This browser cannot read the image, so it cannot be edited here. It is uploaded as it is and the server checks it.	Цей браузер не може прочитати зображення, тому його не можна редагувати тут. Його буде завантажено як є, а сервер його перевірить.
+Videos are uploaded as they are: you can rename them, but editing here would keep only the first frame.	Відео завантажуються як є: їх можна перейменувати, але редагування тут залишило б лише перший кадр.
+Animations are uploaded as they are: you can rename them, but editing here would keep only the first frame.	Анімації завантажуються як є: їх можна перейменувати, але редагування тут залишило б лише перший кадр.
+Loading…	Зачекайте…
+Original {width} × {height} px. Uploaded as a {cropWidth} × {cropHeight} px PNG.	Оригінал {width} × {height} пкс. Буде завантажено як PNG {cropWidth} × {cropHeight} пкс.
+No changes: the original file is uploaded ({width} × {height} px).	Без змін: буде завантажено оригінальний файл ({width} × {height} пкс).
+Removed {name}.	Прибрано {name}.
+the browser could not encode {name}	браузер не зміг закодувати {name}
+Preparing {n} edited image…|Preparing {n} edited images…	Готуємо {n} відредаговане зображення…|Готуємо {n} відредаговані зображення…|Готуємо {n} відредагованих зображень…
+Could not prepare the upload: {error}	Не вдалося підготувати завантаження: {error}
+The server is still loading its AI model; suggestions follow when it is ready…	Сервер ще завантажує модель ШІ; пропозиції з'являться, щойно вона буде готова…
+The server asked to wait a moment (many suggestions at once)…	Сервер попросив трохи зачекати (забагато пропозицій одночасно)…
+Suggesting keywords, emojis and vibe…	Добираємо ключові слова, емодзі та настрій…
+AI suggested the {fields}. Approve or edit them; unapproved ones are uploaded marked AI.	ШІ запропонував {fields}. Схваліть або відредагуйте їх; несхвалені буде завантажено з позначкою ШІ.
+AI suggested the {fields}. Approve or edit it; unapproved, it is uploaded marked AI.	ШІ запропонував {fields}. Схваліть або відредагуйте; без схвалення це поле буде завантажено з позначкою ШІ.
+AI suggested the {fields}. Nothing left to approve.	ШІ запропонував {fields}. Схвалювати більше нічого.
+AI's suggestions were for fields you had filled in; your values stay.	ШІ запропонував значення для полів, які ви вже заповнили; ваші значення залишаються.
+AI had no confident suggestions for this file.	ШІ не має впевнених пропозицій для цього файлу.
+No AI suggestions: this browser cannot read the file.	Без пропозицій ШІ: цей браузер не може прочитати файл.
+No AI suggestions: the server is busy. Try again in a minute.	Без пропозицій ШІ: сервер зайнятий. Спробуйте ще раз за хвилину.
+No AI suggestions: the server could not be reached.	Без пропозицій ШІ: не вдалося зв'язатися із сервером.
+No AI suggestions: something went wrong on the server.	Без пропозицій ШІ: на сервері щось пішло не так.
+AI suggestions are off on this server.	Пропозиції ШІ на цьому сервері вимкнено.
+AI suggestions are not available: the server could not load its AI model.	Пропозиції ШІ недоступні: сервер не зміг завантажити модель ШІ.
+AI suggestions stopped: your session has ended. Sign in again.	Пропозиції ШІ зупинено: ваш сеанс завершився. Увійдіть знову.
+The server's AI model is taking long to load; the fields stay as they are.	Модель ШІ на сервері завантажується надто довго; поля залишаються як є.
+Removed all files.	Усі файли прибрано.
+Approved the AI suggestions for {name}.	Схвалено пропозиції ШІ для {name}.
+Nothing to upload yet: choose files, drop them here or paste an image.	Поки що нічого завантажувати: виберіть файли, перетягніть їх сюди або вставте зображення.
+Approved the AI suggestions for {n} file.|Approved the AI suggestions for {n} files.	Схвалено пропозиції ШІ для {n} файлу.|Схвалено пропозиції ШІ для {n} файлів.|Схвалено пропозиції ШІ для {n} файлів.
+The other {n} file has the keywords, emojis, vibe and tags of {name} now.|The other {n} files have the keywords, emojis, vibe and tags of {name} now.	Тепер {n} інший файл має ті самі ключові слова, емодзі, настрій і теги, що й {name}.|Тепер {n} інші файли мають ті самі ключові слова, емодзі, настрій і теги, що й {name}.|Тепер {n} інших файлів мають ті самі ключові слова, емодзі, настрій і теги, що й {name}.
+Reset {name} to the original.	Відновлено оригінал {name}.

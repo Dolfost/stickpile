@@ -26,6 +26,8 @@ use std::collections::HashSet;
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
 
+use stickpile_i18n::global::{t, t_dyn, tf};
+
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
 use crate::tabs::{Mode, PageKey, Tab, View};
@@ -469,48 +471,55 @@ impl Status {
         }
     }
 
+    /// The footer text, in the current language.
     pub fn text(&self) -> String {
         match self {
             Status::Idle => String::new(),
-            Status::Searching => "Searching…".into(),
-            Status::NoResults { query } => format!("No matches for “{query}”"),
-            Status::NoRecent => "Nothing used yet — type to search".into(),
-            Status::NothingUsed => "Nothing used yet".into(),
-            Status::Offline => "Offline — showing cached results".into(),
-            Status::NothingSelected => "Nothing selected".into(),
-            Status::Copying { name } => format!("Preparing {name}…"),
+            Status::Searching => t("Searching…").into(),
+            Status::NoResults { query } => tf("No matches for “{query}”", &[("query", query)]),
+            Status::NoRecent => t("Nothing used yet — type to search").into(),
+            Status::NothingUsed => t("Nothing used yet").into(),
+            Status::Offline => t("Offline — showing cached results").into(),
+            Status::NothingSelected => t("Nothing selected").into(),
+            Status::Copying { name } => tf("Preparing {name}…", &[("name", name)]),
             Status::Copied {
                 name,
                 target,
                 sticker,
                 warning,
             } => {
-                let what = if *sticker { " as sticker" } else { "" };
-                let mut s = format!("Copied {name}{what} for {}", target_name(*target));
+                let target = target_name(*target);
+                let args: [(&str, &dyn std::fmt::Display); 2] = [("name", name), ("target", &target)];
+                let mut s = if *sticker {
+                    tf("Copied {name} as sticker for {target}", &args)
+                } else {
+                    tf("Copied {name} for {target}", &args)
+                };
                 if let Some(w) = warning {
                     s.push_str(" — ");
-                    s.push_str(w);
+                    s.push_str(&t_dyn(w));
                 }
                 s
             }
-            Status::Dropped { name } => format!("Dropped {name}"),
+            Status::Dropped { name } => tf("Dropped {name}", &[("name", name)]),
             Status::Error(e) => e.clone(),
-            Status::Loading => "Loading...".into(),
-            Status::NoMostUsed => "Nothing used yet".into(),
-            Status::NoFavorites => "No favorites yet".into(),
-            Status::NoPacks => "No packs yet".into(),
-            Status::EmptyPack => "This pack is empty".into(),
+            Status::Loading => t("Loading...").into(),
+            Status::NoMostUsed => t("Nothing used yet").into(),
+            Status::NoFavorites => t("No favorites yet").into(),
+            Status::NoPacks => t("No packs yet").into(),
+            Status::EmptyPack => t("This pack is empty").into(),
             Status::LoadFailed(e) => e.clone(),
-            Status::Favorite { added: true } => "Added to favorites".into(),
-            Status::Favorite { added: false } => "Removed from favorites".into(),
-            Status::Tile { tile, on } => {
-                let what = match tile {
-                    Tile::Favorites => "Favorite marks",
-                    Tile::Emojis => "Emojis",
-                    Tile::Tags => "Tags",
-                };
-                format!("{what} {}", if *on { "shown" } else { "hidden" })
+            Status::Favorite { added: true } => t("Added to favorites").into(),
+            Status::Favorite { added: false } => t("Removed from favorites").into(),
+            Status::Tile { tile, on } => match (tile, on) {
+                (Tile::Favorites, true) => t("Favorite marks shown"),
+                (Tile::Favorites, false) => t("Favorite marks hidden"),
+                (Tile::Emojis, true) => t("Emojis shown"),
+                (Tile::Emojis, false) => t("Emojis hidden"),
+                (Tile::Tags, true) => t("Tags shown"),
+                (Tile::Tags, false) => t("Tags hidden"),
             }
+            .into(),
         }
     }
 
@@ -738,7 +747,10 @@ impl<T> Listing<T> {
 
     fn status(&self, what: &str, empty: Status) -> Status {
         if let Some(e) = &self.error {
-            Status::LoadFailed(format!("Could not load {what}: {e}"))
+            Status::LoadFailed(tf(
+                "Could not load {what}: {error}",
+                &[("what", &what), ("error", &t_dyn(e))],
+            ))
         } else if !self.loaded {
             if self.loading.is_some() {
                 Status::Loading
@@ -969,7 +981,7 @@ impl Model {
     /// Header text: the tab's label, or "Packs / Cats" inside a pack.
     pub fn title(&self) -> String {
         match (self.tab, &self.packs.open) {
-            (Tab::Packs, Some(open)) => format!("Packs / {}", open.set.name),
+            (Tab::Packs, Some(open)) => tf("Packs / {name}", &[("name", &open.set.name)]),
             (tab, _) => tab.label().to_string(),
         }
     }
@@ -1055,9 +1067,9 @@ impl Model {
 
     pub fn footer(&self) -> Footer {
         let target_hint = match &self.target_source {
-            TargetSource::Default => "default".to_string(),
-            TargetSource::Detected { class } => format!("auto: {class}"),
-            TargetSource::Chosen => "chosen".to_string(),
+            TargetSource::Default => t("default").to_string(),
+            TargetSource::Detected { class } => tf("auto: {class}", &[("class", class)]),
+            TargetSource::Chosen => t("chosen").to_string(),
         };
         Footer {
             target: target_name(self.target),
@@ -1193,7 +1205,7 @@ impl Model {
                     return Vec::new();
                 }
                 self.copying = None;
-                self.status = Status::Error(format!("Copy failed: {error}"));
+                self.status = Status::Error(tf("Copy failed: {error}", &[("error", &t_dyn(&error))]));
                 Vec::new()
             }
             Event::Dropped { item_id, name } => {
@@ -1683,7 +1695,7 @@ impl Model {
             }
             Err(e) => {
                 if self.copying.is_none() && shown {
-                    self.status = Status::Error(format!("Search failed: {e}"));
+                    self.status = Status::Error(tf("Search failed: {error}", &[("error", &t_dyn(&e))]));
                 }
                 Vec::new()
             }
@@ -1779,16 +1791,16 @@ impl Model {
         match self.tab {
             Tab::Search => self.search_status(),
             Tab::Recent if self.recent.is_empty() => Status::NothingUsed,
-            Tab::MostUsed => self.most_used.status("most used items", Status::NoMostUsed),
-            Tab::Favorites => self.favorites.status("favorites", Status::NoFavorites),
+            Tab::MostUsed => self.most_used.status(t("most used items"), Status::NoMostUsed),
+            Tab::Favorites => self.favorites.status(t("favorites"), Status::NoFavorites),
             Tab::Packs => match &self.packs.open {
                 Some(open) => filtered_status(
-                    open.items.status("the pack", Status::EmptyPack),
+                    open.items.status(t("the pack"), Status::EmptyPack),
                     &open.filter,
                     self.entries.is_empty(),
                 ),
                 None => filtered_status(
-                    self.packs.sets.status("packs", Status::NoPacks),
+                    self.packs.sets.status(t("packs"), Status::NoPacks),
                     &self.packs.filter,
                     self.packs.shown.is_empty(),
                 ),
@@ -2153,7 +2165,7 @@ impl Model {
                 }
                 Status::Favorite { added: liked }
             }
-            Err(e) => Status::Error(format!("Favorite failed: {e}")),
+            Err(e) => Status::Error(tf("Favorite failed: {error}", &[("error", &t_dyn(&e))])),
         };
         if self.copying.is_none() {
             self.status = status;

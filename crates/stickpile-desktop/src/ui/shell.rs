@@ -22,6 +22,8 @@ use gtk::{gdk, gio, glib};
 use stickpile_api::{ItemSummary, SetSummary, TargetApp};
 use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
+use stickpile_i18n::global::{t, tf};
+use stickpile_i18n::Lang;
 use stickpile_quick::focus::FocusEnv;
 use stickpile_quick::model::{self, Command, Event, Level, Model, OpenInfo, StickerMode, Tile};
 use stickpile_quick::{Mode, Tab, View};
@@ -45,8 +47,6 @@ const THUMB_CACHE: usize = 600;
 /// Prepared copies remembered for drag-and-drop.
 const PREPARED_CACHE: usize = 16;
 const SESSION_OPEN_TIMEOUT: Duration = Duration::from_secs(3);
-
-const SEARCH_PLACEHOLDER: &str = "Search, or try e:😂 set:cats type:gif vibe:tired";
 
 /// Cells are `thumb_px` plus [`glue::CELL_EXTRA_PX`]: the child padding here.
 const CSS: &str = r#"
@@ -165,6 +165,10 @@ pub struct Shell {
     /// and the tab last written there.
     last_tab_path: PathBuf,
     saved_tab: Cell<Option<Tab>>,
+    /// The account's language (from the server, kept in the cache for the
+    /// next start), and where it is kept.
+    account_lang: Cell<Option<Lang>>,
+    account_lang_path: PathBuf,
     thumbs: RefCell<HashMap<String, Thumb>>,
     /// Pack covers by [`cover_key`].
     covers: RefCell<HashMap<String, Thumb>>,
@@ -204,6 +208,9 @@ impl Shell {
             Ok(c) => (c, None),
             Err(e) => (ClientConfig::default(), Some(e.to_string())),
         };
+        let account_lang_path = glue::account_lang_path(&cfg);
+        let account_lang = glue::load_account_lang(&account_lang_path);
+        stickpile_i18n::global::set(glue::effective_lang(&cfg, account_lang, |k| std::env::var(k).ok()));
         let history_path = glue::history_path(&cfg);
         let history = glue::load_history(&history_path);
         let mut model = Model::with_history(glue::model_config(&cfg), history);
@@ -248,6 +255,8 @@ impl Shell {
             layout_queued: Cell::new(false),
             last_tab_path,
             saved_tab: Cell::new(saved_tab),
+            account_lang: Cell::new(account_lang),
+            account_lang_path,
             thumbs: RefCell::new(HashMap::new()),
             covers: RefCell::new(HashMap::new()),
             thumb_permits: Arc::new(tokio::sync::Semaphore::new(THUMB_CONCURRENCY)),
@@ -264,7 +273,55 @@ impl Shell {
         shell.connect_signals();
         shell.start_sync_timer();
         shell.render();
+        shell.refresh_account_lang();
         shell
+    }
+
+    // -- language ----------------------------------------------------------------------
+
+    /// Ask the server for the account's language (the web UI's setting).
+    fn refresh_account_lang(self: &Rc<Self>) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.profile(), |this, out| {
+            if let Some(Ok(p)) = out {
+                this.account_lang_known(&p);
+            }
+        });
+    }
+
+    /// A profile arrived: follow its language when it changed.
+    fn account_lang_known(self: &Rc<Self>, p: &crate::backend::Profile) {
+        if p.auth == crate::backend::AuthKind::None {
+            return;
+        }
+        let lang = p.language.as_deref().and_then(Lang::parse);
+        if self.account_lang.replace(lang) != lang {
+            if let Err(e) = glue::save_account_lang(&self.account_lang_path, lang) {
+                tracing::debug!("saving the account's language: {e}");
+            }
+            self.apply_language();
+        }
+    }
+
+    /// Show everything in the language the config and the account ask for.
+    fn apply_language(self: &Rc<Self>) {
+        let lang = glue::effective_lang(&self.cfg.borrow(), self.account_lang.get(), |k| std::env::var(k).ok());
+        if lang == stickpile_i18n::global::get() {
+            return;
+        }
+        tracing::info!("language: {lang}");
+        stickpile_i18n::global::set(lang);
+        self.w.tabs.relabel();
+        help::relabel(&self.w.help);
+        self.me.relabel();
+        self.settings.relabel();
+        relabel_widgets(&self.w);
+        if self.model.borrow().tab() == Tab::Settings {
+            self.reload_settings();
+        }
+        // Model texts (status, titles) are made when shown.
+        self.rendered_revision.set(u64::MAX);
+        self.render();
     }
 
     /// (Re)open the core session. Runs inside the runtime so a panic in the
@@ -283,8 +340,8 @@ impl Shell {
                 *self.backend_error.borrow_mut() = None;
             }
             Ok(Ok(Err(e))) => self.session_failed(crate::backend::describe(&e)),
-            Ok(Err(e)) => self.session_failed(format!("stickpile-core failed: {e}")),
-            Err(_) => self.session_failed("opening the local cache timed out".into()),
+            Ok(Err(e)) => self.session_failed(tf("stickpile-core failed: {error}", &[("error", &e)])),
+            Err(_) => self.session_failed(t("opening the local cache timed out").into()),
         }
     }
 
@@ -543,11 +600,11 @@ impl Shell {
         event: impl FnOnce(Result<T, String>) -> Event + 'static,
     ) {
         let Some(b) = self.backend() else {
-            self.dispatch(event(Err("not connected".into())));
+            self.dispatch(event(Err(t("not connected").into())));
             return;
         };
         self.spawn(request(b), move |this, out| {
-            let outcome = out.unwrap_or_else(|| Err("internal error (see log)".into()));
+            let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             this.dispatch(event(outcome));
         });
     }
@@ -594,9 +651,9 @@ impl Shell {
         w.entry.set_visible(field);
         w.title.set_hexpand(!field);
         let placeholder = match (tab, m.open_pack()) {
-            (Tab::Packs, Some(p)) => format!("Filter {} by name, keyword or emoji", p.name),
-            (Tab::Packs, None) => "Filter packs by name".to_string(),
-            _ => SEARCH_PLACEHOLDER.to_string(),
+            (Tab::Packs, Some(p)) => tf("Filter {pack} by name, keyword or emoji", &[("pack", &p.name)]),
+            (Tab::Packs, None) => t("Filter packs by name").to_string(),
+            _ => t("Search, or try e:😂 set:cats type:gif vibe:tired").to_string(),
         };
         if w.entry.placeholder_text().as_deref() != Some(placeholder.as_str()) {
             w.entry.set_placeholder_text(Some(&placeholder));
@@ -694,7 +751,7 @@ impl Shell {
                 let on = mode == StickerMode::On;
                 w.sticker.set_visible(true);
                 w.sticker.set_active(on);
-                let label = if on { "sticker: on" } else { "sticker: off" };
+                let label = if on { t("sticker: on") } else { t("sticker: off") };
                 w.sticker_label.set_label(label);
                 set_class(&w.sticker_label, "accent", on);
             }
@@ -762,10 +819,11 @@ impl Shell {
                 .config_error
                 .clone()
                 .or_else(|| self.backend_error.borrow().clone())
-                .unwrap_or_else(|| "unknown error".into());
+                .unwrap_or_else(|| t("unknown error").into());
             self.w.error.set_description(Some(&format!(
-                "{}\n\nConfig: <tt>{config}</tt>",
-                glib::markup_escape_text(&msg)
+                "{}\n\n{}",
+                glib::markup_escape_text(&msg),
+                tf("Config: {file}", &[("file", &format!("<tt>{config}</tt>"))])
             )));
         }
         self.w.stack.set_visible_child_name(page);
@@ -791,24 +849,28 @@ impl Shell {
 
     fn load_profile(self: &Rc<Self>) {
         let Some(b) = self.backend() else {
-            self.me.profile_loaded(Err("not connected".into()));
+            self.me.profile_loaded(Err(t("not connected").into()));
             return;
         };
         self.me.loading();
         self.spawn(b.profile(), |this, out| {
+            if let Some(Ok(p)) = &out {
+                this.account_lang_known(p);
+            }
             this.me
-                .profile_loaded(out.unwrap_or_else(|| Err("internal error (see log)".into())));
+                .profile_loaded(out.unwrap_or_else(|| Err(t("internal error (see log)").into())));
         });
     }
 
     fn me_action(self: &Rc<Self>, action: MeAction) {
         let Some(b) = self.backend() else {
-            self.me.login_finished(Err(LoginError::Failed("not connected".into())));
+            self.me
+                .login_finished(Err(LoginError::Failed(t("not connected").into())));
             return;
         };
         match action {
             MeAction::Login(credentials) => self.spawn(b.login(credentials), |this, out| {
-                let outcome = out.unwrap_or_else(|| Err(LoginError::Failed("internal error (see log)".into())));
+                let outcome = out.unwrap_or_else(|| Err(LoginError::Failed(t("internal error (see log)").into())));
                 let ok = outcome.is_ok();
                 this.me.login_finished(outcome);
                 if ok {
@@ -817,7 +879,7 @@ impl Shell {
             }),
             MeAction::Logout => self.spawn(b.logout(), |this, out| {
                 this.me
-                    .logout_finished(out.unwrap_or_else(|| Err("internal error (see log)".into())));
+                    .logout_finished(out.unwrap_or_else(|| Err(t("internal error (see log)").into())));
                 this.account_changed();
                 this.load_profile();
             }),
@@ -838,13 +900,32 @@ impl Shell {
 
     fn settings_action(self: &Rc<Self>, action: SettingsAction) {
         let path = self.settings.write_path();
+        // A language chosen here becomes the account's too, so the web UI
+        // follows (automatic leaves the account alone).
+        let chosen_lang = match &action {
+            SettingsAction::Set("ui.language", toml::Value::String(v)) => Lang::parse(v),
+            _ => None,
+        };
         let result = match action {
             SettingsAction::Set(key, value) => config_file::set_value(&path, key, value),
             SettingsAction::Reset(key) => config_file::unset_value(&path, key),
         };
         if let Err(e) = &result {
             tracing::warn!("saving a setting: {e}");
-            self.settings.save_failed(&format!("Not saved: {e}"));
+            self.settings.save_failed(&tf("Not saved: {error}", &[("error", &e)]));
+        }
+        if let (Ok(()), Some(lang), Some(b)) = (&result, chosen_lang, self.backend()) {
+            self.spawn(
+                b.set_account_language(Some(lang.code().to_string())),
+                move |this, out| match out {
+                    Some(Ok(())) => {
+                        this.account_lang.set(Some(lang));
+                        let _ = glue::save_account_lang(&this.account_lang_path, Some(lang));
+                    }
+                    Some(Err(e)) => tracing::info!("the account's language stays: {e}"),
+                    None => {}
+                },
+            );
         }
         self.reload_settings();
     }
@@ -877,6 +958,9 @@ impl Shell {
             let (width, height) = glue::window_size(&new);
             w.window.set_default_size(width, height);
             self.layout.set(None);
+        }
+        if old.ui.language != new.ui.language {
+            self.apply_language();
         }
         let account = pages::account_changed(&old, &new);
         if pages::needs_new_session(&old, &new) {
@@ -1050,12 +1134,12 @@ impl Shell {
         let Some(b) = self.backend() else {
             self.dispatch(Event::CopyFailed {
                 item_id: id,
-                error: "not connected".into(),
+                error: t("not connected").into(),
             });
             return;
         };
         self.spawn(b.prepare_copy(item.clone(), target, sticker), move |this, out| {
-            let result = out.unwrap_or_else(|| Err("internal error (see log)".into()));
+            let result = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             match result.and_then(|p| this.set_clipboard(&p).map(|()| p)) {
                 Ok(prepared) => {
                     let warning = prepared.warning.clone();
@@ -1074,14 +1158,14 @@ impl Shell {
     fn set_clipboard(&self, prepared: &PreparedCopy) -> Result<(), String> {
         let window = &self.w.window;
         if !window.is_visible() {
-            return Err("the popup was closed before the item was ready".into());
+            return Err(t("the popup was closed before the item was ready").into());
         }
         if !window.is_active() {
-            return Err("the popup lost focus before the item was ready — press Enter again".into());
+            return Err(t("the popup lost focus before the item was ready — press Enter again").into());
         }
         let specs = offers::provider_specs(&prepared.offers);
         if specs.is_empty() {
-            return Err("nothing to offer (check [clipboard] in config.toml)".into());
+            return Err(t("nothing to offer (check [clipboard] in config.toml)").into());
         }
         window
             .clipboard()
@@ -1554,7 +1638,6 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     let back = gtk::Button::builder()
         .icon_name("go-previous-symbolic")
         .can_focus(false)
-        .tooltip_text("Back to the packs (-, Backspace)")
         .build();
     back.add_css_class("flat");
     let title = gtk::Label::builder()
@@ -1562,10 +1645,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .build();
     title.add_css_class("heading");
-    let entry = gtk::SearchEntry::builder()
-        .hexpand(true)
-        .placeholder_text(SEARCH_PLACEHOLDER)
-        .build();
+    let entry = gtk::SearchEntry::builder().hexpand(true).build();
     let count = gtk::Label::builder().xalign(1.0).build();
     count.add_css_class("dim-label");
     count.add_css_class("caption");
@@ -1603,9 +1683,6 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     pending.add_css_class("stickpile-pending");
     let target = gtk::Label::new(None);
     target.add_css_class("heading");
-    target.set_tooltip_text(Some(
-        "Target app — Ctrl+T / Ctrl+Shift+T to change\nCtrl+S: sticker mode · Shift+Enter: copy with sticker mode flipped",
-    ));
     let target_hint = gtk::Label::new(None);
     target_hint.add_css_class("dim-label");
     target_hint.add_css_class("caption");
@@ -1617,14 +1694,10 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         .child(&sticker_label)
         .can_focus(false)
         .valign(gtk::Align::Center)
-        .tooltip_text("Send as sticker (Ctrl+S)")
         .build();
     sticker.add_css_class("flat");
     sticker.add_css_class("stickpile-sticker");
-    sticker.update_property(&[
-        gtk::accessible::Property::Label("Send as sticker"),
-        gtk::accessible::Property::KeyShortcuts("Control+S"),
-    ]);
+    sticker.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+S")]);
     let status = gtk::Label::builder()
         .hexpand(true)
         .xalign(1.0)
@@ -1648,10 +1721,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     main.set_content(Some(&overlay));
     main.add_bottom_bar(&footer);
 
-    let error = adw::StatusPage::builder()
-        .icon_name("dialog-error-symbolic")
-        .title("stickpile cannot start")
-        .build();
+    let error = adw::StatusPage::builder().icon_name("dialog-error-symbolic").build();
 
     let stack = gtk::Stack::new();
     stack.add_named(&main, Some("main"));
@@ -1667,7 +1737,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         .content(&stack)
         .build();
 
-    Widgets {
+    let w = Widgets {
         window,
         stack,
         error,
@@ -1691,5 +1761,20 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         sticker,
         sticker_label,
         status,
-    }
+    };
+    relabel_widgets(&w);
+    w
+}
+
+/// The fixed texts of the window, in the current language (the tab bar,
+/// the help and the pages have their own).
+fn relabel_widgets(w: &Widgets) {
+    w.back.set_tooltip_text(Some(t("Back to the packs (-, Backspace)")));
+    w.target.set_tooltip_text(Some(t(
+        "Target app — Ctrl+T / Ctrl+Shift+T to change\nCtrl+S: sticker mode · Shift+Enter: copy with sticker mode flipped",
+    )));
+    w.sticker.set_tooltip_text(Some(t("Send as sticker (Ctrl+S)")));
+    w.sticker
+        .update_property(&[gtk::accessible::Property::Label(t("Send as sticker"))]);
+    w.error.set_title(t("stickpile cannot start"));
 }

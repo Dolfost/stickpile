@@ -28,6 +28,7 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "ui.max_results",
         "ui.start_hidden",
         "ui.modal",
+        "ui.language",
         "ui.start_tab",
         "ui.start_mode",
         "ui.mark_favorites",
