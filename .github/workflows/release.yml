@@ -152,7 +152,8 @@ jobs:
         run: |
           set -o pipefail
           crates/stickpile-mac/app/build.sh 2>&1 | tee build.log || {
-            grep -E '(error|fatal error|Error)[:\[]' build.log | head -n 30 | sed 's/^/::error::/'
+            # The end of the log as one annotation (%0A is a line break).
+            printf '::error title=build.sh::%s\n' "$(tail -n 80 build.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
             exit 1
           }
       - name: Package
