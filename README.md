@@ -54,7 +54,7 @@ Android, a stickpile panel for Unexpected Keyboard, and macOS come after v1
 
 ```nix
 {
-  inputs.stickpile.url = "github:Dolfost/stickpile";
+  inputs.stickpile.url = "github:Dolfost/stickpile/stable"; # the latest release
   # ...
   imports = [ inputs.stickpile.nixosModules.default ];
   services.stickpile = {

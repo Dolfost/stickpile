@@ -153,7 +153,7 @@ value) and, for the server, in `crates/stickpile-server/config.example.toml`.
 
 ```nix
 {
-  inputs.stickpile.url = "github:Dolfost/stickpile";
+  inputs.stickpile.url = "github:Dolfost/stickpile/stable"; # the latest release
 
   # in your home-manager configuration
   imports = [ inputs.stickpile.homeManagerModules.default ];
@@ -177,6 +177,10 @@ value) and, for the server, in `crates/stickpile-server/config.example.toml`.
 }
 ```
 
+- `stable` is a branch that the release workflow moves to each release, so
+  `nix flake update stickpile` takes the newest one. Plain
+  `github:Dolfost/stickpile` follows `main`, and a tag
+  (`github:Dolfost/stickpile/v0.2.2`) pins one release.
 - `settings` mirrors `ClientConfig` (`crates/stickpile-core/src/config.rs`)
   one-to-one, with the same names and nesting. Every option defaults to
   `null` (unset), and only the options you set are written to the file. An

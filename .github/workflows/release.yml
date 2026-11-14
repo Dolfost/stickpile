@@ -7,6 +7,7 @@
 #   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
 #              built by Nix and pushed with skopeo
 #   release    GitHub release with every artifact and SHA256SUMS
+#   stable     moves the `stable` branch to the release, for flake inputs
 #
 # Linux tarballs: Nix binaries point at /nix/store for their loader and
 # libraries. The release job rewrites the ELF interpreter to the distribution's
@@ -250,7 +251,7 @@ jobs:
 
           Nix: \`nix profile install github:Dolfost/stickpile/$TAG#stickpile-cli\`,
           NixOS module \`nixosModules.default\`, home-manager module \`homeManagerModules.default\`
-          (docs/deployment.md, docs/nix.md).
+          (docs/deployment.md, docs/nix.md). The flake input \`github:Dolfost/stickpile/stable\` follows releases.
           EOF
           gh release create "$TAG" dist/* \
             --repo "${{ github.repository }}" \
@@ -258,3 +259,28 @@ jobs:
             --notes-file notes.md \
             --generate-notes \
             --verify-tag
+
+  # Moves the `stable` branch to the released commit, so that a flake input
+  # `github:Dolfost/stickpile/stable` follows releases (`nix flake update
+  # stickpile` takes the newest). It only fast-forwards: rebuilding an older
+  # tag with workflow_dispatch leaves the branch where it is.
+  stable:
+    name: stable branch
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - name: Fast-forward stable to the tag
+        run: |
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if git rev-parse -q --verify refs/remotes/origin/stable >/dev/null \
+            && ! git merge-base --is-ancestor origin/stable "$commit"; then
+            echo "::notice::stable is ahead of $TAG, left alone"
+            exit 0
+          fi
+          git push origin "$commit:refs/heads/stable"

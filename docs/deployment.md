@@ -52,7 +52,7 @@ this way.
 ```nix
 # flake.nix
 {
-  inputs.stickpile.url = "github:Dolfost/stickpile";
+  inputs.stickpile.url = "github:Dolfost/stickpile/stable"; # the latest release
   # inputs.stickpile.inputs.nixpkgs.follows = "nixpkgs";  # optional; the flake is tested on nixos-26.05
 
   outputs = { nixpkgs, stickpile, ... }: {
