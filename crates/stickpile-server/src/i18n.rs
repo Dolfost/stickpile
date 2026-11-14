@@ -49,6 +49,12 @@ pub fn t_dyn(en: &str) -> String {
     stickpile_i18n::t_dyn(current(), en)
 }
 
+/// A text made in English from one of `templates` (quality and
+/// compatibility notes), in the request's language.
+pub fn t_template(text: &str, templates: &[&str]) -> String {
+    stickpile_i18n::t_template(current(), text, templates)
+}
+
 /// The language for `req` (see the module docs). Runs after the auth
 /// middleware, which leaves the [`AuthOutcome`] in the extensions.
 pub fn request_lang(req: &Request) -> Lang {

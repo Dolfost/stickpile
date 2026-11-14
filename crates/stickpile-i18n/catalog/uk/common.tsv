@@ -22,3 +22,13 @@ Items	Стікери
 Copies	Копіювання
 Storage	Сховище
 {n} item|{n} items	{n} стікер|{n} стікери|{n} стікерів
+# Sizes and the target app without a name.
+{n} B	{n} Б
+Other / browser	Інше / браузер
+# Why an item cannot go to an app (stickpile_api::profiles::INCOMPATIBLE).
+{app} sticker is {size} KB, limit {limit} KB	{app}: стікер займає {size} КБ, межа {limit} КБ
+{app} does not accept {kind} {format}	{app}: не приймає такий файл ({kind}, {format})
+{app} limit is {limit} MiB, {variant} is {size} MiB	{app}: межа {limit} МіБ, {variant} займає {size} МіБ
+{app} max dimension is {max} px	{app}: найбільший розмір {max} px
+no {app} sticker variant generated yet	{app}: варіант стікера ще не створено
+no variant suitable for {app}	{app}: немає придатного варіанта

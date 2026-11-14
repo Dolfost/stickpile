@@ -13,19 +13,24 @@ use stickpile_quick::{HelpSection, Tab};
 
 use crate::backend::{AuthKind, Profile};
 
-/// "512 B", "1.5 KB", "12.3 MB".
+/// "512 B", "1.5 KB", "12.3 MB", in the current language.
 pub fn human_bytes(n: u64) -> String {
-    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
     if n < 1000 {
-        return format!("{n} B");
+        return tf("{n} B", &[("n", &n)]);
     }
     let mut v = n as f64 / 1000.0;
     let mut unit = 0;
-    while v >= 999.95 && unit < UNITS.len() - 1 {
+    while v >= 999.95 && unit < 3 {
         v /= 1000.0;
         unit += 1;
     }
-    format!("{v:.1} {}", UNITS[unit])
+    let v = format!("{v:.1}");
+    match unit {
+        0 => tf("{n} KB", &[("n", &v)]),
+        1 => tf("{n} MB", &[("n", &v)]),
+        2 => tf("{n} GB", &[("n", &v)]),
+        _ => tf("{n} TB", &[("n", &v)]),
+    }
 }
 
 /// Heading of the Me page.

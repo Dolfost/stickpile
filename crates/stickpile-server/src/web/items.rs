@@ -466,7 +466,7 @@ fn quality_section(d: &ItemDetail) -> Markup {
                                         " " (c.score)
                                     }
                                     td { (format!("{:.1}", c.weight)) }
-                                    td { (c.detail) }
+                                    td { (crate::i18n::t_template(&c.detail, stickpile_media::quality::DETAILS)) }
                                 }
                             }
                         }
@@ -634,7 +634,7 @@ pub async fn page(
                         h2 #inc-head { (t("Cannot be sent to")) }
                         ul {
                             @for i in &d.incompatible {
-                                li { strong { (target_label(i.target)) } ": " (i.reason) }
+                                li { strong { (target_label(i.target)) } ": " (crate::i18n::t_template(&i.reason, stickpile_api::profiles::INCOMPATIBLE)) }
                             }
                         }
                     }

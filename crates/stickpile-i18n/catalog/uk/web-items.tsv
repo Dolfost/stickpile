@@ -116,3 +116,22 @@ Delete item	Видалити стікер
 Better versions	Кращі версії
 No higher-quality copy of this picture in your library or in public sets.	Ні у вашій бібліотеці, ні в публічних наборах немає якіснішої копії цього зображення.
 back to the item	назад до стікера
+# Quality notes (stickpile_media::quality::DETAILS).
+{long} px longest side, looks upscaled from about {eff} px (recommended {rec} px)	{long} px за довшою стороною, схоже, збільшено приблизно з {eff} px (рекомендовано {rec} px)
+{long} px longest side (recommended {rec} px)	{long} px за довшою стороною (рекомендовано {rec} px)
+estimated JPEG q≈{q} (non-standard tables, closest IJG match)	оцінка якості JPEG q≈{q} (нестандартні таблиці, найближча відповідність IJG)
+estimated JPEG q={q}	оцінка якості JPEG q={q}
+no visible 8x8 block seams	немає помітних меж блоків 8x8
+8x8 block seams of {level} grey levels (grid offset {x},{y})	межі блоків 8x8 у {level} рівня сірого (зсув сітки {x},{y})
+8x8 block seams of {level} grey levels	межі блоків 8x8 у {level} рівня сірого
+coefficients fit an earlier JPEG at q≈{first} (now q={q})	коефіцієнти відповідають попередньому JPEG з q≈{first} (зараз q={q})
+block grid shifted by {phase} px in {dir} (cropped after an earlier compression)	сітку блоків зсунуто на {phase} px по {dir} (обрізано після попереднього стиснення)
+{level} grey-level block seams despite q={q}	межі блоків у {level} рівня сірого попри q={q}
+likely recompressed: {why}	ймовірно, стиснено повторно: {why}
+no sign of an earlier JPEG generation	немає ознак попереднього стиснення JPEG
+lossless file with an 8x8 JPEG grid (offset {x},{y}): saved from a JPEG	файл без втрат із сіткою JPEG 8x8 (зсув {x},{y}): збережено з JPEG
+oscillation index {r} next to strong edges	індекс коливань {r} біля різких країв
+Laplacian variance {v} on edges at ≤{side} px	дисперсія лапласіана {v} на краях при ≤{side} px
+{pct}% transparent (cut-out sticker)	{pct}% прозорих пікселів (вирізаний стікер)
+more than 4096 colours in the first frame	понад 4096 кольорів у першому кадрі
+{n} colours in the first frame	кольорів у першому кадрі: {n}

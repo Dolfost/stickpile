@@ -206,3 +206,8 @@ Server unreachable and the pack is not cached	Сервер недоступни�
 Server unreachable; favorites need the server	Сервер недоступний; для вибраного потрібен сервер
 The server did not accept this client; log in on the Me tab (6)	Сервер не прийняв цей клієнт; увійдіть на вкладці "Я" (6)
 The server does not know this device by its tailnet identity; sign in with a username and password	Сервер не знає цей пристрій за ідентифікацією tailnet; увійдіть з іменем користувача й паролем
+# Sizes (powers of 1000).
+{n} KB	{n} кБ
+{n} MB	{n} МБ
+{n} GB	{n} ГБ
+{n} TB	{n} ТБ

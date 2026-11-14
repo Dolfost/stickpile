@@ -31,3 +31,8 @@ or	або
 sign in	увійти
 Your session has ended.	Ваш сеанс завершився.
 Sign in again	Увійти знову
+# Sizes (powers of 1024).
+{n} KiB	{n} КіБ
+{n} MiB	{n} МіБ
+{n} GiB	{n} ГіБ
+{n} TiB	{n} ТіБ

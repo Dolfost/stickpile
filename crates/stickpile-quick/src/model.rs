@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
 
-use stickpile_i18n::global::{t, t_dyn, tf};
+use stickpile_i18n::global::{t, t_dyn, t_template, tf};
 
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
@@ -497,7 +497,7 @@ impl Status {
                 };
                 if let Some(w) = warning {
                     s.push_str(" — ");
-                    s.push_str(&t_dyn(w));
+                    s.push_str(&t_template(w, profiles::INCOMPATIBLE));
                 }
                 s
             }
@@ -615,7 +615,7 @@ impl Entry {
         }
         if let Some(why) = &self.incompatible {
             s.push_str("\n⚠ ");
-            s.push_str(why);
+            s.push_str(&t_template(why, profiles::INCOMPATIBLE));
         }
         s
     }
@@ -632,8 +632,12 @@ fn opening_mode(cfg: &ModelConfig, tab: Tab) -> Mode {
     }
 }
 
-pub fn target_name(t: TargetApp) -> String {
-    profiles::profile(t).display_name
+/// The target's name, in the current language ("Other / browser").
+pub fn target_name(target: TargetApp) -> String {
+    match target {
+        TargetApp::Generic => t("Other / browser").into(),
+        _ => profiles::profile(target).display_name,
+    }
 }
 
 pub fn supports_stickers(t: TargetApp) -> bool {

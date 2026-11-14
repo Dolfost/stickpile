@@ -100,6 +100,58 @@ pub fn jpeg_quality_estimate(jpeg: &[u8]) -> Option<u8> {
     jpeg::luma_table(jpeg).map(|t| estimate_ijg(&t).quality)
 }
 
+const UPSCALED: &str = "{long} px longest side, looks upscaled from about {eff} px (recommended {rec} px)";
+const RESOLUTION: &str = "{long} px longest side (recommended {rec} px)";
+const JPEG_GUESS: &str = "estimated JPEG q≈{q} (non-standard tables, closest IJG match)";
+const JPEG: &str = "estimated JPEG q={q}";
+const NO_SEAMS: &str = "no visible 8x8 block seams";
+const SEAMS_SHIFTED: &str = "8x8 block seams of {level} grey levels (grid offset {x},{y})";
+const SEAMS: &str = "8x8 block seams of {level} grey levels";
+const EARLIER_JPEG: &str = "coefficients fit an earlier JPEG at q≈{first} (now q={q})";
+const GRID_SHIFTED: &str = "block grid shifted by {phase} px in {dir} (cropped after an earlier compression)";
+const SEAMS_DESPITE: &str = "{level} grey-level block seams despite q={q}";
+const RECOMPRESSED: &str = "likely recompressed: {why}";
+const NOT_RECOMPRESSED: &str = "no sign of an earlier JPEG generation";
+const LOSSLESS_FROM_JPEG: &str = "lossless file with an 8x8 JPEG grid (offset {x},{y}): saved from a JPEG";
+const RINGING: &str = "oscillation index {r} next to strong edges";
+const SHARPNESS: &str = "Laplacian variance {v} on edges at ≤{side} px";
+const ALPHA: &str = "{pct}% transparent (cut-out sticker)";
+const MANY_COLOURS: &str = "more than 4096 colours in the first frame";
+const COLOURS: &str = "{n} colours in the first frame";
+const FRAME_RATE: &str = "{fps} fps";
+
+/// Every [`QualityComponent::detail`], English with `{name}` placeholders,
+/// in the order to match them: the web UI translates the stored text with
+/// `stickpile_i18n::t_template`.
+pub const DETAILS: &[&str] = &[
+    UPSCALED,
+    RESOLUTION,
+    JPEG_GUESS,
+    JPEG,
+    NO_SEAMS,
+    SEAMS_SHIFTED,
+    SEAMS,
+    EARLIER_JPEG,
+    GRID_SHIFTED,
+    SEAMS_DESPITE,
+    RECOMPRESSED,
+    NOT_RECOMPRESSED,
+    LOSSLESS_FROM_JPEG,
+    RINGING,
+    SHARPNESS,
+    ALPHA,
+    MANY_COLOURS,
+    COLOURS,
+    FRAME_RATE,
+];
+
+/// `template` (one of [`DETAILS`]) with its placeholders filled.
+fn detail(template: &str, args: &[(&str, &dyn std::fmt::Display)]) -> String {
+    args.iter().fold(template.to_string(), |s, (name, value)| {
+        s.replace(&format!("{{{name}}}"), &value.to_string())
+    })
+}
+
 fn component(name: &str, score: f64, weight: f32, detail: String) -> QualityComponent {
     QualityComponent {
         name: name.into(),
@@ -233,9 +285,9 @@ fn resolution(luma: &Grey, rec: u32) -> QualityComponent {
     let (long, eff, upscaled) = effective_resolution(luma, rec);
     let score = 100.0 * (f64::from(eff) / f64::from(rec)).min(1.0);
     let detail = if upscaled {
-        format!("{long} px longest side, looks upscaled from about {eff} px (recommended {rec} px)")
+        detail(UPSCALED, &[("long", &long), ("eff", &eff), ("rec", &rec)])
     } else {
-        format!("{long} px longest side (recommended {rec} px)")
+        detail(RESOLUTION, &[("long", &long), ("rec", &rec)])
     };
     component("resolution", score, W_RESOLUTION, detail)
 }
@@ -295,12 +347,9 @@ fn jpeg_quality(t: &QuantTable) -> QualityComponent {
     let est = estimate_ijg(t);
     let score = 100.0 * ramp(f64::from(est.quality), 10.0, 90.0);
     let detail = if est.misfit > 0.1 {
-        format!(
-            "estimated JPEG q≈{} (non-standard tables, closest IJG match)",
-            est.quality
-        )
+        detail(JPEG_GUESS, &[("q", &est.quality)])
     } else {
-        format!("estimated JPEG q={}", est.quality)
+        detail(JPEG, &[("q", &est.quality)])
     };
     component("jpeg_quality", score, W_JPEG_QUALITY, detail)
 }
@@ -408,14 +457,18 @@ fn blockiness(grid: &GridProfile) -> QualityComponent {
     let (a, s) = (block_level(aligned.0, aligned.1), block_level(shifted.0, shifted.1));
     let b = a.max(s);
     let detail = if b <= 0.0 {
-        "no visible 8x8 block seams".to_string()
+        NO_SEAMS.to_string()
     } else if s > a {
-        format!(
-            "8x8 block seams of {:.1} grey levels (grid offset {},{})",
-            shifted.1, phase.0, phase.1
+        detail(
+            SEAMS_SHIFTED,
+            &[
+                ("level", &format!("{:.1}", shifted.1)),
+                ("x", &phase.0),
+                ("y", &phase.1),
+            ],
         )
     } else {
-        format!("8x8 block seams of {:.1} grey levels", aligned.1)
+        detail(SEAMS, &[("level", &format!("{:.1}", aligned.1))])
     };
     component("blockiness", 100.0 * (1.0 - b), W_BLOCKINESS, detail)
 }
@@ -589,10 +642,7 @@ fn recompression(
         if let Some(dq) = double_quantisation(g, &t.natural) {
             findings.push((
                 ramp(dq.evidence, 0.1, 0.5),
-                format!(
-                    "coefficients fit an earlier JPEG at q≈{} (now q={})",
-                    dq.first_quality, est.quality
-                ),
+                detail(EARLIER_JPEG, &[("first", &dq.first_quality), ("q", &est.quality)]),
             ));
         }
         if let Some(grid) = grid {
@@ -601,7 +651,7 @@ fn recompression(
                 let dir = if axis == 0 { "x" } else { "y" };
                 findings.push((
                     ramp(ratio, 1.25, 1.75).min(ramp(excess, 0.5, 1.5)),
-                    format!("block grid shifted by {phase} px in {dir} (cropped after an earlier compression)"),
+                    detail(GRID_SHIFTED, &[("phase", &phase), ("dir", &dir)]),
                 ));
             }
             // A high-quality encode does not produce strong seams by itself.
@@ -609,16 +659,19 @@ fn recompression(
                 let excess = grid.excess(0, 0);
                 findings.push((
                     ramp(aligned, 2.2, 3.2).min(ramp(excess, 1.6, 2.6)),
-                    format!("{excess:.1} grey-level block seams despite q={}", est.quality),
+                    detail(
+                        SEAMS_DESPITE,
+                        &[("level", &format!("{excess:.1}")), ("q", &est.quality)],
+                    ),
                 ));
             }
         }
         // Nothing measurable (tiny or flat image): no component.
         let (evidence, why) = findings.into_iter().max_by(|a, b| a.0.total_cmp(&b.0))?;
         let detail = if evidence > 0.0 {
-            format!("likely recompressed: {why}")
+            detail(RECOMPRESSED, &[("why", &why)])
         } else {
-            "no sign of an earlier JPEG generation".into()
+            NOT_RECOMPRESSED.into()
         };
         return Some(component(
             "recompression",
@@ -634,12 +687,9 @@ fn recompression(
     let (phase, best) = grid.strongest();
     let evidence = ramp(best, 1.3, 2.0).min(ramp(grid.excess(phase.0, phase.1), 0.5, 1.5));
     let detail = if evidence > 0.0 {
-        format!(
-            "lossless file with an 8x8 JPEG grid (offset {},{}): saved from a JPEG",
-            phase.0, phase.1
-        )
+        detail(LOSSLESS_FROM_JPEG, &[("x", &phase.0), ("y", &phase.1)])
     } else {
-        "no sign of an earlier JPEG generation".into()
+        NOT_RECOMPRESSED.into()
     };
     Some(component(
         "recompression",
@@ -789,7 +839,7 @@ fn ringing(g: &Grey) -> Option<QualityComponent> {
         "ringing",
         score,
         W_RINGING,
-        format!("oscillation index {r:.1} next to strong edges"),
+        detail(RINGING, &[("r", &format!("{r:.1}"))]),
     ))
 }
 
@@ -837,7 +887,7 @@ fn sharpness(luma: &Grey) -> Option<QualityComponent> {
         "sharpness",
         score,
         W_SHARPNESS,
-        format!("Laplacian variance {v:.0} on edges at ≤{SHARPNESS_SIDE} px"),
+        detail(SHARPNESS, &[("v", &format!("{v:.0}")), ("side", &SHARPNESS_SIDE)]),
     ))
 }
 
@@ -856,14 +906,19 @@ fn alpha(frame: &RgbaImage) -> Option<QualityComponent> {
             "alpha",
             100.0,
             W_ALPHA,
-            format!("{:.0}% transparent (cut-out sticker)", frac * 100.0),
+            detail(ALPHA, &[("pct", &format!("{:.0}", frac * 100.0))]),
         )
     })
 }
 
 fn frame_rate(fps: f32) -> QualityComponent {
     let score = 100.0 * (f64::from(fps) / 24.0).clamp(0.0, 1.0).powf(0.7);
-    component("frame_rate", score, W_FRAME_RATE, format!("{fps:.1} fps"))
+    component(
+        "frame_rate",
+        score,
+        W_FRAME_RATE,
+        detail(FRAME_RATE, &[("fps", &format!("{fps:.1}"))]),
+    )
 }
 
 fn palette(frame: &RgbaImage) -> QualityComponent {
@@ -878,9 +933,9 @@ fn palette(frame: &RgbaImage) -> QualityComponent {
     let n = seen.len();
     let score = 100.0 * ((n.max(1) as f64).log2() / 8.0).clamp(0.0, 1.0);
     let detail = if n > 4096 {
-        "more than 4096 colours in the first frame".to_string()
+        MANY_COLOURS.to_string()
     } else {
-        format!("{n} colours in the first frame")
+        detail(COLOURS, &[("n", &n)])
     };
     component("palette", score, W_PALETTE, detail)
 }

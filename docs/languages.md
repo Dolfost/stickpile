@@ -57,6 +57,13 @@ looks it up in its catalog, falling back to the English.
 - The desktop client keeps one language for the process
   (`stickpile_i18n::global`); widgets built once are relabelled when it
   changes.
+- Texts made in English where no language is known are translated where
+  they are shown: the quality notes, stored with each item
+  (`stickpile_media::quality::DETAILS`), and why an item cannot go to an
+  app (`stickpile_api::profiles::INCOMPATIBLE`). Those lists hold every
+  such text as a template; `t_template` finds the one a text was made
+  from and fills its translation with the same values. The API returns
+  them in English.
 
 **Coverage tests** keep the catalogs complete: `cargo test -p
 stickpile-i18n` finds every `t(`, `tf(`, `tp(` and `plural(` text and every
@@ -64,7 +71,8 @@ literal `AppError` message in the server, the popup model and the desktop
 client, and every `tr(` / `trf(` text of the scripts, and fails when
 Ukrainian lacks one. `catalogs_are_well_formed` checks the files: no key
 twice, the same placeholders, three plural forms. The desktop crate checks
-the Settings rows and the key help, which are not literals.
+the Settings rows and the key help, which are not literals, and the
+server's `tests/languages.rs` the two template lists.
 
 ## Adding a language
 

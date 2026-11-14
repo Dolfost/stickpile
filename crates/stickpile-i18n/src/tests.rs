@@ -53,6 +53,47 @@ fn translates_with_fallback() {
 }
 
 #[test]
+fn matches_filled_templates() {
+    let m = |t, s| match_template(t, s);
+    assert_eq!(
+        m(
+            "{app} limit is {n} MiB, {v} is {s} MiB",
+            "Discord limit is 10 MiB, mp4 is 12.5 MiB"
+        ),
+        Some(vec![("app", "Discord"), ("n", "10"), ("v", "mp4"), ("s", "12.5")])
+    );
+    assert_eq!(m("offset {x},{y}", "offset 3,4"), Some(vec![("x", "3"), ("y", "4")]));
+    assert_eq!(m("likely: {why}", "likely: a: b"), Some(vec![("why", "a: b")]));
+    assert_eq!(m("{n} fps", "12.0 fps"), Some(vec![("n", "12.0")]));
+    assert_eq!(m("no seams", "no seams"), Some(vec![]));
+    assert_eq!(m("no seams", "no seams here"), None);
+    assert_eq!(m("{n} fps", " fps"), None, "empty value");
+    assert_eq!(m("{n} fps", "12 fps!"), None, "the last literal ends the text");
+    assert_eq!(m("at {a} px", "near 3 px"), None);
+    assert_eq!(m("{a}{b}", "xy"), None, "adjacent placeholders are ambiguous");
+}
+
+#[test]
+fn translates_filled_templates() {
+    // Real catalog entries: the compatibility notes and the target name.
+    let templates = ["{app} max dimension is {max} px", "no variant suitable for {app}"];
+    assert_eq!(
+        t_template(Lang::Uk, "no variant suitable for Other / browser", &templates),
+        "Інше / браузер: немає придатного варіанта"
+    );
+    assert_eq!(
+        t_template(Lang::Uk, "Slack max dimension is 4096 px", &templates),
+        "Slack: найбільший розмір 4096 px"
+    );
+    assert_eq!(t_template(Lang::Uk, "Animation", &templates), "Анімація", "a plain key");
+    assert_eq!(t_template(Lang::Uk, "something else", &templates), "something else");
+    assert_eq!(
+        t_template(Lang::En, "no variant suitable for Slack", &templates),
+        "no variant suitable for Slack"
+    );
+}
+
+#[test]
 fn ukrainian_plurals() {
     let forms: Vec<usize> = [0u64, 1, 2, 4, 5, 11, 12, 14, 15, 21, 22, 25, 101, 111, 112]
         .iter()

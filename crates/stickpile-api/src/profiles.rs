@@ -171,6 +171,30 @@ pub struct Choice {
 #[error("{0}")]
 pub struct Incompatible(pub String);
 
+const STICKER_TOO_BIG: &str = "{app} sticker is {size} KB, limit {limit} KB";
+const NOT_ACCEPTED: &str = "{app} does not accept {kind} {format}";
+const FILE_TOO_BIG: &str = "{app} limit is {limit} MiB, {variant} is {size} MiB";
+const TOO_LARGE: &str = "{app} max dimension is {max} px";
+const NO_STICKER: &str = "no {app} sticker variant generated yet";
+const NO_VARIANT: &str = "no variant suitable for {app}";
+
+/// Every [`Incompatible`] text, English with `{name}` placeholders: clients
+/// translate them with `stickpile_i18n::t_template`.
+pub const INCOMPATIBLE: &[&str] = &[
+    STICKER_TOO_BIG,
+    NOT_ACCEPTED,
+    FILE_TOO_BIG,
+    TOO_LARGE,
+    NO_STICKER,
+    NO_VARIANT,
+];
+
+fn incompatible(template: &str, args: &[(&str, String)]) -> String {
+    args.iter().fold(template.to_string(), |s, (name, value)| {
+        s.replace(&format!("{{{name}}}"), value)
+    })
+}
+
 fn format_of_variant(v: &VariantInfo, original: MediaFormat) -> Option<MediaFormat> {
     match v.variant {
         Variant::Original => Some(original),
@@ -219,11 +243,13 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
                 spec.video_max_bytes
             };
             if v.size_bytes > max {
-                last_reason = Some(format!(
-                    "{} sticker is {} KB, limit {} KB",
-                    p.display_name,
-                    v.size_bytes / 1024,
-                    max / 1024
+                last_reason = Some(incompatible(
+                    STICKER_TOO_BIG,
+                    &[
+                        ("app", p.display_name.clone()),
+                        ("size", (v.size_bytes / 1024).to_string()),
+                        ("limit", (max / 1024).to_string()),
+                    ],
                 ));
                 continue;
             }
@@ -238,25 +264,34 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
             _ => item.kind,
         };
         if !p.accepts(kind_for_format, fmt) {
-            last_reason = Some(format!(
-                "{} does not accept {:?} {:?}",
-                p.display_name, kind_for_format, fmt
+            last_reason = Some(incompatible(
+                NOT_ACCEPTED,
+                &[
+                    ("app", p.display_name.clone()),
+                    ("kind", format!("{kind_for_format:?}")),
+                    ("format", format!("{fmt:?}")),
+                ],
             ));
             continue;
         }
         if v.size_bytes > p.max_file_bytes {
-            last_reason = Some(format!(
-                "{} limit is {} MiB, {} is {:.1} MiB",
-                p.display_name,
-                p.max_file_bytes / MIB,
-                v.variant.as_str(),
-                v.size_bytes as f64 / MIB as f64
+            last_reason = Some(incompatible(
+                FILE_TOO_BIG,
+                &[
+                    ("app", p.display_name.clone()),
+                    ("limit", (p.max_file_bytes / MIB).to_string()),
+                    ("variant", v.variant.as_str().to_string()),
+                    ("size", format!("{:.1}", v.size_bytes as f64 / MIB as f64)),
+                ],
             ));
             continue;
         }
         if let Some(maxd) = p.max_dimension {
             if v.width.max(v.height) > maxd {
-                last_reason = Some(format!("{} max dimension is {maxd} px", p.display_name));
+                last_reason = Some(incompatible(
+                    TOO_LARGE,
+                    &[("app", p.display_name.clone()), ("max", maxd.to_string())],
+                ));
                 continue;
             }
         }
@@ -266,11 +301,8 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
         });
     }
     Err(Incompatible(last_reason.unwrap_or_else(|| {
-        if sticker {
-            format!("no {} sticker variant generated yet", p.display_name)
-        } else {
-            format!("no variant suitable for {}", p.display_name)
-        }
+        let template = if sticker { NO_STICKER } else { NO_VARIANT };
+        incompatible(template, &[("app", p.display_name.clone())])
     })))
 }
 

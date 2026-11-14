@@ -116,3 +116,57 @@ async fn pages_follow_the_language() {
     let me: User = srv.get(&alice_u, routes::ME).await.expect(200).json();
     assert_eq!(me.language, None);
 }
+
+/// Notes made in English by crates without translations (compatibility)
+/// or stored in English (quality) are translated where they are shown.
+#[test]
+fn notes_made_in_english_have_ukrainian() {
+    use stickpile_api::profiles::INCOMPATIBLE;
+    use stickpile_i18n::{lookup, t_template, Lang};
+    use stickpile_media::quality::DETAILS;
+    for template in INCOMPATIBLE.iter().chain(DETAILS) {
+        assert!(lookup(Lang::Uk, template).is_some(), "no Ukrainian for {template:?}");
+    }
+    assert_eq!(
+        t_template(
+            Lang::Uk,
+            "likely recompressed: block grid shifted by 3 px in x (cropped after an earlier compression)",
+            DETAILS
+        ),
+        "ймовірно, стиснено повторно: сітку блоків зсунуто на 3 px по x (обрізано після попереднього стиснення)"
+    );
+    assert_eq!(
+        t_template(Lang::Uk, "more than 4096 colours in the first frame", DETAILS),
+        "понад 4096 кольорів у першому кадрі",
+        "matched before \"{{n}} colours in the first frame\""
+    );
+    assert_eq!(
+        t_template(Lang::Uk, "Discord does not accept Animation Webm", INCOMPATIBLE),
+        "Discord: не приймає такий файл (Анімація, Webm)"
+    );
+    assert_eq!(
+        t_template(Lang::Uk, "no variant suitable for Other / browser", INCOMPATIBLE),
+        "Інше / браузер: немає придатного варіанта"
+    );
+}
+
+#[tokio::test]
+async fn an_item_page_in_ukrainian() {
+    let srv = TestServer::start().await;
+    let alice_u = srv.user("alice").await;
+    let set = srv
+        .create_set(&alice_u, "cats", stickpile_api::Visibility::Private)
+        .await;
+    let item = srv.upload_one(&alice_u, &set.id, "cat.png", common::png(7)).await;
+    srv.patch(&alice_u, routes::ME, json!({"language": "uk"}))
+        .await
+        .expect(200);
+    let alice = Browser::login(&srv, &alice_u).await;
+    let page = alice.get(&format!("/items/{}", item.id)).await;
+    assert_page(&page);
+    let html = page.text();
+    assert!(html.contains("за довшою стороною"), "the quality notes");
+    assert!(!html.contains("longest side"));
+    assert!(html.contains(" КіБ") || html.contains(" Б<"), "the file size");
+    assert!(!html.contains(" KiB"));
+}

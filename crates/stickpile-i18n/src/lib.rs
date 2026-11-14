@@ -245,6 +245,70 @@ pub fn tf(lang: Lang, en: &'static str, args: &[(&str, &dyn Display)]) -> String
     fill(t(lang, en), args)
 }
 
+/// The values of `template`'s `{name}` placeholders when `text` is that
+/// template filled, else `None`. A placeholder takes the shortest text up
+/// to the literal after it; none may be empty.
+pub fn match_template<'a>(template: &'a str, text: &'a str) -> Option<Vec<(&'a str, &'a str)>> {
+    let mut literals = Vec::new();
+    let mut names = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let close = open + rest[open..].find('}')?;
+        literals.push(&rest[..open]);
+        names.push(&rest[open + 1..close]);
+        rest = &rest[close + 1..];
+    }
+    literals.push(rest);
+    if names.is_empty() {
+        return (text == template).then(Vec::new);
+    }
+    let mut at = text.strip_prefix(literals[0]).map(|_| literals[0].len())?;
+    let mut values = Vec::new();
+    for (k, name) in names.iter().enumerate() {
+        let literal = literals[k + 1];
+        let end = if k + 1 == names.len() {
+            text[at..].strip_suffix(literal).map(|v| at + v.len())?
+        } else if literal.is_empty() {
+            return None;
+        } else {
+            at + text[at..].find(literal)?
+        };
+        if end == at {
+            return None;
+        }
+        values.push((*name, &text[at..end]));
+        at = end + literal.len();
+    }
+    Some(values)
+}
+
+/// `text`, made in English by filling one of `templates`, in `lang`: the
+/// first template it fits is translated and filled again with the same
+/// values, each translated too (by the same templates, else as a catalog
+/// key: "Animation"). A text that fits none is looked up as it is. For
+/// texts that crates without translations make (compatibility notes) or
+/// that are stored in English (quality notes).
+pub fn t_template(lang: Lang, text: &str, templates: &[&str]) -> String {
+    if lang == Lang::En {
+        return text.to_string();
+    }
+    for template in templates {
+        let Some(values) = match_template(template, text) else {
+            continue;
+        };
+        let Some(translated) = lookup(lang, template) else {
+            return text.to_string();
+        };
+        let mut out = translated.to_string();
+        for (name, value) in values {
+            // Values are shorter than the text: the recursion ends.
+            out = out.replace(&format!("{{{name}}}"), &t_template(lang, value, templates));
+        }
+        return out;
+    }
+    t_dyn(lang, text)
+}
+
 /// Index of the plural form for `n`: English `one` (0) / `other` (1);
 /// Ukrainian `one` (0: 1, 21, 31...), `few` (1: 2-4, 22-24...), `many` (2).
 pub fn plural_form(lang: Lang, n: u64) -> usize {
@@ -448,6 +512,10 @@ pub mod global {
 
     pub fn t_dyn(en: &str) -> String {
         super::t_dyn(get(), en)
+    }
+
+    pub fn t_template(text: &str, templates: &[&str]) -> String {
+        super::t_template(get(), text, templates)
     }
 }
 

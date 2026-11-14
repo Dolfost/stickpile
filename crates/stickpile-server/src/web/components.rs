@@ -611,18 +611,21 @@ pub fn opt_time(ts: Option<i64>) -> Markup {
     }
 }
 
+/// "512 B", "1.5 KiB", in the request's language.
 pub fn fmt_bytes(n: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut u = 0;
-    while v >= 1024.0 && u < UNITS.len() - 1 {
+    while v >= 1024.0 && u < 4 {
         v /= 1024.0;
         u += 1;
     }
-    if u == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", UNITS[u])
+    let v = format!("{v:.1}");
+    match u {
+        0 => tf("{n} B", &[("n", &n)]),
+        1 => tf("{n} KiB", &[("n", &v)]),
+        2 => tf("{n} MiB", &[("n", &v)]),
+        3 => tf("{n} GiB", &[("n", &v)]),
+        _ => tf("{n} TiB", &[("n", &v)]),
     }
 }
 
