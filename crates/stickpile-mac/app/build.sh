@@ -85,15 +85,27 @@ mkdir -p "$GEN"
 "$BINDGEN" "$LIB" "$GEN" --swift-sources --headers --modulemap \
 	--module-name stickpile_macFFI --modulemap-filename module.modulemap
 
-echo "swiftc: $SWIFT_TARGET"
-# shellcheck disable=SC2086
-swiftc -O -parse-as-library -swift-version 5 -target "$SWIFT_TARGET" -module-name Stickpile \
-	-Xcc -fmodule-map-file="$GEN/module.modulemap" -I "$GEN" \
-	"$APP_DIR"/Sources/*.swift "$GEN/stickpile_mac.swift" \
-	-Xlinker "$LIB" $NATIVE_LIBS \
-	-framework AppKit -framework Carbon -framework ServiceManagement \
-	-Xlinker -dead_strip \
-	-o "$BUILD/Stickpile"
+# The SDK is passed explicitly: with an Xcode selected (GitHub's runners) the
+# link otherwise ran without it and found no libm.
+SDK=${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}
+echo "swiftc: $SWIFT_TARGET, SDK $SDK"
+compile() {
+	# shellcheck disable=SC2086
+	swiftc -O -parse-as-library -swift-version 5 -target "$SWIFT_TARGET" -sdk "$SDK" -module-name Stickpile \
+		-Xcc -fmodule-map-file="$GEN/module.modulemap" -I "$GEN" \
+		"$APP_DIR"/Sources/*.swift "$GEN/stickpile_mac.swift" \
+		-Xlinker "$LIB" $NATIVE_LIBS \
+		-framework AppKit -framework Carbon -framework ServiceManagement \
+		-Xlinker -dead_strip \
+		-o "$BUILD/Stickpile" "$@"
+}
+if ! compile; then
+	# Show how the linker was called (its search paths and libraries).
+	echo "build.sh: swiftc failed; again with -v:" >&2
+	compile -v 2>&1 | grep -E '^/[^ ]*/clang |^ld: ' | tr ' ' '\n' |
+		grep -E -A1 -e 'sysroot|syslibroot|^-target$' -e '^-[lL]' -e '^ld:' -e 'not found' >&2 || true
+	exit 1
+fi
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 BUNDLE="$OUT_DIR/Stickpile.app"
