@@ -436,7 +436,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clipspike"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3634,7 +3634,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stickpile-ai"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "image",
  "ort",
@@ -3651,7 +3651,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-api"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3684,7 +3684,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -3718,7 +3718,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-desktop"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3739,7 +3739,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-gitpack"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "git2",
  "hex",
@@ -3754,7 +3754,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-media"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "gif 0.13.3",
  "hex",
@@ -3772,7 +3772,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-quick"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3784,7 +3784,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-search"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "stickpile-api",
  "unicode-normalization",
@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3846,7 +3846,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-setfmt"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "libc",
  "serde",
@@ -3860,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "stickpile-telegram"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "reqwest",
