@@ -120,13 +120,20 @@ error. Telegram limits come from `stickpile_api::profiles`.
 | Variant | Kind | When | Constraints / encoding |
 |---|---|---|---|
 | `Png` | still | original is not PNG | Lossless PNG of the (oriented) frame, RGB when opaque, RGBA otherwise. |
-| `TgSticker` | still | always | Longest side exactly 512 (up- or downscaled, Lanczos3), lossy WebP via libwebp with alpha kept; quality 95, else the highest quality that fits ≤ 512 KiB (binary search). |
+| `TgSticker` | still | always | Longest side exactly 512 (up- or downscaled, Lanczos3), **lossless** WebP via libwebp with alpha kept (colours under fully transparent pixels may change). This is the file copied into chats, where Telegram Desktop takes a sticker below 2 MiB; a lossless 512 px image always fits (white noise, the worst case, stays near 1 MiB). Only past that limit would it fall back to lossy WebP (see `tg_pack_sticker`). Sticker packs take at most 512 KiB: the Telegram export passes the rendition through `tg_pack_sticker`, which keeps it when it fits and otherwise re-encodes it lossy (sharp RGB to YUV, quality 95, else the highest quality that fits, binary search), for the pack only. |
 | `Mp4` | animation | always | H.264 (libx264, preset medium, CRF 20), `yuv420p`, even dimensions (odd pixel cropped; longest side capped at 1920), frame rate from the shortest frame delay capped at 50 fps, no audio, `+faststart`. Transparency is **flattened on white**. |
 | `Mp4` | video | original is WebM, or not 8-bit 4:2:0 H.264 | Same encoding as above from the video; VP9 alpha is decoded with libvpx and flattened on white. |
 | `DiscordGif` | animation | unless the original is a GIF within `discord_gif_max_bytes` | ffmpeg `palettegen` (256 colours, `stats_mode=diff`, transparent slot when the source has alpha) + `paletteuse` (Bayer dither, `diff_mode=rectangle`, alpha threshold 128), infinite loop. Tried at (longest side, fps cap) = (640, 30), (480, 25), (400, 20), (320, 15), (240, 12), (160, 10), never upscaling, until the file fits the limit. |
 | `DiscordGif` | video | duration ≤ 10 s | Same ladder from the video. |
 | `TgVideoSticker` | animation | always | VP9 WebM (libvpx-vp9), longest side exactly 512 (other side even), first 3 s, ≤ 30 fps, no audio, `yuva420p` when the source has alpha. Bitrate search: start at 85 % of 256 KiB × 8 / duration, re-encode with the bitrate scaled by limit/size × 0.85 up to 6 times; skipped with a warning if it never fits 256 KiB. |
 | `TgVideoSticker` | video | duration ≤ 10 s | Same from the first 3 s of the video (`-t 3`, `fps=30` only when the source is faster). |
+
+`variants_version(kind)` numbers the renditions made for each kind and is
+bumped whenever their encoding changes (2: lossless `TgSticker` for
+stills). The server stores it per media row; on start it queues a
+`Variants` job for every row made by an older version, so stored items
+get the new renditions without a manual step. Clients notice the new size
+in the item summary and download the file again.
 
 Animations are decoded in Rust (ffmpeg 8.1 cannot decode animated WebP),
 resampled to a constant frame rate by repeating or dropping frames at the

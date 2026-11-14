@@ -189,6 +189,15 @@ fn sticker_is_padded_to_512_square_webp() {
         assert_eq!(img.get_pixel(0, 256)[3], 0, "stickers are never flattened");
         let mid = img.get_pixel(256, 256);
         assert!(mid[0] > 200 && mid[1] < 60 && mid[3] == 255, "{mid:?}");
+        // Lossless: the padded sticker holds the source pixels unchanged
+        // (colours under fully transparent pixels do not count).
+        assert_eq!(&a.bytes[12..16], b"VP8L");
+        let src = image::load_from_memory(&sticker).unwrap().to_rgba8();
+        let top = (512 - 300) / 2;
+        for (x, y, p) in src.enumerate_pixels() {
+            let q = img.get_pixel(x, y + top);
+            assert!(p == q || (p[3] == 0 && q[3] == 0), "({x}, {y}): {p:?} -> {q:?}");
+        }
     }
     let square_sticker = encode(&sample(512, 512), ImageFormat::WebP);
     assert_eq!(

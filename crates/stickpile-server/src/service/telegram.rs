@@ -549,7 +549,26 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
             continue;
         };
         let abs = files::resolve(&state.media_dir(), &v.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
-        let bytes = files::read(abs).await?;
+        let mut bytes = files::read(abs).await?;
+        if format == StickerFormat::Static {
+            // The stored sticker is lossless for chats; a pack takes at most
+            // 512 KB, so a larger one is re-encoded lossy for the pack only.
+            let fitted = tokio::task::spawn_blocking(move || stickpile_media::tg_pack_sticker(&bytes))
+                .await
+                .map_err(|e| JobError::Retry(e.to_string()))?;
+            match fitted {
+                Ok(Some(b)) => bytes = b,
+                Ok(None) => {
+                    skipped.push(json!({"item_id": r.id, "name": r.name,
+                        "reason": "does not fit Telegram's 512 KB sticker limit"}));
+                    continue;
+                }
+                Err(e) => {
+                    skipped.push(json!({"item_id": r.id, "name": r.name, "reason": e.to_string()}));
+                    continue;
+                }
+            }
+        }
         items.push(ExportItem {
             key: r.id.clone(),
             content_key: r.sha256.clone(),

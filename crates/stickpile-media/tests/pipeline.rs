@@ -568,7 +568,7 @@ fn still_variants() {
     let tg = &v[1];
     assert_eq!((tg.width, tg.height), (256, 512));
     assert_eq!(tg.mime, "image/webp");
-    assert!(tg.bytes.len() <= 512 * 1024);
+    assert!(is_lossless_webp(&tg.bytes), "chat stickers are lossless");
     assert_eq!(sniff(&tg.bytes), Some(MediaFormat::Webp));
 
     // PNG original: no Png variant; small stickers are upscaled to 512.
@@ -581,6 +581,41 @@ fn still_variants() {
     assert_eq!((v[0].width, v[0].height), (512, 410));
     let decoded = image::load_from_memory(&v[0].bytes).unwrap().to_rgba8();
     assert_eq!(decoded.get_pixel(0, 0)[3], 0, "sticker keeps alpha");
+    assert!(is_lossless_webp(&v[0].bytes));
+}
+
+/// A WebP whose image chunk is VP8L (lossless), as libwebp writes it when
+/// there is no metadata or animation (no VP8X header).
+fn is_lossless_webp(bytes: &[u8]) -> bool {
+    bytes.len() > 16 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" && &bytes[12..16] == b"VP8L"
+}
+
+#[test]
+fn a_sticker_sized_still_becomes_a_pixel_exact_sticker() {
+    let e = env();
+    let dir = tempfile::tempdir().unwrap();
+    // Already 512 on the longest side: no resize, so nothing may change.
+    let img = opaque(512, 300);
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img.clone())
+        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let ing = ingest(&png, &opts(), &e.tools).unwrap();
+    let path = dir.path().join("exact.png");
+    std::fs::write(&path, &ing.original).unwrap();
+    let v = generate_variants(
+        &path,
+        &ing.probe,
+        &VariantOptions {
+            discord_gif_max_bytes: 10 << 20,
+        },
+        &e.tools,
+    )
+    .unwrap();
+    let tg = v.iter().find(|r| r.variant == Variant::TgSticker).unwrap();
+    assert_eq!((tg.width, tg.height), (512, 300));
+    let decoded = image::load_from_memory(&tg.bytes).unwrap().to_rgba8();
+    assert!(decoded == img, "the sticker decodes to the original pixels");
 }
 
 /// `(w, h)` of a decoded image.
@@ -594,7 +629,7 @@ impl Dims for image::DynamicImage {
 }
 
 #[test]
-fn big_noisy_sticker_is_squeezed_under_the_limit() {
+fn big_noisy_sticker_stays_lossless_and_is_squeezed_for_packs() {
     let e = env();
     let dir = tempfile::tempdir().unwrap();
     // White noise is the worst case for WebP.
@@ -623,8 +658,24 @@ fn big_noisy_sticker_is_squeezed_under_the_limit() {
     )
     .unwrap();
     let tg = v.iter().find(|r| r.variant == Variant::TgSticker).unwrap();
-    assert!(tg.bytes.len() <= 512 * 1024, "{}", tg.bytes.len());
     assert_eq!((tg.width, tg.height), (512, 512));
+    // White noise is the worst case for WebP, yet lossless fits a chat.
+    assert!(is_lossless_webp(&tg.bytes));
+    assert!(tg.bytes.len() > 512 * 1024, "{}", tg.bytes.len());
+    assert!(tg.bytes.len() < 2 * 1024 * 1024, "{}", tg.bytes.len());
+    // A pack takes at most 512 KB: re-encoded lossy, same size.
+    let pack = tg_pack_sticker(&tg.bytes).unwrap().unwrap();
+    assert!(pack.len() <= 512 * 1024, "{}", pack.len());
+    assert!(!is_lossless_webp(&pack));
+    let decoded = image::load_from_memory(&pack).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (512, 512));
+}
+
+#[test]
+fn a_pack_sticker_that_fits_is_used_as_it_is() {
+    let small = encode_tg_sticker(&sticker(512, 400)).unwrap().unwrap();
+    assert!(small.len() <= 512 * 1024);
+    assert_eq!(tg_pack_sticker(&small).unwrap().unwrap(), small);
 }
 
 // ---------------------------------------------------------------------------

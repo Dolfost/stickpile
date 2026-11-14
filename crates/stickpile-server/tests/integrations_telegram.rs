@@ -35,6 +35,20 @@ async fn setup(f: impl FnOnce(&mut stickpile_server::Config)) -> Tg {
     }
 }
 
+/// A 1024 px PNG of white noise: its lossless 512 px sticker is over the
+/// 512 KB pack limit.
+fn noise_png() -> Vec<u8> {
+    let mut state = 0x1234_5678u32;
+    let img = image::RgbaImage::from_fn(1024, 1024, |_, _| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        let b = state.to_le_bytes();
+        image::Rgba([b[0], b[1], b[2], 255])
+    });
+    common::encode(&img, image::ImageFormat::Png)
+}
+
 fn webp(seed: u64) -> Vec<u8> {
     common::encode(&common::image(512, 512, seed, 0), image::ImageFormat::WebP)
 }
@@ -137,6 +151,35 @@ async fn import_pack_skips_tgs_and_duplicates() {
     // The token never leaks into job results or errors.
     let all = serde_json::to_string(&srv.get(&alice, &routes::path(routes::JOB, &[&j.id])).await.value()).unwrap();
     assert!(!all.contains(mock_bot::TOKEN));
+}
+
+#[tokio::test]
+async fn a_sticker_over_the_pack_limit_is_squeezed_for_the_pack_only() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let alice = srv.user("alice").await;
+    srv.patch(&alice, routes::ME, json!({"telegram_user_id": 555}))
+        .await
+        .expect(200);
+    let set = srv.create_set(&alice, "noise", Visibility::Private).await;
+    let item = srv.upload_one(&alice, &set.id, "noise.png", noise_png()).await;
+    run_jobs_now(srv).await;
+    // The stored sticker is lossless, too big for a pack but fine for chats.
+    let stored = srv
+        .get(&alice, &routes::path(routes::ITEM_FILE, &[&item.id, "tg_sticker"]))
+        .await
+        .expect(200)
+        .body;
+    assert!(stored.len() > 512 * 1024, "{}", stored.len());
+
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["exported"], 1);
+    let m = tg.mock.lock().unwrap();
+    let sent = &m.packs[&format!("noise_by_{BOT}")].stickers[0].bytes;
+    assert!(sent.len() <= 512 * 1024, "{}", sent.len());
+    let img = image::load_from_memory(sent).unwrap();
+    assert_eq!((img.width(), img.height()), (512, 512));
 }
 
 #[tokio::test]

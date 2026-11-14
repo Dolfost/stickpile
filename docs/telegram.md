@@ -153,7 +153,10 @@ can edit only its own packs.
 
 Every item is exported as its `tg_sticker` variant (512 px static WebP) for
 stills, or its `tg_video_sticker` variant (512 px VP9 WebM, at most 3 s, no
-audio) for animations and videos. If the `variants` job has not produced the
+audio) for animations and videos. `tg_sticker` is lossless, made for
+chats; one over Telegram's 512 KB limit for pack stickers is re-encoded
+lossy for the pack (docs/media.md, section 3), the stored file stays as it
+is. If the `variants` job has not produced the
 variant yet, the export job renders it itself. Items that cannot become
 stickers are skipped and listed in the result, for example an animation
 without ffmpeg on the server, or a video that cannot fit Telegram's limits.

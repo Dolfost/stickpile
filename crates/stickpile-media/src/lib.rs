@@ -207,11 +207,33 @@ pub fn pack_thumbnail(frame: &image::RgbaImage) -> Result<Vec<u8>, MediaError> {
 }
 
 /// Encode an image that already has Telegram sticker dimensions (longest
-/// side 512) the way the `tg_sticker` variant is encoded: lossy WebP at the
-/// highest quality that fits the 512 KB limit. `None` if nothing fits. Used
-/// by clients that pad a sticker rendition before copying it.
+/// side 512) the way the `tg_sticker` variant is encoded: lossless WebP
+/// (lossy only past the chat limit, which 512 px never reaches). `None` if
+/// nothing fits. Used by clients that pad a sticker rendition before copying
+/// it.
 pub fn encode_tg_sticker(img: &image::RgbaImage) -> Result<Option<Vec<u8>>, MediaError> {
     variants::tg_sticker_webp(img)
+}
+
+/// A static sticker WebP (the `tg_sticker` variant) as a Telegram sticker
+/// pack takes it, at most `static_max_bytes` (512 KB): unchanged when it
+/// fits, else re-encoded lossy at the highest quality that fits. `None` if
+/// nothing fits.
+pub fn tg_pack_sticker(bytes: &[u8]) -> Result<Option<Vec<u8>>, MediaError> {
+    variants::tg_pack_sticker_webp(bytes)
+}
+
+/// Version of the renditions [`generate_variants`] makes for `kind`. Bumped
+/// whenever they change, so a server can remake stored ones that are older:
+///
+/// - 1: the first renditions.
+/// - 2: stills: the `tg_sticker` variant is lossless WebP (was lossy, at most
+///   512 KB; packs now re-encode with [`tg_pack_sticker`]).
+pub fn variants_version(kind: MediaKind) -> i64 {
+    match kind {
+        MediaKind::Still => 2,
+        MediaKind::Animation | MediaKind::Video => 1,
+    }
 }
 
 /// Decode a still (or first frame) for re-processing (e.g. Telegram import of

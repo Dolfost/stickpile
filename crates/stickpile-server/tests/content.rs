@@ -844,6 +844,43 @@ async fn background_workers_process_jobs() {
 }
 
 #[tokio::test]
+async fn renditions_of_an_older_version_are_remade() {
+    use stickpile_server::jobs::media::requeue_outdated_variants;
+    let srv = TestServer::start().await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let item = srv.upload_one(&u, &set.id, "cat.png", png(5)).await;
+    assert!(srv.run_jobs().await >= 1);
+    let db = &srv.state.db;
+    assert_eq!(
+        requeue_outdated_variants(db).await.unwrap(),
+        0,
+        "fresh renditions are current"
+    );
+
+    // Renditions from version 1 (lossy stickers) are queued once, then remade.
+    sqlx::query("UPDATE media SET variants_version = 1")
+        .execute(db)
+        .await
+        .unwrap();
+    assert_eq!(requeue_outdated_variants(db).await.unwrap(), 1);
+    assert_eq!(requeue_outdated_variants(db).await.unwrap(), 0, "already pending");
+    assert_eq!(srv.run_jobs().await, 1);
+    let version: i64 = sqlx::query_scalar("SELECT variants_version FROM media")
+        .fetch_one(db)
+        .await
+        .unwrap();
+    assert_eq!(
+        version,
+        stickpile_media::variants_version(stickpile_api::MediaKind::Still)
+    );
+    assert_eq!(requeue_outdated_variants(db).await.unwrap(), 0);
+    let sticker = routes::path(routes::ITEM_FILE, &[&item.id, "tg_sticker"]);
+    let body = srv.get(&u, &sticker).await.expect(200).body;
+    assert_eq!(&body[12..16], b"VP8L", "the remade sticker is lossless");
+}
+
+#[tokio::test]
 async fn video_upload() {
     if !common::ffmpeg_available() {
         eprintln!("ffmpeg not on PATH; skipping");

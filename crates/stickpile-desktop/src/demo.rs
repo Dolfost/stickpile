@@ -93,8 +93,11 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
         height,
         size_bytes: size,
     }];
-    // A 512 px WebP already is a Telegram static sticker.
-    if format == MediaFormat::Webp && width.max(height) == 512 && size <= 512 * 1024 {
+    // A 512 px WebP already is a Telegram static sticker (for chats).
+    let chat_max = stickpile_api::profiles::profile(stickpile_api::TargetApp::Telegram)
+        .sticker
+        .map_or(0, |s| s.static_chat_max_bytes);
+    if format == MediaFormat::Webp && width.max(height) == 512 && size <= chat_max {
         variants.push(VariantInfo {
             variant: Variant::TgSticker,
             mime: "image/webp".into(),

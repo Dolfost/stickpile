@@ -95,7 +95,8 @@ pub async fn generate_variants(state: &AppState, media_id: &str) -> JobResult {
         made.push(r.variant.as_str());
     }
     let t = now();
-    sqlx::query("UPDATE media SET variants_done = 1 WHERE id = ?")
+    sqlx::query("UPDATE media SET variants_done = 1, variants_version = ? WHERE id = ?")
+        .bind(stickpile_media::variants_version(media.kind()))
         .bind(&media_id)
         .execute(&state.db)
         .await
@@ -108,6 +109,39 @@ pub async fn generate_variants(state: &AppState, media_id: &str) -> JobResult {
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
     Ok(Some(json!({ "variants": made })))
+}
+
+/// Queue a `Variants` job for every media row whose renditions were made by
+/// an older [`stickpile_media::variants_version`] (and none is pending yet),
+/// so encoder changes reach stored items. Rows whose variants never finished
+/// are left alone: their own job is pending or failed. Returns how many jobs
+/// were queued; the workers pick them up once they run.
+pub async fn requeue_outdated_variants(pool: &sqlx::SqlitePool) -> crate::error::AppResult<u64> {
+    let rows: Vec<(String, String, i64)> =
+        sqlx::query_as("SELECT id, kind, variants_version FROM media WHERE variants_done = 1")
+            .fetch_all(pool)
+            .await?;
+    let mut queued = 0;
+    for (id, kind, version) in rows {
+        let Some(kind) = db::parse_enum::<stickpile_api::MediaKind>(&kind) else {
+            continue;
+        };
+        if version >= stickpile_media::variants_version(kind)
+            || super::pending_exists(pool, super::JobKind::Variants, &id).await?
+        {
+            continue;
+        }
+        super::insert(
+            pool,
+            super::JobKind::Variants,
+            json!({ "media_id": id }),
+            Some(id.clone()),
+            None,
+        )
+        .await?;
+        queued += 1;
+    }
+    Ok(queued)
 }
 
 /// Embed the representative frame (decoded from the stored thumbnail), store

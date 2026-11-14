@@ -14,14 +14,24 @@ const MIB: u64 = 1024 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StickerSpec {
-    /// Static sticker: formats, exact longest side, max bytes.
+    /// Static sticker: formats, exact longest side, and max bytes in a
+    /// sticker pack.
     pub static_formats: Vec<MediaFormat>,
     pub static_side_px: u32,
     pub static_max_bytes: u64,
+    /// Max bytes of a static sticker sent in a chat (larger than in a pack:
+    /// Telegram Desktop sends a WebP file as a sticker below 2 MiB). Older
+    /// servers do not send it: Telegram's value is assumed.
+    #[serde(default = "telegram_static_chat_max_bytes")]
+    pub static_chat_max_bytes: u64,
     /// Animated sticker as video, if supported.
     pub video_formats: Vec<MediaFormat>,
     pub video_max_bytes: u64,
     pub video_max_ms: u64,
+}
+
+fn telegram_static_chat_max_bytes() -> u64 {
+    2 * MIB - 1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,6 +77,7 @@ pub fn profile(target: TargetApp) -> TargetProfile {
                 static_formats: vec![Webp, Png],
                 static_side_px: 512,
                 static_max_bytes: 512 * 1024,
+                static_chat_max_bytes: telegram_static_chat_max_bytes(),
                 video_formats: vec![Webm],
                 video_max_bytes: 256 * 1024,
                 video_max_ms: 3000,
@@ -201,8 +212,9 @@ pub fn choose_variant(target: TargetApp, item: &ItemShape<'_>, prefer_sticker: b
         };
         if sticker {
             let spec = p.sticker.as_ref().expect("checked");
+            // Copies go to a chat; packs re-encode (`tg_pack_sticker`).
             let max = if *want == Variant::TgSticker {
-                spec.static_max_bytes
+                spec.static_chat_max_bytes
             } else {
                 spec.video_max_bytes
             };
@@ -334,6 +346,33 @@ mod tests {
         let c = choose_variant(TargetApp::Telegram, &shape, true).unwrap();
         assert!(c.sticker);
         assert_eq!(c.variant.variant, Variant::TgSticker);
+    }
+
+    #[test]
+    fn telegram_chat_sticker_may_exceed_the_pack_limit() {
+        let choose = |size| {
+            let vs = [v(Variant::Original, 1000), v(Variant::TgSticker, size)];
+            let shape = ItemShape {
+                kind: MediaKind::Still,
+                format: MediaFormat::Png,
+                duration_ms: None,
+                variants: &vs,
+            };
+            choose_variant(TargetApp::Telegram, &shape, true)
+        };
+        // A lossless sticker over the 512 KB pack limit still goes to chats.
+        assert!(choose(MIB).unwrap().sticker);
+        // At 2 MiB Telegram Desktop would send it as a plain file.
+        let e = choose(2 * MIB).unwrap_err();
+        assert!(e.0.contains("limit 2047 KB"), "{}", e.0);
+    }
+
+    #[test]
+    fn profiles_from_older_servers_get_the_chat_sticker_limit() {
+        let mut json = serde_json::to_value(profile(TargetApp::Telegram)).unwrap();
+        json["sticker"].as_object_mut().unwrap().remove("static_chat_max_bytes");
+        let p: TargetProfile = serde_json::from_value(json).unwrap();
+        assert_eq!(p.sticker.unwrap().static_chat_max_bytes, 2 * MIB - 1);
     }
 
     #[test]

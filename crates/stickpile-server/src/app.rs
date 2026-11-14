@@ -57,6 +57,12 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
     if requeued > 0 {
         tracing::info!("requeued {requeued} interrupted jobs");
     }
+    let outdated = jobs::media::requeue_outdated_variants(&pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if outdated > 0 {
+        tracing::info!("queued {outdated} Variants jobs to remake renditions made by an older version");
+    }
     service::users::bootstrap_admin(&pool, &config).await?;
 
     let vocab = match &config.ai.vocabulary_file {

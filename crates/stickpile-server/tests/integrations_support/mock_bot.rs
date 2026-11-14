@@ -132,6 +132,10 @@ impl MockState {
         if !["static", "video"].contains(&format) {
             return Err("invalid sticker format".into());
         }
+        // Telegram's limit for static stickers in packs.
+        if format == "static" && bytes.len() > 512 * 1024 {
+            return Err("STICKER_FILE_TOO_BIG (mock: static stickers take at most 512 KB)".into());
+        }
         let emoji_list = strings(&v["emoji_list"])?;
         if !emoji_ok(&emoji_list) {
             return Err("STICKER_EMOJI_INVALID".into());

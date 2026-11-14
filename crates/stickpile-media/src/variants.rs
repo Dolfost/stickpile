@@ -88,15 +88,46 @@ fn rendition(variant: Variant, mime: &'static str, (width, height): (u32, u32), 
 }
 
 pub(crate) fn webp_lossy(img: &RgbaImage, quality: f32) -> Result<Vec<u8>, MediaError> {
+    let mut config = webp_config()?;
+    config.quality = quality;
+    webp_encode(img, &config)
+}
+
+/// Lossless WebP. Colours under fully transparent pixels may change (libwebp
+/// default); nothing visible does.
+pub(crate) fn webp_lossless(img: &RgbaImage) -> Result<Vec<u8>, MediaError> {
+    let mut config = webp_config()?;
+    config.lossless = 1;
+    config.alpha_compression = 0;
+    // Effort, not fidelity: 75 is libwebp's default for lossless.
+    config.quality = 75.0;
+    webp_encode(img, &config)
+}
+
+/// Lossy WebP for stickers: like [`webp_lossy`] plus sharp RGB to YUV
+/// conversion, which keeps coloured edges (text, outlines) from bleeding.
+fn webp_sticker_lossy(img: &RgbaImage, quality: f32) -> Result<Vec<u8>, MediaError> {
+    let mut config = webp_config()?;
+    config.quality = quality;
+    config.use_sharp_yuv = 1;
+    webp_encode(img, &config)
+}
+
+fn webp_config() -> Result<webp::WebPConfig, MediaError> {
+    webp::WebPConfig::new().map_err(|()| MediaError::Invalid("webp: bad libwebp version".into()))
+}
+
+/// Encode with `config`; opaque images go in as RGB (no alpha plane).
+fn webp_encode(img: &RgbaImage, config: &webp::WebPConfig) -> Result<Vec<u8>, MediaError> {
     let (w, h) = img.dimensions();
     let encoded = if raster::has_transparency(img) {
         webp::Encoder::from_rgba(img.as_raw(), w, h)
-            .encode_simple(false, quality)
+            .encode_advanced(config)
             .map(|m| m.to_vec())
     } else {
         let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
         webp::Encoder::from_rgb(rgb.as_raw(), w, h)
-            .encode_simple(false, quality)
+            .encode_advanced(config)
             .map(|m| m.to_vec())
     };
     encoded.map_err(|e| MediaError::Invalid(format!("webp encode: {e:?}")))
@@ -165,28 +196,53 @@ pub(crate) fn thumb(frame: &RgbaImage, px: u32) -> Result<Rendition, MediaError>
     ))
 }
 
-/// Telegram static sticker: longest side exactly 512, encoded by
-/// [`tg_sticker_webp`].
+/// Telegram static sticker for chats: longest side exactly 512, encoded by
+/// [`tg_sticker_webp`] (lossless). Packs take it through
+/// [`tg_pack_sticker_webp`].
 fn tg_sticker(frame: &RgbaImage) -> Result<Option<Rendition>, MediaError> {
     let dims = fit_exact(frame.width(), frame.height(), tg_spec().static_side_px);
     let img = image::imageops::resize(frame, dims.0, dims.1, FilterType::Lanczos3);
     Ok(tg_sticker_webp(&img)?.map(|b| rendition(Variant::TgSticker, "image/webp", dims, b)))
 }
 
-/// Lossy WebP of an image already at sticker size, at the highest quality
-/// <= 95 that fits Telegram's static sticker limit (binary search); `None`
-/// when even quality 1 does not fit.
+/// WebP of an image already at sticker size, for sending in a chat:
+/// lossless, as long as it fits the chat limit (a 512 px image always does:
+/// even white noise stays near its raw 1 MiB). Otherwise lossy, see
+/// [`squeeze_webp`]. `None` when nothing fits.
 pub(crate) fn tg_sticker_webp(img: &RgbaImage) -> Result<Option<Vec<u8>>, MediaError> {
-    let spec = tg_spec();
-    let fits = |b: &Vec<u8>| b.len() as u64 <= spec.static_max_bytes;
-    let top = webp_lossy(img, STICKER_MAX_QUALITY as f32)?;
+    let max = tg_spec().static_chat_max_bytes;
+    let lossless = webp_lossless(img)?;
+    if lossless.len() as u64 <= max {
+        return Ok(Some(lossless));
+    }
+    squeeze_webp(img, max)
+}
+
+/// A `tg_sticker` rendition (or any static sticker WebP) for a Telegram
+/// sticker pack, which takes at most `static_max_bytes`: the bytes as they
+/// are when they fit, else decoded and re-encoded lossy ([`squeeze_webp`]).
+/// `None` when nothing fits.
+pub(crate) fn tg_pack_sticker_webp(bytes: &[u8]) -> Result<Option<Vec<u8>>, MediaError> {
+    let max = tg_spec().static_max_bytes;
+    if bytes.len() as u64 <= max {
+        return Ok(Some(bytes.to_vec()));
+    }
+    let img = crate::decode_frame(bytes, &Limits::default())?;
+    squeeze_webp(&img, max)
+}
+
+/// Lossy sticker WebP at the highest quality <= 95 that fits `max` bytes
+/// (binary search); `None` when even quality 1 does not fit.
+fn squeeze_webp(img: &RgbaImage, max: u64) -> Result<Option<Vec<u8>>, MediaError> {
+    let fits = |b: &Vec<u8>| b.len() as u64 <= max;
+    let top = webp_sticker_lossy(img, STICKER_MAX_QUALITY as f32)?;
     if fits(&top) {
         return Ok(Some(top));
     }
     let (mut lo, mut hi, mut best) = (1u32, STICKER_MAX_QUALITY - 1, None);
     while lo <= hi {
         let mid = (lo + hi) / 2;
-        let b = webp_lossy(img, mid as f32)?;
+        let b = webp_sticker_lossy(img, mid as f32)?;
         if fits(&b) {
             best = Some(b);
             lo = mid + 1;
@@ -197,10 +253,7 @@ pub(crate) fn tg_sticker_webp(img: &RgbaImage) -> Result<Option<Vec<u8>>, MediaE
     match best {
         Some(b) => Ok(Some(b)),
         None => {
-            warn!(
-                "telegram sticker does not fit {} bytes even at quality 1, skipped",
-                spec.static_max_bytes
-            );
+            warn!("telegram sticker does not fit {max} bytes even at quality 1, skipped");
             Ok(None)
         }
     }
