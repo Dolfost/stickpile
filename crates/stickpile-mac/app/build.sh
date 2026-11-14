@@ -73,10 +73,11 @@ fi
 	echo "build.sh: $LIB is missing (run without SKIP_CARGO=1)" >&2
 	exit 1
 }
-# swiftc links libSystem itself.
-NATIVE_LIBS=$(sed 's/-lSystem//g' "$NATIVE_CACHE" 2>/dev/null || true)
+# swiftc links libSystem itself, and libc and libm are libSystem: newer SDKs
+# have no separate libm to find, so those three are left out.
+NATIVE_LIBS=$(tr ' ' '\n' <"$NATIVE_CACHE" 2>/dev/null | grep -v -x -E -e '-l(System|c|m)' | tr '\n' ' ' || true)
 if [ -z "$NATIVE_LIBS" ]; then
-	NATIVE_LIBS="-framework CoreFoundation -framework Security -framework SystemConfiguration -liconv -lc -lm"
+	NATIVE_LIBS="-framework CoreFoundation -framework Security -framework SystemConfiguration -liconv"
 fi
 
 rm -rf "$GEN"
