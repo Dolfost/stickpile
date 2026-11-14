@@ -62,8 +62,9 @@ let
   ];
   target = types.enum targetNames;
 
-  # stickpile_core::config::TABS
-  tabNames = [
+  # stickpile_core::config::START_TABS
+  startTabNames = [
+    "last"
     "search"
     "recent"
     "most_used"
@@ -219,7 +220,10 @@ in
           '';
 
           ui = section "Quick-search popup." {
-            columns = setting types.ints.positive 6 "Grid columns.";
+            columns = setting types.ints.positive 6 ''
+              Thumbnails per row at the popup's default size. The grid reflows
+              when the window is resized, so a wider window shows more.
+            '';
             thumb_px = setting (types.ints.between 32 4294967295) 128 "Thumbnail size (at least 32).";
             hide_on_copy = setting types.bool true "Hide the popup after copying.";
             start_hidden = setting types.bool false ''
@@ -233,8 +237,30 @@ in
               Vim-style Insert/Normal modes in the popup; false keeps the plain
               keys.
             '';
-            start_tab = setting (types.enum tabNames) "search" ''
-              Tab shown when the popup opens.
+            start_tab = setting (types.enum startTabNames) "last" ''
+              Tab shown when the popup opens: `last` (the tab it was closed
+              on, kept across restarts) or a tab.
+            '';
+            start_mode =
+              setting
+                (types.enum [
+                  "normal"
+                  "insert"
+                ])
+                "normal"
+                ''
+                  Mode the popup opens in when `modal` is on: `normal` (vim
+                  keys; `i` or `/` to type), or `insert` to type a search right
+                  away on the tabs with a text field.
+                '';
+            mark_favorites = setting types.bool true ''
+              A heart on the tiles of items you liked (`zf` in Normal mode).
+            '';
+            show_emojis = setting types.bool true ''
+              An item's emojis on its tile (`ze` in Normal mode).
+            '';
+            show_tags = setting types.bool true ''
+              An item's tags on its tile (`zt` in Normal mode).
             '';
           };
 

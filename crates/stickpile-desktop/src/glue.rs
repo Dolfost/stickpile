@@ -3,19 +3,23 @@
 
 use std::path::{Path, PathBuf};
 
+use stickpile_core::config::StartMode;
 use stickpile_core::ClientConfig;
 use stickpile_quick::focus::{self, FocusEnv, FocusError, WindowInfo};
 use stickpile_quick::history::WindowHistory;
-use stickpile_quick::model::{ModelConfig, OpenInfo, DEFAULT_DEBOUNCE_MS};
-use stickpile_quick::Tab;
+use stickpile_quick::model::{ModelConfig, OpenInfo, Tile, Tiles, DEFAULT_DEBOUNCE_MS};
+use stickpile_quick::{Mode, Tab};
 
 /// GApplication id: D-Bus name, Wayland app id / X11 class of the popup.
 pub const APP_ID: &str = "io.github.dolfost.Stickpile";
 
-/// Rows the window shows without scrolling.
+/// Rows the window shows without scrolling at its default size.
 pub const VISIBLE_ROWS: u32 = 4;
-/// Space around a thumbnail inside its grid cell (GridView child padding + margins).
+/// Space around a thumbnail inside its grid cell: the GridView child's
+/// padding, 8 px a side (the shell's CSS).
 pub const CELL_EXTRA_PX: u32 = 16;
+/// Most grid columns a wide window gets.
+pub const MAX_COLUMNS: u32 = 64;
 /// Height a pack list cell adds under the cover: its name and item count.
 pub const PACK_LABELS_PX: u32 = 40;
 /// Tab row, header (title and text field) and footer heights plus outer margins.
@@ -36,10 +40,37 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
         hide_on_copy: cfg.ui.hide_on_copy,
         debounce_ms: DEFAULT_DEBOUNCE_MS,
         modal: cfg.ui.modal,
-        // The config is validated, so an unknown name cannot get here.
-        start_tab: Tab::from_key(&cfg.ui.start_tab).unwrap_or_default(),
+        // The config is validated: anything but a tab's name is `last`.
+        start_tab: Tab::from_key(&cfg.ui.start_tab),
+        start_mode: match cfg.ui.start_mode {
+            StartMode::Normal => Mode::Normal,
+            StartMode::Insert => Mode::Insert,
+        },
+        tiles: Tiles {
+            favorites: cfg.ui.mark_favorites,
+            emojis: cfg.ui.show_emojis,
+            tags: cfg.ui.show_tags,
+        },
         ..ModelConfig::default()
     }
+}
+
+/// The config key a `z` key's change is saved to.
+pub fn tile_key(tile: Tile) -> &'static str {
+    match tile {
+        Tile::Favorites => "ui.mark_favorites",
+        Tile::Emojis => "ui.show_emojis",
+        Tile::Tags => "ui.show_tags",
+    }
+}
+
+/// Grid columns and fully visible rows for a grid `width` x `height`
+/// logical pixels with cells `cell_w` x `cell_h`, the way GtkGridView
+/// counts its columns (no border spacing): as many as fit, at least one.
+pub fn grid_layout(width: i32, height: i32, cell_w: i32, cell_h: i32) -> (usize, usize) {
+    let columns = (width / cell_w.max(1)).clamp(1, MAX_COLUMNS as i32);
+    let rows = (height / cell_h.max(1)).max(1);
+    (columns as usize, rows as usize)
 }
 
 /// Default popup size in logical pixels for `ui.columns` x [`VISIBLE_ROWS`]
@@ -88,6 +119,26 @@ pub fn capture_focus(cfg: &ClientConfig, env: &FocusEnv) -> OpenInfo {
 
 pub fn history_path(cfg: &ClientConfig) -> PathBuf {
     cfg.cache_path().join("desktop-window-history.json")
+}
+
+/// The tab the popup was last closed on, for `ui.start_tab = "last"`.
+pub fn last_tab_path(cfg: &ClientConfig) -> PathBuf {
+    cfg.cache_path().join("desktop-last-tab")
+}
+
+/// Missing, unreadable or unknown: none.
+pub fn load_last_tab(path: &Path) -> Option<Tab> {
+    Tab::from_key(std::fs::read_to_string(path).ok()?.trim())
+}
+
+/// Atomic write (temp file + rename).
+pub fn save_last_tab(path: &Path, tab: Tab) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, format!("{}\n", tab.key()))?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Missing or unreadable history starts empty.
@@ -141,13 +192,53 @@ mod tests {
         assert!(m.prefer_stickers);
         assert_eq!(m.debounce_ms, 120);
         assert!(m.modal);
-        assert_eq!(m.start_tab, Tab::Search);
+        assert_eq!(m.start_tab, None, "the last tab");
+        assert_eq!(m.start_mode, Mode::Normal);
+        assert_eq!(m.tiles, Tiles::default());
 
         cfg.ui.modal = false;
         cfg.ui.start_tab = "most_used".into();
+        cfg.ui.start_mode = StartMode::Insert;
+        cfg.ui.show_tags = false;
         let m = model_config(&cfg);
         assert!(!m.modal);
-        assert_eq!(m.start_tab, Tab::MostUsed);
+        assert_eq!(m.start_tab, Some(Tab::MostUsed));
+        assert_eq!(m.start_mode, Mode::Insert);
+        assert!(!m.tiles.tags && m.tiles.emojis && m.tiles.favorites);
+    }
+
+    #[test]
+    fn tile_keys_are_settings() {
+        for tile in Tile::ALL {
+            let spec = stickpile_core::settings::setting_spec(tile_key(tile)).unwrap();
+            assert_eq!(spec.default, toml::Value::Boolean(true));
+        }
+    }
+
+    #[test]
+    fn grid_layout_fits_whole_cells() {
+        // The default window: 6 columns of 144 px.
+        assert_eq!(grid_layout(864, 576, 144, 144), (6, 4));
+        assert_eq!(grid_layout(1000, 600, 144, 144), (6, 4));
+        assert_eq!(grid_layout(1008, 300, 144, 144), (7, 2));
+        assert_eq!(grid_layout(100, 50, 144, 144), (1, 1), "at least one");
+        assert_eq!(grid_layout(100_000, 50, 144, 144).0, MAX_COLUMNS as usize);
+        assert_eq!(grid_layout(0, 0, 0, 0), (1, 1));
+    }
+
+    #[test]
+    fn last_tab_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = ClientConfig {
+            cache_dir: Some(dir.path().join("cache")),
+            ..ClientConfig::default()
+        };
+        let path = last_tab_path(&cfg);
+        assert_eq!(load_last_tab(&path), None);
+        save_last_tab(&path, Tab::Packs).unwrap();
+        assert_eq!(load_last_tab(&path), Some(Tab::Packs));
+        std::fs::write(&path, "nope").unwrap();
+        assert_eq!(load_last_tab(&path), None);
     }
 
     #[test]

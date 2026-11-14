@@ -1,5 +1,6 @@
 //! Normal-mode key sequences: counts (`3j`), `g` prefixes (`gg`, `gt`,
-//! `gx`) and the ambiguity between a count and a tab number.
+//! `gx`), `z` prefixes (`zf`, `ze`, `zt`) and the ambiguity between a count
+//! and a tab number.
 //!
 //! A lone `1`-`7` is either tab 1-7 or the start of a count. Like vim with
 //! an ambiguous mapping, it waits: the next key decides (`3j` is a count,
@@ -7,7 +8,7 @@
 //! ([`crate::model::Command::KeyTimeout`]) makes it a tab switch. Where
 //! counts mean nothing (the Me and Settings pages) digits switch at once.
 
-use crate::model::Nav;
+use crate::model::{Nav, Tile};
 use crate::tabs::Tab;
 
 /// Counts are capped here; nothing in the popup is that long.
@@ -91,6 +92,8 @@ pub(crate) enum Cmd {
     Back,
     /// `o`
     Open,
+    /// `zf`, `ze`, `zt`: show or hide favorite marks, emojis or tags on the tiles.
+    Tile(Tile),
 }
 
 /// What feeding a key gave.
@@ -110,13 +113,14 @@ pub(crate) struct Pending {
     count: Option<usize>,
     digits: u8,
     g: bool,
+    z: bool,
     /// Bumped on every change, so a timeout for an older state is ignored.
     seq: u64,
 }
 
 impl Pending {
     pub(crate) fn is_empty(&self) -> bool {
-        self.count.is_none() && !self.g
+        self.count.is_none() && !self.g && !self.z
     }
 
     pub(crate) fn clear(&mut self) {
@@ -124,22 +128,26 @@ impl Pending {
             self.count = None;
             self.digits = 0;
             self.g = false;
+            self.z = false;
             self.seq += 1;
         }
     }
 
-    /// `"3"`, `"12"`, `"g"`, `"5g"`, or empty.
+    /// `"3"`, `"12"`, `"g"`, `"5g"`, `"z"`, or empty.
     pub(crate) fn display(&self) -> String {
         let mut s = self.count.map(|n| n.to_string()).unwrap_or_default();
         if self.g {
             s.push('g');
+        }
+        if self.z {
+            s.push('z');
         }
         s
     }
 
     /// A single digit that may still be a tab number.
     fn tab_digit(&self) -> Option<Tab> {
-        if self.digits != 1 || self.g {
+        if self.digits != 1 || self.g || self.z {
             return None;
         }
         Tab::from_number(self.count? as u8)
@@ -179,6 +187,17 @@ impl Pending {
             };
             return Fed::Run(cmd.into_iter().collect());
         }
+        if self.z {
+            // Takes no count; one typed before the z is dropped.
+            self.clear();
+            let tile = match key {
+                NormalKey::Char('f') => Some(Tile::Favorites),
+                NormalKey::Char('e') => Some(Tile::Emojis),
+                NormalKey::Char('t') => Some(Tile::Tags),
+                _ => None,
+            };
+            return Fed::Run(tile.map(Cmd::Tile).into_iter().collect());
+        }
         if let NormalKey::Char(c @ '0'..='9') = key {
             let d = c as usize - '0' as usize;
             match self.count {
@@ -201,6 +220,11 @@ impl Pending {
         }
         if key == NormalKey::Char('g') {
             self.g = true;
+            self.seq += 1;
+            return Fed::Wait { timeout: None };
+        }
+        if key == NormalKey::Char('z') {
+            self.z = true;
             self.seq += 1;
             return Fed::Wait { timeout: None };
         }
@@ -275,6 +299,7 @@ pub const HELP: &[HelpSection] = &[
             ("gx", "open the item in the browser"),
             ("t / T", "next / previous target app"),
             ("s", "toggle sticker mode"),
+            ("zf / ze / zt", "favorite marks / emojis / tags on the tiles"),
             ("/", "new search"),
             ("i, a", "edit the query"),
             ("?", "this help"),
@@ -368,7 +393,7 @@ mod tests {
                 Cmd::RowStart
             ]
         );
-        assert_eq!(run("zZ!"), [], "unknown keys do nothing");
+        assert_eq!(run("Z!"), [], "unknown keys do nothing");
     }
 
     #[test]
@@ -402,6 +427,26 @@ mod tests {
             Fed::Run(vec![Cmd::HalfPage { down: false }])
         );
         assert_eq!(p.feed(NormalKey::Ctrl('x'), true), Fed::Run(vec![]));
+    }
+
+    #[test]
+    fn z_sequences() {
+        assert_eq!(run("zf"), [Cmd::Tile(Tile::Favorites)]);
+        assert_eq!(run("ze"), [Cmd::Tile(Tile::Emojis)]);
+        assert_eq!(run("zt"), [Cmd::Tile(Tile::Tags)]);
+        assert_eq!(run("3zt"), [Cmd::Tile(Tile::Tags)], "a count is dropped");
+        assert_eq!(run("zZ"), [], "unknown z-sequence is dropped");
+        assert_eq!(run("zqj"), [Cmd::Move(Nav::Down, 1)]);
+        let mut p = Pending::default();
+        assert_eq!(p.feed(ch('z'), true), Fed::Wait { timeout: None });
+        assert_eq!(p.display(), "z");
+        assert_eq!(p.feed(NormalKey::Escape, true), Fed::Run(vec![]), "Esc cancels z");
+        assert!(p.is_empty());
+        let mut p = Pending::default();
+        p.feed(ch('3'), true);
+        p.feed(ch('z'), true);
+        assert_eq!(p.display(), "3z");
+        assert_eq!(p.timeout(p.seq), None, "3z is no tab switch");
     }
 
     #[test]
@@ -467,7 +512,9 @@ mod tests {
     fn lone_tab_digit_flushed_by_a_key_without_count() {
         assert_eq!(run("2y"), [Cmd::Tab(Tab::Recent), Cmd::Yank { flip: false }]);
         assert_eq!(run("5?"), [Cmd::Tab(Tab::Favorites), Cmd::Help]);
-        assert_eq!(run("2z"), [Cmd::Tab(Tab::Recent)]);
+        assert_eq!(run("2Z"), [Cmd::Tab(Tab::Recent)]);
+        assert_eq!(run("2z"), [], "z waits for its second key");
+        assert_eq!(run("2zt"), [Cmd::Tile(Tile::Tags)], "and takes no count");
         assert_eq!(run("23y"), [Cmd::Yank { flip: false }], "a real count is dropped");
         assert_eq!(run("9y"), [Cmd::Yank { flip: false }]);
     }

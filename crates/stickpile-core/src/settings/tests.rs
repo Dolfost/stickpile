@@ -29,6 +29,10 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "ui.start_hidden",
         "ui.modal",
         "ui.start_tab",
+        "ui.start_mode",
+        "ui.mark_favorites",
+        "ui.show_emojis",
+        "ui.show_tags",
         "copy.square",
         "copy.background",
         "focus.detect",
@@ -78,6 +82,10 @@ fn spec_check_rejects_wrong_values() {
     assert!(cols.check(&toml::Value::String("6".into())).is_err());
     let tab = setting_spec("ui.start_tab").unwrap();
     assert!(tab.check(&toml::Value::String("home".into())).is_err());
+    tab.check(&toml::Value::String("last".into())).unwrap();
+    let mode = setting_spec("ui.start_mode").unwrap();
+    mode.check(&toml::Value::String("insert".into())).unwrap();
+    assert!(mode.check(&toml::Value::String("visual".into())).is_err());
     assert!(setting_spec("ui.modal")
         .unwrap()
         .check(&toml::Value::Integer(1))
@@ -294,7 +302,7 @@ still = [\"text/plain\"]
             background: Background::Keep
         }
     );
-    assert_eq!(c.ui.start_tab, "search");
+    assert_eq!(c.ui.start_tab, "last");
     assert_eq!(c.timeout_secs, 5);
     assert_eq!(c.focus.rules.len(), 1);
     assert_eq!(c.clipboard, ClientConfig::default().clipboard);

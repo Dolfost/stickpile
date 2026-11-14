@@ -55,7 +55,15 @@ pub fn build() -> gtk::Widget {
         .build();
     hint.add_css_class("dim-label");
     hint.add_css_class("caption");
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    // The padding is inside the scrolled area: at its edge the first
+    // headings were clipped by a pixel or two on some renderers.
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .margin_top(14)
+        .margin_bottom(14)
+        .margin_start(20)
+        .margin_end(20)
+        .build();
     content.append(&grid);
     content.append(&hint);
     let scroller = gtk::ScrolledWindow::builder()

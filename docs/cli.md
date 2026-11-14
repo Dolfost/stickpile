@@ -82,14 +82,18 @@ prefer_stickers = false
 timeout_secs = 5
 
 [ui]                    # desktop popup only
-columns = 6
+columns = 6             # per row at the default window size; the grid reflows on resize
 thumb_px = 128          # >= 32
 hide_on_copy = true
 start_hidden = false
 recent_count = 24       # items shown before typing, most recently copied first
 max_results = 60
 modal = true            # vim-style Insert/Normal modes; false keeps the plain keys
-start_tab = "search"    # search | recent | most_used | packs | favorites | me | settings
+start_tab = "last"      # last | search | recent | most_used | packs | favorites | me | settings
+start_mode = "normal"   # normal | insert: the mode the popup opens in
+mark_favorites = true   # a heart on the items you liked
+show_emojis = true      # an item's emojis on its tile
+show_tags = true        # an item's tags on its tile
 
 [copy]                  # `copy` and the popup
 square = "off"          # off | transparent | white: pad non-square stills and stickers to a square
@@ -144,14 +148,18 @@ sticker = ["text/uri-list"]
 | `default_target` | `"generic"` | target app when none is given |
 | `prefer_stickers` | `false` | copy Telegram sticker renditions by default |
 | `timeout_secs` | `5` | request timeout before the offline fallback (transfers get 10 min) |
-| `ui.columns` | `6` | popup grid columns (> 0) |
+| `ui.columns` | `6` | popup grid columns at the default window size (> 0); a resized window reflows |
 | `ui.thumb_px` | `128` | popup thumbnail size (>= 32) |
 | `ui.hide_on_copy` | `true` | hide the popup after copying |
 | `ui.start_hidden` | `false` | a bare `stickpile-desktop` that starts the resident instance does not show the popup (autostart uses `--hidden` instead) |
 | `ui.recent_count` | `24` | recently used items shown before typing |
 | `ui.max_results` | `60` | popup search results |
 | `ui.modal` | `true` | vim-style Insert/Normal modes in the popup |
-| `ui.start_tab` | `"search"` | popup tab shown on open: `search`, `recent`, `most_used`, `packs`, `favorites`, `me` or `settings` |
+| `ui.start_tab` | `"last"` | popup tab shown on open: `last` (the tab it was closed on), `search`, `recent`, `most_used`, `packs`, `favorites`, `me` or `settings` |
+| `ui.start_mode` | `"normal"` | mode the popup opens in (with `modal`): `normal`, or `insert` to type right away on Search and Packs |
+| `ui.mark_favorites` | `true` | a heart on the tiles of items you liked |
+| `ui.show_emojis` | `true` | an item's emojis on its tile |
+| `ui.show_tags` | `true` | an item's tags on its tile |
 | `copy.square` | `"off"` | pad non-square stills and sticker renditions to a square: `off`, `transparent` or `white` margins |
 | `copy.background` | `"keep"` | `white` fills the transparent pixels of stills copied as images |
 | `focus.detect` | `true` | detect the focused window |

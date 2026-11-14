@@ -152,9 +152,10 @@ available on KDE Wayland (same fallback as GNOME); on KDE X11 it works.
 
 ## Tabs
 
-The popup has seven tabs, numbered in this order. Every opening starts on
-`ui.start_tab` (Search by default); when the server has rejected the
-client (signed out), it opens on Me instead, with the login form.
+The popup has seven tabs, numbered in this order. It opens on the tab it
+was closed on, also after a restart; `ui.start_tab` names a fixed tab
+instead. When the server has rejected the client (signed out), it opens on
+Me, with the login form.
 
 | Tab | Shows |
 |---|---|
@@ -174,17 +175,30 @@ mode (INSERT / NORMAL), keys of a command still being typed, the target
 app, the sticker toggle and the status. Every tab fetches its list again
 each time it is shown, so it is never older than the last look.
 
+The grid fills the window: `ui.columns` sets how many thumbnails a row has
+at the default window size, and a wider or narrower window shows more or
+fewer per row. Each tile shows, over the thumbnail, the item's emojis
+(top left), a heart if you liked it (top right) and its tags (bottom).
+`zf`, `ze` and `zt` in Normal mode turn the heart, the emojis and the tags
+on and off, and the Settings tab has a switch for each
+(`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`). The heart marks
+the items the Favorites tab lists (fetched each time the popup opens) and
+the ones you like or unlike since.
+
 ## Keys
 
 Keys work vim-style, in two modes:
 
-- **Insert**: the text field has the keys. Search and Packs open in
-  Insert, so typing starts right away.
+- **Insert**: the text field has the keys. Switching to Search or Packs
+  puts you in Insert, so typing starts right away.
 - **Normal**: single keys act on the grid. Recent, Most used, Favorites,
-  Me and Settings open in Normal; Escape leaves Insert for Normal.
+  Me and Settings are shown in Normal; Escape leaves Insert for Normal.
+
+The popup opens in Normal (`i` or `/` to type). With
+`ui.start_mode = "insert"` it opens in Insert on Search and Packs.
 
 The footer shows the mode and, like vim's showcmd, the keys of a command
-still being typed (`3`, `g`, `12g`). `?` (or F1) shows all keys over the
+still being typed (`3`, `g`, `12g`, `z`). `?` (or F1) shows all keys over the
 popup.
 
 ### Insert mode
@@ -216,6 +230,7 @@ popup.
 | gx | open the selected item in the browser |
 | t / T | next / previous target app |
 | s | toggle sticker mode |
+| zf / ze / zt | show or hide the favorite hearts / emojis / tags on the tiles (saved like a setting) |
 | / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
 | i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
 | 1 to 7 | go to that tab |
@@ -402,14 +417,18 @@ The page says at the top which file it saves to.
 
 ```toml
 [ui]
-columns = 6          # grid columns
+columns = 6          # grid columns at the default window size; resizing reflows
 thumb_px = 128       # thumbnail cell size (logical px)
 hide_on_copy = true  # hide after copying / dropping
 start_hidden = false # true: a bare first `stickpile-desktop` starts resident without showing
 recent_count = 24    # recently used items shown before typing
 max_results = 60
 modal = true         # vim-style Insert/Normal modes; false keeps the plain keys
-start_tab = "search" # search | recent | most_used | packs | favorites | me | settings
+start_tab = "last"   # last | search | recent | most_used | packs | favorites | me | settings
+start_mode = "normal" # normal | insert: the mode the popup opens in
+mark_favorites = true # a heart on the items you liked (zf)
+show_emojis = true   # an item's emojis on its tile (ze)
+show_tags = true     # an item's tags on its tile (zt)
 
 [copy]
 square = "off"       # off | transparent | white: pad non-square stills and stickers to a square

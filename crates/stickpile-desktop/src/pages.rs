@@ -79,6 +79,7 @@ pub fn stat_tiles(p: &Profile) -> Vec<(String, &'static str)> {
 /// Display text of a choice value of the setting `key`.
 pub fn choice_label(key: &str, value: &str) -> String {
     let named = match key {
+        "ui.start_tab" if value == "last" => Some("Last used".to_string()),
         "ui.start_tab" => Tab::from_key(value).map(|t| t.label().to_string()),
         "default_target" => TargetApp::parse(value).map(target_name),
         _ => None,
@@ -257,6 +258,8 @@ mod tests {
     #[test]
     fn choice_labels() {
         assert_eq!(choice_label("ui.start_tab", "most_used"), "Most used");
+        assert_eq!(choice_label("ui.start_tab", "last"), "Last used");
+        assert_eq!(choice_label("ui.start_mode", "normal"), "Normal");
         assert_eq!(choice_label("default_target", "whatsapp"), "WhatsApp");
         assert_eq!(
             choice_label("default_target", "generic"),

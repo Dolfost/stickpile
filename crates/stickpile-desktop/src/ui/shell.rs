@@ -23,7 +23,7 @@ use stickpile_api::{ItemSummary, SetSummary, TargetApp};
 use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_quick::focus::FocusEnv;
-use stickpile_quick::model::{self, Command, Event, Level, Model, OpenInfo, StickerMode};
+use stickpile_quick::model::{self, Command, Event, Level, Model, OpenInfo, StickerMode, Tile};
 use stickpile_quick::{Mode, Tab, View};
 
 use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
@@ -48,10 +48,18 @@ const SESSION_OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 
 const SEARCH_PLACEHOLDER: &str = "Search, or try e:😂 set:cats type:gif vibe:tired";
 
+/// Cells are `thumb_px` plus [`glue::CELL_EXTRA_PX`]: the child padding here.
 const CSS: &str = r#"
-gridview.stickpile-grid > child { padding: 4px; border-radius: 10px; }
-.stickpile-badge { font-size: 0.7em; font-weight: bold; padding: 1px 5px; border-radius: 5px; margin: 6px; }
-.stickpile-warn { margin: 6px; color: @warning_color; }
+gridview.stickpile-grid { border-spacing: 0; }
+gridview.stickpile-grid > child { padding: 8px; border-radius: 10px; }
+gridview.stickpile-grid > child:selected { background-color: alpha(@accent_bg_color, 0.45); }
+gridview.stickpile-grid > child:selected:hover { background-color: alpha(@accent_bg_color, 0.55); }
+.stickpile-tile-row { margin: 3px; }
+.stickpile-badge { font-size: 0.7em; font-weight: bold; padding: 1px 5px; border-radius: 5px; }
+.stickpile-warn { color: @warning_color; }
+.stickpile-pill { font-size: 0.9em; padding: 0 4px; border-radius: 6px; }
+.stickpile-tags { font-size: 0.7em; padding: 1px 5px; }
+label.stickpile-heart { color: #ff5470; }
 .stickpile-footer { padding: 4px 10px; }
 .stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
 .stickpile-tabs { padding: 6px 8px 0 8px; }
@@ -64,7 +72,7 @@ gridview.stickpile-grid > child { padding: 4px; border-radius: 10px; }
 .stickpile-mode.insert { background-color: @accent_bg_color; color: @accent_fg_color; }
 .stickpile-mode.normal { background-color: alpha(currentColor, 0.12); }
 .stickpile-pending { font-family: monospace; font-weight: bold; }
-.stickpile-help { font-size: 0.92em; background-color: @popover_bg_color; color: @popover_fg_color; border-radius: 12px; padding: 14px 20px; box-shadow: 0 2px 14px alpha(black, 0.35); }
+.stickpile-help { font-size: 0.92em; background-color: @popover_bg_color; color: @popover_fg_color; border-radius: 12px; box-shadow: 0 2px 14px alpha(black, 0.35); }
 .stickpile-help-key { font-family: monospace; font-weight: bold; }
 .stickpile-pack-name { font-weight: bold; }
 .stickpile-stat { padding: 10px 6px; }
@@ -151,6 +159,12 @@ pub struct Shell {
     shown: Cell<Option<Tab>>,
     /// The grid geometry last reported to the model.
     layout: Cell<Option<(usize, usize)>>,
+    /// A layout check is queued for the next idle moment (a grid resized).
+    layout_queued: Cell<bool>,
+    /// Where the tab the popup closed on is kept (`ui.start_tab = "last"`),
+    /// and the tab last written there.
+    last_tab_path: PathBuf,
+    saved_tab: Cell<Option<Tab>>,
     thumbs: RefCell<HashMap<String, Thumb>>,
     /// Pack covers by [`cover_key`].
     covers: RefCell<HashMap<String, Thumb>>,
@@ -192,7 +206,12 @@ impl Shell {
         };
         let history_path = glue::history_path(&cfg);
         let history = glue::load_history(&history_path);
-        let model = Model::with_history(glue::model_config(&cfg), history);
+        let mut model = Model::with_history(glue::model_config(&cfg), history);
+        let last_tab_path = glue::last_tab_path(&cfg);
+        let saved_tab = glue::load_last_tab(&last_tab_path);
+        if let Some(tab) = saved_tab {
+            model.restore_tab(tab);
+        }
         let me = MePage::new();
         let settings = SettingsPage::new();
         let w = build_widgets(app, &cfg, &me, &settings);
@@ -226,6 +245,9 @@ impl Shell {
             scrolled_to: Cell::new(None),
             shown: Cell::new(None),
             layout: Cell::new(None),
+            layout_queued: Cell::new(false),
+            last_tab_path,
+            saved_tab: Cell::new(saved_tab),
             thumbs: RefCell::new(HashMap::new()),
             covers: RefCell::new(HashMap::new()),
             thumb_permits: Arc::new(tokio::sync::Semaphore::new(THUMB_CONCURRENCY)),
@@ -339,14 +361,7 @@ impl Shell {
             let m = self.model.borrow();
             (m.tab(), m.view(), m.is_visible())
         };
-        let layout = {
-            let cfg = self.cfg.borrow();
-            let rows = match view {
-                View::Packs => glue::pack_rows(&cfg),
-                _ => glue::VISIBLE_ROWS as usize,
-            };
-            (cfg.ui.columns.max(1) as usize, rows)
-        };
+        let layout = self.grid_layout(view);
         if self.layout.get() != Some(layout) {
             self.layout.set(Some(layout));
             self.model.borrow_mut().handle(Event::Layout {
@@ -365,10 +380,83 @@ impl Shell {
         }
     }
 
+    /// Columns and visible rows of the grid `view` shows, as GTK lays it
+    /// out now; before it has a size, what the config asks for.
+    fn grid_layout(&self, view: View) -> (usize, usize) {
+        let cfg = self.cfg.borrow();
+        let cell = (cfg.ui.thumb_px + glue::CELL_EXTRA_PX) as i32;
+        let (grid, fallback) = match view {
+            View::Packs => (&self.w.pack_grid, (cell, cell + glue::PACK_LABELS_PX as i32)),
+            _ => (&self.w.grid, (cell, cell)),
+        };
+        measure_grid(grid, fallback).unwrap_or_else(|| {
+            let rows = match view {
+                View::Packs => glue::pack_rows(&cfg),
+                _ => glue::VISIBLE_ROWS as usize,
+            };
+            (cfg.ui.columns.max(1) as usize, rows)
+        })
+    }
+
+    /// A grid got a new size: tell the model its geometry once GTK is done
+    /// allocating.
+    fn queue_layout(self: &Rc<Self>) {
+        if self.layout_queued.replace(true) {
+            return;
+        }
+        let this = self.clone();
+        glib::idle_add_local_once(move || {
+            this.layout_queued.set(false);
+            if this.model.try_borrow_mut().is_ok() {
+                this.after_render();
+            }
+        });
+    }
+
+    /// Keep the tab the popup closed on, for the next start.
+    fn remember_tab(&self) {
+        let tab = self.model.borrow().tab();
+        if self.saved_tab.replace(Some(tab)) == Some(tab) {
+            return;
+        }
+        let path = self.last_tab_path.clone();
+        runtime().spawn_blocking(move || {
+            if let Err(e) = glue::save_last_tab(&path, tab) {
+                tracing::warn!("saving {}: {e}", path.display());
+            }
+        });
+    }
+
+    /// A `z` key showed or hid something on the tiles: save it like the
+    /// Settings tab would. A key `config.toml` sets stays as it is there;
+    /// the change then lasts until the popup restarts.
+    fn save_tile(self: &Rc<Self>, tile: Tile, on: bool) {
+        let key = glue::tile_key(tile);
+        let layered = match config_file::load_layered(&self.config_path) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::warn!("saving {key}: {e}");
+                return;
+            }
+        };
+        if layered.locked.contains(key) {
+            tracing::info!("{key} is set in {}; not saved", self.config_path.display());
+            return;
+        }
+        if let Err(e) = config_file::set_value(&layered.write_path, key, toml::Value::Boolean(on)) {
+            tracing::warn!("saving {key}: {e}");
+            return;
+        }
+        self.reload_settings();
+    }
+
     fn execute(self: &Rc<Self>, command: Command) {
         match command {
             Command::Present => self.present(),
-            Command::Hide => self.w.window.set_visible(false),
+            Command::Hide => {
+                self.remember_tab();
+                self.w.window.set_visible(false)
+            }
             Command::Search {
                 query,
                 target,
@@ -415,6 +503,7 @@ impl Shell {
             Command::LoadThumbnails { items } => self.load_thumbnails(items),
             Command::LoadPackCovers { packs } => self.load_covers(packs),
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
+            Command::SaveTile { tile, on } => self.save_tile(tile, on),
             Command::SaveHistory(history) => {
                 let path = self.history_path.clone();
                 runtime().spawn_blocking(move || {
@@ -536,6 +625,7 @@ impl Shell {
         }
 
         if m.entries_revision() != self.rendered_revision.get() {
+            let tiles = m.tiles();
             let thumbs = self.thumbs.borrow();
             let objects: Vec<StickerObject> = m
                 .entries()
@@ -545,7 +635,7 @@ impl Shell {
                         Some(Thumb::Ready(t)) => Some(t),
                         _ => None,
                     };
-                    StickerObject::new(e, tex)
+                    StickerObject::new(e, tex, tiles)
                 })
                 .collect();
             w.store.splice(0, w.store.n_items(), &objects);
@@ -779,12 +869,6 @@ impl Shell {
         let old = self.cfg.replace(new.clone());
         let w = &self.w;
         if old.ui.columns != new.ui.columns || old.ui.thumb_px != new.ui.thumb_px {
-            let columns = new.ui.columns.max(1);
-            for grid in [&w.grid, &w.pack_grid] {
-                grid.set_max_columns(columns.max(grid.max_columns()));
-                grid.set_min_columns(columns);
-                grid.set_max_columns(columns);
-            }
             if old.ui.thumb_px != new.ui.thumb_px {
                 let px = new.ui.thumb_px as i32;
                 w.grid.set_factory(Some(&self.item_factory(px)));
@@ -1277,8 +1361,18 @@ impl Shell {
         let this = self.clone();
         w.window.connect_close_request(move |_| {
             this.dispatch(Event::Hidden);
+            this.remember_tab();
             glib::Propagation::Proceed
         });
+
+        // A resized window reflows the grids; the model needs their geometry
+        // for the keys that move by rows and pages.
+        for grid in [&w.grid, &w.pack_grid] {
+            for adj in [grid.hadjustment(), grid.vadjustment()].into_iter().flatten() {
+                let this = self.clone();
+                adj.connect_page_size_notify(move |_| this.queue_layout());
+            }
+        }
 
         let px = self.cfg.borrow().ui.thumb_px as i32;
         w.grid.set_factory(Some(&self.item_factory(px)));
@@ -1300,22 +1394,48 @@ impl Shell {
                 .width_request(thumb_px)
                 .height_request(thumb_px)
                 .build();
-            let badge = gtk::Label::builder()
-                .halign(gtk::Align::End)
-                .valign(gtk::Align::End)
-                .build();
+            let badge = gtk::Label::new(None);
             badge.add_css_class("osd");
             badge.add_css_class("stickpile-badge");
-            let warn = gtk::Image::builder()
-                .icon_name("dialog-warning-symbolic")
-                .halign(gtk::Align::Start)
-                .valign(gtk::Align::End)
-                .build();
+            let warn = gtk::Image::from_icon_name("dialog-warning-symbolic");
             warn.add_css_class("stickpile-warn");
+            let emojis = gtk::Label::builder()
+                .max_width_chars(6)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            emojis.add_css_class("osd");
+            emojis.add_css_class("stickpile-pill");
+            let heart = gtk::Label::new(Some("\u{2665}"));
+            heart.add_css_class("osd");
+            heart.add_css_class("stickpile-pill");
+            heart.add_css_class("stickpile-heart");
+            let tags = gtk::Label::builder()
+                .halign(gtk::Align::Start)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            tags.add_css_class("osd");
+            tags.add_css_class("stickpile-pill");
+            tags.add_css_class("stickpile-tags");
+            // Emojis and the heart along the top, the warning, tags and the
+            // GIF badge along the bottom. Clicks go through to the cell.
+            let row = |valign, parts: &[&gtk::Widget]| {
+                let row = gtk::Box::builder().spacing(3).valign(valign).can_target(false).build();
+                row.add_css_class("stickpile-tile-row");
+                for p in parts {
+                    row.append(*p);
+                }
+                row
+            };
+            let spacer = || gtk::Box::builder().hexpand(true).build().upcast::<gtk::Widget>();
+            let top = row(gtk::Align::Start, &[emojis.upcast_ref(), &spacer(), heart.upcast_ref()]);
+            let bottom = row(
+                gtk::Align::End,
+                &[warn.upcast_ref(), tags.upcast_ref(), &spacer(), badge.upcast_ref()],
+            );
             let cell = gtk::Overlay::new();
             cell.set_child(Some(&picture));
-            cell.add_overlay(&badge);
-            cell.add_overlay(&warn);
+            cell.add_overlay(&top);
+            cell.add_overlay(&bottom);
             li.set_child(Some(&cell));
 
             let item = li.property_expression("item");
@@ -1329,6 +1449,16 @@ impl Shell {
                 .bind(&badge, "visible", gtk::Widget::NONE);
             item.chain_property::<StickerObject>("incompatible")
                 .bind(&warn, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("liked")
+                .bind(&heart, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("emojis")
+                .bind(&emojis, "label", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("has-emojis")
+                .bind(&emojis, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("tags")
+                .bind(&tags, "label", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("has-tags")
+                .bind(&tags, "visible", gtk::Widget::NONE);
 
             let source = gtk::DragSource::new();
             source.set_actions(gdk::DragAction::COPY);
@@ -1354,16 +1484,48 @@ impl Shell {
     }
 }
 
-fn grid_view(selection: &gtk::SingleSelection, columns: u32) -> gtk::GridView {
+/// A grid of as many columns as fit (it reflows with the window).
+fn grid_view(selection: &gtk::SingleSelection) -> gtk::GridView {
     let grid = gtk::GridView::builder()
         .model(selection)
-        .min_columns(columns)
-        .max_columns(columns)
+        .min_columns(1)
+        .max_columns(glue::MAX_COLUMNS)
         .single_click_activate(true)
         .can_focus(false)
         .build();
     grid.add_css_class("stickpile-grid");
     grid
+}
+
+/// Columns and fully visible rows of `grid` as allocated now, counted the
+/// way GtkGridView does: its widest cell and the first cell's height for
+/// that width (`fallback` while it has no cells). `None` before it has a
+/// size or while hidden.
+fn measure_grid(grid: &gtk::GridView, fallback: (i32, i32)) -> Option<(usize, usize)> {
+    if !grid.is_mapped() {
+        return None;
+    }
+    let width = grid.hadjustment()?.page_size() as i32;
+    let height = grid.vadjustment()?.page_size() as i32;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    let mut cell_w = 0;
+    let mut child = grid.first_child();
+    let first = child.clone();
+    while let Some(c) = child {
+        cell_w = cell_w.max(c.measure(gtk::Orientation::Horizontal, -1).0);
+        child = c.next_sibling();
+    }
+    let (cell_w, cell_h) = match first {
+        Some(c) if cell_w > 0 => {
+            let (columns, _) = glue::grid_layout(width, height, cell_w, 1);
+            let column = width / columns as i32;
+            (cell_w, c.measure(gtk::Orientation::Vertical, column).0)
+        }
+        _ => fallback,
+    };
+    Some(glue::grid_layout(width, height, cell_w, cell_h))
 }
 
 fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
@@ -1417,13 +1579,12 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     top.append(&tabs.root);
     top.append(&header);
 
-    let columns = cfg.ui.columns.max(1);
     let store = gio::ListStore::new::<StickerObject>();
     let selection = single_selection(&store);
-    let grid = grid_view(&selection, columns);
+    let grid = grid_view(&selection);
     let pack_store = gio::ListStore::new::<PackObject>();
     let pack_selection = single_selection(&pack_store);
-    let pack_grid = grid_view(&pack_selection, columns);
+    let pack_grid = grid_view(&pack_selection);
 
     let content = gtk::Stack::builder().vexpand(true).build();
     content.add_named(&scrolled(&grid), Some("items"));

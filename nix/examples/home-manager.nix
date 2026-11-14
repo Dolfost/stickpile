@@ -23,6 +23,10 @@
         max_results = 80;
         modal = false;
         start_tab = "favorites";
+        start_mode = "insert";
+        mark_favorites = false;
+        show_emojis = false;
+        show_tags = true;
       };
       copy = {
         square = "white";

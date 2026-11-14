@@ -164,10 +164,26 @@ for you.
 ```toml
 [ui]
 modal = true          # vim-style Insert/Normal modes in the popup; false keeps the plain keys
-start_tab = "search"  # search | recent | most_used | packs | favorites | me | settings
+start_tab = "last"    # last | search | recent | most_used | packs | favorites | me | settings
+start_mode = "normal" # normal | insert
 ```
 
-Any other `start_tab` value is an error.
+`last` reopens the tab the popup was closed on, also after a restart (it
+is kept in the cache directory). `start_mode = "insert"` puts the cursor
+in the text field on Search and Packs; the other tabs open in Normal
+either way. Any other `start_tab` or `start_mode` value is an error.
+
+### Popup tiles
+
+```toml
+[ui]
+mark_favorites = true # a heart on the items you liked
+show_emojis = true    # an item's emojis on its tile
+show_tags = true      # an item's tags on its tile
+```
+
+`zf`, `ze` and `zt` in Normal mode turn them on and off and save the
+change like the Settings tab does.
 
 ### Copy-time image adjustments
 
@@ -200,7 +216,7 @@ The popup's Settings tab edits these keys:
 
 | Group | Keys |
 |---|---|
-| Popup | `ui.start_tab`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Popup | `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 

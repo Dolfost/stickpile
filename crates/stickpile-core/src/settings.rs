@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{DocumentMut, Item, TableLike};
 
-use crate::config::{Background, ClientConfig, ConfigError, SquarePad, TABS};
+use crate::config::{Background, ClientConfig, ConfigError, SquarePad, StartMode, START_TABS};
 
 /// The GUI's settings file, next to `config.toml`.
 pub const SETTINGS_FILE: &str = "settings.toml";
@@ -129,9 +129,17 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "ui.start_tab",
             "Popup",
             "Start tab",
-            "Tab shown when the popup opens.",
-            Choice(TABS),
-            s("search"),
+            "Tab shown when the popup opens; last is the tab it was closed on.",
+            Choice(START_TABS),
+            s("last"),
+        ),
+        spec(
+            "ui.start_mode",
+            "Popup",
+            "Start mode",
+            "Mode the popup opens in: normal (vim keys), or insert to type a search right away.",
+            Choice(StartMode::NAMES),
+            s("normal"),
         ),
         spec(
             "ui.modal",
@@ -145,7 +153,7 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "ui.columns",
             "Popup",
             "Grid columns",
-            "Thumbnails per row.",
+            "Thumbnails per row at the default window size; resizing reflows the grid.",
             Int { min: 1, max: 20 },
             i(6),
         ),
@@ -156,6 +164,30 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "Grid cell size in logical pixels.",
             Int { min: 32, max: 512 },
             i(128),
+        ),
+        spec(
+            "ui.mark_favorites",
+            "Popup",
+            "Mark favorites",
+            "A heart on the items you liked (zf in Normal mode).",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "ui.show_emojis",
+            "Popup",
+            "Show emojis",
+            "An item's emojis on its tile (ze in Normal mode).",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "ui.show_tags",
+            "Popup",
+            "Show tags",
+            "An item's tags on its tile (zt in Normal mode).",
+            Bool,
+            b(true),
         ),
         spec(
             "ui.recent_count",

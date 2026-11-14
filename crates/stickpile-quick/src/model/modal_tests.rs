@@ -30,7 +30,7 @@ fn open_with(cfg: ModelConfig) -> (Model, Vec<Command>) {
 
 fn open_on(tab: Tab) -> Model {
     open_with(ModelConfig {
-        start_tab: tab,
+        start_tab: Some(tab),
         ..cfg()
     })
     .0
@@ -102,7 +102,7 @@ fn loads_recent(cmds: &[Command]) -> bool {
 /// Normal mode on Most used with `n` items (4 columns, 2 visible rows).
 fn grid(n: usize) -> Model {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::MostUsed,
+        start_tab: Some(Tab::MostUsed),
         ..cfg()
     });
     let generation = most_used_gen(&cmds).unwrap();
@@ -116,7 +116,7 @@ fn grid(n: usize) -> Model {
 
 fn packs_model(cfg: ModelConfig) -> Model {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Packs,
+        start_tab: Some(Tab::Packs),
         ..cfg
     });
     let generation = packs_gen(&cmds).unwrap();
@@ -165,7 +165,7 @@ fn opened_pack(cfg: ModelConfig) -> Model {
 fn opens_on_the_start_tab_in_its_mode() {
     for tab in Tab::ALL {
         let (m, cmds) = open_with(ModelConfig {
-            start_tab: tab,
+            start_tab: Some(tab),
             ..cfg()
         });
         assert_eq!(m.tab(), tab);
@@ -738,7 +738,7 @@ fn key_timeout_after_hiding_is_ignored() {
 #[test]
 fn most_used_loads_on_every_show() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::MostUsed,
+        start_tab: Some(Tab::MostUsed),
         ..cfg()
     });
     let g1 = most_used_gen(&cmds).unwrap();
@@ -787,7 +787,7 @@ fn most_used_loads_on_every_show() {
 #[test]
 fn list_requests_in_flight_are_not_repeated_within_an_opening() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::MostUsed,
+        start_tab: Some(Tab::MostUsed),
         ..cfg()
     });
     let g1 = most_used_gen(&cmds).unwrap();
@@ -815,7 +815,7 @@ fn list_requests_in_flight_are_not_repeated_within_an_opening() {
 #[test]
 fn list_answers_for_hidden_tabs_are_kept_for_later() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..cfg()
     });
     let g = favorites_gen(&cmds).unwrap();
@@ -857,7 +857,7 @@ fn list_answers_keep_a_message_the_user_caused() {
 #[test]
 fn favorite_toggle_round_trip() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..cfg()
     });
     let generation = favorites_gen(&cmds).unwrap();
@@ -914,7 +914,7 @@ fn favorite_toggle_round_trip() {
 #[test]
 fn unliking_elsewhere_drops_the_item_from_favorites() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..cfg()
     });
     m.handle(Event::FavoritesLoaded {
@@ -942,7 +942,7 @@ fn unliking_elsewhere_drops_the_item_from_favorites() {
 #[test]
 fn pack_list_loads_filters_and_shows_covers() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Packs,
+        start_tab: Some(Tab::Packs),
         ..cfg()
     });
     assert_eq!(m.view(), View::Packs);
@@ -979,7 +979,7 @@ fn pack_list_loads_filters_and_shows_covers() {
 #[test]
 fn no_packs_and_errors() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Packs,
+        start_tab: Some(Tab::Packs),
         ..cfg()
     });
     m.handle(Event::PacksLoaded {
@@ -1276,7 +1276,7 @@ fn without_modes_escape_leaves_a_pack_then_hides() {
 #[test]
 fn without_modes_a_start_tab_still_applies() {
     let (m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..non_modal()
     });
     assert_eq!((m.tab(), m.mode()), (Tab::Favorites, Mode::Insert));
@@ -1304,7 +1304,7 @@ fn configure_applies_new_settings_at_once() {
         prefer_stickers: true,
         default_target: TargetApp::Telegram,
         hide_on_copy: false,
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..cfg()
     };
     assert!(m.handle(Event::Configure(new.clone())).is_empty());
@@ -1338,7 +1338,7 @@ fn configure_applies_new_settings_at_once() {
 #[test]
 fn reload_forgets_the_old_accounts_lists() {
     let (mut m, cmds) = open_with(ModelConfig {
-        start_tab: Tab::Favorites,
+        start_tab: Some(Tab::Favorites),
         ..cfg()
     });
     let old = favorites_gen(&cmds).unwrap();

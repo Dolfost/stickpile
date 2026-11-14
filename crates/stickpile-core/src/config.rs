@@ -58,6 +58,8 @@ impl Default for ClientConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct UiConfig {
+    /// Thumbnails per row at the popup's default size. The grid reflows
+    /// when the window is resized, so a wider window shows more.
     pub columns: u32,
     pub thumb_px: u32,
     /// Hide the popup after copying.
@@ -71,12 +73,55 @@ pub struct UiConfig {
     pub max_results: u32,
     /// Vim-style Insert/Normal modes in the popup; false keeps the plain keys.
     pub modal: bool,
-    /// Tab shown when the popup opens, one of [`TABS`].
+    /// Tab shown when the popup opens: `last` (the tab it was closed on,
+    /// kept across restarts) or one of [`TABS`].
     pub start_tab: String,
+    /// Mode the popup opens in when `modal` is on.
+    pub start_mode: StartMode,
+    /// A heart on the tiles of items the viewer liked.
+    pub mark_favorites: bool,
+    /// An item's emojis on its tile.
+    pub show_emojis: bool,
+    /// An item's tags on its tile.
+    pub show_tags: bool,
 }
 
-/// The popup's tabs in display order (`ui.start_tab` names one of them).
+/// The popup's tabs in display order.
 pub const TABS: &[&str] = &["search", "recent", "most_used", "packs", "favorites", "me", "settings"];
+
+/// Values of `ui.start_tab`: `last`, then [`TABS`].
+pub const START_TABS: &[&str] = &[
+    "last",
+    "search",
+    "recent",
+    "most_used",
+    "packs",
+    "favorites",
+    "me",
+    "settings",
+];
+
+/// `ui.start_mode`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StartMode {
+    /// Vim keys right away; `i` or `/` to type.
+    #[default]
+    Normal,
+    /// Typing right away on the tabs with a text field (Search, Packs);
+    /// the other tabs open in Normal.
+    Insert,
+}
+
+impl StartMode {
+    pub const NAMES: &'static [&'static str] = &["normal", "insert"];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StartMode::Normal => "normal",
+            StartMode::Insert => "insert",
+        }
+    }
+}
 
 impl Default for UiConfig {
     fn default() -> Self {
@@ -88,7 +133,11 @@ impl Default for UiConfig {
             recent_count: 24,
             max_results: 60,
             modal: true,
-            start_tab: "search".into(),
+            start_tab: "last".into(),
+            start_mode: StartMode::Normal,
+            mark_favorites: true,
+            show_emojis: true,
+            show_tags: true,
         }
     }
 }
@@ -329,10 +378,10 @@ impl ClientConfig {
                 "ui.columns must be > 0 and ui.thumb_px >= 32".into(),
             ));
         }
-        if !TABS.contains(&self.ui.start_tab.as_str()) {
+        if !START_TABS.contains(&self.ui.start_tab.as_str()) {
             return Err(ConfigError::Invalid(format!(
                 "ui.start_tab must be one of {}, got {:?}",
-                TABS.join(", "),
+                START_TABS.join(", "),
                 self.ui.start_tab
             )));
         }
@@ -433,16 +482,21 @@ mod tests {
     #[test]
     fn ui_and_copy_keys() {
         let c = ClientConfig::from_toml(
-            "[ui]\nmodal = false\nstart_tab = \"most_used\"\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
+            "[ui]\nmodal = false\nstart_tab = \"most_used\"\nstart_mode = \"insert\"\nmark_favorites = false\n\
+             show_emojis = false\nshow_tags = false\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
         )
         .unwrap();
         assert!(!c.ui.modal);
         assert_eq!(c.ui.start_tab, "most_used");
+        assert_eq!(c.ui.start_mode, StartMode::Insert);
+        assert!(!c.ui.mark_favorites && !c.ui.show_emojis && !c.ui.show_tags);
         assert_eq!(c.copy.square, SquarePad::White);
         assert_eq!(c.copy.background, Background::White);
         let d = ClientConfig::default();
         assert!(d.ui.modal);
-        assert_eq!(d.ui.start_tab, "search");
+        assert_eq!(d.ui.start_tab, "last");
+        assert_eq!(d.ui.start_mode, StartMode::Normal);
+        assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags);
         assert_eq!((d.copy.square, d.copy.background), (SquarePad::Off, Background::Keep));
         for name in SquarePad::NAMES {
             let c = ClientConfig::from_toml(&format!("[copy]\nsquare = {name:?}")).unwrap();
@@ -452,9 +506,14 @@ mod tests {
             let c = ClientConfig::from_toml(&format!("[copy]\nbackground = {name:?}")).unwrap();
             assert_eq!(c.copy.background.as_str(), *name);
         }
-        for tab in TABS {
+        for tab in START_TABS {
             let c = ClientConfig::from_toml(&format!("[ui]\nstart_tab = {tab:?}")).unwrap();
             assert_eq!(c.ui.start_tab, *tab);
+        }
+        assert_eq!(&START_TABS[1..], TABS);
+        for name in StartMode::NAMES {
+            let c = ClientConfig::from_toml(&format!("[ui]\nstart_mode = {name:?}")).unwrap();
+            assert_eq!(c.ui.start_mode.as_str(), *name);
         }
     }
 
@@ -463,7 +522,8 @@ mod tests {
         let e = ClientConfig::from_toml("[ui]\nstart_tab = \"home\"")
             .unwrap_err()
             .to_string();
-        assert!(e.contains("ui.start_tab must be one of search, recent"), "{e}");
+        assert!(e.contains("ui.start_tab must be one of last, search, recent"), "{e}");
+        assert!(ClientConfig::from_toml("[ui]\nstart_mode = \"visual\"").is_err());
         let e = ClientConfig::from_toml("[copy]\nsquare = \"black\"")
             .unwrap_err()
             .to_string();

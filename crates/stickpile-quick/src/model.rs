@@ -16,9 +16,12 @@
 //!
 //! With `modal` on, the shell maps keys by [`Model::mode`]: in Insert the
 //! text field has them, in Normal they arrive as [`Event::Normal`] and
-//! [`crate::vim`] turns them into commands. Each tab is shown in its
+//! [`crate::vim`] turns them into commands. An opening starts in
+//! [`ModelConfig::start_mode`], a tab switched to in its
 //! [`Tab::default_mode`]; the shell reports focus changes of text fields
 //! ([`Event::TextFocus`]) and moves the focus to match [`Model::mode`].
+
+use std::collections::HashSet;
 
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
@@ -54,10 +57,68 @@ pub struct ModelConfig {
     /// Vim-style Insert / Normal modes (`ui.modal`). Off: the text field
     /// always has the keys and Escape hides.
     pub modal: bool,
-    /// The tab every opening starts on (`ui.start_tab`).
-    pub start_tab: Tab,
+    /// The tab every opening starts on (`ui.start_tab`); `None`: the tab
+    /// the popup was closed on (see [`Model::restore_tab`]).
+    pub start_tab: Option<Tab>,
+    /// The mode an opening starts in with `modal` on (`ui.start_mode`):
+    /// Normal, or Insert for the tab's own [`Tab::default_mode`] (Insert
+    /// where it has a text field).
+    pub start_mode: Mode,
+    /// What the item tiles show next to the thumbnail; Normal-mode `z`
+    /// keys change it for the life of the model.
+    pub tiles: Tiles,
     /// See [`DEFAULT_KEY_TIMEOUT_MS`].
     pub key_timeout_ms: u64,
+}
+
+/// What the item tiles show next to the thumbnail (`ui.mark_favorites`,
+/// `ui.show_emojis`, `ui.show_tags`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tiles {
+    /// A heart on the items the viewer liked ([`Entry::liked`]).
+    pub favorites: bool,
+    pub emojis: bool,
+    pub tags: bool,
+}
+
+impl Default for Tiles {
+    fn default() -> Self {
+        Tiles {
+            favorites: true,
+            emojis: true,
+            tags: true,
+        }
+    }
+}
+
+impl Tiles {
+    pub fn get(self, tile: Tile) -> bool {
+        match tile {
+            Tile::Favorites => self.favorites,
+            Tile::Emojis => self.emojis,
+            Tile::Tags => self.tags,
+        }
+    }
+
+    fn set(&mut self, tile: Tile, on: bool) {
+        match tile {
+            Tile::Favorites => self.favorites = on,
+            Tile::Emojis => self.emojis = on,
+            Tile::Tags => self.tags = on,
+        }
+    }
+}
+
+/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tile {
+    Favorites,
+    Emojis,
+    Tags,
+}
+
+impl Tile {
+    pub const ALL: [Tile; 3] = [Tile::Favorites, Tile::Emojis, Tile::Tags];
 }
 
 impl Default for ModelConfig {
@@ -73,7 +134,9 @@ impl Default for ModelConfig {
             debounce_ms: DEFAULT_DEBOUNCE_MS,
             list_limit: 120,
             modal: true,
-            start_tab: Tab::Search,
+            start_tab: Some(Tab::Search),
+            start_mode: Mode::Insert,
+            tiles: Tiles::default(),
             key_timeout_ms: DEFAULT_KEY_TIMEOUT_MS,
         }
     }
@@ -289,6 +352,12 @@ pub enum Command {
     },
     /// Persist the per-window history (changed after a copy).
     SaveHistory(WindowHistory),
+    /// A `z` key showed or hid something on the tiles: save it as the
+    /// matching setting, so it holds after a restart too.
+    SaveTile {
+        tile: Tile,
+        on: bool,
+    },
     /// Like or unlike; answer with [`Event::FavoriteToggled`].
     ToggleFavorite {
         item_id: String,
@@ -365,6 +434,11 @@ pub enum Status {
     Favorite {
         added: bool,
     },
+    /// A `z` key showed or hid something on the tiles.
+    Tile {
+        tile: Tile,
+        on: bool,
+    },
 }
 
 impl Status {
@@ -380,7 +454,8 @@ impl Status {
             | Status::NoFavorites
             | Status::NoPacks
             | Status::EmptyPack
-            | Status::Favorite { .. } => Level::Info,
+            | Status::Favorite { .. }
+            | Status::Tile { .. } => Level::Info,
             Status::Searching | Status::Copying { .. } | Status::Loading => Level::Busy,
             Status::Offline => Level::Warning,
             Status::Copied { warning, .. } => {
@@ -428,6 +503,14 @@ impl Status {
             Status::LoadFailed(e) => e.clone(),
             Status::Favorite { added: true } => "Added to favorites".into(),
             Status::Favorite { added: false } => "Removed from favorites".into(),
+            Status::Tile { tile, on } => {
+                let what = match tile {
+                    Tile::Favorites => "Favorite marks",
+                    Tile::Emojis => "Emojis",
+                    Tile::Tags => "Tags",
+                };
+                format!("{what} {}", if *on { "shown" } else { "hidden" })
+            }
         }
     }
 
@@ -488,6 +571,9 @@ pub struct Entry {
     pub incompatible: Option<String>,
     /// Matched signals from search (`name`, `keyword`, `image`, ...).
     pub matched: Vec<String>,
+    /// The viewer liked the item, as far as the model knows: the favorites
+    /// it loaded (the Favorites tab's list) and the likes made since.
+    pub liked: bool,
 }
 
 impl Entry {
@@ -523,6 +609,17 @@ impl Entry {
             s.push_str(why);
         }
         s
+    }
+}
+
+/// The mode an opening on `tab` starts in.
+fn opening_mode(cfg: &ModelConfig, tab: Tab) -> Mode {
+    if !cfg.modal {
+        Mode::Insert
+    } else if cfg.start_mode == Mode::Normal {
+        Mode::Normal
+    } else {
+        tab.default_mode()
     }
 }
 
@@ -730,6 +827,10 @@ pub struct Model {
     generation: u64,
     copying: Option<InFlight>,
     history: WindowHistory,
+    /// Ids of the items the viewer liked, for [`Entry::liked`].
+    liked: HashSet<String>,
+    /// What the tiles show: [`ModelConfig::tiles`], changed by `z` keys.
+    tiles: Tiles,
 }
 
 /// The copy currently being prepared.
@@ -773,14 +874,11 @@ impl Model {
 
     /// Start with a per-window history loaded by the shell.
     pub fn with_history(cfg: ModelConfig, history: WindowHistory) -> Model {
+        let tab = cfg.start_tab.unwrap_or_default();
         Model {
             visible: false,
-            tab: cfg.start_tab,
-            mode: if cfg.modal {
-                cfg.start_tab.default_mode()
-            } else {
-                Mode::Insert
-            },
+            tab,
+            mode: opening_mode(&cfg, tab),
             pending: Pending::default(),
             help: false,
             query: String::new(),
@@ -809,7 +907,18 @@ impl Model {
             generation: 0,
             copying: None,
             history,
+            liked: HashSet::new(),
+            tiles: cfg.tiles,
             cfg,
+        }
+    }
+
+    /// The tab the popup was closed on last time (saved by the shell), for
+    /// a `start_tab` of `None`. Ignored once the popup has been opened.
+    pub fn restore_tab(&mut self, tab: Tab) {
+        if self.cfg.start_tab.is_none() && !self.visible && self.generation == 0 {
+            self.tab = tab;
+            self.mode = opening_mode(&self.cfg, tab);
         }
     }
 
@@ -929,6 +1038,10 @@ impl Model {
     pub fn history(&self) -> &WindowHistory {
         &self.history
     }
+    /// What the item tiles show.
+    pub fn tiles(&self) -> Tiles {
+        self.tiles
+    }
 
     pub fn sticker_mode(&self) -> StickerMode {
         if !supports_stickers(self.target) {
@@ -993,7 +1106,17 @@ impl Model {
             }
             Event::FavoritesLoaded { generation, outcome } => {
                 let fresh = self.favorites.accept(generation, outcome);
-                self.list_answered(fresh && self.tab == Tab::Favorites)
+                let shown = fresh && self.tab == Tab::Favorites;
+                if fresh && self.favorites.error.is_none() {
+                    let liked: HashSet<String> = self.favorites.items.iter().map(|i| i.id.clone()).collect();
+                    if liked != self.liked {
+                        self.liked = liked;
+                        if self.tiles.favorites && !shown && self.view() == View::Items {
+                            self.rebuild(Sel::Keep);
+                        }
+                    }
+                }
+                self.list_answered(shown)
             }
             Event::PacksLoaded { generation, outcome } => {
                 let fresh = self.packs.sets.accept(generation, outcome);
@@ -1104,12 +1227,10 @@ impl Model {
             }
         }
         self.window = info.window;
-        self.tab = self.cfg.start_tab;
-        self.mode = if self.cfg.modal {
-            self.tab.default_mode()
-        } else {
-            Mode::Insert
-        };
+        if let Some(tab) = self.cfg.start_tab {
+            self.tab = tab;
+        }
+        self.mode = opening_mode(&self.cfg, self.tab);
         self.help = false;
         self.memory = Default::default();
         self.packs.filter.clear();
@@ -1122,6 +1243,10 @@ impl Model {
         self.packs.sets.loading = None;
         let mut cmds = vec![Command::Present, Command::CancelSearch];
         cmds.extend(self.enter_tab());
+        // The other tabs need the favorites for their marks.
+        if self.tiles.favorites && self.tab != Tab::Favorites {
+            cmds.extend(self.load_favorites());
+        }
         cmds
     }
 
@@ -1158,10 +1283,54 @@ impl Model {
                 Mode::Insert
             };
         }
+        // A changed setting is the user's latest word; a `z` key's change
+        // holds until then.
+        let mut cmds = Vec::new();
+        let tiles = self.cfg.tiles;
+        for tile in Tile::ALL {
+            let on = tiles.get(tile);
+            if on != old.tiles.get(tile) && on != self.tiles.get(tile) {
+                cmds.extend(self.set_tile(tile, on));
+            }
+        }
         if compat {
             self.refresh_compat();
         }
+        cmds
+    }
+
+    /// Show or hide something on the tiles.
+    fn set_tile(&mut self, tile: Tile, on: bool) -> Vec<Command> {
+        self.tiles.set(tile, on);
+        if tile == Tile::Favorites && self.view() == View::Items {
+            // Marks were not kept up to date while off.
+            self.rebuild(Sel::Keep);
+        } else {
+            // Same entries, drawn differently.
+            self.entries_revision += 1;
+        }
+        if tile == Tile::Favorites && on && self.visible {
+            return self.load_favorites().into_iter().collect();
+        }
         Vec::new()
+    }
+
+    /// `zf`, `ze`, `zt`.
+    fn toggle_tile(&mut self, tile: Tile) -> Vec<Command> {
+        let on = !self.tiles.get(tile);
+        let mut cmds = self.set_tile(tile, on);
+        cmds.push(Command::SaveTile { tile, on });
+        if self.copying.is_none() {
+            self.status = Status::Tile { tile, on };
+        }
+        cmds
+    }
+
+    fn load_favorites(&mut self) -> Option<Command> {
+        let limit = self.cfg.list_limit;
+        self.favorites
+            .start(&mut self.requests)
+            .map(|generation| Command::LoadFavorites { limit, generation })
     }
 
     fn reload(&mut self) -> Vec<Command> {
@@ -1226,16 +1395,7 @@ impl Model {
                         }),
                 )
             }
-            Tab::Favorites => {
-                cmds.extend(
-                    self.favorites
-                        .start(&mut self.requests)
-                        .map(|generation| Command::LoadFavorites {
-                            limit: self.cfg.list_limit,
-                            generation,
-                        }),
-                )
-            }
+            Tab::Favorites => cmds.extend(self.load_favorites()),
             Tab::Packs => {
                 cmds.extend(
                     self.packs
@@ -1402,6 +1562,7 @@ impl Model {
             Cmd::Escape => self.escape_normal(),
             Cmd::Back if self.tab == Tab::Packs => self.pack_back(),
             Cmd::Open if view == View::Packs => self.enter(false),
+            Cmd::Tile(tile) => self.toggle_tile(tile),
             Cmd::Yank { .. } | Cmd::Space | Cmd::Favorite | Cmd::Browser | Cmd::Back | Cmd::Open => Vec::new(),
         }
     }
@@ -1695,6 +1856,7 @@ impl Model {
             incompatible: incompatibility(item, target, sticker),
             item: item.clone(),
             matched: Vec::new(),
+            liked: false,
         };
         self.entries = match self.tab {
             Tab::Search => match self.showing {
@@ -1712,6 +1874,7 @@ impl Model {
                             incompatible: server.or_else(|| incompatibility(&hit.item, target, sticker)),
                             item: hit.item.clone(),
                             matched: hit.matched.clone(),
+                            liked: false,
                         }
                     })
                     .collect(),
@@ -1733,6 +1896,9 @@ impl Model {
             },
             Tab::Me | Tab::Settings => Vec::new(),
         };
+        for e in &mut self.entries {
+            e.liked = self.liked.contains(&e.item.id);
+        }
         if self.view() == View::Packs {
             let terms = filter_terms(&self.packs.filter);
             self.packs.shown = self
@@ -1976,11 +2142,14 @@ impl Model {
     fn favorite_toggled(&mut self, item_id: &str, outcome: Result<bool, String>) -> Vec<Command> {
         let status = match outcome {
             Ok(liked) => {
-                if !liked {
+                if liked {
+                    self.liked.insert(item_id.to_string());
+                } else {
+                    self.liked.remove(item_id);
                     self.favorites.items.retain(|i| i.id != item_id);
-                    if self.tab == Tab::Favorites {
-                        self.rebuild(Sel::Keep);
-                    }
+                }
+                if self.view() == View::Items && (self.tiles.favorites || self.tab == Tab::Favorites) {
+                    self.rebuild(Sel::Keep);
                 }
                 Status::Favorite { added: liked }
             }
@@ -2073,12 +2242,18 @@ pub(crate) mod tests {
         }
     }
 
+    /// Favorite marks off, so an opening asks only for its own tab's data;
+    /// `tiles_tests` covers them.
     pub(crate) fn cfg() -> ModelConfig {
         ModelConfig {
             columns: 4,
             visible_rows: 2,
             recent_count: 5,
             max_results: 10,
+            tiles: Tiles {
+                favorites: false,
+                ..Tiles::default()
+            },
             ..ModelConfig::default()
         }
     }
@@ -3043,6 +3218,7 @@ pub(crate) mod tests {
             item: item("a"),
             incompatible: None,
             matched: vec![],
+            liked: false,
         };
         assert_eq!(e.badge(), None);
         assert!(!e.is_animated());
@@ -3099,3 +3275,6 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod modal_tests;
+
+#[cfg(test)]
+mod tiles_tests;
