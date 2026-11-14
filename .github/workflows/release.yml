@@ -134,13 +134,27 @@ jobs:
       # `brew install onnxruntime` to enable AI.
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p stickpile-cli -p stickpile-server
-      # The menu bar app: the Rust driver for this target, then the Swift app
-      # with the runner's Xcode. Ad-hoc signed, not notarized (docs/macos.md).
+      # The app is built and tested with the newest Swift and macOS SDK; the
+      # image's default Xcode can be older.
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(find /Applications -maxdepth 1 -name "Xcode_*.app" | sort -V | tail -n 1)
+          sudo xcode-select -s "$xcode"
+          echo "::notice::$(basename "$xcode"): $(swiftc --version 2>&1 | head -n 1)"
+      # The menu bar app: the Rust driver for this target, then the Swift app.
+      # Ad-hoc signed, not notarized (docs/macos.md).
       - name: Build Stickpile.app
         env:
           TARGET: ${{ matrix.target }}
           OUT: app-dist
-        run: crates/stickpile-mac/app/build.sh
+        # Errors also become annotations: reading the job log needs admin
+        # rights, annotations do not.
+        run: |
+          set -o pipefail
+          crates/stickpile-mac/app/build.sh 2>&1 | tee build.log || {
+            grep -E '(error|fatal error|Error)[:\[]' build.log | head -n 30 | sed 's/^/::error::/'
+            exit 1
+          }
       - name: Package
         run: |
           name="stickpile-${TAG}-${{ matrix.arch }}-macos"

@@ -109,8 +109,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # The app is built and tested with the newest Swift and macOS SDK; the
+      # image's default Xcode can be older.
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(find /Applications -maxdepth 1 -name "Xcode_*.app" | sort -V | tail -n 1)
+          sudo xcode-select -s "$xcode"
+          echo "::notice::$(basename "$xcode"): $(swiftc --version 2>&1 | head -n 1)"
       - name: Build Stickpile.app
-        run: crates/stickpile-mac/app/build.sh
+        # Errors also become annotations: reading the job log needs admin
+        # rights, annotations do not.
+        run: |
+          set -o pipefail
+          crates/stickpile-mac/app/build.sh 2>&1 | tee build.log || {
+            grep -E '(error|fatal error|Error)[:\[]' build.log | head -n 30 | sed 's/^/::error::/'
+            exit 1
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: stickpile-macos-app
