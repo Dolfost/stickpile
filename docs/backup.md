@@ -49,7 +49,7 @@ tests are in `crates/stickpile-server/tests/integrations_backup.rs`.
   {
     "format": 1,
     "created_at": 1794268800,
-    "stickpile_version": "0.4.0",
+    "stickpile_version": "0.5.0",
     "schema_version": 2,
     "users": 3, "sets": 12, "items": 410, "media": 398,
     "bytes": 81234567,
