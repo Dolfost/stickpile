@@ -102,6 +102,7 @@ object Library
   async fn login_tailnet() throws -> Account?          // null: not on the tailnet
   async fn login_password(username: String, password: String, totp: String?) throws -> Account
   async fn login_pairing(server_url: String, code: String) throws -> Account
+                                                       // sets the URL, then Session::login_pairing
   async fn logout() throws
 
   // reading (offline: from the cache, ItemList.offline = true)
@@ -122,6 +123,10 @@ object Library
   fn record_use(item_id: String, variant: String, editor_package: String) throws
   async fn toggle_like(item_id: String) throws -> Boolean   // the new state
   async fn upload(set_id: String, file: UploadFile) throws -> Item  // one file; the app loops and shows progress
+
+  // pairing input, no network (stickpile_api::pairing)
+  fn parse_pairing_link(text: String) -> PairingLink?  // a scanned stickpile://pair?url=&code=
+  fn normalize_pairing_code(input: String) -> String?  // null: not a code (yet); else the display form
 
   // sync (stickpile_core's SyncPolicy: every 10 minutes, retry after 60 s)
   async fn sync_if_due() throws -> SyncState
@@ -148,6 +153,7 @@ record Pack        { id: String, slug: String, name: String, owner: String,
                      item_count: u32, mine: Boolean }
 record PackList    { packs: List<Pack>, offline: Boolean }
 record Suggestions { key: String, words: List<String>, chosen: u32? }
+record PairingLink { server_url: String, code: String }
 record Prepared    { path: String, mime_type: String, display_name: String,
                      target: Target, variant: String, sticker: Boolean }
 record UploadFile  { path: String, name: String?, keywords: List<String>,
@@ -167,7 +173,12 @@ error  LibraryError {
 
 `prepare` picks the rendition with `stickpile_core`'s `target_for_package`
 and `variant_for` (below): it never returns a MIME type the field did not
-list, and returns `NothingFits` instead.
+list, and returns `NothingFits` instead. It then has `Session` fetch that
+exact rendition into the cache (not `prepare_copy`, which chooses its own)
+and names the file `<item name>.<format extension>`. `Prepared.variant` is
+the variant's name (`original`, `tg_sticker`, ...), which `record_use`
+gets back. Pairing errors: a wrong, expired or used code is
+`Unauthorized`; a bad token name is `InvalidInput`.
 
 ### Choosing what to insert
 
@@ -176,7 +187,9 @@ Two functions in `stickpile-core`, with unit tests:
 - `target_for_package(package) -> TargetApp`: a table of known package
   names (Telegram and its forks, Discord, Signal and Molly, WhatsApp and
   WhatsApp Business, Slack); everything else is `Generic`.
-- `variant_for(item, target, accepted_mime_types, sticker) -> Option<Variant>`:
+- `variant_for(item, target, accepted_mime_types, sticker) -> Option<InsertChoice>`
+  (the rendition's `VariantInfo`, its `MediaFormat`, the MIME type to
+  commit it as, and whether it is the sticker rendition):
   the best rendition whose MIME type the field accepts, honouring
   wildcards (`image/*`), or none. The preference order per target is a
   table (data, not code), provisional until the by-hand results in
