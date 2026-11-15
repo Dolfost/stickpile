@@ -1,3 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Texts of the picker keyboard (package ime), in Ukrainian. -->
-<resources />
+<resources>
+    <string name="ime_back_to_keyboard">Назад до клавіатури</string>
+
+    <string name="ime_tab_recent">Нещодавні</string>
+    <string name="ime_tab_liked">Вподобані</string>
+    <string name="ime_tab_sets">Набори</string>
+    <string name="ime_tab_results">Пошук: %1$s</string>
+
+    <string name="ime_all_sets">Усі набори</string>
+    <string name="ime_set_summary">%1$s - %2$s</string>
+    <plurals name="ime_set_items">
+        <item quantity="one">%d стікер</item>
+        <item quantity="few">%d стікери</item>
+        <item quantity="many">%d стікерів</item>
+        <item quantity="other">%d стікера</item>
+    </plurals>
+
+    <string name="ime_empty_recent">Звідси ще нічого не надсилали. Виберіть стікер у вкладці \"Вподобані\" або \"Набори\".</string>
+    <string name="ime_empty_liked">Ви ще нічого не вподобали.</string>
+    <string name="ime_empty_sets">Наборів ще немає.</string>
+    <string name="ime_empty_set">У цьому наборі порожньо.</string>
+    <string name="ime_empty_results">За запитом \"%1$s\" нічого не знайдено.</string>
+    <string name="ime_offline">Немає зв\'язку: показано збережені стікери.</string>
+    <string name="ime_loading">Завантаження</string>
+
+    <string name="ime_signed_out">Увійдіть у stickpile, щоб користуватися своїми стікерами тут.</string>
+    <string name="ime_open_app">Відкрити stickpile</string>
+
+    <string name="ime_error_unreachable">Сервер недоступний, а збережених стікерів немає.</string>
+    <string name="ime_error_not_found">Цього стікера вже немає.</string>
+    <string name="ime_error_rate_limited">Забагато запитів. Спробуйте за хвилину.</string>
+    <string name="ime_error_nothing_fits">Цей стікер сюди не надіслати.</string>
+    <string name="ime_error_server">На сервері сталася помилка. Спробуйте пізніше.</string>
+    <string name="ime_error_io">Не вдалося прочитати збережені стікери.</string>
+    <string name="ime_error_failed">Щось пішло не так.</string>
+    <string name="ime_error_no_app">Немає застосунку, щоб поділитися.</string>
+
+    <string name="ime_copied">Скопійовано. Поверніться до своєї клавіатури та вставте.</string>
+
+    <string name="ime_menu_like">Вподобати</string>
+    <string name="ime_menu_unlike">Прибрати вподобання</string>
+    <string name="ime_menu_send_sticker">Надіслати як стікер</string>
+    <string name="ime_menu_share">Поділитися</string>
+    <string name="ime_liked">Вподобано.</string>
+    <string name="ime_unliked">Вподобання прибрано.</string>
+    <string name="ime_share_title">Поділитися стікером</string>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One sticker in the picker's grid: its thumbnail in a square cell. -->
+<io.github.dolfost.stickpile.ime.SquareFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="4dp">
+
+    <ImageView
+        android:id="@+id/ime_item_image"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+</io.github.dolfost.stickpile.ime.SquareFrameLayout>

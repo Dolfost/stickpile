@@ -1,3 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Texts of the picker keyboard (package ime). -->
-<resources />
+<resources>
+    <!-- The button that switches back to the keyboard used before (content description). -->
+    <string name="ime_back_to_keyboard">Back to the keyboard</string>
+
+    <!-- Tabs. ime_tab_results shows the text in the field the picker searched for. -->
+    <string name="ime_tab_recent">Recent</string>
+    <string name="ime_tab_liked">Liked</string>
+    <string name="ime_tab_sets">Sets</string>
+    <string name="ime_tab_results">Search: %1$s</string>
+
+    <!-- A set's items: the button back to the list of sets. -->
+    <string name="ime_all_sets">All sets</string>
+    <!-- Under a set's name in the list: its owner and how many stickers it has. -->
+    <string name="ime_set_summary">%1$s - %2$s</string>
+    <plurals name="ime_set_items">
+        <item quantity="one">%d sticker</item>
+        <item quantity="other">%d stickers</item>
+    </plurals>
+
+    <!-- Empty lists. -->
+    <string name="ime_empty_recent">Nothing sent from here yet. Pick a sticker in Liked or Sets.</string>
+    <string name="ime_empty_liked">Nothing liked yet.</string>
+    <string name="ime_empty_sets">No sets yet.</string>
+    <string name="ime_empty_set">This set is empty.</string>
+    <string name="ime_empty_results">Nothing found for \"%1$s\".</string>
+    <string name="ime_offline">Offline: showing saved stickers.</string>
+    <string name="ime_loading">Loading</string>
+
+    <!-- Signed out: the message and the button that opens the app. -->
+    <string name="ime_signed_out">Sign in to stickpile to use your stickers here.</string>
+    <string name="ime_open_app">Open stickpile</string>
+
+    <!-- What went wrong, in a short line inside the keyboard. -->
+    <string name="ime_error_unreachable">Can\'t reach the server, and nothing is saved for offline use.</string>
+    <string name="ime_error_not_found">This sticker is gone.</string>
+    <string name="ime_error_rate_limited">Too many requests. Try again in a minute.</string>
+    <string name="ime_error_nothing_fits">This sticker can\'t be sent here.</string>
+    <string name="ime_error_server">The server had a problem. Try again later.</string>
+    <string name="ime_error_io">Couldn\'t read the saved stickers.</string>
+    <string name="ime_error_failed">Something went wrong.</string>
+    <string name="ime_error_no_app">No app to share it with.</string>
+
+    <!-- After a pick that could not go into the field directly. -->
+    <string name="ime_copied">Copied. Switch back to your keyboard and paste it.</string>
+
+    <!-- Long press on a sticker. -->
+    <string name="ime_menu_like">Like</string>
+    <string name="ime_menu_unlike">Remove like</string>
+    <string name="ime_menu_send_sticker">Send as sticker</string>
+    <string name="ime_menu_share">Share</string>
+    <string name="ime_liked">Liked.</string>
+    <string name="ime_unliked">Like removed.</string>
+    <string name="ime_share_title">Share sticker</string>
+</resources>
