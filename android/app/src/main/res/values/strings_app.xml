@@ -133,4 +133,75 @@
 
     <!-- The settings. -->
     <string name="settings_title">Settings</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_account_checking">Checking your account</string>
+    <string name="settings_account_username">Username: %1$s</string>
+    <string name="settings_account_server">Server</string>
+    <string name="settings_account_how">Signed in</string>
+    <string name="settings_account_how_token">With a token of this phone</string>
+    <string name="settings_account_how_tailnet">Through Tailscale, without a token</string>
+    <string name="settings_account_signed_out">Not signed in.</string>
+    <string name="settings_sign_in">Sign in</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_sign_out_title">Sign out?</string>
+    <string name="settings_sign_out_text">The uses not sent yet go to the server, the token of this phone is revoked there, and your account data is removed from this phone. The background sync stops.</string>
+    <string name="settings_sync">Sync</string>
+    <string name="settings_sync_never">No sync since signing in.</string>
+    <!-- %1$s: when, such as "5 minutes ago". -->
+    <string name="settings_sync_last">Last sync: %1$s</string>
+    <!-- %1$s: the error (one of the app_error_ texts). -->
+    <string name="settings_sync_failed">The last attempt failed: %1$s</string>
+    <string name="settings_sync_nothing_pending">Every use is sent.</string>
+    <plurals name="settings_sync_pending">
+        <item quantity="one">%d use waiting to be sent</item>
+        <item quantity="other">%d uses waiting to be sent</item>
+    </plurals>
+    <string name="settings_sync_now">Sync now</string>
+    <string name="settings_cache">Saved pictures</string>
+    <!-- %1$s: a size, such as 12 MB. -->
+    <string name="settings_cache_size">On this phone: %1$s</string>
+    <string name="settings_cache_unknown">The size cannot be read.</string>
+    <string name="settings_cache_text">Thumbnails, and files kept for sending. Clearing them frees the space; the offline search keeps working, and pictures download again when needed.</string>
+    <string name="settings_cache_clear">Clear</string>
+    <string name="settings_cache_cleared">Freed %1$s</string>
+    <string name="settings_keyboard">Sticker keyboard</string>
+    <string name="settings_keyboard_setup">Turn on and switch</string>
+    <string name="settings_keyboard_setup_text">How to turn the keyboard on and switch to it</string>
+    <string name="settings_keyboard_search_draft">Search for what you typed</string>
+    <string name="settings_keyboard_search_draft_text">Text already in the field (one line, up to 60 characters) is the search.</string>
+    <string name="settings_keyboard_delete_draft">Delete what you typed</string>
+    <string name="settings_keyboard_delete_draft_text">When a sticker found from it goes in, the typed text goes away.</string>
+    <string name="settings_keyboard_stay_open">Stay open</string>
+    <string name="settings_keyboard_stay_open_text">After a sticker goes in, stay on the sticker keyboard instead of switching back.</string>
+    <string name="settings_allowlist">Keyboards that may read your stickers</string>
+    <string name="settings_allowlist_text">Other keyboards can show your stickers too: a keyboard you allow can search your library and read its pictures, as the sticker keyboard of this app does.</string>
+    <string name="settings_allowlist_empty">No other keyboard has asked yet.</string>
+    <string name="settings_allowlist_allowed">Allowed</string>
+    <!-- %1$s: the keyboard's package name. -->
+    <string name="settings_allowlist_allowed_package">Allowed (%1$s)</string>
+    <string name="settings_allowlist_asked">Asked to read your stickers</string>
+    <string name="settings_allowlist_asked_package">Asked to read your stickers (%1$s)</string>
+    <string name="settings_allowlist_allow">Allow</string>
+    <string name="settings_allowlist_dismiss">Dismiss</string>
+    <string name="settings_allowlist_revoke">Revoke</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+
+    <!-- The licences. Library names and SPDX identifiers are not translated. -->
+    <string name="licences_title">Licences</string>
+    <string name="licences_app">stickpile is free software under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later). Its source code:</string>
+    <string name="licences_source_url" translatable="false">https://github.com/Dolfost/stickpile</string>
+    <string name="licences_libraries">Libraries</string>
+    <string name="licences_rust">The Rust crates the app is built from are listed in its source code, in Cargo.lock.</string>
+    <string name="licence_lib_compose" translatable="false">Jetpack Compose</string>
+    <string name="licence_lib_androidx" translatable="false">AndroidX (Activity, Core, Lifecycle, RecyclerView)</string>
+    <string name="licence_lib_material" translatable="false">Material Components for Android</string>
+    <string name="licence_lib_work" translatable="false">WorkManager</string>
+    <string name="licence_lib_coroutines" translatable="false">kotlinx.coroutines</string>
+    <string name="licence_lib_kotlin">Kotlin standard library</string>
+    <string name="licence_lib_jna" translatable="false">JNA (Java Native Access)</string>
+    <string name="licence_lib_zxing" translatable="false">ZXing</string>
+    <string name="licence_lib_zxing_embedded" translatable="false">ZXing Android Embedded</string>
+    <string name="licence_apache" translatable="false">Apache-2.0</string>
+    <string name="licence_jna">LGPL-2.1-or-later or Apache-2.0</string>
 </resources>

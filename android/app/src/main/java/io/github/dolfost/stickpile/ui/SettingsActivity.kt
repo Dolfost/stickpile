@@ -1,17 +1,45 @@
 package io.github.dolfost.stickpile.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.rust.StickpileLibrary
+import io.github.dolfost.stickpile.sync.SyncScheduler
+import io.github.dolfost.stickpile.ui.common.Doing
+import io.github.dolfost.stickpile.ui.common.Failure
+import io.github.dolfost.stickpile.ui.common.FailureLog
+import io.github.dolfost.stickpile.ui.common.FailureScreen
+import io.github.dolfost.stickpile.ui.common.Loading
+import io.github.dolfost.stickpile.ui.common.messageFor
+import io.github.dolfost.stickpile.ui.common.openLibrary
+import io.github.dolfost.stickpile.ui.keyboard.KeyboardSetupScreen
+import io.github.dolfost.stickpile.ui.library.Thumbnails
+import io.github.dolfost.stickpile.ui.settings.LicencesScreen
+import io.github.dolfost.stickpile.ui.settings.SettingsScreen
+import io.github.dolfost.stickpile.ui.settings.SettingsViewModel
 import io.github.dolfost.stickpile.ui.theme.StickpileTheme
 
 /**
  * The app's settings, also opened by the system as the input method's
- * settings (res/xml/method.xml). Stub: an empty screen.
+ * settings (res/xml/method.xml): the settings list, the keyboard
+ * walk-through and the licences.
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -19,8 +47,75 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             StickpileTheme {
-                Surface(Modifier.fillMaxSize()) {}
+                Surface(Modifier.fillMaxSize()) {
+                    SettingsContent(
+                        onFinish = ::finish,
+                        onSignIn = { restartMain() },
+                        onSignedOut = { restartMain() },
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * The launcher afresh, in a new task: it asks again who is signed in, and
+ * no screen of the account before stays behind. This screen goes.
+ */
+private fun ComponentActivity.restartMain() {
+    startActivity(
+        Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+    )
+    finish()
+}
+
+/** The pages of the settings activity. */
+private enum class SettingsPage { MAIN, KEYBOARD_SETUP, LICENCES }
+
+@Composable
+private fun SettingsContent(onFinish: () -> Unit, onSignIn: () -> Unit, onSignedOut: () -> Unit) {
+    val context = LocalContext.current
+    var attempt by rememberSaveable { mutableIntStateOf(0) }
+    val opened by produceState<Result<StickpileLibrary>?>(null, attempt) {
+        value = openLibrary(context).onFailure { FailureLog.android.failed(Doing.OPENING, it) }
+    }
+    val result = opened ?: return Loading()
+    val library = result.getOrElse { e ->
+        return FailureScreen(
+            title = stringResource(R.string.app_broken_title),
+            message = messageFor(Failure.of(e), Doing.OPENING),
+            onRetry = { attempt++ },
+        )
+    }
+
+    var page by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    BackHandler(enabled = page != SettingsPage.MAIN) { page = SettingsPage.MAIN }
+    val appContext = context.applicationContext
+    val vm = viewModel {
+        SettingsViewModel(
+            library,
+            onCacheCleared = { Thumbnails.clear() },
+            onSignedOut = {
+                SyncScheduler.cancel(appContext)
+                Thumbnails.clear()
+            },
+        )
+    }
+    when (page) {
+        SettingsPage.MAIN -> SettingsScreen(
+            vm = vm,
+            onBack = onFinish,
+            onSignIn = onSignIn,
+            onSignedOut = onSignedOut,
+            onKeyboardSetup = { page = SettingsPage.KEYBOARD_SETUP },
+            onLicences = { page = SettingsPage.LICENCES },
+        )
+        SettingsPage.KEYBOARD_SETUP -> KeyboardSetupScreen(
+            onDone = { page = SettingsPage.MAIN },
+            onBack = { page = SettingsPage.MAIN },
+        )
+        SettingsPage.LICENCES -> LicencesScreen(onBack = { page = SettingsPage.MAIN })
     }
 }
