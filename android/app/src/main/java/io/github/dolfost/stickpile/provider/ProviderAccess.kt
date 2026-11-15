@@ -22,7 +22,7 @@ object ProviderAccess {
      *   system has checked to belong to [callingUid]; null where there is
      *   none (`getType`).
      * @param packagesOf `PackageManager.getPackagesForUid`; null when the uid has none.
-     * @param isApproved whether the user approved a package.
+     * @param isApproved whether the user approved a package (and it is still the app approved).
      */
     fun decide(
         callingUid: Int,

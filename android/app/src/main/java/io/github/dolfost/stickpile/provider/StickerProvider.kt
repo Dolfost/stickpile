@@ -26,8 +26,9 @@ import kotlinx.coroutines.runBlocking
  * Serves stickers to keyboards (docs/android.md, "Provider contract").
  * Exported without a permission; access is checked here, at every entry
  * point ([ProviderAccess]): the app's own uid, or a package the user
- * approved in [KeyboardAllowlist]. A refused caller is noted as pending and
- * gets a [SecurityException]. The one exception is `/prepared/<token>/...`,
+ * approved in [KeyboardAllowlist] (still signed as when approved). A refused
+ * caller gets a [SecurityException], and is noted as pending when it is a
+ * keyboard. The one exception is `/prepared/<token>/...`,
  * which anyone presenting a valid token may read ([PreparedTokens]).
  *
  * Paths are parsed by [ProviderRoutes]; anything else is no route. Nothing
