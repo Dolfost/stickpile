@@ -187,7 +187,8 @@ token. Wrong, expired and used codes, codes of a disabled account and
 input that cannot be a code all get the same status and body.
 
 Clients: `stickpile_api::pairing` has the format (`normalize`, `display`,
-`link`, `parse_link`), `stickpile_core` the client calls
+`link`, `parse_link`, and `server_url`, which checks and normalises the
+server URL in a link), `stickpile_core` the client calls
 (`ApiClient::create_pairing`, `ApiClient::pair`) and
 `Session::login_pairing`, which stores the token like a password login.
 The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).

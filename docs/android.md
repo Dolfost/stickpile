@@ -217,6 +217,8 @@ Rules for the interface:
 - Errors are one enum, `LibraryError` (Kotlin: the sealed class
   `LibraryException`). Each variant is a kind the app turns into its own
   (translated) text; the `detail` string is for logs, never shown as is.
+  URLs in it are cut to scheme, host, port and path: no query (a search's
+  text) and no user name or password.
   `LibraryErrorKind` names the same variants without their fields (for
   `SyncState.last_error`).
 - The enum `Target` shares its name with Kotlin's default-imported
@@ -230,19 +232,26 @@ Rules for the interface:
   constructors for Kotlin).
 
 ```
+// free functions, no library needed
+fn target_for_package(package: String) -> Target   // stickpile_core::insert, for ranking
+fn version() -> String                               // the crate's version
+fn client_name() -> String                           // the client name for the server, "android/<version>"
+
 object StickpileLibrary
   constructor(dirs: LibraryDirs) throws LibraryError
 
   // account
   fn server_url() -> String
-  async fn set_server_url(url: String) throws          // validated, saved, session reopened;
-                                                       // a different URL signs out first
-  async fn account() throws -> Account?                // null: signed out
+  async fn set_server_url(url: String) throws          // checked and normalised, saved, session
+                                                       // reopened; another server signs out first
+  async fn account() throws -> Account?                // null: signed out; auth = Tailnet: known
+                                                       // by its tailnet identity, no token
   async fn login_tailnet() throws -> Account?          // null: not on the tailnet
   async fn login_password(username: String, password: String, totp: String?) throws -> Account
   async fn login_pairing(server_url: String, code: String) throws -> Account
                                                        // exchanges first; the URL is saved only on success
-  async fn logout() throws
+  async fn logout() throws                             // revokes and deletes the token; nothing
+                                                       // to do for a tailnet identity
 
   // reading (offline: from the cache, ItemList.offline = true)
   async fn search(query: String, target: Target, limit: u32) throws -> ItemList
@@ -337,6 +346,15 @@ Behaviour the signatures do not show:
   statuses are `Server { status }`; cache and SQLite errors are `Io`. The
   constructor gives `InvalidInput` for a path that is not absolute or a
   config file that is not a valid config.
+- **Server URLs.** `set_server_url`, `login_pairing` and
+  `parse_pairing_link` check and normalise a server URL the same way
+  (`stickpile_api::pairing::server_url`): `http` or `https` with a host; no
+  user name, password, query or fragment (`https://my.server@evil.example`
+  goes to `evil.example`, so it is refused); the host in lower case and an
+  internationalised host in its `xn--` form; no default port; no trailing
+  `/`. The URL shown is the one contacted. The same server written another
+  way is the same server. An `InvalidInput` for a URL does not repeat it
+  (it may hold a password).
 - **Logins.** `login_pairing` exchanges the code with a client that has no
   token, for `server_url`; only when that works does it save the URL, write
   the token and reopen the session. A wrong code changes nothing, and the
@@ -344,15 +362,30 @@ Behaviour the signatures do not show:
   `Android (<device model>)`, or `Android (phone)` when the model is
   unknown. `set_server_url` with a different URL first signs out
   (revoking the token on the old server when it answers; the token file is
-  removed either way), so a token is never sent to another server.
+  removed either way), so a token is never sent to another server. A
+  login that replaces a stored token (`login_password`, `login_tailnet`,
+  and `login_pairing` with the current server) first sends the unsent uses
+  with the old token, then revokes it on the server, best effort within
+  the configured timeout (5 s by default); the login goes on either way. A
+  login that fails (a wrong password or code) keeps the stored token.
 - **Account.** `account()` is null when no token is stored and when the
   server rejects it; offline it is the cached user, else null when no
-  token is stored (a fresh install) and `Unreachable` when one is. `display_name` is null when blank or equal to the
-  username.
+  token is stored (a fresh install) and `Unreachable` when one is. Behind
+  `tailscale serve` with no token stored, the server may know the phone by
+  its tailnet identity: then `account()` is that account with
+  `auth = Tailnet`, and `logout()` changes nothing (there is no token; the
+  app offers to change the server instead). `display_name` is null when
+  blank or equal to the username.
 - **Offline favorites.** The library remembers the last favorites list it
   read online (kept up to date by `toggle_like`) and answers from the
   cached items with `offline = true`; `Unreachable` if it was never read
-  online.
+  online. Online it reads (and remembers) up to 200 favorites, or `limit`
+  if more, and returns the first `limit`: asking for a few does not
+  shorten the list kept for offline.
+- **Account changes.** A read that ends after a login, logout or server
+  change keeps nothing for the new account or server: its items are not
+  remembered for `thumbnail`, `prepare` and `record_use`, and favorites
+  are not saved.
 - **Sync.** `sync_if_due` returns at once when no sync is due or one is
   running. Both sync calls throw a failure and also record it in
   `last_error`. `last_sync` is the local time of this process's last sync,
@@ -363,9 +396,13 @@ Behaviour the signatures do not show:
   suggestion, as the desktop popup does. Reads (search, account, favorites,
   most used, packs, pack items) stop when the calling coroutine is
   cancelled; writes and file fetches run to their end.
-- **Pairing input.** `PairingLink.code` and `normalize_pairing_code` give
+- **Pairing input.** `parse_pairing_link` returns the server URL
+  normalised (above), the one `login_pairing` contacts, and null for a
+  link whose URL has a user name or password, a query or a fragment.
+  `PairingLink.code` and `normalize_pairing_code` give
   the display form `XXXX-XXXX-XXXX`.
-- **Upload.** With `name = null` the server names the item after the file
+- **Upload.** The file is streamed from disk, never held in memory whole.
+  With `name = null` the server names the item after the file
   name (the path's last part), so the app names its temporary copy after
   the shared file.
 

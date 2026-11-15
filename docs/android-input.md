@@ -8,13 +8,44 @@ with it. What each app lists and does cannot be learned from a build. This
 page holds the matrix to fill in by hand on a phone, the expectations it
 starts from, and the procedure.
 
-> **Status (2026-11-15):** nothing here has been observed. Every cell is
+> **Status (2026-11-15):** no cell of the matrix has been observed (see
+> "Observed on the emulator" for the one app run so far). Every cell is
 > **expected (UNVERIFIED)**: the rendition is what `variant_for` picks
 > (`crates/stickpile-core/src/insert.rs`, its `PREFERENCES` table) for the
 > MIME types the field is assumed to list; the outcome is reasoning from
 > how the desktop apps behave (`docs/clipboard.md`) and from the apps'
 > public source where named. Treat it as a hypothesis until a cell has a
 > result.
+
+## Observed on the emulator
+
+The only app run so far (2026-11-15): AOSP Messaging
+(`com.android.messaging`) on the Android Emulator's API 36 x86_64 system
+image (the AOSP "default" image, without Google apps), with the debug build
+of the `android` branch, signed in to a local test server. This is not a
+phone and not one of the apps in the matrix.
+
+- The picker opened in a conversation's message field, read the draft
+  `cat` and showed the search's results with their thumbnails. With the
+  emulator's hardware keyboard attached (and Android's "show on-screen
+  keyboard" off) it showed after a tap on the field.
+- The field lists no content types: picking an item never reached
+  `commitContent`. The keyboard sent the file with `ACTION_SEND` to
+  Messaging, which opened its "Select conversation" screen and logged
+  `Cannot send private file content://io.github.dolfost.stickpile.stickers/prepared/...`
+  (with an SELinux `getattr` denial on `/data/data/io.github.dolfost.stickpile`):
+  it refuses a URI whose file lies in another app's private storage. No
+  sticker was sent.
+- With the share screen cancelled, the draft `cat` stayed in the field.
+  After choosing the conversation on Messaging's share screen the field
+  was empty (the cause was not established).
+- The keyboard switched back to the previous keyboard after the hand-off
+  when the picker had been chosen with the keyboard's globe key; when it
+  had been selected with `adb shell ime set`, the system's keyboard
+  switcher opened instead (no previous keyboard to go back to).
+
+Not observed: `commitContent` into any field (no app on the image takes
+content), and every cell of the matrix below.
 
 ## How the keyboard decides
 
