@@ -85,4 +85,18 @@
     <string name="onboarding_totp">Two-factor code</string>
     <string name="onboarding_totp_notice">This account uses two-factor authentication. Enter the code from your authenticator app.</string>
     <string name="onboarding_sign_in">Sign in</string>
+
+    <!-- The walk-through that turns the picker keyboard on. %1$s: the keyboard's name (ime_name). -->
+    <string name="keyboard_setup_title">The sticker keyboard</string>
+    <string name="keyboard_setup_intro">stickpile comes with a keyboard of its own, without keys: switch to it in any chat, tap a sticker, and you are back on your usual keyboard.</string>
+    <string name="keyboard_setup_enable_title">1. Turn it on</string>
+    <string name="keyboard_setup_enable_text">In the list of keyboards, turn on %1$s. Android may warn that a keyboard can read what you type: this one reads only the text in the field, to search for stickers, and you can turn that off in the settings.</string>
+    <string name="keyboard_setup_open_settings">Open the keyboard settings</string>
+    <string name="keyboard_setup_enabled">Turned on</string>
+    <string name="keyboard_setup_switch_title">2. Switch to it</string>
+    <string name="keyboard_setup_switch_text">In any app, use the switch-keyboard button of your keyboard or of the navigation bar, and choose %1$s. After you tap a sticker, it switches back to your keyboard.</string>
+    <string name="keyboard_setup_switch_first">Turn the keyboard on first.</string>
+    <string name="keyboard_setup_show_picker">Show the keyboard switcher</string>
+    <string name="keyboard_setup_to_library">Go to my stickers</string>
+    <string name="keyboard_setup_skip">Skip for now</string>
 </resources>

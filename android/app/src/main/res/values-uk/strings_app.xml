@@ -68,4 +68,17 @@
     <string name="onboarding_totp">Код двофакторної автентифікації</string>
     <string name="onboarding_totp_notice">Цей обліковий запис використовує двофакторну автентифікацію. Введіть код із застосунку автентифікації.</string>
     <string name="onboarding_sign_in">Увійти</string>
+
+    <string name="keyboard_setup_title">Клавіатура стікерів</string>
+    <string name="keyboard_setup_intro">stickpile має власну клавіатуру, без клавіш: перемкніться на неї в будь-якому чаті, торкніться стікера, і ви знову на своїй звичній клавіатурі.</string>
+    <string name="keyboard_setup_enable_title">1. Увімкніть її</string>
+    <string name="keyboard_setup_enable_text">У списку клавіатур увімкніть %1$s. Android може попередити, що клавіатура здатна читати все, що ви вводите: ця читає лише текст у полі, щоб шукати стікери, і це можна вимкнути в налаштуваннях.</string>
+    <string name="keyboard_setup_open_settings">Відкрити налаштування клавіатур</string>
+    <string name="keyboard_setup_enabled">Увімкнено</string>
+    <string name="keyboard_setup_switch_title">2. Перемикайтеся на неї</string>
+    <string name="keyboard_setup_switch_text">У будь-якому застосунку скористайтеся кнопкою перемикання клавіатури (на самій клавіатурі чи на панелі навігації) і виберіть %1$s. Після того як ви торкнетеся стікера, вона перемкне назад на вашу клавіатуру.</string>
+    <string name="keyboard_setup_switch_first">Спершу увімкніть клавіатуру.</string>
+    <string name="keyboard_setup_show_picker">Показати вибір клавіатури</string>
+    <string name="keyboard_setup_to_library">До моїх стікерів</string>
+    <string name="keyboard_setup_skip">Пропустити поки що</string>
 </resources>
