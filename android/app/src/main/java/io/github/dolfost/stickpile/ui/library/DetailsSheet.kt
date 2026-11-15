@@ -58,7 +58,7 @@ internal fun DetailsSheet(
     onSearch: (String) -> Unit,
 ) {
     val item = details.item
-    val sheet = rememberModalBottomSheetState()
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     // Do it now, and let the sheet slide away before it goes.
     val closing = { action: () -> Unit ->
@@ -99,17 +99,6 @@ internal fun DetailsSheet(
                     }
                 }
             }
-            val search = { query: String -> closing { onSearch(query) } }
-            ChipSection(R.string.display_field_vibe, listOfNotNull(ItemLabels.vibe(item)), { it }, { SearchTerms.filter("vibe", it) }, search)
-            ChipSection(R.string.display_field_emojis, cleaned(item.emojis), { it }, { SearchTerms.filter("e", it) }, search)
-            ChipSection(R.string.display_field_tags, cleaned(item.tags), { "#$it" }, { SearchTerms.filter("tag", it) }, search)
-            val keywords = cleaned(item.keywords)
-            if (keywords.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SectionTitle(R.string.library_details_keywords)
-                    Text(keywords.joinToString(", "), style = MaterialTheme.typography.bodyMedium)
-                }
-            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { closing { onShare(item) } }) {
                     ButtonLabel(R.drawable.ic_share, stringResource(R.string.library_share))
@@ -127,11 +116,22 @@ internal fun DetailsSheet(
                     }
                 }
             }
+            val search = { query: String -> closing { onSearch(query) } }
+            ChipSection(R.string.display_field_vibe, listOfNotNull(ItemLabels.vibe(item)), { it }, { SearchTerms.filter("vibe", it) }, search)
+            ChipSection(R.string.display_field_emojis, cleaned(item.emojis), { it }, { SearchTerms.filter("e", it) }, search)
+            ChipSection(R.string.display_field_tags, cleaned(item.tags), { "#$it" }, { SearchTerms.filter("tag", it) }, search)
+            val keywords = cleaned(item.keywords)
+            if (keywords.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SectionTitle(R.string.library_details_keywords)
+                    Text(keywords.joinToString(", "), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
     }
 }
 
-/** "PNG 512x512, copied 3 times, 2 likes, quality 80", as the desktop's footer. */
+/** "PNG 512x512, copied 3 times, 2 likes, quality 80", as the desktop's footer (no likes: left out). */
 @Composable
 private fun facts(item: Item): String {
     val copies = item.copies.toCount()
@@ -139,7 +139,7 @@ private fun facts(item: Item): String {
     return listOfNotNull(
         ItemLabels.shape(item),
         if (copies == 0) stringResource(R.string.display_never_copied) else pluralStringResource(R.plurals.display_copied, copies, copies),
-        pluralStringResource(R.plurals.display_likes, likes, likes),
+        if (likes == 0) null else pluralStringResource(R.plurals.display_likes, likes, likes),
         item.quality?.let { stringResource(R.string.display_quality, it.toInt()) },
     ).joinToString(", ")
 }
