@@ -273,6 +273,9 @@ is one process; these pieces are shared by its parts:
   delete the draft, stay open).
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout.
+- `provider.PreparedFiles`: `uriFor(context, prepared)` turns a file from
+  `StickpileLibrary.prepare` into a `/prepared/<token>/<name>` provider URI,
+  for the input method's `commitContent` and for sharing from the app.
 
 Packages: `ui` (onboarding, the library screen, settings, licences),
 `ime` (the picker keyboard), `provider` (the content provider below),
