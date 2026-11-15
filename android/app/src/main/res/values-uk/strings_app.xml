@@ -59,6 +59,7 @@
     <string name="onboarding_server_label">Адреса сервера</string>
     <string name="onboarding_server_title">Вхід на ваш сервер</string>
     <string name="onboarding_server_text">Адреса вашого сервера stickpile, така, як ви відкриваєте його в браузері.</string>
+    <string name="onboarding_server_signs_out">Якщо це інший сервер, телефон спершу вийде з поточного.</string>
     <string name="onboarding_sign_in_title">Вхід</string>
     <string name="onboarding_sign_in_server">Сервер: %1$s</string>
     <string name="onboarding_tailnet_text">Якщо телефон у тому самому tailnet, що й сервер, Tailscale впустить вас без пароля.</string>

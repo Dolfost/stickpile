@@ -77,6 +77,8 @@
     <string name="onboarding_server_placeholder" translatable="false">https://stickers.example.org</string>
     <string name="onboarding_server_title">Sign in on your server</string>
     <string name="onboarding_server_text">The address of your stickpile server, as you open it in a browser.</string>
+    <!-- Shown when someone is signed in already (onboarding opened by a pairing link). -->
+    <string name="onboarding_server_signs_out">If this is another server, this phone signs out of the current one first.</string>
     <string name="onboarding_sign_in_title">Sign in</string>
     <!-- %1$s: the server address. -->
     <string name="onboarding_sign_in_server">Server: %1$s</string>

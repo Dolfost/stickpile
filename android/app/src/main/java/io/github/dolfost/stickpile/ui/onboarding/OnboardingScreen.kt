@@ -118,7 +118,7 @@ fun OnboardingScreen(
                     OnboardingStep.WELCOME -> Welcome(vm, canCancel, onCancel)
                     OnboardingStep.CONFIRM_LINK -> ConfirmLink(vm)
                     OnboardingStep.CODE -> PairByCode(vm)
-                    OnboardingStep.SERVER -> ServerAddress(vm)
+                    OnboardingStep.SERVER -> ServerAddress(vm, signedIn = canCancel)
                     OnboardingStep.SIGN_IN -> SignIn(vm)
                 }
                 Messages(state.notice, state.error)
@@ -223,9 +223,11 @@ private fun PairByCode(vm: OnboardingViewModel) {
 }
 
 @Composable
-private fun ServerAddress(vm: OnboardingViewModel) {
+private fun ServerAddress(vm: OnboardingViewModel, signedIn: Boolean) {
     val state = vm.state
     Text(stringResource(R.string.onboarding_server_text))
+    // Saving another address signs out before the new sign-in (the library's set_server_url).
+    if (signedIn) Text(stringResource(R.string.onboarding_server_signs_out), style = MaterialTheme.typography.bodyMedium)
     ServerField(
         state.serverUrl,
         vm::setServerUrl,
