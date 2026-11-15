@@ -86,7 +86,7 @@ settings stay the owner's ([collaboration.md](collaboration.md)).
 | 3 | Web UI | maud + htmx pages: login, sets, upload, inline editing, AI confirm/override, copy, popular, stats, admin | handler tests per page |
 | 4 | Clients (**v1**) | `stickpile-core`, `stickpile` CLI, GTK desktop | core cache/queue/sync tests, quick-model tests, CLI e2e against a real server |
 | 5 | Packaging | flake packages, NixOS + home-manager modules with TOML mirror check, container image, quadlets + aorus snippet, CI + release workflows | `nix flake check` green |
-| 6 | post-v1 | Android (Kotlin + UniFFI), Unexpected Keyboard fork (separate repo), F-Droid metadata | — |
+| 6 | post-v1 | Android: `stickpile-android` (a touch-first bridge over `stickpile-core`, UniFFI) and a Kotlin app with a picker keyboard, a content provider for other keyboards, a share target and QR pairing ([android.md](android.md)); F-Droid recipe and listing. Unexpected Keyboard panel and WhatsApp sticker packs later | built, host tests and JVM tests green, APK in CI; run on a device and the insert matrix ([android-input.md](android-input.md)) pending |
 | 7 | post-v1 | macOS client: `stickpile-mac` (the GTK shell's driver without GTK, behind UniFFI) and a Swift menu bar app ([macos.md](macos.md)) | app builds in CI and the release; pasting confirmed by hand ([clipboard.md](clipboard.md#6-macos)) |
 
 ## Open questions and risks

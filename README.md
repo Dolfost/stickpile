@@ -51,8 +51,9 @@ v3](https://www.unicode.org/license.txt); see
 | `stickpile` | command-line client |
 | `stickpile-desktop` | Linux quick-search popup (GTK4/libadwaita), resident, bound to a global shortcut |
 | `Stickpile.app` | the same popup for macOS, a menu bar app with its own shortcut ([docs/macos.md](docs/macos.md)) |
+| Android app | a picker keyboard that inserts stickers into any chat app, a share target that uploads, and a content provider other keyboards can read ([docs/android.md](docs/android.md)); built, not yet run on a phone |
 
-Android and a stickpile panel for Unexpected Keyboard come after v1 (see
+A stickpile panel for Unexpected Keyboard comes later (see
 [docs/plan.md](docs/plan.md)).
 
 ## Run the server

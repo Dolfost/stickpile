@@ -413,4 +413,7 @@ file:
   by cargo. Install `ffmpeg` and `onnxruntime` from Homebrew to get the same
   features.
 - **Windows**: the `stickpile` CLI, best effort.
-- Android (APK and F-Droid metadata) comes after v1.
+- **Android**: `stickpile-vX.Y.Z-android-unsigned.apk`, one APK for
+  arm64-v8a, armeabi-v7a and x86_64, unsigned (best effort; sign it before
+  installing, see [android.md](android.md#release-signing)). F-Droid is
+  planned.

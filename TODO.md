@@ -49,11 +49,27 @@ results, the clients run on the provisional defaults in
 
 ### Android (phase 6)
 
-- [ ] Kotlin app over `stickpile-core` through UniFFI, reusing the
-      `stickpile-quick` state machine.
+- [x] Kotlin app over `stickpile-core` through UniFFI
+      (`crates/stickpile-android`, `android/`): onboarding with QR pairing,
+      the library, settings, a picker keyboard, a content provider for
+      other keyboards, a share target, background sync
+      ([docs/android.md](docs/android.md)). It has its own touch-first
+      bridge instead of the desktop popup's `stickpile-quick` model.
+- [x] Pairing by QR code: `POST /api/v1/pairings`, `POST /api/v1/auth/pair`,
+      "Add a device" in the web settings, `stickpile login --code`.
+- [x] APK in the CI and release workflows (unsigned); draft F-Droid recipe
+      and listing (`android/fdroid/`, `fastlane/`).
+- [ ] Run it: on an emulator, then on a phone; fill in the insert matrix
+      ([docs/android-input.md](docs/android-input.md)).
+- [ ] Release signing key; choose F-Droid's signing (its key, or
+      reproducible builds with the owner's) before the first submission;
+      submit after the three months F-Droid asks for.
+- [ ] Logins on a new server address that switch servers only when the
+      login works (pairing already does; a password or Tailscale login on a
+      new address signs out of the old server first).
 - [ ] A stickpile panel in a fork of Unexpected Keyboard (separate
-      repository).
-- [ ] APK in the release workflow and F-Droid metadata.
+      repository), over the provider contract.
+- [ ] WhatsApp sticker packs from the app (WhatsApp's sticker provider).
 
 ### macOS (phase 7)
 

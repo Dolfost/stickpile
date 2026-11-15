@@ -1,8 +1,9 @@
 # Languages
 
-The web UI and the desktop popup are translated into Ukrainian; English is
-the default. Each user chooses a language, and the choice travels between
-the web UI and the desktop client through their account.
+The web UI, the desktop popup and the Android app are translated into
+Ukrainian; English is the default. Each user chooses a language, and the
+choice travels between the web UI and the desktop client through their
+account; the Android app follows the phone's language.
 
 ## Choosing a language
 
@@ -57,6 +58,12 @@ looks it up in its catalog, falling back to the English.
 - The desktop client keeps one language for the process
   (`stickpile_i18n::global`); widgets built once are relabelled when it
   changes.
+- The Android app does not use `stickpile-i18n`: its texts are Android
+  string resources (`android/app/src/main/res/values/strings_*.xml`, with
+  Ukrainian in `values-uk/`), which Android picks by the phone's language
+  and which translators and F-Droid's tools expect. Errors cross the bridge
+  as kinds (`LibraryErrorKind`), and the app chooses the text. The F-Droid
+  listing is in `fastlane/metadata/android/{en-US,uk}/`.
 - Texts made in English where no language is known are translated where
   they are shown: the quality notes, stored with each item
   (`stickpile_media::quality::DETAILS`), and why an item cannot go to an
