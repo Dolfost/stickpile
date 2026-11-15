@@ -69,6 +69,12 @@ kotlin {
     }
 }
 
+// ManifestTest reads these source files: a change to them reruns the tests.
+tasks.withType<Test>().configureEach {
+    inputs.file("src/main/AndroidManifest.xml").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("src/main/res/xml").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 dependencies {
     // UniFFI's Kotlin bindings call the native library through JNA.
     implementation(libs.jna) { artifact { type = "aar" } }
