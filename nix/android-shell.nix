@@ -46,7 +46,8 @@ let
       "x86_64-linux-android"
     ];
   };
-  jdk = pkgs.jdk17;
+  # JDK 21: what F-Droid's build server (Debian trixie) builds with.
+  jdk = pkgs.jdk21;
 in
 pkgs.mkShell {
   packages = [

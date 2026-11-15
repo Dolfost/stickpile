@@ -43,9 +43,11 @@ Before compiling Kotlin, the build runs three tasks of
   `app/build/generated/uniffi/kotlin/`. Generated code is never committed.
 
 Versions: Android Gradle Plugin 9.5.1 with Gradle 9.6.0 (the wrapper
-downloads it), JDK 17, compileSdk and targetSdk 37, minSdk 26, NDK
-28.2.13676358. The dev shell provides the SDK, the NDK, cargo-ndk and Rust
-with the three Android targets. On NixOS the `aapt2` that the plugin
+downloads it), Kotlin 2.4.21 (the Kotlin Gradle plugin on the build
+classpath; the Compose compiler plugin must have the same version), JDK 21
+(what F-Droid builds with; the Java and Kotlin target is 17), compileSdk
+and targetSdk 37, minSdk 26, NDK 28.2.13676358. The dev shell provides the
+SDK, the NDK, cargo-ndk and Rust with the three Android targets. On NixOS the `aapt2` that the plugin
 downloads cannot run, so the shell points Gradle at the SDK's own through
 `GRADLE_OPTS`; nothing machine-specific is committed.
 
