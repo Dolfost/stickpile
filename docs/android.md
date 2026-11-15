@@ -258,6 +258,28 @@ The input method then tries, in order: `commitContent` with the prepared
 file's provider URI; else an `ACTION_SEND` intent to the editor's package;
 else the URI on the clipboard, saying so.
 
+## App internals
+
+The Kotlin app (`android/app/src/main/java/io/github/dolfost/stickpile/`)
+is one process; these pieces are shared by its parts:
+
+- `StickpileApp` (the `Application`): `StickpileApp.from(context).library`
+  is the one `StickpileLibrary`, created on first use with its files in
+  `noBackupFilesDir` (`config.toml`, `cache/`, `token`); `.scope` is a
+  `CoroutineScope` for work that must outlive a screen.
+- `provider.KeyboardAllowlist`: the keyboards the user lets read stickers
+  through the provider, and the pending (refused) ones.
+- `ime.ImeSettings`: the picker keyboard's switches (search the draft,
+  delete the draft, stay open).
+- `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
+  login, `cancel(context)` after a logout.
+
+Packages: `ui` (onboarding, the library screen, settings, licences),
+`ime` (the picker keyboard), `provider` (the content provider below),
+`share` (the share target and upload), `sync` (background sync). Strings
+are Android resources: English in `res/values/`, Ukrainian in
+`res/values-uk/`, one `strings_<area>.xml` per package group.
+
 ## Provider contract
 
 The app serves stickers to keyboards (its own picker, and others such as a
