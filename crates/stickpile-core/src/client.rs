@@ -280,6 +280,21 @@ impl ApiClient {
             .await
     }
 
+    /// Exchange a one-time pairing code (made by [`ApiClient::create_pairing`]
+    /// on a signed-in device) for a token. Needs no credentials and does not
+    /// store the returned token anywhere. A wrong, expired or used code is a
+    /// `401 unauthorized`.
+    pub async fn pair(&self, req: &PairRequest) -> Result<TokenCreated> {
+        self.json(self.request(Method::POST, routes::AUTH_PAIR, false)?.json(req))
+            .await
+    }
+
+    /// A one-time pairing code for this account, valid for five minutes,
+    /// with the `stickpile://pair` link for its QR code.
+    pub async fn create_pairing(&self) -> Result<PairingCreated> {
+        self.post(routes::PAIRINGS, &serde_json::json!({})).await
+    }
+
     /// Self-service registration (subject to the server's registration policy).
     pub async fn register(&self, req: &RegisterRequest) -> Result<User> {
         self.json(self.request(Method::POST, routes::AUTH_REGISTER, false)?.json(req))
@@ -731,6 +746,7 @@ fn is_public_path(path: &str) -> bool {
         routes::HEALTH,
         routes::OPENAPI,
         routes::AUTH_TOKEN,
+        routes::AUTH_PAIR,
         routes::AUTH_REGISTER,
     ]
     .iter()

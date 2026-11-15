@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use stickpile_api::profiles::{choose_variant, ItemShape};
 use stickpile_api::routes::{self, path};
 use stickpile_api::{
-    CreateToken, ItemSummary, MediaKind, SearchHit, SetSource, SetSummary, TargetApp, TokenCreated, TokenRequest, User,
-    Variant, VariantInfo, Visibility,
+    CreateToken, ItemSummary, MediaKind, PairRequest, SearchHit, SetSource, SetSummary, TargetApp, TokenCreated,
+    TokenRequest, User, Variant, VariantInfo, Visibility,
 };
 
 use crate::cache::{self, safe_component, Cache, OfflineIndex, SyncReport};
@@ -509,6 +509,22 @@ impl Session {
     /// the account wants a code and `req.totp` is `None`.
     pub async fn login_password(&self, req: &TokenRequest) -> Result<User> {
         let created = self.client.login(req).await?;
+        self.adopt(created)
+    }
+
+    /// Exchange a one-time pairing code for a token of the account that made
+    /// it (no password; [`stickpile_api::pairing`]), stored and used like
+    /// [`Session::login_password`]. `code` is as shown or typed: case, spaces
+    /// and dashes do not matter. The server is this session's `server_url`
+    /// (for a scanned `stickpile://pair` link, read it with
+    /// [`stickpile_api::pairing::parse_link`] and open the session for its
+    /// server first). A wrong, expired or used code is a `401 unauthorized`.
+    pub async fn login_pairing(&self, code: &str, token_name: &str) -> Result<User> {
+        let req = PairRequest {
+            code: stickpile_api::pairing::normalize(code).unwrap_or_else(|| code.to_string()),
+            token_name: token_name.to_string(),
+        };
+        let created = self.client.pair(&req).await?;
         self.adopt(created)
     }
 

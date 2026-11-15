@@ -2,7 +2,8 @@
 //! client tests here and in the CLI. Enabled by the `mock` feature.
 //!
 //! It implements the contract of `stickpile_api::routes` closely enough for
-//! the clients: bearer tokens (password + optional TOTP login), sets, uploads,
+//! the clients: bearer tokens (password + optional TOTP login, pairing
+//! codes), sets, uploads,
 //! tar import/export via `stickpile-setfmt`, the `GET /items` cache feed with
 //! cursors and tombstones, files, set cover images, likes, a naive substring
 //! search (with `is:` filters), usage dedup, popular, `/stats/me`, jobs and a
@@ -35,6 +36,9 @@ use stickpile_api::*;
 
 pub type Shared = Arc<Mutex<MockState>>;
 
+/// Life of a pairing code, as on the server.
+pub const PAIRING_TTL_SECS: i64 = 5 * 60;
+
 /// A user account of the mock.
 #[derive(Debug, Clone)]
 pub struct MockUser {
@@ -51,6 +55,15 @@ pub struct MockToken {
     pub user_id: String,
 }
 
+/// A one-time pairing code of the mock (kept in canonical form).
+#[derive(Debug, Clone)]
+pub struct MockPairing {
+    pub code: String,
+    pub user_id: String,
+    pub expires_at: i64,
+    pub used: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct MockItem {
     pub item: Item,
@@ -63,6 +76,12 @@ pub struct MockState {
     pub clock: i64,
     pub users: Vec<MockUser>,
     pub tokens: Vec<MockToken>,
+    /// Pairing codes; they expire [`PAIRING_TTL_SECS`] after creation on
+    /// the mock's `clock`.
+    pub pairings: Vec<MockPairing>,
+    /// The server URL put into pairing links (the mock's own address once
+    /// it is started).
+    pub public_url: String,
     pub sets: Vec<Set>,
     pub items: Vec<MockItem>,
     /// (item id, removed at)
@@ -96,6 +115,8 @@ impl Default for MockState {
             clock: 1_700_000_000,
             users: Vec::new(),
             tokens: Vec::new(),
+            pairings: Vec::new(),
+            public_url: "http://mock".into(),
             sets: Vec::new(),
             items: Vec::new(),
             tombstones: Vec::new(),
@@ -237,6 +258,30 @@ impl MockState {
             token: secret,
             info,
             user,
+        }
+    }
+
+    /// A new pairing code for `username` without a request, in display form
+    /// (like `POST /pairings` would return it).
+    pub fn add_pairing(&mut self, username: &str) -> String {
+        let user_id = self.user_by_name(username).expect("user").user.id.clone();
+        self.new_pairing(&user_id).code
+    }
+
+    fn new_pairing(&mut self, user_id: &str) -> PairingCreated {
+        let code = stickpile_api::pairing::code_from_bits(rand::random());
+        let expires_at = self.clock + PAIRING_TTL_SECS;
+        self.pairings.push(MockPairing {
+            code: code.clone(),
+            user_id: user_id.into(),
+            expires_at,
+            used: false,
+        });
+        let shown = stickpile_api::pairing::display(&code);
+        PairingCreated {
+            pairing_url: stickpile_api::pairing::link(&self.public_url, &shown),
+            code: shown,
+            expires_at,
         }
     }
 
@@ -560,6 +605,7 @@ impl MockServer {
     pub fn start_with(state: MockState) -> MockServer {
         let state: Shared = Arc::new(Mutex::new(state));
         let (addr, tx, thread) = run(state.clone(), "127.0.0.1:0".parse().expect("addr"));
+        lock(&state).public_url = format!("http://{addr}");
         MockServer {
             url: format!("http://{addr}"),
             addr,
@@ -664,9 +710,11 @@ pub fn router(state: Shared) -> Router {
     Router::new()
         .route(r::HEALTH, get(|| async { "ok" }))
         .route(r::AUTH_TOKEN, post(login))
+        .route(r::AUTH_PAIR, post(pair))
         .route(r::ME, get(me).patch(patch_me))
         .route(r::TOKENS, get(list_tokens).post(create_token))
         .route(r::TOKEN, axum::routing::delete(revoke_token))
+        .route(r::PAIRINGS, post(create_pairing))
         .route(r::SETS, get(list_sets).post(create_set))
         .route(r::SET, get(get_set).delete(delete_set).patch(update_set))
         .route(r::SET_ITEMS, post(upload))
@@ -712,6 +760,32 @@ async fn login(State(s): State<Shared>, Json(req): Json<TokenRequest>) -> HResul
         }
     }
     Ok(Json(st.new_token(&u.user.id, &req.token_name)))
+}
+
+/// The server's rules without the rate limit: a valid token name, then the
+/// code once and before it expires; every failure is the same 401.
+async fn pair(State(s): State<Shared>, Json(req): Json<PairRequest>) -> HResult<Json<TokenCreated>> {
+    let mut st = lock(&s);
+    let name = req.token_name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(api_err(400, "bad_request", "token name must be 1..=100 characters"));
+    }
+    let code = stickpile_api::pairing::normalize(&req.code);
+    let clock = st.clock;
+    let pairing = st
+        .pairings
+        .iter_mut()
+        .find(|p| Some(&p.code) == code.as_ref() && !p.used && clock < p.expires_at)
+        .ok_or_else(|| api_err(401, "unauthorized", "invalid or expired pairing code"))?;
+    pairing.used = true;
+    let user_id = pairing.user_id.clone();
+    Ok(Json(st.new_token(&user_id, name)))
+}
+
+async fn create_pairing(State(s): State<Shared>, h: HeaderMap) -> HResult<(StatusCode, Json<PairingCreated>)> {
+    let mut st = lock(&s);
+    let u = auth(&st, &h)?;
+    Ok((StatusCode::CREATED, Json(st.new_pairing(&u.id))))
 }
 
 async fn me(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<User>> {

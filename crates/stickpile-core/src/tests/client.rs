@@ -6,7 +6,7 @@ use stickpile_api::*;
 
 use super::*;
 use crate::client::{SearchParams, UploadFile};
-use crate::mock::{dead_url, MockServer};
+use crate::mock::{dead_url, MockServer, PAIRING_TTL_SECS};
 use crate::CoreError;
 
 #[tokio::test]
@@ -110,6 +110,49 @@ async fn tailnet_identity_works_without_a_token() {
         .unwrap();
     let with_token = client_for(&server.url, Some(created.token));
     assert_eq!(with_token.current_token_id().await.unwrap(), Some(created.info.id));
+}
+
+#[tokio::test]
+async fn pairing_codes_work_once_and_expire() {
+    let server = MockServer::start();
+    let anon = client_for(&server.url, None);
+    // Creating a code needs a signed-in client.
+    assert!(matches!(anon.create_pairing().await, Err(CoreError::NotLoggedIn)));
+    let token = server.state().issue_token("alice", "laptop");
+    let alice = client_for(&server.url, Some(token));
+    let created = alice.create_pairing().await.unwrap();
+    assert_eq!(pairing::display(&created.code), created.code);
+    let link = pairing::parse_link(&created.pairing_url).unwrap();
+    assert_eq!(link.server_url, server.url);
+    assert_eq!(link.code, pairing::normalize(&created.code).unwrap());
+
+    let req = |code: &str| PairRequest {
+        code: code.into(),
+        token_name: "phone".into(),
+    };
+    let paired = anon.pair(&req(&created.code.to_lowercase())).await.unwrap();
+    assert_eq!(paired.user.username, "alice");
+    assert_eq!(paired.info.name, "phone");
+    let phone = client_for(&server.url, Some(paired.token));
+    assert_eq!(phone.me().await.unwrap().username, "alice");
+
+    // Used, wrong and expired codes: the same 401 (an API error, not
+    // "not logged in": the route is public).
+    let expired = server.state().add_pairing("alice");
+    server.state().clock += PAIRING_TTL_SECS;
+    for code in [created.code.as_str(), "0000-0000-0000", "nope", expired.as_str()] {
+        let err = anon.pair(&req(code)).await.unwrap_err();
+        assert_eq!(err.status(), Some(401), "{code}: {err:?}");
+        assert_eq!(err.api_code(), Some("unauthorized"));
+        assert!(err.to_string().contains("invalid or expired pairing code"), "{err}");
+    }
+    let fresh = server.state().add_pairing("alice");
+    let bad_name = PairRequest {
+        code: fresh.clone(),
+        token_name: " ".into(),
+    };
+    assert_eq!(anon.pair(&bad_name).await.unwrap_err().status(), Some(400));
+    anon.pair(&req(&fresh)).await.unwrap();
 }
 
 #[tokio::test]

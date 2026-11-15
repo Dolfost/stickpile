@@ -304,6 +304,44 @@ async fn thumbnails_are_downloaded_once() {
     image::load_from_memory(&std::fs::read(&a).unwrap()).unwrap();
 }
 
+#[tokio::test]
+async fn login_pairing_stores_the_token_like_a_password_login() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    let session = Session::open(config_for(&server.url, dir.path())).await.unwrap();
+    assert!(!session.is_logged_in());
+    let code = server.state().add_pairing("alice");
+
+    // As typed on a phone: lower case, spaces instead of dashes.
+    let typed = code.to_lowercase().replace('-', " ");
+    let user = session.login_pairing(&typed, "Pixel 8").await.unwrap();
+    assert_eq!(user.username, "alice");
+    assert!(session.is_logged_in());
+    // The token file: the issued token, mode 0600.
+    let path = dir.path().join("state/token");
+    let stored = crate::token::read_token(&path).unwrap().expect("token stored");
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    {
+        let st = server.state();
+        let issued = st.tokens.iter().find(|t| t.info.name == "Pixel 8").expect("issued");
+        assert_eq!(issued.secret, stored);
+        assert!(st.pairings.iter().all(|p| p.used));
+    }
+    // The session uses it from now on, and the cache knows the account.
+    assert_eq!(session.client().token().as_deref(), Some(stored.as_str()));
+    assert_eq!(session.client().me().await.unwrap().username, "alice");
+    assert_eq!(session.cache().me().unwrap().unwrap().username, "alice");
+    // A reopened session finds it.
+    let again = Session::open(config_for(&server.url, dir.path())).await.unwrap();
+    assert!(again.is_logged_in());
+
+    // A used code fails and leaves the stored token alone.
+    let err = session.login_pairing(&code, "Pixel 8").await.unwrap_err();
+    assert_eq!(err.status(), Some(401), "{err:?}");
+    assert_eq!(crate::token::read_token(&path).unwrap(), Some(stored));
+}
+
 #[test]
 fn clip_file_names_are_safe() {
     assert_eq!(clip_file_stem("grumpy cat", "id"), "grumpy cat");
