@@ -1,6 +1,5 @@
 package io.github.dolfost.stickpile.share
 
-import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -56,7 +55,7 @@ object ShareFiles {
      * `ACTION_SEND_MULTIPLE` (a list of them) intent, else of its clip
      * data; empty for any other intent and for a share with text only.
      * Other schemes (`file:` above all, which could name this app's own
-     * files) are left out.
+     * files) and this app's own provider are left out ([SharedUris]).
      */
     fun streams(intent: Intent): List<Uri> {
         val extra = when (intent.action) {
@@ -70,7 +69,7 @@ object ShareFiles {
             val clip = intent.clipData
             if (clip == null) emptyList() else (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
         }
-        return uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT }.distinct()
+        return uris.filter { SharedUris.accepts(it.scheme, it.authority) }.distinct()
     }
 
     /**
