@@ -26,6 +26,7 @@ pub mod config;
 pub mod mock;
 pub mod session;
 pub mod settings;
+pub mod sync_policy;
 pub mod token;
 pub mod usage;
 
@@ -35,6 +36,7 @@ mod tests;
 pub use client::ApiClient;
 pub use config::ClientConfig;
 pub use session::{PreparedCopy, SearchOutcome, Session};
+pub use sync_policy::SyncPolicy;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
