@@ -55,11 +55,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.StickpileApp
 import io.github.dolfost.stickpile.ime.ImeSettings
 import io.github.dolfost.stickpile.provider.KeyboardAllowlist
 import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.version
+import io.github.dolfost.stickpile.ui.common.DisplayOptions
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.filterTouchesWhenObscured
 import io.github.dolfost.stickpile.ui.common.messageFor
@@ -69,8 +72,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The settings: account, sync, cache, the picker keyboard, the keyboards
- * that may read the stickers, and the licences.
+ * The settings: account, sync, cache, what the sticker tiles show (shared
+ * with the keyboard), the picker keyboard, the keyboards that may read the
+ * stickers, and the licences.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -130,6 +134,8 @@ fun SettingsScreen(
             SyncSection(vm)
             HorizontalDivider()
             CacheSection(vm)
+            HorizontalDivider()
+            DisplaySection()
             HorizontalDivider()
             KeyboardSection(onKeyboardSetup)
             HorizontalDivider()
@@ -316,6 +322,16 @@ private fun CacheSection(vm: SettingsViewModel) {
             BusyLabel(stringResource(R.string.settings_cache_clear), state.clearing)
         }
     }
+}
+
+/** Safe mode and what the tiles show, in the app and the keyboard alike. */
+@Composable
+private fun DisplaySection() {
+    val context = LocalContext.current
+    val settings = remember { StickpileApp.from(context).display }
+    val display by settings.state.collectAsStateWithLifecycle()
+    SectionHeader(stringResource(R.string.display_info))
+    DisplayOptions(display, settings, withSafeMode = true)
 }
 
 @Composable
