@@ -191,9 +191,16 @@ async fn pairing_input_needs_no_network() {
         "stickpile://pair?url=https%3A%2F%2Fs.example",
         "stickpile://pair?url=ftp%3A%2F%2Fs.example&code=7KQ2M9XA4FTR",
         "stickpile://other?url=https%3A%2F%2Fs.example&code=7KQ2M9XA4FTR",
+        // It would show `https://my.server@evil.example` and pair with evil.example.
+        "stickpile://pair?url=https%3A%2F%2Fmy.server%40evil.example&code=7KQ2M9XA4FTR",
     ] {
         assert_eq!(lib.parse_pairing_link(not_a_link.into()), None, "{not_a_link:?}");
     }
+    // The URL as it is contacted.
+    let idn = lib
+        .parse_pairing_link("stickpile://pair?url=HTTPS%3A%2F%2Fb%C3%BCcher.Example%3A443%2F&code=7KQ2M9XA4FTR".into())
+        .unwrap();
+    assert_eq!(idn.server_url, "https://xn--bcher-kva.example");
 
     assert_eq!(
         lib.normalize_pairing_code("7kq2 m9xa 4ftr".into()).as_deref(),

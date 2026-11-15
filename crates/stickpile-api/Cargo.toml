@@ -16,4 +16,6 @@ openapi = ["dep:utoipa"]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# `pairing::server_url` parses and normalises server URLs.
+url.workspace = true
 utoipa = { workspace = true, optional = true }

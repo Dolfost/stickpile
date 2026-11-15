@@ -11,6 +11,8 @@
 //!
 //! The QR code shows a pairing link, [`link`]:
 //! `stickpile://pair?url=<server URL>&code=<code>`, read by [`parse_link`].
+//! The server URL in it is checked and normalised by [`server_url`], so that
+//! the URL a client shows is the one it contacts.
 
 /// Crockford's base32 alphabet: no I, L, O or U, which are easily confused
 /// with 1, 1, 0 and V.
@@ -96,15 +98,58 @@ pub fn link(server_url: &str, code: &str) -> String {
 /// What a pairing link says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairingLink {
-    /// The server's URL (`http://` or `https://`, no trailing `/`).
+    /// The server's URL, normalised by [`server_url`].
     pub server_url: String,
     /// The code in canonical form.
     pub code: String,
 }
 
+/// Why [`server_url`] refuses a server URL.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ServerUrlError {
+    #[error("not a URL ({0})")]
+    Parse(String),
+    #[error("not an http or https URL")]
+    Scheme,
+    #[error("no host")]
+    NoHost,
+    #[error("a user name or password")]
+    Userinfo,
+    #[error("a query or fragment")]
+    QueryOrFragment,
+}
+
+/// The normalised form of a server URL typed or read from a pairing link:
+/// `scheme://host[:port][/path]`, as the `url` crate parses and serialises
+/// it, without a trailing `/`. The scheme and host are lower case, an
+/// internationalised host is in its ASCII (`xn--`) form, and a default port
+/// (80 for http, 443 for https) is dropped, so the result names the host
+/// that is contacted. Refused: anything but `http` and `https`, no host, a
+/// user name or password (`https://my.server@evil.example` goes to
+/// `evil.example`), a query or a fragment. Surrounding spaces are ignored.
+pub fn server_url(input: &str) -> Result<String, ServerUrlError> {
+    let parsed = url::Url::parse(input.trim()).map_err(|e| ServerUrlError::Parse(e.to_string()))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(ServerUrlError::Scheme);
+    }
+    if parsed.host_str().is_none_or(str::is_empty) {
+        return Err(ServerUrlError::NoHost);
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ServerUrlError::Userinfo);
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(ServerUrlError::QueryOrFragment);
+    }
+    // Without a user, a query and a fragment the serialisation is
+    // `scheme://host[:port]/path`.
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
+}
+
 /// Read a pairing link made by [`link`]. `None` if it is not one: another
-/// scheme or host, a server URL that is not http(s), a missing or invalid
-/// code. Unknown parameters are ignored.
+/// scheme or host, a server URL that [`server_url`] refuses, a missing or
+/// invalid code. The server URL comes back normalised by [`server_url`].
+/// Unknown parameters are ignored.
 pub fn parse_link(text: &str) -> Option<PairingLink> {
     let text = text.trim();
     let (scheme, rest) = text.split_once("://")?;
@@ -125,16 +170,8 @@ pub fn parse_link(text: &str) -> Option<PairingLink> {
             _ => {}
         }
     }
-    let server_url = url?.trim().trim_end_matches('/').to_string();
-    let lower = server_url.to_ascii_lowercase();
-    let host_part = lower
-        .strip_prefix("https://")
-        .or_else(|| lower.strip_prefix("http://"))?;
-    if host_part.is_empty() || host_part.starts_with('/') {
-        return None;
-    }
     Some(PairingLink {
-        server_url,
+        server_url: server_url(&url?).ok()?,
         code: normalize(&code?)?,
     })
 }
@@ -276,11 +313,76 @@ mod tests {
         assert_eq!(parsed.server_url, "https://stickers.example.ts.net");
         assert_eq!(parsed.code, "7KQ2M9XA4FTR");
 
-        // A port, a path prefix and characters that need escaping survive.
-        let url = "http://192.0.2.7:8080/stick pile?x=1&y=2";
-        let parsed = parse_link(&link(url, "7kq2m9xa4ftr")).unwrap();
-        assert_eq!(parsed.server_url, url);
+        // A port and a path prefix survive, the path as the URL is sent.
+        let parsed = parse_link(&link("http://192.0.2.7:8080/stick pile", "7kq2m9xa4ftr")).unwrap();
+        assert_eq!(parsed.server_url, "http://192.0.2.7:8080/stick%20pile");
         assert_eq!(parsed.code, "7KQ2M9XA4FTR");
+        // A server URL with a query is no server URL.
+        assert_eq!(parse_link(&link("http://192.0.2.7:8080/s?x=1", "7kq2m9xa4ftr")), None);
+    }
+
+    #[test]
+    fn server_urls_are_normalised() {
+        for (input, want) in [
+            ("https://s.example", "https://s.example"),
+            (" https://s.example/ ", "https://s.example"),
+            ("https://s.example//", "https://s.example"),
+            // Scheme and host in lower case.
+            ("HTTPS://Stickers.EXAMPLE.org", "https://stickers.example.org"),
+            // Default ports dropped, others kept.
+            ("https://s.example:443/", "https://s.example"),
+            ("http://s.example:80", "http://s.example"),
+            ("http://s.example:443", "http://s.example:443"),
+            ("http://10.0.0.2:8080/", "http://10.0.0.2:8080"),
+            ("http://[::1]:8080", "http://[::1]:8080"),
+            // A path prefix kept, without the trailing `/`, escaped as sent.
+            ("https://example.org/stickers/", "https://example.org/stickers"),
+            ("https://example.org/a/b", "https://example.org/a/b"),
+            ("http://h/stick pile", "http://h/stick%20pile"),
+            // An internationalised host in the form that is looked up.
+            ("https://b\u{fc}cher.example", "https://xn--bcher-kva.example"),
+            (
+                "https://\u{43f}\u{440}\u{438}\u{43c}\u{435}\u{440}.\u{443}\u{43a}\u{440}",
+                "https://xn--e1afmkfd.xn--j1amh",
+            ),
+        ] {
+            assert_eq!(server_url(input).as_deref(), Ok(want), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn server_urls_refuse_what_would_mislead() {
+        use ServerUrlError::*;
+        for (input, why) in [
+            ("https://my.server@evil.example", Userinfo),
+            ("https://my.server:x@evil.example", Userinfo),
+            ("https://:pw@s.example", Userinfo),
+            ("https://s.example?a=1", QueryOrFragment),
+            ("https://s.example/?", QueryOrFragment),
+            ("https://s.example#top", QueryOrFragment),
+            ("ftp://s.example", Scheme),
+            ("javascript:alert(1)", Scheme),
+            ("file:///etc/passwd", Scheme),
+        ] {
+            assert_eq!(server_url(input), Err(why), "{input:?}");
+        }
+        for input in ["", "s.example", "https://", "http://:8080"] {
+            assert!(matches!(server_url(input), Err(Parse(_))), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn links_carry_the_normalised_url_and_refuse_userinfo() {
+        // A link whose URL hides another host behind a user name is refused,
+        // not shown as `https://my.server@evil.example`.
+        assert_eq!(
+            parse_link("stickpile://pair?url=https%3A%2F%2Fmy.server%40evil.example&code=7KQ2M9XA4FTR"),
+            None
+        );
+        let parsed =
+            parse_link("stickpile://pair?url=HTTPS%3A%2F%2Fb%C3%BCcher.Example%3A443%2Fs%2F&code=7KQ2M9XA4FTR")
+                .unwrap();
+        assert_eq!(parsed.server_url, "https://xn--bcher-kva.example/s");
     }
 
     #[test]

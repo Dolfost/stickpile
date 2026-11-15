@@ -158,27 +158,23 @@ fn falls_back(e: &CoreError) -> bool {
     e.is_offline() || e.status().is_some_and(|s| s >= 500)
 }
 
-/// A server URL as typed: trimmed, `http` or `https` with a host, without
-/// the trailing `/`.
+/// A server URL as typed, checked and normalised as a pairing link's is
+/// ([`pairing::server_url`]): `http` or `https` with a host, no user name,
+/// password, query or fragment; the host as it is contacted (lower case,
+/// IDN in `xn--` form), no default port, no trailing `/`. The input is not
+/// repeated in the error: it may hold a password.
 fn server_url_from(input: &str) -> Result<String, LibraryError> {
-    let url = input.trim().trim_end_matches('/');
-    let parsed = url::Url::parse(url).map_err(|e| LibraryError::invalid("server_url", format!("{url:?}: {e}")))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(LibraryError::invalid(
-            "server_url",
-            format!("{url:?}: not an http or https URL"),
-        ));
+    pairing::server_url(input).map_err(|e| LibraryError::invalid("server_url", format!("server URL refused: {e}")))
+}
+
+/// Whether the configured `current` URL names the server at `url` (a
+/// result of [`server_url_from`]). A configured URL that does not normalise
+/// (written by hand) is compared without its trailing `/`.
+fn same_server(current: &str, url: &str) -> bool {
+    match pairing::server_url(current) {
+        Ok(current) => current == url,
+        Err(_) => current.trim().trim_end_matches('/') == url,
     }
-    if parsed.host_str().is_none_or(str::is_empty) {
-        return Err(LibraryError::invalid("server_url", format!("{url:?}: no host")));
-    }
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(LibraryError::invalid(
-            "server_url",
-            format!("{url:?}: a query or fragment"),
-        ));
-    }
-    Ok(url.to_string())
 }
 
 /// Aborts a task when the caller stops waiting for it (the Kotlin coroutine
@@ -492,9 +488,11 @@ impl StickpileLibrary {
         self.inner.session().config().server_url.clone()
     }
 
-    /// Use another server: `url` is checked (`http` or `https` with a host;
-    /// spaces and a trailing `/` are dropped). The same URL as now changes
-    /// nothing. Another URL signs out first, so the stored token is never
+    /// Use another server: `url` is checked and normalised as a pairing
+    /// link's is (`http` or `https` with a host, no user name, password,
+    /// query or fragment; the host lower case and an IDN host in `xn--`
+    /// form, no default port, no trailing `/`). The same server as now
+    /// changes nothing. Another URL signs out first, so the stored token is never
     /// sent to the new URL: the unsent uses go to the old server and the
     /// token is revoked there (best effort, waiting at most the configured
     /// timeout, 5 s by default), and the token file is deleted even when the
@@ -510,7 +508,7 @@ impl StickpileLibrary {
             let url = server_url_from(&url)?;
             let _busy = inner.busy.lock().await;
             let old = inner.session();
-            if old.config().server_url.trim_end_matches('/') == url {
+            if same_server(&old.config().server_url, &url) {
                 return Ok(());
             }
             inner.sign_out_for_new_server(&old).await?;
@@ -630,7 +628,7 @@ impl StickpileLibrary {
                 .await
                 .map_err(|e| LibraryError::input(e, "token_name"))?;
             let old = inner.session();
-            if old.config().server_url.trim_end_matches('/') != url {
+            if !same_server(&old.config().server_url, &url) {
                 inner.sign_out_for_new_server(&old).await?;
             }
             // Stored like `stickpile login` (`session::save_login`): the
@@ -948,7 +946,10 @@ impl StickpileLibrary {
     // -- pairing input ----------------------------------------------------------
 
     /// Read a scanned pairing link (`stickpile://pair?url=...&code=...`);
-    /// `None` when `text` is not one (no network).
+    /// `None` when `text` is not one, or its server URL is refused (as by
+    /// `set_server_url`, e.g. one with a user name). The server URL comes
+    /// back normalised, so what the app shows is the host that
+    /// `login_pairing` contacts (no network).
     pub fn parse_pairing_link(&self, text: String) -> Option<PairingLink> {
         pairing::parse_link(&text).map(|l| PairingLink {
             server_url: l.server_url,
@@ -1024,12 +1025,16 @@ mod tests {
 
     #[test]
     fn server_urls_are_checked() {
-        assert_eq!(server_url_from(" https://s.example/ ").unwrap(), "https://s.example");
-        assert_eq!(server_url_from("http://10.0.0.2:8080").unwrap(), "http://10.0.0.2:8080");
-        assert_eq!(
-            server_url_from("https://example.org/stickers/").unwrap(),
-            "https://example.org/stickers"
-        );
+        for (input, want) in [
+            (" https://s.example/ ", "https://s.example"),
+            ("http://10.0.0.2:8080", "http://10.0.0.2:8080"),
+            ("https://example.org/stickers/", "https://example.org/stickers"),
+            ("HTTPS://S.Example:443/", "https://s.example"),
+            ("http://s.example:80/a/", "http://s.example/a"),
+            ("https://b\u{fc}cher.example", "https://xn--bcher-kva.example"),
+        ] {
+            assert_eq!(server_url_from(input).unwrap(), want, "{input:?}");
+        }
         for bad in [
             "",
             "example.org",
@@ -1037,13 +1042,44 @@ mod tests {
             "http://",
             "https://x?a=1",
             "https://x#f",
+            "https://my.server@evil.example",
+            "https://alice:hunter2@s.example",
         ] {
             let e = server_url_from(bad).unwrap_err();
             assert!(
                 matches!(&e, LibraryError::InvalidInput { field, .. } if field == "server_url"),
                 "{bad:?}: {e:?}"
             );
+            assert!(!e.to_string().contains("hunter2"), "{e}");
         }
+    }
+
+    /// What `parse_pairing_link` shows is what `login_pairing` and
+    /// `set_server_url` contact, for every URL either accepts.
+    #[test]
+    fn pairing_links_and_typed_urls_agree() {
+        for input in [
+            "https://s.example",
+            "https://s.example/",
+            "HTTPS://S.Example:443/stickers/",
+            "http://10.0.0.2:8080",
+            "http://[::1]:8080/",
+            "https://b\u{fc}cher.example",
+            "http://h/stick pile",
+            "https://my.server@evil.example",
+            "https://:pw@s.example",
+            "https://s.example?a=1",
+            "https://s.example#f",
+            "ftp://s.example",
+            "https://",
+            "s.example",
+        ] {
+            let linked = pairing::parse_link(&pairing::link(input, "7KQ2-M9XA-4FTR")).map(|l| l.server_url);
+            assert_eq!(linked, server_url_from(input).ok(), "{input:?}");
+        }
+        assert!(same_server("https://s.example/", "https://s.example"));
+        assert!(same_server("HTTPS://S.EXAMPLE:443", "https://s.example"));
+        assert!(!same_server("https://s.example", "https://t.example"));
     }
 
     #[test]

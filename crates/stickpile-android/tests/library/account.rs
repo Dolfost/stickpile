@@ -74,6 +74,7 @@ async fn set_server_url_saves_it_and_reopens() {
         "ftp://stickers.example",
         "https://",
         "https://x/?a=b",
+        "https://my.server@evil.example",
     ] {
         assert_eq!(
             invalid_field(again.set_server_url(bad.into()).await),
