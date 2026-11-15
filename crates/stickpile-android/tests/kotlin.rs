@@ -38,8 +38,11 @@ const METHODS: &[&str] = &[
     "suspend fun `packs`(): PackList",
     "suspend fun `packItems`(`packId`: kotlin.String): ItemList",
     "fun `suggestions`(`query`: kotlin.String): Suggestions?",
+    "fun `hints`(`query`: kotlin.String): List<SearchHint>",
+    "fun `itemUrl`(`itemId`: kotlin.String): kotlin.String?",
     // files
     "suspend fun `thumbnail`(`itemId`: kotlin.String): kotlin.String",
+    "suspend fun `motion`(`itemId`: kotlin.String, `download`: kotlin.Boolean): Motion?",
     "suspend fun `prepare`(`itemId`: kotlin.String, `editorPackage`: kotlin.String, `acceptedMimeTypes`: List<kotlin.String>, `sticker`: kotlin.Boolean): Prepared",
     // writing
     "fun `recordUse`(`itemId`: kotlin.String, `variant`: kotlin.String, `editorPackage`: kotlin.String)",
@@ -68,6 +71,8 @@ const NOT_THROWING: &[&str] = &[
     "normalizePairingCode",
     "syncState",
     "pendingUsage",
+    "hints",
+    "itemUrl",
 ];
 
 /// Records with their fields in order, as `name: type`.
@@ -97,18 +102,41 @@ const RECORDS: &[(&str, &[&str])] = &[
             "name: kotlin.String",
             "setId: kotlin.String",
             "setName: kotlin.String",
+            "owner: kotlin.String",
             "emojis: List<kotlin.String>",
             "keywords: List<kotlin.String>",
             "vibe: kotlin.String?",
             "tags: List<kotlin.String>",
             "kind: MediaKind",
+            "format: MediaFormat",
             "width: kotlin.UInt",
             "height: kotlin.UInt",
+            "quality: kotlin.UInt?",
             "likes: kotlin.ULong",
             "copies: kotlin.ULong",
+            "nsfw: kotlin.Boolean",
+            "liked: kotlin.Boolean",
         ],
     ),
     ("ItemList", &["items: List<Item>", "offline: kotlin.Boolean"]),
+    (
+        "SearchHint",
+        &[
+            "label: kotlin.String",
+            "query: kotlin.String",
+            "chosen: kotlin.Boolean",
+            "kind: HintKind",
+        ],
+    ),
+    (
+        "Motion",
+        &[
+            "path: kotlin.String",
+            "kind: MotionKind",
+            "width: kotlin.UInt",
+            "height: kotlin.UInt",
+        ],
+    ),
     (
         "Pack",
         &[
@@ -168,6 +196,9 @@ const ENUMS: &[(&str, &[&str])] = &[
         &["TELEGRAM", "DISCORD", "SIGNAL", "WHATSAPP", "SLACK", "GENERIC"],
     ),
     ("MediaKind", &["STILL", "ANIMATION", "VIDEO"]),
+    ("MediaFormat", &["PNG", "JPEG", "WEBP", "GIF", "MP4", "WEBM"]),
+    ("HintKind", &["VALUE", "FILTER", "KEY"]),
+    ("MotionKind", &["PICTURE", "VIDEO"]),
     (
         "LibraryErrorKind",
         &[

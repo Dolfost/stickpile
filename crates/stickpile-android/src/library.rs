@@ -14,6 +14,7 @@ use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Sessio
 use stickpile_quick::suggest;
 
 use crate::hints::{self, Words};
+use crate::motion;
 
 use crate::types::*;
 use crate::{device, LibraryError, LibraryErrorKind};
@@ -1021,6 +1022,35 @@ impl StickpileLibrary {
             let (generation, session) = inner.current();
             let item = inner.item_local_first(generation, &session, &item_id).await?;
             Ok(path_string(&session.thumbnail(&item).await?))
+        })
+        .await
+    }
+
+    /// The rendition of a moving item to play in place of its still
+    /// thumbnail: an animated GIF or WebP when there is one (the smaller),
+    /// else an MP4 or WebM, fetched into the cache unless it is there. With
+    /// `download` false nothing is downloaded: the cached file or `None`.
+    /// `None` also for a still and for an item without a playable
+    /// rendition. Offline: the cached file; throws `Unreachable` if it is
+    /// not cached. Runs to its end once started, like `prepare`.
+    pub async fn motion(&self, item_id: String, download: bool) -> Result<Option<Motion>, LibraryError> {
+        self.write(move |inner| async move {
+            let (generation, session) = inner.current();
+            let item = inner.item_local_first(generation, &session, &item_id).await?;
+            let Some((info, kind)) = motion::choose(&item) else {
+                return Ok(None);
+            };
+            let path = if download {
+                Some(session.fetch_variant(&item, info.variant).await?)
+            } else {
+                session.cached_variant(&item, info.variant)?
+            };
+            Ok(path.map(|p| Motion {
+                path: path_string(&p),
+                kind,
+                width: info.width,
+                height: info.height,
+            }))
         })
         .await
     }

@@ -319,6 +319,8 @@ object StickpileLibrary
 
   // files
   async fn thumbnail(item_id: String) throws -> String // path of the cached thumbnail
+  async fn motion(item_id: String, download: Boolean) throws -> Motion?
+                                                       // a moving item's rendition to play
   async fn prepare(item_id: String, editor_package: String,
                    accepted_mime_types: List<String>, sticker: Boolean) throws -> Prepared
 
@@ -369,6 +371,8 @@ record PackList    { packs: List<Pack>, offline: Boolean }
 record Suggestions { key: String, words: List<String>, chosen: u32? }
 enum   HintKind    { Value, Filter, Key }
 record SearchHint  { label: String, query: String, chosen: Boolean, kind: HintKind }
+enum   MotionKind  { Picture, Video }
+record Motion      { path: String, kind: MotionKind, width: u32, height: u32 }
 record PairingLink { server_url: String, code: String }
 record Prepared    { path: String, mime_type: String, display_name: String,
                      target: Target, variant: String, sticker: Boolean }
@@ -472,6 +476,16 @@ Behaviour the signatures do not show:
   any case. `liked` comes from the favorites the library last read (and
   the likes toggled since): false for every item until `favorites` was
   read once for the account, which the app does in the background.
+- **Motion.** The thumbnail is a still of the first frame; `motion` gives
+  the file the grids play instead. For an animation, a `Picture`: the
+  original when it is a GIF or WebP, or the Discord GIF, whichever is
+  smaller (an animated picture keeps its transparency), and the MP4 only
+  when there is neither. For a video, a `Video`: the MP4 the server made
+  (for a WebM or an original that is not plain H.264), else the original.
+  Null for a still and for an item without such a rendition. The file is
+  the cached rendition `prepare` would use, fetched unless cached; with
+  `download` false nothing is fetched and null means not cached (the
+  app's "Wi-Fi only"). Like the other file fetches it runs to its end.
 - **Pairing input.** `parse_pairing_link` returns the server URL
   normalised (above), the one `login_pairing` contacts, and null for a
   link whose URL has a user name or password, a query or a fragment.

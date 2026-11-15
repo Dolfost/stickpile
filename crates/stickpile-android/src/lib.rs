@@ -49,6 +49,7 @@ mod device;
 mod error;
 mod hints;
 mod library;
+mod motion;
 pub mod types;
 
 pub use error::{LibraryError, LibraryErrorKind};

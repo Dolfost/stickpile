@@ -48,6 +48,7 @@ const CONTRACT: &[&str] = &[
     "fn StickpileLibrary.item_url(item_id: String) -> String?",
     // files
     "async fn StickpileLibrary.thumbnail(item_id: String) -> String throws LibraryError",
+    "async fn StickpileLibrary.motion(item_id: String, download: Boolean) -> Motion? throws LibraryError",
     "async fn StickpileLibrary.prepare(item_id: String, editor_package: String, accepted_mime_types: List<String>, sticker: Boolean) -> Prepared throws LibraryError",
     // writing
     "fn StickpileLibrary.record_use(item_id: String, variant: String, editor_package: String) throws LibraryError",
@@ -76,6 +77,7 @@ const CONTRACT: &[&str] = &[
     "record PackList { packs: List<Pack>, offline: Boolean }",
     "record Suggestions { key: String, words: List<String>, chosen: u32? }",
     "record SearchHint { label: String, query: String, chosen: Boolean, kind: HintKind }",
+    "record Motion { path: String, kind: MotionKind, width: u32, height: u32 }",
     "record PairingLink { server_url: String, code: String }",
     "record Prepared { path: String, mime_type: String, display_name: String, target: Target, variant: String, \
      sticker: Boolean }",
@@ -87,6 +89,7 @@ const CONTRACT: &[&str] = &[
     "enum MediaKind { Still, Animation, Video }",
     "enum MediaFormat { Png, Jpeg, Webp, Gif, Mp4, Webm }",
     "enum HintKind { Value, Filter, Key }",
+    "enum MotionKind { Picture, Video }",
     "enum LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited, NothingFits, \
      InvalidInput, Server, Io, Other }",
     // the error

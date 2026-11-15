@@ -178,7 +178,7 @@ fn values(before: &str, neg: &str, typed: &str, vocab: &Vocabulary) -> Vec<Searc
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn words() -> Words {

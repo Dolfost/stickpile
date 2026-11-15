@@ -1,8 +1,8 @@
-//! Thumbnails and `prepare`.
+//! Thumbnails, `motion` and `prepare`.
 
 use std::path::Path;
 
-use stickpile_android::{LibraryErrorKind, Prepared, Target};
+use stickpile_android::{LibraryErrorKind, MotionKind, Prepared, Target};
 use stickpile_api::Variant;
 
 use super::*;
@@ -46,6 +46,44 @@ async fn thumbnails_are_cached_and_work_offline() {
     assert_eq!(
         kind(lib.thumbnail(items[0].id.clone()).await),
         LibraryErrorKind::NotSignedIn
+    );
+}
+
+#[tokio::test]
+async fn motion_plays_the_animated_original_and_waits_for_leave_to_download() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    assert_eq!(lib.motion(items[0].id.clone(), true).await.unwrap(), None, "a still");
+
+    let gif = &items[1];
+    assert_eq!(gif.kind, stickpile_api::MediaKind::Animation);
+    let downloads = |s: &MockServer| requests(s, &format!("GET /api/v1/items/{}/file/original", gif.id));
+    assert_eq!(lib.motion(gif.id.clone(), false).await.unwrap(), None, "not cached");
+    assert_eq!(downloads(&server), 0, "nothing downloaded without leave");
+
+    let m = lib
+        .motion(gif.id.clone(), true)
+        .await
+        .unwrap()
+        .expect("a moving picture");
+    assert_eq!(m.kind, MotionKind::Picture);
+    assert_eq!(std::fs::read(&m.path).unwrap(), gif_bytes(3, 2), "the original GIF");
+    assert!(Path::new(&m.path).starts_with(dir.path().join("cache")));
+    assert_eq!((m.width, m.height), (gif.width, gif.height));
+    assert_eq!(
+        lib.motion(gif.id.clone(), false).await.unwrap(),
+        Some(m.clone()),
+        "cached now"
+    );
+    assert_eq!(lib.motion(gif.id.clone(), true).await.unwrap(), Some(m.clone()));
+    assert_eq!(downloads(&server), 1, "downloaded once");
+
+    server.stop();
+    assert_eq!(
+        lib.motion(gif.id.clone(), true).await.unwrap(),
+        Some(m),
+        "offline: the cached file"
     );
 }
 

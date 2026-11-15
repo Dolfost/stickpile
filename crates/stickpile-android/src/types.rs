@@ -289,6 +289,26 @@ pub struct SearchHint {
     pub kind: HintKind,
 }
 
+/// How a moving item's rendition plays (`StickpileLibrary.motion`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum MotionKind {
+    /// An animated GIF or WebP: `ImageDecoder` animates it (API 28 and later).
+    Picture,
+    /// An MP4 or WebM, played in a media player without sound.
+    Video,
+}
+
+/// A rendition of a moving item to play in place of its still thumbnail.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Motion {
+    /// The file, in the cache: absolute.
+    pub path: String,
+    pub kind: MotionKind,
+    /// Of the rendition, in pixels (0 when unknown).
+    pub width: u32,
+    pub height: u32,
+}
+
 /// What a pairing link (the QR code) says.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct PairingLink {
