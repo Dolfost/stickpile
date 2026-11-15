@@ -38,9 +38,17 @@ import kotlinx.coroutines.runBlocking
  * library there. The app's own parts (the input method, the screens) use
  * the library directly, never this provider: a call that needs the library
  * on the main thread is refused.
+ *
+ * The calls that may download (`/thumb/` opens and `prepare`) run at most
+ * [DOWNLOADS] at a time ([DownloadGate]), so that a keyboard loading a
+ * large grid over a slow network cannot hold every binder thread of the
+ * process. A call over the limit waits up to [DOWNLOAD_WAIT_MILLIS] for a
+ * slot, then fails: `/thumb/` with a [FileNotFoundException], `prepare`
+ * with `failed`; the keyboard may try again.
  */
 class StickerProvider : ContentProvider() {
     private val allowlist by lazy { KeyboardAllowlist(ctx()) }
+    private val downloads = DownloadGate(DOWNLOADS, DOWNLOAD_WAIT_MILLIS)
 
     override fun onCreate(): Boolean = true
 
@@ -99,10 +107,10 @@ class StickerProvider : ContentProvider() {
         requireReadOnly(mode)
         if (route !is ProviderRoute.Thumbnail) throw FileNotFoundException("not a file")
         val path = try {
-            withLibrary { it.thumbnail(route.itemId) }
+            downloads.run { withLibrary { it.thumbnail(route.itemId) } }
         } catch (e: LibraryException) {
             throw FileNotFoundException("no thumbnail: ${e.kind}")
-        }
+        } ?: throw FileNotFoundException("busy: too many downloads at once, try again")
         return ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
@@ -144,7 +152,8 @@ class StickerProvider : ContentProvider() {
         val sticker = extras?.getBoolean(KEY_STICKER, false) ?: false
         val callingUid = Binder.getCallingUid()
         return try {
-            val prepared = withLibrary { it.prepare(itemId, editorPackage, mimeTypes, sticker) }
+            val prepared = downloads.run { withLibrary { it.prepare(itemId, editorPackage, mimeTypes, sticker) } }
+                ?: return errorBundle(ProviderErrors.FAILED)
             // Another app's tokens are capped per uid; the app's own are not.
             val uri = if (callingUid == Process.myUid()) {
                 PreparedFiles.uriFor(ctx(), prepared)
@@ -251,6 +260,12 @@ class StickerProvider : ContentProvider() {
 
         /** Thumbnails are WebP. */
         const val THUMBNAIL_TYPE = "image/webp"
+
+        /** Library calls that may download, at once, for all callers together. */
+        const val DOWNLOADS = 4
+
+        /** How long a call over [DOWNLOADS] waits for a slot before it fails. */
+        const val DOWNLOAD_WAIT_MILLIS = 2_000L
 
         const val METHOD_INFO = "info"
         const val METHOD_PREPARE = "prepare"
