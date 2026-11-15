@@ -30,8 +30,10 @@ import io.github.dolfost.stickpile.ui.keyboard.KeyboardSetupScreen
 import io.github.dolfost.stickpile.ui.library.LibraryScreen
 import io.github.dolfost.stickpile.ui.library.LibraryViewModel
 import io.github.dolfost.stickpile.ui.library.Thumbnails
+import io.github.dolfost.stickpile.ui.main.LaunchRequest
 import io.github.dolfost.stickpile.ui.main.MainRoute
 import io.github.dolfost.stickpile.ui.main.MainViewModel
+import io.github.dolfost.stickpile.ui.main.launchRequest
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingScreen
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingViewModel
 import io.github.dolfost.stickpile.ui.theme.StickpileTheme
@@ -60,8 +62,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // A restored activity has seen its intent already.
-        if (savedInstanceState == null) intent?.data?.let { vm.openLink(it.toString()) }
-        addOnNewIntentListener { intent -> intent.data?.let { vm.openLink(it.toString()) } }
+        if (savedInstanceState == null) consume(intent)
+        addOnNewIntentListener(::consume)
         vm.start()
         setContent {
             StickpileTheme {
@@ -70,6 +72,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Hand what [intent] asks for to the view model, once: the intent then
+     * loses its data (a used pairing code is not offered again), and an
+     * intent relaunched from Recents asks for nothing ([launchRequest]).
+     */
+    private fun consume(intent: Intent) {
+        when (val request = launchRequest(intent.dataString, intent.flags)) {
+            is LaunchRequest.OpenLink -> vm.openLink(request.link)
+            null -> Unit
+        }
+        if (intent.data != null) setIntent(Intent(intent).apply { data = null })
     }
 
     companion object {
