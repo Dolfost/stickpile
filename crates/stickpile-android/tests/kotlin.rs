@@ -53,6 +53,9 @@ const METHODS: &[&str] = &[
     "suspend fun `syncNow`(): SyncState",
     "fun `syncState`(): SyncState",
     "fun `pendingUsage`(): kotlin.UInt",
+    // cache
+    "fun `cacheBytes`(): kotlin.ULong",
+    "fun `clearCache`(): kotlin.ULong",
 ];
 
 /// The methods that do not throw (`throws` is missing in the contract).

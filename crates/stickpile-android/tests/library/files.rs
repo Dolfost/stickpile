@@ -213,3 +213,26 @@ async fn prepare_works_offline_once_cached() {
         .await;
     assert_eq!(kind(signed_out), LibraryErrorKind::NotSignedIn);
 }
+
+#[tokio::test]
+async fn the_cache_size_counts_files_and_clearing_keeps_the_items() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    assert_eq!(lib.cache_bytes().unwrap(), 0);
+    lib.sync_now().await.unwrap();
+    let thumb = lib.thumbnail(items[0].id.clone()).await.unwrap();
+    let bytes = lib.cache_bytes().unwrap();
+    assert!(bytes > 0, "the thumbnail is counted");
+
+    assert_eq!(lib.clear_cache().unwrap(), bytes);
+    assert_eq!(lib.cache_bytes().unwrap(), 0);
+    assert!(!Path::new(&thumb).exists(), "the file is gone");
+    assert_eq!(lib.clear_cache().unwrap(), 0, "nothing left to clear");
+
+    // The item list stays: offline search still answers.
+    server.stop();
+    let found = lib.search(items[0].name.clone(), Target::Generic, 10).await.unwrap();
+    assert!(found.offline);
+    assert!(found.items.iter().any(|i| i.id == items[0].id));
+}

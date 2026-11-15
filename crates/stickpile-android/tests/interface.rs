@@ -58,6 +58,8 @@ const CONTRACT: &[&str] = &[
     "async fn StickpileLibrary.sync_now() -> SyncState throws LibraryError",
     "fn StickpileLibrary.sync_state() -> SyncState",
     "fn StickpileLibrary.pending_usage() -> u32",
+    "fn StickpileLibrary.cache_bytes() -> u64 throws LibraryError",
+    "fn StickpileLibrary.clear_cache() -> u64 throws LibraryError",
     // records
     "record LibraryDirs { config_file: String, cache_dir: String, token_file: String }",
     "record Account { username: String, display_name: String?, server_url: String, auth: AuthKind, is_admin: Boolean }",

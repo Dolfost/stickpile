@@ -143,6 +143,11 @@ object StickpileLibrary
   async fn sync_now() throws -> SyncState
   fn sync_state() -> SyncState
   fn pending_usage() -> u32
+
+  // cache (no network)
+  fn cache_bytes() throws -> u64                       // thumbnails and prepared files
+  fn clear_cache() throws -> u64                       // deletes them, returns the bytes freed;
+                                                       // the item list (offline search) stays
 ```
 
 Records and enums:

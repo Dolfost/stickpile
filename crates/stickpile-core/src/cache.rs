@@ -399,11 +399,23 @@ impl Cache {
 
     /// Delete least-recently-used files until the total is within the cap.
     pub fn evict(&self, keep: Option<&str>) -> Result<EvictReport> {
+        self.evict_to(self.max_bytes, keep)
+    }
+
+    /// Delete every cached file (thumbnails and copied renditions). The
+    /// item metadata, and so the offline search, stays.
+    pub fn clear_files(&self) -> Result<EvictReport> {
+        self.evict_to(0, None)
+    }
+
+    /// Delete least-recently-used files, except `keep`, until the total is
+    /// within `limit` bytes.
+    fn evict_to(&self, limit: u64, keep: Option<&str>) -> Result<EvictReport> {
         let mut report = EvictReport {
             total_bytes: self.files_total_bytes()?,
             ..Default::default()
         };
-        if report.total_bytes <= self.max_bytes {
+        if report.total_bytes <= limit {
             return Ok(report);
         }
         let candidates: Vec<(String, u64)> = {
@@ -413,7 +425,7 @@ impl Cache {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
         for (rel, size) in candidates {
-            if report.total_bytes <= self.max_bytes {
+            if report.total_bytes <= limit {
                 break;
             }
             if Some(rel.as_str()) == keep {

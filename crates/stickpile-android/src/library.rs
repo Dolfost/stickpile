@@ -979,6 +979,19 @@ impl StickpileLibrary {
     pub fn pending_usage(&self) -> u32 {
         to_u32(self.inner.session().pending_usage())
     }
+
+    /// Bytes of files in the offline cache: thumbnails and prepared
+    /// renditions (no network). The item list is not counted.
+    pub fn cache_bytes(&self) -> Result<u64, LibraryError> {
+        Ok(self.inner.session().cache().files_total_bytes()?)
+    }
+
+    /// Deletes every cached file (thumbnails and prepared renditions) and
+    /// returns the bytes freed. The item list stays, so search still works
+    /// offline; files are fetched again when needed.
+    pub fn clear_cache(&self) -> Result<u64, LibraryError> {
+        Ok(self.inner.session().cache().clear_files()?.freed_bytes)
+    }
 }
 
 #[cfg(test)]
