@@ -42,6 +42,10 @@
     <!-- The library cannot be opened (its config is unreadable): a screen of its own. -->
     <string name="app_broken_title">Cannot open your library</string>
 
+    <!-- The launcher, when asking who is signed in failed. -->
+    <string name="main_account_unknown_title">Cannot check your account</string>
+    <string name="main_sign_in_anew">Sign in again</string>
+
     <!-- Onboarding: the first screen. -->
     <string name="onboarding_welcome_title">Welcome to stickpile</string>
     <string name="onboarding_welcome_text">Your stickers and memes from your own server, in the text field of any app.</string>

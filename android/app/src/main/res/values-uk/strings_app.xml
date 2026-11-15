@@ -32,6 +32,8 @@
     <string name="app_error_not_a_pairing_qr">Цей QR-код не для підключення пристрою до stickpile. Відскануйте код із розділу Налаштування, Додати пристрій, на вебсторінці свого сервера.</string>
 
     <string name="app_broken_title">Не вдається відкрити вашу бібліотеку</string>
+    <string name="main_account_unknown_title">Не вдається перевірити ваш обліковий запис</string>
+    <string name="main_sign_in_anew">Увійти знову</string>
 
     <string name="onboarding_welcome_title">Вітаємо в stickpile</string>
     <string name="onboarding_welcome_text">Ваші стікери й меми з вашого власного сервера, у текстовому полі будь-якого застосунку.</string>
