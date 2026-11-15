@@ -138,6 +138,21 @@ async fn favorites_online_remembered_offline_and_signed_out() {
     assert_eq!(ids(&offline.items), vec![items[0].id.clone(), items[2].id.clone()]);
     assert_eq!(lib.favorites(1).await.unwrap().items.len(), 1);
 
+    // A short list online still remembers them all for offline.
+    server.restart();
+    assert!(lib.toggle_like(items[4].id.clone()).await.unwrap());
+    let one = lib.favorites(1).await.unwrap();
+    assert!(!one.offline);
+    assert_eq!(one.items.len(), 1);
+    server.stop();
+    let offline = lib.favorites(10).await.unwrap();
+    assert!(offline.offline);
+    let mut got = ids(&offline.items);
+    got.sort();
+    let mut want = vec![items[0].id.clone(), items[2].id.clone(), items[4].id.clone()];
+    want.sort();
+    assert_eq!(got, want);
+
     // Never read online: nothing to answer with.
     let other = tempfile::tempdir().unwrap();
     server.restart();

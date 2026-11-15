@@ -30,6 +30,11 @@ const SEEN_MAX: usize = 4096;
 /// what [`StickpileLibrary::favorites`] answers with offline.
 const FAVORITES_KEY: &str = "android_favorites:";
 
+/// Favorites read (and saved for offline) by every online
+/// [`StickpileLibrary::favorites`], however few the caller asks for: the
+/// server's most for a search.
+const FAVORITES_SAVED: usize = 200;
+
 /// The stickpile library: an account on one server, its offline cache, and
 /// the sync. Create one per process and share it; every method may be
 /// called from any thread. `suspend` methods run on the library's own Tokio
@@ -695,18 +700,23 @@ impl StickpileLibrary {
     /// The items the account liked, most used first. Offline: the
     /// favorites last read from the server, as far as the cache has them
     /// (`offline = true`); throws `Unreachable` if they were never read.
+    /// Online it reads (and remembers for offline) up to 200 favorites, or
+    /// `limit` if more, and returns the first `limit`: asking for a few
+    /// does not shorten the list kept for offline.
     pub async fn favorites(&self, limit: u32) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
             let session = inner.session();
-            match session.favorites(limit as usize).await {
-                Ok(items) => {
+            let limit = limit as usize;
+            match session.favorites(limit.max(FAVORITES_SAVED)).await {
+                Ok(mut items) => {
                     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
                     inner.save_favorites(&session, &ids);
+                    items.truncate(limit);
                     Ok(inner.list(items, false))
                 }
                 Err(e) if falls_back(&e) => match inner.saved_favorites(&session)? {
                     Some(mut items) => {
-                        items.truncate(limit as usize);
+                        items.truncate(limit);
                         Ok(inner.list(items, true))
                     }
                     None => Err(e.into()),
