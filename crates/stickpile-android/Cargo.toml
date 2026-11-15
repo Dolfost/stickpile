@@ -22,6 +22,8 @@ path = "uniffi-bindgen.rs"
 required-features = ["bindgen"]
 
 [features]
+# The uniffi-bindgen binary; also turns on tests/kotlin.rs, which generates
+# the Kotlin bindings (not in the default test run: see that file).
 bindgen = ["uniffi/cli"]
 
 [dependencies]
@@ -45,7 +47,10 @@ libc = "0.2"
 
 [dev-dependencies]
 stickpile-core = { workspace = true, features = ["mock"] }
-# `bindgen`: the test that generates the Kotlin bindings.
-uniffi = { version = "0.32", features = ["tokio", "bindgen"] }
 tempfile.workspace = true
 image.workspace = true
+# tests/interface.rs reads the interface from the built library as
+# uniffi-bindgen does: its symbols (goblin) and UniFFI's metadata
+# (uniffi_meta). Both are uniffi_bindgen's own dependencies.
+goblin = "0.8"
+uniffi_meta = "0.32"

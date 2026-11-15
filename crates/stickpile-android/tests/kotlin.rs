@@ -8,6 +8,15 @@
 //! The bindings are made like the Gradle build makes them (library mode,
 //! the crate's `uniffi.toml`), from the `libstickpile_android` cdylib that
 //! cargo builds next to this test.
+//!
+//! Needs the `bindgen` feature, so it is not part of the default test run:
+//! `cargo nextest run -p stickpile-android --features bindgen`. The reason
+//! is the Nix sandbox: `uniffi_bindgen` does not compile there (askama 0.16
+//! computes its `askama.toml` path lexically, which breaks on crane's
+//! symlinked vendor directory). `tests/interface.rs` checks the same
+//! interface, from UniFFI's metadata, in every run.
+
+#![cfg(feature = "bindgen")]
 
 use std::path::{Path, PathBuf};
 

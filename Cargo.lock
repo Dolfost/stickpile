@@ -3817,6 +3817,7 @@ dependencies = [
 name = "stickpile-android"
 version = "0.5.2"
 dependencies = [
+ "goblin",
  "image",
  "libc",
  "stickpile-api",
@@ -3828,6 +3829,7 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "uniffi",
+ "uniffi_meta",
  "url",
 ]
 
