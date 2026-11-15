@@ -180,7 +180,9 @@ The listing says up front that a stickpile server is needed.
   listing names no proprietary app; keep it that way (judgement, see
   below).
 - Ads, NonFreeAssets, KnownVuln, NoSourceSince, DisabledAlgorithm: none.
-  The app icon (not made yet) must be under a free licence.
+  The app icon is the macOS app's (`crates/stickpile-mac/app/Resources/`),
+  redrawn as vector drawables in `android/app/src/main/res/`; both are in
+  this repository under its licence (AGPL-3.0-or-later).
 - NSFW ([BMR]: "the app contains content that the user may not want to be
   publicized"): the app ships no content; memes come from the user's
   server.
@@ -249,11 +251,12 @@ from the latest release" [DESC]: listing changes appear with the next tag.
 `changelogs/6000.txt` assumes the app first ships in 0.6.0. Every later
 release may add `changelogs/<versionCode>.txt` (e.g. 6001 for 0.6.1).
 
-Screenshots and graphics (not made yet; PNG or JPEG, [DESC]):
+Screenshots and graphics (only the icon is made; PNG or JPEG, [DESC]):
 - `fastlane/metadata/android/en-US/images/phoneScreenshots/1.png`,
   `2.png`, ... (localized ones may go in `uk/images/phoneScreenshots/`);
-- `fastlane/metadata/android/en-US/images/icon.png` (optional; [DESC]
-  says "usually 512x512" for the Triple-T equivalent);
+- `fastlane/metadata/android/en-US/images/icon.png` (present: the macOS
+  app's 512 px icon; [DESC] says "usually 512x512" for the Triple-T
+  equivalent);
 - `fastlane/metadata/android/en-US/images/featureGraphic.png` (optional,
   landscape, "usually 1024x500").
 
@@ -336,8 +339,8 @@ What in this build can break reproducibility (all from [RB]):
   differences between Java 17 and 21. The build server image is Debian
   trixie with `default-jdk-headless` [BS], which is OpenJDK 21
   (https://packages.debian.org/trixie/default-jdk-headless, 2:1.21-76);
-  the dev shell has JDK 17. cargo-ndk (4.1.2) and Rust (1.95.0) match
-  today; not verified: whether rust-overlay's 1.95.0 and rustup's 1.95.0
+  the dev shell has JDK 21 as well. cargo-ndk (4.1.2) and Rust (1.95.0)
+  match today; not verified: whether rust-overlay's 1.95.0 and rustup's 1.95.0
   are byte-identical toolchains.
 - **The NixOS aapt2.** The dev shell makes Gradle use the SDK's build-tools
   36.0.0 `aapt2` instead of the one the Android Gradle Plugin downloads;
@@ -373,7 +376,8 @@ What in this build can break reproducibility (all from [RB]):
   verifiable by `apksigcopier`, but newer versions will fail." The signing
   block must not carry Google's dependency metadata: [SCN] counts block
   `0x504B4453: 'Dependency metadata'` as a problem, and [NYM]'s app sets
-  `dependenciesInfo { includeInApk = false }`.
+  `dependenciesInfo { includeInApk = false }`. Done in
+  `android/app/build.gradle.kts` (with `includeInBundle = false`).
 
 ### Design decisions this research questions
 
@@ -391,12 +395,11 @@ What in this build can break reproducibility (all from [RB]):
   Fastlane at the root is read. Consequence: every `vX.Y.Z` tag is an
   Android release on F-Droid, including server-only releases.
 - **Application id: fine** (free, from the owner's GitHub domain).
-- **JDK 17: change to 21.** F-Droid's server is trixie, whose default JDK
-  is 21; 17 exists only "from Debian Bookworm", and "versions not from the
+- **JDK 21: done.** F-Droid's server is trixie, whose default JDK is 21;
+  17 exists only "from Debian Bookworm", and "versions not from the
   current Debian stable (Trixie) might become unavailable as time passes,
-  so you are encouraged to update as much as possible" [RB]. Keep
-  `sourceCompatibility`/`targetCompatibility` 17 if wanted, but build with
-  21 in the dev shell. Never use Gradle JVM toolchains (`jvmToolchain(17)`):
+  so you are encouraged to update as much as possible" [RB]. The dev shell
+  and CI build with 21. Never use Gradle JVM toolchains (`jvmToolchain(17)`):
   the server sets `org.gradle.java.installations.auto-download=false` [BS,
   provision-gradle], and the scanner deletes `gradle-daemon-jvm.properties`.
 - **Reproducible builds "later": not possible.** Decide before the first

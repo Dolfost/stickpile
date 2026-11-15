@@ -50,6 +50,19 @@ android {
         compose = true
     }
 
+    // No dependency metadata block in the APK: F-Droid's scanner flags it
+    // in a signed APK, and it carries nothing the app needs.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
+    // lintVital in a release build fetches Google's SDK index; lint runs in
+    // CI (lintDebug) instead, so a release build needs no extra network.
+    lint {
+        checkReleaseBuilds = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

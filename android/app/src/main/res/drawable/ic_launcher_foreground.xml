@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A smiley and the sticker's peeled corner, inside the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- eyes -->
+    <path
+        android:fillColor="#FF3B3346"
+        android:pathData="M45,46m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+    <path
+        android:fillColor="#FF3B3346"
+        android:pathData="M63,46m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+    <!-- smile -->
+    <path
+        android:pathData="M39,57Q54,70 69,57"
+        android:strokeWidth="4.5"
+        android:strokeColor="#FF3B3346"
+        android:strokeLineCap="round" />
+    <!-- the folded corner -->
+    <path
+        android:fillColor="#FFFDF4E3"
+        android:pathData="M69,85L85,69L70.5,70.5Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#FFC2410C"
+        android:strokeLineJoin="round" />
+</vector>
