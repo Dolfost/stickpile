@@ -100,6 +100,9 @@ pub struct MockState {
     pub items_page_size: usize,
     pub search_delay: Option<Duration>,
     pub usage_delay: Option<Duration>,
+    /// Delay before answering `GET /tokens` (a token revocation looks its
+    /// token up there first).
+    pub tokens_delay: Option<Duration>,
     /// Answer `POST /usage` with this status (and an ApiError body).
     pub fail_usage: Option<u16>,
     /// Username that requests without a bearer token are authenticated as,
@@ -129,6 +132,7 @@ impl Default for MockState {
             items_page_size: 1000,
             search_delay: None,
             usage_delay: None,
+            tokens_delay: None,
             fail_usage: None,
             tailnet_user: None,
             requests: Vec::new(),
@@ -808,6 +812,10 @@ async fn patch_me(
 }
 
 async fn list_tokens(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<Vec<ApiToken>>> {
+    let delay = lock(&s).tokens_delay;
+    if let Some(d) = delay {
+        tokio::time::sleep(d).await;
+    }
     let st = lock(&s);
     let u = auth(&st, &h)?;
     Ok(Json(

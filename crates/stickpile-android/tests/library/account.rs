@@ -408,6 +408,93 @@ async fn login_pairing_sets_the_server_and_stores_the_token() {
     assert_eq!(kind(used), LibraryErrorKind::Unauthorized);
 }
 
+/// The token `dir` holds.
+fn stored_token(dir: &std::path::Path) -> String {
+    stickpile_core::token::read_token(&token_path(dir)).unwrap().unwrap()
+}
+
+/// Whether `server` revoked the token `secret`.
+fn revoked(server: &MockServer, secret: &str) -> bool {
+    let st = server.state();
+    st.tokens.iter().find(|t| t.secret == secret).unwrap().info.revoked
+}
+
+#[tokio::test]
+async fn a_new_login_revokes_the_token_it_replaces() {
+    let (server, _) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let first = store_token(&server, dir.path());
+    let lib = open(dir.path(), &server.url);
+
+    // A password login.
+    lib.login_password("alice".into(), "secret".into(), None).await.unwrap();
+    let second = stored_token(dir.path());
+    assert_ne!(second, first);
+    assert!(revoked(&server, &first));
+    assert!(!revoked(&server, &second));
+    assert_eq!(requests_starting(&server, "DELETE /api/v1/tokens/"), 1);
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+    // A wrong password changes nothing.
+    let wrong = lib.login_password("alice".into(), "nope".into(), None).await;
+    assert_eq!(kind(wrong), LibraryErrorKind::Unauthorized);
+    assert_eq!(stored_token(dir.path()), second);
+    assert!(!revoked(&server, &second));
+
+    // A tailnet login.
+    server.state().tailnet_user = Some("alice".into());
+    lib.login_tailnet().await.unwrap().unwrap();
+    let third = stored_token(dir.path());
+    assert!(revoked(&server, &second) && !revoked(&server, &third));
+    server.state().tailnet_user = None;
+
+    // Pairing with the same server, written another way.
+    let code = server.state().add_pairing("alice");
+    lib.login_pairing(format!(" {}/ ", server.url), code).await.unwrap();
+    let fourth = stored_token(dir.path());
+    assert!(revoked(&server, &third) && !revoked(&server, &fourth));
+    assert_eq!(lib.account().await.unwrap().unwrap().auth, AuthKind::Token);
+
+    // Another account on the same server.
+    lib.login_password("bob".into(), "hunter2".into(), None).await.unwrap();
+    assert!(revoked(&server, &fourth));
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "bob");
+    // Only the last token is left valid.
+    let st = server.state();
+    let live: Vec<&str> = st
+        .tokens
+        .iter()
+        .filter(|t| !t.info.revoked)
+        .map(|t| t.secret.as_str())
+        .collect();
+    assert_eq!(live, vec![stored_token(dir.path())]);
+}
+
+#[tokio::test]
+async fn a_token_that_cannot_be_revoked_does_not_hold_the_login_up() {
+    let (server, _) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let first = store_token(&server, dir.path());
+    let lib = open(dir.path(), &server.url);
+    // The server takes longer than the config's timeout (2 s) to look the
+    // old token up.
+    server.state().tokens_delay = Some(Duration::from_secs(3));
+    let started = std::time::Instant::now();
+    lib.login_password("alice".into(), "secret".into(), None).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert!(!revoked(&server, &first), "it did not answer in time");
+    let second = stored_token(dir.path());
+    assert_ne!(second, first);
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+    server.state().tokens_delay = None;
+
+    // A stored token the server does not know (revoked elsewhere).
+    stickpile_core::token::write_token(&token_path(dir.path()), "spk_made_up").unwrap();
+    let lib = open(dir.path(), &server.url);
+    lib.login_password("alice".into(), "secret".into(), None).await.unwrap();
+    assert_ne!(stored_token(dir.path()), "spk_made_up");
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+}
+
 #[tokio::test]
 async fn logout_deletes_and_revokes_the_token() {
     let (server, _) = seeded_server();

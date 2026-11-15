@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
-use stickpile_api::{pairing, ItemSummary, PairRequest, TokenRequest, UploadMeta, Variant};
+use stickpile_api::{pairing, ItemSummary, PairRequest, TokenCreated, TokenRequest, UploadMeta, User, Variant};
+use stickpile_core::session::{save_login, tailnet_login};
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
 use stickpile_quick::suggest::{self, Vocabulary};
 
@@ -225,6 +226,56 @@ impl Inner {
         }
         token::delete_token(&self.dirs.token_file)?;
         Ok(())
+    }
+
+    /// Before a new token for `session`'s server takes the place of the one
+    /// stored, revoke the stored one there, so that it does not stay valid
+    /// unused: the unsent uses go out with it first (another account's login
+    /// would drop them), then it is revoked. Best effort, as in
+    /// [`Inner::sign_out_for_new_server`]: the server is waited for at most
+    /// its `timeout_secs`, and a failure is only logged; the login goes on
+    /// either way. Nothing happens when no token is stored.
+    async fn revoke_replaced_token(&self, session: &Session) {
+        let stored = match session.client().token() {
+            Some(t) => Some(t),
+            None => token::read_token(&session.config().token_path()).ok().flatten(),
+        };
+        let Some(stored) = stored else {
+            return;
+        };
+        // A client of its own: the session's may get the new token meanwhile.
+        let client = session.client().anonymous().with_token(Some(stored));
+        let wait = Duration::from_secs(session.config().timeout_secs.max(1));
+        let revoke = async {
+            if session.is_logged_in() {
+                if let Err(e) = session.flush_usage().await {
+                    tracing::info!("replacing the token: the unsent uses stay queued: {e}");
+                }
+            }
+            match client.current_token_id().await? {
+                Some(id) => client.revoke_token(&id).await.map(|()| true),
+                None => Ok(false),
+            }
+        };
+        match tokio::time::timeout(wait, revoke).await {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => tracing::info!("replacing the token: the server does not know the old one"),
+            Ok(Err(e)) => tracing::warn!("replacing the token: the old one was not revoked: {e}"),
+            Err(_) => tracing::warn!(
+                "replacing the token: the server did not answer in {wait:?}; the old one was not revoked"
+            ),
+        }
+    }
+
+    /// Store `created`, a new token from `session`'s server, as the
+    /// session's (as `Session`'s logins do, [`save_login`]), after revoking
+    /// the one it replaces ([`Inner::revoke_replaced_token`]).
+    async fn adopt(&self, session: &Session, created: TokenCreated) -> Result<User, LibraryError> {
+        self.revoke_replaced_token(session).await;
+        save_login(session.config(), Some(session.cache()), &created)?;
+        session.client().set_token(Some(created.token));
+        self.account_changed();
+        Ok(created.user)
     }
 
     /// The account changed on the same server (a login or logout).
@@ -556,23 +607,27 @@ impl StickpileLibrary {
 
     /// Sign in without a password where the server knows this device by its
     /// tailnet identity (behind `tailscale serve`): a token is made and
-    /// stored. `None`: the server does not know this device that way.
+    /// stored; a token stored before is revoked on the server first (best
+    /// effort, as by `logout`). `None`: the server does not know this
+    /// device that way.
     pub async fn login_tailnet(&self) -> Result<Option<Account>, LibraryError> {
         self.write(|inner| async move {
             let _busy = inner.busy.lock().await;
             let session = inner.session();
-            let Some(user) = session.login_tailnet(&device::token_name()).await? else {
+            let Some(created) = tailnet_login(session.client(), &device::token_name()).await? else {
                 return Ok(None);
             };
-            inner.account_changed();
+            let user = inner.adopt(&session, created).await?;
             Ok(Some(Account::new(&user, &session.config().server_url, AuthKind::Token)))
         })
         .await
     }
 
     /// Sign in with a username and password (and the two-factor code, if the
-    /// account has two-factor authentication on); the token is stored.
-    /// Throws `Unauthorized` for a wrong password or code, and
+    /// account has two-factor authentication on); the token is stored, and
+    /// a token stored before is revoked on the server first (best effort,
+    /// as by `logout`). Throws `Unauthorized` for a wrong password or code
+    /// (the stored token is kept), and
     /// `InvalidInput` with field `totp` when the account needs a code and
     /// none was given (ask for it and call again).
     pub async fn login_password(
@@ -590,12 +645,12 @@ impl StickpileLibrary {
                 totp: totp.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
                 token_name: device::token_name(),
             };
-            let user = match session.login_password(&req).await {
-                Ok(user) => user,
+            let created = match session.client().login(&req).await {
+                Ok(created) => created,
                 Err(e) if e.is_totp_required() => return Err(LibraryError::invalid("totp", e.to_string())),
                 Err(e) => return Err(LibraryError::input(e, "username")),
             };
-            inner.account_changed();
+            let user = inner.adopt(&session, created).await?;
             Ok(Account::new(&user, &session.config().server_url, AuthKind::Token))
         })
         .await
@@ -608,7 +663,9 @@ impl StickpileLibrary {
     /// new token stored in place of the old one, so a wrong code changes
     /// nothing. Pairing with another server than the current one first
     /// signs out of the current one as `set_server_url` does (its token is
-    /// revoked there, best effort). The token is named after the device,
+    /// revoked there, best effort); pairing with the current one revokes
+    /// the token stored for it, as `login_password` does. The token is
+    /// named after the device,
     /// `Android (<model>)`. Throws `InvalidInput` (field `code` or
     /// `server_url`) for input that cannot be a code or URL, `Unauthorized`
     /// for a wrong, expired or used code, `InvalidInput` (field
@@ -632,7 +689,9 @@ impl StickpileLibrary {
                 .await
                 .map_err(|e| LibraryError::input(e, "token_name"))?;
             let old = inner.session();
-            if !same_server(&old.config().server_url, &url) {
+            if same_server(&old.config().server_url, &url) {
+                inner.revoke_replaced_token(&old).await;
+            } else {
                 inner.sign_out_for_new_server(&old).await?;
             }
             // Stored like `stickpile login` (`session::save_login`): the
