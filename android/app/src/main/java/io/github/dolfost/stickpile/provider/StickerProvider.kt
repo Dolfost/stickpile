@@ -79,6 +79,13 @@ class StickerProvider : ContentProvider() {
         return if (route is ProviderRoute.Thumbnail) THUMBNAIL_TYPE else null
     }
 
+    /**
+     * Nothing: on Android 14 and later the system may ask for a type with
+     * the caller's identity cleared, where [getType]'s access check would
+     * see this app's own uid.
+     */
+    override fun getTypeAnonymous(uri: Uri): String? = null
+
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         val route = route(uri)
         if (route is ProviderRoute.PreparedFile) {
@@ -112,18 +119,23 @@ class StickerProvider : ContentProvider() {
         }
     }
 
-    override fun insert(uri: Uri, values: ContentValues?): Uri? =
-        throw UnsupportedOperationException("read-only")
+    // Nothing can be written; the access check still comes first, as everywhere.
 
-    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
-        throw UnsupportedOperationException("read-only")
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = refuseWrite()
+
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = refuseWrite()
 
     override fun update(
         uri: Uri,
         values: ContentValues?,
         selection: String?,
         selectionArgs: Array<out String>?,
-    ): Int = throw UnsupportedOperationException("read-only")
+    ): Int = refuseWrite()
+
+    private fun refuseWrite(): Nothing {
+        enforceAccess()
+        throw UnsupportedOperationException("read-only")
+    }
 
     private fun prepare(itemId: String?, extras: Bundle?): Bundle {
         if (itemId == null || !ProviderRoutes.isId(itemId)) return errorBundle(ProviderErrors.NOT_FOUND)
