@@ -85,7 +85,7 @@ internal class PickerView(
     private val progress: View = root.findViewById(R.id.ime_progress)
     private val status: TextView = root.findViewById(R.id.ime_status)
 
-    private val thumbnails = ThumbnailLoader(scope, library, context.resources)
+    private val thumbnails = ThumbnailLoader(scope, library, context.resources, cellPx())
     private val itemsAdapter = ItemsAdapter(thumbnails, ::onItemClick, ::onItemLongClick)
     private val packsAdapter = PacksAdapter(::openPack)
     private val gridLayout = GridLayoutManager(context, spanCount())
@@ -352,6 +352,9 @@ internal class PickerView(
 
     /** Columns of the grid: about 84 dp each, at least three. */
     private fun spanCount(): Int = maxOf(3, context.resources.configuration.screenWidthDp / 84)
+
+    /** The width of a grid cell in pixels: the most a thumbnail is decoded at. */
+    private fun cellPx(): Int = context.resources.displayMetrics.widthPixels / spanCount()
 
     private companion object {
         const val STATUS_MILLIS = 5_000L

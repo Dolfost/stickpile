@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ime
 
 import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.graphics.drawable.Animatable
@@ -11,6 +12,7 @@ import android.util.Log
 import android.util.LruCache
 import android.widget.ImageView
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.scale
 import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.LibraryException
 import java.io.File
@@ -26,12 +28,21 @@ import kotlinx.coroutines.withContext
  * missing), decoded off the main thread, kept in memory in an [LruCache].
  * On API 28 and later [ImageDecoder] decodes them, so an animated WebP
  * moves; below, [BitmapFactory] gives its first frame.
+ *
+ * The file comes from the server and is not trusted: it is decoded at most
+ * [cellPx] (and [DecodeSize.MAX_THUMBNAIL_PX]) on its longer side, and a
+ * file that fails to decode, for whatever reason, shows nothing.
+ *
+ * @param cellPx the size of a grid cell, in pixels.
  */
 internal class ThumbnailLoader(
     private val scope: CoroutineScope,
     private val library: ImeLibrary,
     private val resources: Resources,
+    cellPx: Int,
 ) {
+    private val maxPx = DecodeSize.thumbnailPx(cellPx)
+
     private val cache = object : LruCache<String, Drawable>(cacheBytes()) {
         override fun sizeOf(key: String, value: Drawable): Int = bytesOf(value)
     }
@@ -75,14 +86,32 @@ internal class ThumbnailLoader(
     private suspend fun decode(path: String): Drawable? = withContext(Dispatchers.IO) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                ImageDecoder.decodeDrawable(ImageDecoder.createSource(File(path)))
+                ImageDecoder.decodeDrawable(ImageDecoder.createSource(File(path))) { decoder, info, _ ->
+                    val (w, h) = DecodeSize.fit(info.size.width, info.size.height, maxPx)
+                        ?: throw IOException("no size")
+                    decoder.setTargetSize(w, h)
+                }
             } else {
-                BitmapFactory.decodeFile(path)?.toDrawable(resources)
+                decodeFirstFrame(path)?.toDrawable(resources)
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            // Any failure of a file from the server is no thumbnail, not a crash.
             Log.d(TAG, "thumbnail not decoded: ${e.javaClass.simpleName}")
             null
         }
+    }
+
+    /** Below API 28: sampled down while decoding, then scaled to fit. */
+    private fun decodeFirstFrame(path: String): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        DecodeSize.fit(bounds.outWidth, bounds.outHeight, maxPx) ?: return null
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = DecodeSize.sampleSize(bounds.outWidth, bounds.outHeight, maxPx)
+        }
+        val bitmap = BitmapFactory.decodeFile(path, options) ?: return null
+        val (w, h) = DecodeSize.fit(bitmap.width, bitmap.height, maxPx) ?: return null
+        return if (w == bitmap.width && h == bitmap.height) bitmap else bitmap.scale(w, h)
     }
 
     private companion object {
