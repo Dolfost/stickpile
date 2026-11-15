@@ -23,6 +23,7 @@ use uniffi_meta::{EnumShape, Metadata, Type};
 /// `u16`, `u32`, `u64`, `i64`, `List<T>`, `T?`, and the records and enums
 /// by name.
 const CONTRACT: &[&str] = &[
+    "fn target_for_package(package: String) -> Target",
     "fn version() -> String",
     "fn client_name() -> String",
     "object StickpileLibrary",

@@ -8,7 +8,7 @@ import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.StickpileLibrary
-import io.github.dolfost.stickpile.rust.Target
+import io.github.dolfost.stickpile.rust.targetForPackage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -26,11 +26,15 @@ internal class ImeLibrary(private val app: StickpileApp) {
 
     suspend fun favorites(): ItemList = call { it.favorites(LIMIT) }
 
-    /**
-     * The library takes a [Target], not the editor's package, for search;
-     * it is [Target.GENERIC] here until the bridge maps a package for search.
-     */
-    suspend fun search(query: String): ItemList = call { it.search(query, Target.GENERIC, LIMIT) }
+    /** The package of the field being typed into, set by the service on each input start. */
+    @Volatile
+    var editorPackage: String = ""
+
+    /** Search ranked for the editor's app (the bridge maps its package to a [Target]). */
+    suspend fun search(query: String): ItemList {
+        val target = targetForPackage(editorPackage)
+        return call { it.search(query, target, LIMIT) }
+    }
 
     suspend fun packs(): PackList = call { it.packs() }
 

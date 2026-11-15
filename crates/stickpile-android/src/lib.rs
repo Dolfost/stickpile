@@ -54,6 +54,14 @@ pub use error::{LibraryError, LibraryErrorKind};
 pub use library::StickpileLibrary;
 pub use types::*;
 
+/// The chat app behind an Android package name (the focused field's
+/// editor package), as `search` and `prepare` see it; no network. Unknown
+/// packages are `Generic`.
+#[uniffi::export]
+pub fn target_for_package(package: String) -> Target {
+    stickpile_core::target_for_package(&package).into()
+}
+
 /// The stickpile version this library was built from (the workspace's).
 #[uniffi::export]
 pub fn version() -> String {

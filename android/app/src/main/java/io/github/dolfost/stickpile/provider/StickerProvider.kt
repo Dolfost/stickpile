@@ -17,7 +17,7 @@ import io.github.dolfost.stickpile.StickpileApp
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
-import io.github.dolfost.stickpile.rust.Target
+import io.github.dolfost.stickpile.rust.targetForPackage
 import java.io.File
 import java.io.FileNotFoundException
 import kotlinx.coroutines.runBlocking
@@ -58,7 +58,9 @@ class StickerProvider : ContentProvider() {
         }
         enforceAccess()
         return when (route) {
-            is ProviderRoute.Search -> items { it.search(route.query, Target.GENERIC, route.limit.toUInt()).items }
+            is ProviderRoute.Search -> items {
+                it.search(route.query, targetForPackage(route.editorPackage), route.limit.toUInt()).items
+            }
             is ProviderRoute.Recent -> items { it.recent(route.limit.toUInt()) }
             is ProviderRoute.Favorites -> items { it.favorites(route.limit.toUInt()).items }
             is ProviderRoute.PackItems -> items { it.packItems(route.packId).items }

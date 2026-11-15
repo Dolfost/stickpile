@@ -200,7 +200,11 @@ const ERRORS: &[(&str, &[&str])] = &[
 ];
 
 /// The top-level functions besides `StickpileLibrary`.
-const FUNCTIONS: &[&str] = &["fun `version`(): kotlin.String", "fun `clientName`(): kotlin.String"];
+const FUNCTIONS: &[&str] = &[
+    "fun `targetForPackage`(`package`: kotlin.String): Target",
+    "fun `version`(): kotlin.String",
+    "fun `clientName`(): kotlin.String",
+];
 
 fn cdylib() -> PathBuf {
     let name = format!(
