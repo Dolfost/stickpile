@@ -3,52 +3,31 @@ package io.github.dolfost.stickpile.ui.library
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.Drawable
 import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -60,28 +39,26 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.provider.PreparedFiles
-import io.github.dolfost.stickpile.rust.Item
-import io.github.dolfost.stickpile.rust.MediaKind
 import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
@@ -92,22 +69,37 @@ import io.github.dolfost.stickpile.ui.common.text
 import kotlinx.coroutines.launch
 
 /**
- * The library: a search field, the tabs (recent, liked, packs, most used)
- * and a grid. A tap shares an item, a long press likes or unlikes it;
- * pulling down (or the refresh button) syncs.
+ * The library: a search field with offers for what is typed, safe mode
+ * and the tiles' info as toggles, a menu (what the tiles show, the search
+ * syntax, sync, settings), the tabs (recent, liked, packs, most used) and
+ * a grid of tiles that show what [settings] asks. A tap shares an item, a
+ * long press opens its details; pulling down syncs.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     vm: LibraryViewModel,
     library: StickpileLibraryInterface,
+    settings: DisplaySettings,
     onOpenSettings: () -> Unit,
     onSignInAgain: () -> Unit,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val state = vm.state
+    val display by settings.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var searchFocused by remember { mutableStateOf(false) }
+    var sheet by rememberSaveable { mutableStateOf<LibrarySheet?>(null) }
+
+    // A message that replaces the one shown.
+    fun notify(text: String) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(text)
+        }
+    }
 
     LaunchedEffect(vm) {
         vm.eventFlow.collect { event ->
@@ -120,9 +112,9 @@ fun LibraryScreen(
             }
         }
     }
-    // Back from a chat (the picker keyboard) or the settings: the recent items may have changed.
+    // Back from a chat (the picker keyboard) or the settings.
     LifecycleResumeEffect(vm) {
-        if (vm.state.request == LibraryRequest.Recent) vm.reload()
+        vm.resumed()
         onPauseOrDispose {}
     }
     BackHandler(enabled = state.query.isNotEmpty()) { vm.setQuery("") }
@@ -134,7 +126,31 @@ fun LibraryScreen(
         topBar = {
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.statusBarsPadding()) {
-                    SearchRow(state.query, vm::setQuery, vm::refresh, onOpenSettings)
+                    SearchRow(
+                        query = state.query,
+                        display = display,
+                        onQuery = vm::setQuery,
+                        onFocusChange = { focused ->
+                            if (focused && !searchFocused) vm.searchFocused()
+                            searchFocused = focused
+                        },
+                        onSafeMode = { on ->
+                            settings.setSafeMode(on)
+                            notify(resources.getString(if (on) R.string.display_safe_on else R.string.display_safe_off))
+                        },
+                        onShowInfo = settings::setShowInfo,
+                        onMenu = { entry ->
+                            when (entry) {
+                                LibraryMenu.DISPLAY -> sheet = LibrarySheet.DISPLAY
+                                LibraryMenu.SYNTAX -> sheet = LibrarySheet.SYNTAX
+                                LibraryMenu.SYNC -> vm.refresh()
+                                LibraryMenu.SETTINGS -> onOpenSettings()
+                            }
+                        },
+                    )
+                    if ((searchFocused || state.query.isNotEmpty()) && state.hints.isNotEmpty()) {
+                        HintRow(state.hints, vm::takeHint)
+                    }
                     if (state.query.isBlank()) {
                         PrimaryTabRow(selectedTabIndex = state.tab.ordinal) {
                             LibraryTab.entries.forEach { tab ->
@@ -156,6 +172,9 @@ fun LibraryScreen(
             val content = state.content
             val offline = (content as? LibraryContent.Items)?.offline ?: (content as? LibraryContent.Packs)?.offline ?: false
             if (offline) OfflineNotice()
+            if (content is LibraryContent.Items && content.hidden > 0 && content.items.isNotEmpty()) {
+                HiddenNotice(content.hidden)
+            }
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
                 onRefresh = vm::refresh,
@@ -163,12 +182,13 @@ fun LibraryScreen(
             ) {
                 when (content) {
                     LibraryContent.Loading -> Loading()
-                    is LibraryContent.Items ->
-                        if (content.items.isEmpty()) {
-                            Empty(stringResource(emptyText(state.request)))
-                        } else {
-                            ItemGrid(content.items, library, state.preparing, vm::share, vm::toggleLike)
-                        }
+                    is LibraryContent.Items -> when {
+                        content.items.isNotEmpty() ->
+                            ItemGrid(content.items, library, display, state.preparing, vm::share, vm::showDetails)
+                        content.hidden > 0 ->
+                            Empty(pluralStringResource(R.plurals.display_hidden_by_safe_mode, content.hidden, content.hidden))
+                        else -> Empty(stringResource(emptyText(state.request, display.safeMode)))
+                    }
                     is LibraryContent.Packs ->
                         if (content.packs.isEmpty()) {
                             Empty(stringResource(R.string.library_empty_packs))
@@ -180,6 +200,23 @@ fun LibraryScreen(
             }
         }
     }
+
+    state.details?.let { details ->
+        DetailsSheet(
+            details,
+            library,
+            onDismiss = vm::hideDetails,
+            onShare = vm::share,
+            onLike = vm::toggleLike,
+            onOpen = { url -> if (!openPage(context, url)) notify(resources.getString(R.string.library_open_failed)) },
+            onSearch = vm::searchNow,
+        )
+    }
+    when (sheet) {
+        LibrarySheet.DISPLAY -> DisplaySheet(display, settings, onDismiss = { sheet = null })
+        LibrarySheet.SYNTAX -> SyntaxSheet(onExample = vm::searchNow, onDismiss = { sheet = null })
+        null -> Unit
+    }
 }
 
 private val LibraryTab.label: Int
@@ -190,46 +227,13 @@ private val LibraryTab.label: Int
         LibraryTab.MOST_USED -> R.string.library_tab_most_used
     }
 
-private fun emptyText(request: LibraryRequest): Int = when (request) {
-    is LibraryRequest.Search -> R.string.library_empty_search
+private fun emptyText(request: LibraryRequest, safeMode: Boolean): Int = when (request) {
+    is LibraryRequest.Search -> if (safeMode) R.string.library_empty_search_safe else R.string.library_empty_search
     LibraryRequest.Recent -> R.string.library_empty_recent
     LibraryRequest.Favorites -> R.string.library_empty_liked
     LibraryRequest.MostUsed -> R.string.library_empty_most_used
     LibraryRequest.Packs -> R.string.library_empty_packs
     is LibraryRequest.PackItems -> R.string.library_empty_pack
-}
-
-@Composable
-private fun SearchRow(query: String, onQuery: (String) -> Unit, onRefresh: () -> Unit, onOpenSettings: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQuery,
-            placeholder = { Text(stringResource(R.string.library_search)) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { onQuery("") }) {
-                        Icon(Icons.Filled.Clear, stringResource(R.string.library_search_clear))
-                    }
-                }
-            },
-            singleLine = true,
-            shape = CircleShape,
-            modifier = Modifier.weight(1f),
-        )
-        IconButton(onClick = onRefresh) {
-            Icon(Icons.Filled.Refresh, stringResource(R.string.library_sync))
-        }
-        IconButton(onClick = onOpenSettings) {
-            Icon(Icons.Filled.Settings, stringResource(R.string.settings_title))
-        }
-    }
 }
 
 @Composable
@@ -251,6 +255,19 @@ private fun OfflineNotice() {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
     }
+}
+
+/** A slim line over the grid: safe mode hid some of the list. */
+@Composable
+private fun HiddenNotice(hidden: Int) {
+    Text(
+        pluralStringResource(R.plurals.display_hidden_by_safe_mode, hidden, hidden),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    )
 }
 
 /** A message in the middle, scrollable so that pulling down still syncs. */
@@ -295,76 +312,6 @@ private fun PackList(packs: List<Pack>, onOpen: (Pack) -> Unit) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ItemGrid(
-    items: List<Item>,
-    library: StickpileLibraryInterface,
-    preparing: String?,
-    onShare: (Item) -> Unit,
-    onLike: (Item) -> Unit,
-) {
-    val haptics = LocalHapticFeedback.current
-    val shareLabel = stringResource(R.string.library_share)
-    val likeLabel = stringResource(R.string.library_like)
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(96.dp),
-        contentPadding = PaddingValues(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        // Keys must be unique: an item listed twice is drawn once.
-        items(items.distinctBy { it.id }, key = { it.id }) { item ->
-            Box(
-                Modifier
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .combinedClickable(
-                        onClickLabel = shareLabel,
-                        onLongClickLabel = likeLabel,
-                        onLongClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onLike(item)
-                        },
-                        onClick = { onShare(item) },
-                    )
-                    .semantics { contentDescription = item.name },
-                contentAlignment = Alignment.Center,
-            ) {
-                Thumbnail(library, item.id)
-                if (item.kind == MediaKind.VIDEO) {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(20.dp),
-                    )
-                }
-                if (preparing == item.id) CircularProgressIndicator(Modifier.size(32.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun Thumbnail(library: StickpileLibraryInterface, itemId: String) {
-    val resources = LocalResources.current
-    val drawable: Drawable? by produceState(Thumbnails.cached(itemId), itemId) {
-        if (value == null) value = Thumbnails.load(library, itemId, resources)
-    }
-    drawable?.let { d ->
-        val painter = remember(d) { DrawablePainter(d) }
-        Image(
-            painter = painter,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize().padding(6.dp),
-        )
-    }
-}
-
 /**
  * The system share sheet for a prepared file, readable through the
  * provider; false when it cannot open (no share sheet, refused, ...), which
@@ -381,3 +328,8 @@ private fun share(context: Context, title: String, prepared: Prepared): Boolean 
     }
     context.startActivity(Intent.createChooser(send, title))
 }.onFailure { e -> Log.w(FailureLog.TAG, "no share sheet: ${e.javaClass.simpleName}") }.isSuccess
+
+/** An item's web page in the browser; false when no app opens it. */
+private fun openPage(context: Context, url: String): Boolean = catching {
+    context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+}.onFailure { e -> Log.w(FailureLog.TAG, "no browser: ${e.javaClass.simpleName}") }.isSuccess

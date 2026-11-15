@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ui
 
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.ui.common.Message
@@ -12,6 +13,7 @@ import io.github.dolfost.stickpile.ui.library.LibraryViewModel
 import io.github.dolfost.stickpile.ui.library.requestFor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -32,7 +34,7 @@ class LibraryViewModelTest {
     val main = MainDispatcherRule()
 
     private val library = FakeLibrary()
-    private val vm by lazy { LibraryViewModel(library, io = main.dispatcher, log = { _, _ -> }) }
+    private val vm by lazy { LibraryViewModel(library, MutableStateFlow(Display()), io = main.dispatcher, log = { _, _ -> }) }
 
     private fun TestScope.started(): LibraryViewModel {
         vm.state // create it
@@ -72,10 +74,10 @@ class LibraryViewModelTest {
         vm.setQuery("cat")
         advanceTimeBy(LibraryViewModel.SEARCH_DELAY_MS - 1)
         runCurrent()
-        assertEquals(emptyList<String>(), library.calls)
+        assertEquals(emptyList<String>(), library.calls.filter { it.startsWith("search") })
         advanceTimeBy(2)
         runCurrent()
-        assertEquals(listOf("search cat GENERIC"), library.calls)
+        assertEquals(listOf("search cat GENERIC"), library.calls.filter { it.startsWith("search") })
         assertEquals(LibraryContent.Items(listOf(item("c")), offline = true), vm.state.content)
 
         // Clearing the query goes back to the tab.

@@ -91,6 +91,7 @@
 
     <string name="library_search">Пошук стікерів</string>
     <string name="library_search_clear">Очистити пошук</string>
+    <string name="library_more">Інші дії</string>
     <string name="library_sync">Синхронізувати</string>
     <string name="library_tab_recent">Нещодавні</string>
     <string name="library_tab_liked">Вподобані</string>
@@ -98,8 +99,9 @@
     <string name="library_tab_most_used">Найчастіші</string>
     <string name="library_offline">Офлайн: показано те, що збережено на цьому телефоні.</string>
     <string name="library_empty_search">Нічого не знайдено.</string>
+    <string name="library_empty_search_safe">У безпечному режимі нічого не знайдено.</string>
     <string name="library_empty_recent">Тут з\'являться стікери, які ви надсилаєте з цього телефона.</string>
-    <string name="library_empty_liked">Ще нічого не вподобано. Натисніть і утримуйте стікер, щоб його вподобати.</string>
+    <string name="library_empty_liked">Ще нічого не вподобано. Натисніть і утримуйте стікер, щоб побачити подробиці й вподобати його.</string>
     <string name="library_empty_most_used">Ще нічого не використано.</string>
     <string name="library_empty_packs">Наборів ще немає.</string>
     <string name="library_empty_pack">Цей набір порожній.</string>
@@ -112,7 +114,13 @@
         <item quantity="other">%d елемента</item>
     </plurals>
     <string name="library_share">Поділитися</string>
-    <string name="library_like">Вподобати або прибрати вподобання</string>
+    <string name="library_details_open">Показати подробиці</string>
+    <string name="library_details_keywords">Ключові слова</string>
+    <string name="library_like">Вподобати</string>
+    <string name="library_unlike">Скасувати вподобання</string>
+    <string name="library_open_in_browser">Відкрити в браузері</string>
+    <string name="library_open_failed">На цьому телефоні немає застосунку, який відкриє посилання.</string>
+    <string name="library_syntax_tap">Торкніться прикладу, щоб його шукати.</string>
     <string name="library_liked">Вподобано: %1$s</string>
     <string name="library_unliked">Більше не вподобано: %1$s</string>
     <string name="library_share_title">Поділитися стікером</string>

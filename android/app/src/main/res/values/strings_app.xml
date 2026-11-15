@@ -117,6 +117,8 @@
     <!-- The library screen. -->
     <string name="library_search">Search stickers</string>
     <string name="library_search_clear">Clear the search</string>
+    <!-- The menu button next to the search field (content description). -->
+    <string name="library_more">More options</string>
     <string name="library_sync">Sync now</string>
     <string name="library_tab_recent">Recent</string>
     <string name="library_tab_liked">Liked</string>
@@ -124,8 +126,9 @@
     <string name="library_tab_most_used">Most used</string>
     <string name="library_offline">Offline: showing what is saved on this phone.</string>
     <string name="library_empty_search">Nothing found.</string>
+    <string name="library_empty_search_safe">Nothing found with safe mode on.</string>
     <string name="library_empty_recent">The stickers you send from this phone show up here.</string>
-    <string name="library_empty_liked">Nothing liked yet. Press and hold a sticker to like it.</string>
+    <string name="library_empty_liked">Nothing liked yet. Press and hold a sticker to see its details and like it.</string>
     <string name="library_empty_most_used">Nothing used yet.</string>
     <string name="library_empty_packs">No packs yet.</string>
     <string name="library_empty_pack">This pack is empty.</string>
@@ -136,9 +139,17 @@
         <item quantity="one">%d item</item>
         <item quantity="other">%d items</item>
     </plurals>
-    <!-- What a tap and a long press on an item do (for accessibility services). -->
+    <!-- What a tap and a long press on an item do (for accessibility services); library_share is also a button of the details. -->
     <string name="library_share">Share</string>
-    <string name="library_like">Like or unlike</string>
+    <string name="library_details_open">Show the details</string>
+    <!-- The details of an item (a long press): a heading, and the buttons. -->
+    <string name="library_details_keywords">Keywords</string>
+    <string name="library_like">Like</string>
+    <string name="library_unlike">Unlike</string>
+    <string name="library_open_in_browser">Open in browser</string>
+    <string name="library_open_failed">No app on this phone can open the link.</string>
+    <!-- Under the title of the search syntax sheet. -->
+    <string name="library_syntax_tap">Tap an example to search for it.</string>
     <!-- %1$s: the item's name. -->
     <string name="library_liked">Liked %1$s</string>
     <string name="library_unliked">No longer liked: %1$s</string>

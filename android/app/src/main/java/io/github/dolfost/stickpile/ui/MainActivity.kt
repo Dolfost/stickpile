@@ -169,10 +169,14 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
         MainRoute.KeyboardSetup -> KeyboardSetupScreen(onDone = vm::onKeyboardSetupDone, onBack = null, signedInAs = vm.signedInAs)
         MainRoute.Library -> {
             if (library == null) return Loading()
-            val screen = viewModel(key = "library-${vm.session}") { LibraryViewModel(library) }
+            val app = StickpileApp.from(LocalContext.current)
+            val screen = viewModel(key = "library-${vm.session}") {
+                LibraryViewModel(library, app.display.state, refreshLikes = app::refreshLikes)
+            }
             LibraryScreen(
                 vm = screen,
                 library = library,
+                settings = app.display,
                 onOpenSettings = onOpenSettings,
                 onSignInAgain = vm::signInAnew,
             )
