@@ -1,8 +1,9 @@
 ## F-Droid
 
-> Draft for docs/android.md. Nothing has been submitted. Every F-Droid rule
-> below was read on 2026-11-15 at the URL given; quotes are verbatim except
-> that typographic quotes and dashes are written in ASCII.
+> The F-Droid notes for the Android app (docs/android.md has a summary).
+> Nothing has been submitted. Every F-Droid rule below was read on
+> 2026-11-15 at the URL given; quotes are verbatim except that typographic
+> quotes and dashes are written in ASCII.
 
 The app is meant for F-Droid's main repository. The draft build recipe is
 [`android/fdroid/io.github.dolfost.stickpile.yml`](io.github.dolfost.stickpile.yml),

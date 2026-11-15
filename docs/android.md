@@ -1,9 +1,9 @@
 # Android app
 
-> Work in progress on the `android` branch. This page starts with the two
-> contracts the app is built against; the user documentation (install,
-> onboarding, the keyboard, sharing, settings, F-Droid) follows when the app
-> exists.
+> **Status:** built and tested on the host (Rust tests, JVM unit tests,
+> lint), not yet run on a phone or an emulator. What the keyboard inserts
+> into each chat app is still to be tried by hand: see
+> [android-input.md](android-input.md).
 
 On Android stickpile is not an app you open to copy something. A keyboard
 (input method) can insert a picture straight into the focused text field
@@ -19,6 +19,82 @@ it accepts. So the app is:
 Layout: `crates/stickpile-android` (the Rust library, behind UniFFI),
 `android/` (the Gradle project, one module `app`), `nix/android-shell.nix`
 (`nix develop .#android`).
+
+## Install
+
+It needs Android 8.0 (API 26) or later and a stickpile server
+([deployment.md](deployment.md)); there is no public server.
+
+- **From a release:** each GitHub release has
+  `stickpile-vX.Y.Z-android-unsigned.apk`. Android installs only signed
+  APKs: sign it first ([Release signing](#release-signing)) or build it
+  ([Build from source](#build-from-source)).
+- **F-Droid:** planned, not submitted yet ([F-Droid](#f-droid)).
+
+The app keeps its files in its private storage, outside backups and device
+transfer: the API token never leaves the phone.
+
+## Sign in
+
+1. In the web UI, open Settings, "Add a device". It shows a QR code and a
+   code like `7KQ2-M9XA-4FTR`, valid for five minutes and once.
+2. In the app, "Scan a QR code" (the camera permission is asked for then),
+   or type the server address and the code. Scanning the code with the
+   phone's camera app opens a `stickpile://pair` link, which opens
+   stickpile and asks before it signs in.
+3. Without the web UI at hand: type the server address, then "Sign in with
+   Tailscale" (on a tailnet, no password) or a username and password (and
+   a TOTP code if the account has one).
+
+After signing in, the app walks you through turning on the keyboard.
+
+## The picker keyboard
+
+Turn it on once: the app's walk-through opens the system's keyboard
+settings (Settings, System, Keyboard, On-screen keyboard, Manage keyboards
+on most phones; the path differs by vendor), where "stickpile stickers" is
+switched on. Then switch to it from any keyboard with the keyboard switcher
+(the keyboard icon in the navigation bar, or the globe key).
+
+Using it:
+
+- Type a few words with your usual keyboard, then switch: stickpile searches
+  for what is in the field (one line, at most 60 characters). Or browse the
+  tabs Recent, Liked and Sets; the row of emojis narrows the grid.
+- Tap a sticker: it is inserted and your keyboard comes back. If the field
+  does not take pictures, the chat app's share screen opens with the file;
+  failing that, it is copied to the clipboard (the keyboard says which).
+- Long press: like or unlike, send as a sticker (Telegram), share.
+- The keyboard button at the top goes back to your keyboard at any time.
+
+Its settings (in the app's settings): search what is typed, delete what was
+typed when a result from it is inserted, and stay open after inserting.
+
+### Other keyboards
+
+Another keyboard (such as a patched Unexpected Keyboard) can show your
+stickers through the app's content provider ([Provider contract](#provider-contract)).
+It must be allowed first: the first time it asks, it is refused and appears
+under Settings, "Keyboards that may read your stickers", where you allow
+it.
+
+## Sharing to stickpile
+
+Share a picture or a video from a gallery or any app to "stickpile", pick
+one of your sets, change the name, keywords and emojis if you like, and
+upload. Several files upload one after another with their progress; a file
+that fails says why and can be retried.
+
+## Settings
+
+Account (sign out), sync (sync now, the last sync, uses waiting to be
+sent), the offline cache (its size, clear it), the keyboard's switches and
+walk-through, the keyboards allowed to read stickers, and licences.
+
+The app syncs in the background every 15 minutes when there is a network
+(WorkManager), and when the app or the keyboard opens. Offline, search, the
+lists and the thumbnails come from the cache, and stickers inserted before
+can be inserted again.
 
 ## Build from source
 
@@ -50,6 +126,45 @@ and targetSdk 37, minSdk 26, NDK 28.2.13676358. The dev shell provides the
 SDK, the NDK, cargo-ndk and Rust with the three Android targets. On NixOS the `aapt2` that the plugin
 downloads cannot run, so the shell points Gradle at the SDK's own through
 `GRADLE_OPTS`; nothing machine-specific is committed.
+
+## Release signing
+
+The release workflow builds the APK unsigned: no signing key is in the
+repository or in CI. To install it, the owner signs it with their own key
+(`apksigner` and `zipalign` are in the SDK's build tools, e.g.
+`$ANDROID_HOME/build-tools/36.0.0/`):
+
+```sh
+zipalign -c -v 4 stickpile-vX.Y.Z-android-unsigned.apk      # aligned already?
+apksigner sign --ks stickpile-release.jks --out stickpile-vX.Y.Z-android.apk \
+    stickpile-vX.Y.Z-android-unsigned.apk
+apksigner verify --print-certs stickpile-vX.Y.Z-android.apk
+```
+
+Every update must be signed with the same key, or Android refuses to
+install it over the old one. An APK from F-Droid is signed with F-Droid's
+key unless the build is reproducible (below), so the two cannot update
+each other.
+
+## F-Droid
+
+The app is meant for F-Droid's main repository. The draft recipe is
+[`android/fdroid/io.github.dolfost.stickpile.yml`](../android/fdroid/io.github.dolfost.stickpile.yml),
+the listing texts are in `fastlane/metadata/android/` (English and
+Ukrainian), and the compliance checklist with its evidence, the submission
+steps and the notes on reproducible builds are in
+[`android/fdroid/README.md`](../android/fdroid/README.md). In short:
+
+- Licences, dependencies (Google's Maven and Maven Central only, JNA as it
+  is, as other accepted apps do) and the build (Rust from rustup, cargo-ndk,
+  the pinned NDK, JDK 21) fit the inclusion policy; no anti-feature is
+  expected (the app talks only to the server you configure, and the server
+  is free software).
+- F-Droid wants about three months of development before a new app;
+  this one started in November 2026.
+- Before the first submission the owner decides how releases are signed:
+  by F-Droid's key, or reproducibly with the owner's key. This cannot be
+  changed later.
 
 ## Permissions
 
