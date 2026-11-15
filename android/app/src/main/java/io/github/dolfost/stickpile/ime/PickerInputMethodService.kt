@@ -25,12 +25,14 @@ import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.ui.MainActivity
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 
 /**
@@ -42,10 +44,15 @@ import kotlinx.coroutines.withContext
  *
  * It uses the app's one library in process ([ImeLibrary], never the
  * provider) and never waits for it on the main thread: everything runs in
- * [scope], which lives as long as the service.
+ * [scope], which lives as long as the service. An exception nobody caught
+ * there (a Rust panic arrives as UniFFI's `InternalException`) is logged
+ * instead of taking down the process, which also hosts the app and the
+ * provider.
  */
 class PickerInputMethodService : InputMethodService() {
-    private val scope: CoroutineScope = MainScope()
+    private val scope: CoroutineScope = MainScope() + CoroutineExceptionHandler { _, e ->
+        Log.e(TAG, "picker work failed: ${e.javaClass.simpleName}")
+    }
     private val app: StickpileApp get() = StickpileApp.from(this)
     private val library by lazy { ImeLibrary(app) }
     private val settings by lazy { ImeSettings(this) }
