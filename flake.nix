@@ -163,6 +163,12 @@
           inherit nixpkgs rust-overlay;
           system = pkgs.stdenv.hostPlatform.system;
         };
+        # The same with the emulator and a system image (docs/android.md).
+        android-emulator = import ./nix/android-shell.nix {
+          inherit nixpkgs rust-overlay;
+          system = pkgs.stdenv.hostPlatform.system;
+          emulator = true;
+        };
       });
     };
 }

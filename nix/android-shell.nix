@@ -5,10 +5,15 @@
 #
 # The Android SDK is unfree in nixpkgs: its licence is accepted here, for
 # this shell only.
+#
+# With `emulator = true` (`nix develop .#android-emulator`) it also has the
+# Android emulator and an AOSP x86_64 system image (no Google services), to
+# run the app on a virtual device; it needs /dev/kvm.
 {
   nixpkgs,
   rust-overlay,
   system,
+  emulator ? false,
 }:
 let
   pkgs = import nixpkgs {
@@ -26,15 +31,30 @@ let
   buildToolsVersion = "36.0.0";
   ndkVersion = "28.2.13676358";
 
-  android = pkgs.androidenv.composeAndroidPackages {
-    platformVersions = [ platformVersion ];
-    buildToolsVersions = [ buildToolsVersion ];
-    includeNDK = true;
-    ndkVersions = [ ndkVersion ];
-    includeCmake = false;
-    includeEmulator = false;
-    includeSystemImages = false;
-  };
+  # The emulator's system image: the newest AOSP ("default") one.
+  imageVersion = "36";
+
+  android = pkgs.androidenv.composeAndroidPackages (
+    {
+      platformVersions = [ platformVersion ];
+      buildToolsVersions = [ buildToolsVersion ];
+      includeNDK = true;
+      ndkVersions = [ ndkVersion ];
+      includeCmake = false;
+      includeEmulator = false;
+      includeSystemImages = false;
+    }
+    // pkgs.lib.optionalAttrs emulator {
+      platformVersions = [
+        platformVersion
+        imageVersion
+      ];
+      includeEmulator = true;
+      includeSystemImages = true;
+      systemImageTypes = [ "default" ];
+      abiVersions = [ "x86_64" ];
+    }
+  );
   sdkRoot = "${android.androidsdk}/libexec/android-sdk";
 
   # The same Rust release as nixpkgs' rustc, with the Android standard libraries.
