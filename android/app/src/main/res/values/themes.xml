@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Window theme of the Compose activities (light or dark with the
+      system); their colours come from ui.theme.StickpileTheme.
+    -->
+    <style name="Theme.Stickpile" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <!-- The share target (share.ShareActivity); for now the same. -->
+    <style name="Theme.Stickpile.Share" />
+
+    <!--
+      Classic Views with Material Components widgets: the input method
+      (ime.PickerInputMethodService) and any other UI not in Compose.
+    -->
+    <style name="Theme.Stickpile.Views" parent="Theme.Material3.DayNight.NoActionBar" />
+</resources>

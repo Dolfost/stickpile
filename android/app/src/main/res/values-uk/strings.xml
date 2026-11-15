@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared texts, in Ukrainian (values/strings.xml). -->
+<resources>
+    <string name="ime_name">Стікери stickpile</string>
+    <string name="ime_subtype_label">Стікери</string>
+</resources>

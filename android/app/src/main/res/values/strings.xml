@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared texts. Each later part of the app keeps its own texts in its own
+  file: strings_app.xml (ui), strings_ime.xml (ime), strings_share.xml
+  (share), with the Ukrainian ones in values-uk/.
+-->
 <resources>
-    <string name="app_name">stickpile</string>
+    <string name="app_name" translatable="false">stickpile</string>
+    <!-- The keyboard's name in the system's keyboard lists. -->
+    <string name="ime_name">stickpile stickers</string>
+    <!-- The keyboard's one subtype, in the system's keyboard switcher. -->
+    <string name="ime_subtype_label">Stickers</string>
 </resources>

@@ -1,18 +1,102 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every component of the app (docs/android.md). The libraries add their own
+  entries to the merged manifest: WorkManager's services, receivers and
+  startup provider, and zxing-android-embedded's CaptureActivity.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application
-        android:allowBackup="false"
-        android:label="@string/app_name"
-        android:supportsRtl="true">
+    <!-- The server the user configured. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Pairing by QR code; requested at run time on the pairing screen only. -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <!--
+      No backup and no device transfer: the app's data includes the API
+      token, which never leaves the device. allowBackup covers cloud backup,
+      dataExtractionRules (API 31+) and fullBackupContent (older) exclude
+      everything from both.
+    -->
+    <application
+        android:name=".StickpileApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Stickpile">
+
+        <!-- Onboarding, then the library. -->
         <activity
-            android:name=".MainActivity"
-            android:exported="true">
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          The app's settings, and the input method's settings activity
+          (res/xml/method.xml), which the system settings open.
+        -->
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
+        <!-- "Share -> stickpile": upload pictures and videos into a set. -->
+        <activity
+            android:name=".share.ShareActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Stickpile.Share"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- The picker keyboard: only the system may bind to it. -->
+        <service
+            android:name=".ime.PickerInputMethodService"
+            android:exported="true"
+            android:label="@string/ime_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <!--
+          Stickers for keyboards (docs/android.md, "Provider contract").
+          Exported without a permission on purpose: access is checked in
+          code at every entry point, and URI grants are not used.
+        -->
+        <provider
+            android:name=".provider.StickerProvider"
+            android:authorities="io.github.dolfost.stickpile.stickers"
+            android:exported="true"
+            android:grantUriPermissions="false" />
     </application>
 </manifest>
