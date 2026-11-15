@@ -216,7 +216,11 @@ class ShareViewModel(application: Application) : AndroidViewModel(application) {
                 fileName = FileNames.forCopy(s.displayName, s.mimeType),
                 isVideo = s.isVideo,
                 name = FileNames.defaultItemName(s.displayName),
-                status = if (s.notMedia) FileStatus.Unreadable(ReadProblem.NOT_MEDIA) else FileStatus.Copying,
+                status = when {
+                    s.notMedia -> FileStatus.Unreadable(ReadProblem.NOT_MEDIA)
+                    s.tooLarge -> FileStatus.Unreadable(ReadProblem.TOO_LARGE)
+                    else -> FileStatus.Copying
+                },
             )
         }
         state = state.copy(batch = ShareBatch(files))

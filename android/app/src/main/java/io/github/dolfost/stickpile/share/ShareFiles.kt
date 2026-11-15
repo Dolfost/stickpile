@@ -17,12 +17,16 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 
-/** One stream of a share: its URI and what its provider says about it. */
-data class SharedStream(val uri: Uri, val displayName: String?, val mimeType: String?) {
+/**
+ * One stream of a share: its URI and what its provider says about it
+ * ([size]: `OpenableColumns.SIZE` in bytes, null when it gives none).
+ */
+data class SharedStream(val uri: Uri, val displayName: String?, val mimeType: String?, val size: Long? = null) {
     val isVideo: Boolean get() = mimeType?.startsWith("video/") == true
+
+    /** Its provider says it is larger than the share target copies ([ShareLimits]). */
+    val tooLarge: Boolean get() = ShareLimits.tooLarge(size)
 
     /**
      * Its provider types it as something else than a picture or a video
@@ -74,19 +78,25 @@ object ShareFiles {
 
     /**
      * What the provider says about [uri]: its display name
-     * (`OpenableColumns.DISPLAY_NAME`) and type, with the intent's type
-     * when the provider gives none or just "bytes".
+     * (`OpenableColumns.DISPLAY_NAME`), size (`OpenableColumns.SIZE`) and
+     * type, with the intent's type when the provider gives none or just
+     * "bytes".
      */
     fun describe(context: Context, uri: Uri, intentType: String?): SharedStream {
         val resolver = context.contentResolver
-        val name = try {
-            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                val column = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (column >= 0 && c.moveToFirst() && !c.isNull(column)) c.getString(column) else null
-            }
+        val columns = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+        val (name, size) = try {
+            resolver.query(uri, columns, null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return@use null
+                val nameColumn = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeColumn = c.getColumnIndex(OpenableColumns.SIZE)
+                val name = if (nameColumn >= 0 && !c.isNull(nameColumn)) c.getString(nameColumn) else null
+                val size = if (sizeColumn >= 0 && !c.isNull(sizeColumn)) c.getLong(sizeColumn) else null
+                name to size
+            } ?: (null to null)
         } catch (e: Exception) {
-            Log.w(TAG, "no display name for a shared file: ${e.javaClass.simpleName}")
-            null
+            Log.w(TAG, "no name or size for a shared file: ${e.javaClass.simpleName}")
+            null to null
         }
         val provided = try {
             resolver.getType(uri)
@@ -96,7 +106,7 @@ object ShareFiles {
         val type = provided?.takeUnless { it == SharedStream.OCTET_STREAM }
             ?: intentType?.takeUnless { it.endsWith("/*") }
             ?: provided
-        return SharedStream(uri, name?.takeIf { it.isNotBlank() }, type)
+        return SharedStream(uri, name?.takeIf { it.isNotBlank() }, type, size?.takeIf { it >= 0 })
     }
 
     /** Start a session: its copies are safe from [deleteStale] until [close]. */
@@ -117,8 +127,9 @@ object ShareFiles {
     /**
      * Copy [uri] to `<session>/<id>/<fileName>` with the read access the
      * sender granted, and return the copy. Throws [CopyFailed] with the
-     * reason; a partial copy is deleted. Stops between blocks when the
-     * calling coroutine is cancelled.
+     * reason, [ReadProblem.TOO_LARGE] as soon as the stream passes
+     * [ShareLimits.MAX_FILE_BYTES]; a partial copy is deleted. Stops
+     * between blocks when the calling coroutine is cancelled.
      */
     suspend fun copy(context: Context, session: String, id: Int, uri: Uri, fileName: String): File {
         val dir = File(File(root(context), session), id.toString())
@@ -127,20 +138,13 @@ object ShareFiles {
             if (!dir.isDirectory && !dir.mkdirs()) throw IOException("cannot make $dir")
             val input = context.contentResolver.openInputStream(uri) ?: throw FileNotFoundException("no stream")
             input.use { from ->
-                target.outputStream().use { to ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val n = from.read(buffer)
-                        if (n < 0) break
-                        to.write(buffer, 0, n)
-                    }
-                }
+                target.outputStream().use { to -> ShareLimits.copy(from, to) }
             }
             return target
         } catch (e: Exception) {
             dir.deleteRecursively()
             val problem = when (e) {
+                is TooLargeException -> ReadProblem.TOO_LARGE
                 is SecurityException -> ReadProblem.NO_ACCESS
                 is FileNotFoundException -> ReadProblem.GONE
                 is CancellationException -> throw e

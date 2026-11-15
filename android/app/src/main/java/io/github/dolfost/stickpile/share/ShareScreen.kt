@@ -478,5 +478,6 @@ private fun readProblemText(problem: ReadProblem): String = when (problem) {
     ReadProblem.NOT_MEDIA -> stringResource(R.string.share_unreadable_not_media)
     ReadProblem.NO_ACCESS -> stringResource(R.string.share_unreadable_no_access)
     ReadProblem.GONE -> stringResource(R.string.share_unreadable_gone)
+    ReadProblem.TOO_LARGE -> stringResource(R.string.share_unreadable_too_large)
     ReadProblem.FAILED -> stringResource(R.string.share_unreadable_failed)
 }

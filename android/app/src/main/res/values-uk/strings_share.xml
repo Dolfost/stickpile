@@ -76,5 +76,6 @@
     <string name="share_unreadable_not_media">Це не зображення і не відео; файл пропущено.</string>
     <string name="share_unreadable_no_access">Застосунок, який поділився цим файлом, не дозволив stickpile його прочитати.</string>
     <string name="share_unreadable_gone">Не вдалося відкрити цей файл. Можливо, його перемістили або видалили.</string>
+    <string name="share_unreadable_too_large">Файл більший за 1 ГБ; його пропущено.</string>
     <string name="share_unreadable_failed">Не вдалося скопіювати цей файл. Можливо, у пам\'яті немає місця.</string>
 </resources>

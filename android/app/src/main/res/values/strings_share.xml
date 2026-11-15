@@ -81,5 +81,7 @@
     <string name="share_unreadable_not_media">Not a picture or a video; left out.</string>
     <string name="share_unreadable_no_access">The app that shared this file did not let stickpile read it.</string>
     <string name="share_unreadable_gone">Could not open this file. It may have been moved or deleted.</string>
+    <!-- The limit is ShareLimits.MAX_FILE_BYTES. -->
+    <string name="share_unreadable_too_large">Larger than 1 GB; left out.</string>
     <string name="share_unreadable_failed">Could not copy this file. The storage may be full.</string>
 </resources>

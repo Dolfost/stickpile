@@ -16,6 +16,9 @@ enum class ReadProblem {
     /** It is not there any more. */
     GONE,
 
+    /** It is larger than the share target copies ([ShareLimits.MAX_FILE_BYTES]). */
+    TOO_LARGE,
+
     /** Reading or copying it failed otherwise (storage full, say). */
     FAILED,
 }
