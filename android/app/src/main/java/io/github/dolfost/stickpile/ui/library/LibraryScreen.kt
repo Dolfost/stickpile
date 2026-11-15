@@ -1,6 +1,5 @@
 package io.github.dolfost.stickpile.ui.library
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -88,6 +87,7 @@ import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.ui.common.FailureLog
 import io.github.dolfost.stickpile.ui.common.Loading
+import io.github.dolfost.stickpile.ui.common.catching
 import io.github.dolfost.stickpile.ui.common.text
 import kotlinx.coroutines.launch
 
@@ -112,7 +112,10 @@ fun LibraryScreen(
     LaunchedEffect(vm) {
         vm.eventFlow.collect { event ->
             when (event) {
-                is LibraryEvent.Share -> share(context, resources.getString(R.string.library_share_title), event.prepared)
+                is LibraryEvent.Share ->
+                    if (!share(context, resources.getString(R.string.library_share_title), event.prepared)) {
+                        launch { snackbar.showSnackbar(resources.getString(R.string.library_share_failed)) }
+                    }
                 is LibraryEvent.Notice -> launch { snackbar.showSnackbar(event.message.text(resources)) }
             }
         }
@@ -362,8 +365,13 @@ private fun Thumbnail(library: StickpileLibraryInterface, itemId: String) {
     }
 }
 
-/** The system share sheet for a prepared file, readable through the provider. */
-private fun share(context: Context, title: String, prepared: Prepared) {
+/**
+ * The system share sheet for a prepared file, readable through the
+ * provider; false when it cannot open (no share sheet, refused, ...), which
+ * the screen says. Only the failure's class is logged: the intent holds
+ * the URI, and the URI the token.
+ */
+private fun share(context: Context, title: String, prepared: Prepared): Boolean = catching {
     val uri = PreparedFiles.uriFor(context, prepared)
     val send = Intent(Intent.ACTION_SEND).apply {
         type = prepared.mimeType
@@ -371,9 +379,5 @@ private fun share(context: Context, title: String, prepared: Prepared) {
         clipData = ClipData(prepared.displayName, arrayOf(prepared.mimeType), ClipData.Item(uri))
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    try {
-        context.startActivity(Intent.createChooser(send, title))
-    } catch (e: ActivityNotFoundException) {
-        Log.w(FailureLog.TAG, "no share sheet: $e")
-    }
-}
+    context.startActivity(Intent.createChooser(send, title))
+}.onFailure { e -> Log.w(FailureLog.TAG, "no share sheet: ${e.javaClass.simpleName}") }.isSuccess

@@ -143,6 +143,7 @@
     <string name="library_liked">Liked %1$s</string>
     <string name="library_unliked">No longer liked: %1$s</string>
     <string name="library_share_title">Share a sticker</string>
+    <string name="library_share_failed">The share screen cannot be opened on this phone.</string>
     <string name="library_sign_in_again">Sign in again</string>
 
     <!-- The settings. -->

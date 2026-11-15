@@ -116,6 +116,7 @@
     <string name="library_liked">Вподобано: %1$s</string>
     <string name="library_unliked">Більше не вподобано: %1$s</string>
     <string name="library_share_title">Поділитися стікером</string>
+    <string name="library_share_failed">На цьому телефоні не вдається відкрити вибір застосунку, щоб поділитися.</string>
     <string name="library_sign_in_again">Увійти знову</string>
 
     <string name="settings_title">Налаштування</string>
