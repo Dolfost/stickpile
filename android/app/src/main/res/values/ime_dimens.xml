@@ -3,6 +3,9 @@
 <resources>
     <!-- The grid with its message and panels, while the search keys are hidden. -->
     <dimen name="ime_body_height">240dp</dimen>
+    <!-- A row of chips (offers, emoji filters): a 32dp chip with room above and below. -->
+    <dimen name="ime_chip_row_height">44dp</dimen>
+    <dimen name="ime_chip_row_padding">6dp</dimen>
     <!-- A row of the search keys. -->
     <dimen name="ime_key_row_height">42dp</dimen>
     <!-- The padding of the grid on each side; PickerView counts it to size the cells. -->
