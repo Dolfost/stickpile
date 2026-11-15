@@ -22,6 +22,7 @@ pub mod cache;
 pub mod client;
 pub mod clipboard;
 pub mod config;
+pub mod insert;
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
 pub mod session;
@@ -35,6 +36,7 @@ mod tests;
 
 pub use client::ApiClient;
 pub use config::ClientConfig;
+pub use insert::{target_for_package, variant_for, InsertChoice};
 pub use session::{PreparedCopy, SearchOutcome, Session};
 pub use sync_policy::SyncPolicy;
 
