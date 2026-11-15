@@ -46,7 +46,7 @@ async fn set_server_url_saves_it_and_reopens() {
     let (server, _) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
     let lib = open(dir.path(), &dead_url());
-    assert_eq!(kind(lib.account().await), LibraryErrorKind::Unreachable);
+    assert_eq!(lib.account().await.unwrap(), None, "a fresh install is signed out");
 
     lib.set_server_url(format!(" {}/ ", server.url)).await.unwrap();
     assert_eq!(lib.server_url(), server.url);
@@ -235,9 +235,14 @@ async fn account_signed_in_signed_out_and_offline() {
     lib.sync_now().await.unwrap();
     server.stop();
     assert_eq!(lib.account().await.unwrap(), Some(alice));
-    // Nothing cached: unreachable.
+    // Nothing cached and no token: signed out, even offline.
     let other = tempfile::tempdir().unwrap();
     let lib = open(other.path(), &server.url);
+    assert_eq!(lib.account().await.unwrap(), None);
+    // A token but nothing cached: whether it still works is unknown.
+    let third = tempfile::tempdir().unwrap();
+    stickpile_core::token::write_token(&token_path(third.path()), "made-up-token").unwrap();
+    let lib = open(third.path(), &server.url);
     assert_eq!(kind(lib.account().await), LibraryErrorKind::Unreachable);
 
     // A revoked token: signed out.

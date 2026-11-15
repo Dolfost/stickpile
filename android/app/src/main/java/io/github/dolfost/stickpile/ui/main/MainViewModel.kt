@@ -41,18 +41,18 @@ sealed interface MainRoute {
 
 /**
  * Where to go once `account()` answered: the library when someone is
- * signed in, else onboarding. `Unreachable` here means the server cannot be
- * reached and no account was ever cached on this device (a new install
- * still points at the default address), so there is nothing to show but
- * onboarding; `NotSignedIn` likewise. Other failures get a screen of their
- * own with a retry.
+ * signed in, else onboarding (a new install answers null, also offline).
+ * `NotSignedIn` goes to onboarding too. `Unreachable` means a token is
+ * stored but the server cannot be reached and no account was cached: the
+ * user is probably signed in, so it gets the screen with a retry, like the
+ * other failures.
  */
 fun routeAfterAccountCheck(result: Result<Account?>): MainRoute = result.fold(
     onSuccess = { account -> if (account != null) MainRoute.Library else MainRoute.Onboarding() },
     onFailure = { e ->
         val failure = Failure.of(e)
         when (failure.kind) {
-            LibraryErrorKind.NOT_SIGNED_IN, LibraryErrorKind.UNREACHABLE -> MainRoute.Onboarding()
+            LibraryErrorKind.NOT_SIGNED_IN -> MainRoute.Onboarding()
             else -> MainRoute.AccountUnknown(failure)
         }
     },

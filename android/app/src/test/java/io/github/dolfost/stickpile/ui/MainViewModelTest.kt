@@ -30,8 +30,11 @@ class MainViewModelTest {
     fun theAccountCheckDecidesTheFirstScreen() {
         assertEquals(MainRoute.Library, routeAfterAccountCheck(Result.success(alice)))
         assertEquals(MainRoute.Onboarding(), routeAfterAccountCheck(Result.success(null)))
-        // A new install still points at the default address: unreachable, nothing cached.
-        assertEquals(MainRoute.Onboarding(), routeAfterAccountCheck(Result.failure(unreachable())))
+        // A token, but the server is down and nothing was cached: retry, not onboarding.
+        assertEquals(
+            MainRoute.AccountUnknown(Failure(LibraryErrorKind.UNREACHABLE)),
+            routeAfterAccountCheck(Result.failure(unreachable())),
+        )
         assertEquals(MainRoute.Onboarding(), routeAfterAccountCheck(Result.failure(LibraryException.NotSignedIn("d"))))
         assertEquals(
             MainRoute.AccountUnknown(Failure(LibraryErrorKind.SERVER, status = 500)),

@@ -524,8 +524,9 @@ impl StickpileLibrary {
 
     /// Who is signed in, asking the server; `None` when nobody is (no token
     /// and no tailnet identity, or the server refused the token). When the
-    /// server cannot be reached, the account the cache last saw; throws
-    /// `Unreachable` if there is none.
+    /// server cannot be reached, the account the cache last saw; with none
+    /// cached, `None` when no token is stored either (a fresh install, so
+    /// the app shows onboarding) and `Unreachable` when one is.
     pub async fn account(&self) -> Result<Option<Account>, LibraryError> {
         self.read(|inner| async move {
             let session = inner.session();
@@ -540,6 +541,9 @@ impl StickpileLibrary {
                 Err(e) if e.is_unauthorized() => Ok(None),
                 Err(e) if falls_back(&e) => match session.cache().me()? {
                     Some(user) => Ok(Some(Account::new(&user, &server_url, auth))),
+                    // No token and nothing cached: signed out, whatever the
+                    // server would say about a tailnet identity.
+                    None if !session.is_logged_in() => Ok(None),
                     None => Err(e.into()),
                 },
                 Err(e) => Err(e.into()),

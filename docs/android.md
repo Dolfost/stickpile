@@ -217,8 +217,8 @@ Behaviour the signatures do not show:
   (revoking the token on the old server when it answers; the token file is
   removed either way), so a token is never sent to another server.
 - **Account.** `account()` is null when no token is stored and when the
-  server rejects it; offline it is the cached user (`Unreachable` when
-  there is none). `display_name` is null when blank or equal to the
+  server rejects it; offline it is the cached user, else null when no
+  token is stored (a fresh install) and `Unreachable` when one is. `display_name` is null when blank or equal to the
   username.
 - **Offline favorites.** The library remembers the last favorites list it
   read online (kept up to date by `toggle_like`) and answers from the

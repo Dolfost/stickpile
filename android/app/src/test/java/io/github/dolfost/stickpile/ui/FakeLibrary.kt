@@ -111,6 +111,11 @@ class FakeLibrary : StickpileLibraryInterface {
         return packs.invoke()
     }
 
+    override suspend fun ownPacks(): PackList {
+        calls += "ownPacks"
+        return packs.invoke()
+    }
+
     override fun parsePairingLink(text: String): PairingLink? {
         calls += "parsePairingLink"
         return parsePairingLink.invoke(text)
