@@ -405,6 +405,22 @@ Behaviour the signatures do not show:
   suggestion, as the desktop popup does. Reads (search, account, favorites,
   most used, packs, pack items) stop when the calling coroutine is
   cancelled; writes and file fetches run to their end.
+- **Hints.** `hints(query)` is what a phone offers under a search field
+  instead of the desktop's Tab completion; each hint carries the whole
+  query it makes. While a `key:value` filter is typed: its values, ranked
+  as `suggestions` ranks them, `chosen` on the one the search uses. While
+  `e:` (or `emoji:`) is typed: the emojis of the cached items, most used
+  first. While a bare word is typed: the tags, vibes and packs containing
+  it as filters (`rea` offers `tag:reaction`), those starting with it
+  first, then the filter keys the word starts. With nothing typed, or a
+  space at the end: the keys `tag:`, `vibe:`, `e:`, `set:`, `by:`,
+  `type:`, `is:`, `sort:`. A leading `-` stays on what is offered; inside
+  an unfinished phrase nothing is. The words come from the offline cache,
+  so they follow the last sync.
+- **Item marks.** `nsfw` is the desktop's safe-mode test: a tag `nsfw` in
+  any case. `liked` comes from the favorites the library last read (and
+  the likes toggled since): false for every item until `favorites` was
+  read once for the account, which the app does in the background.
 - **Pairing input.** `parse_pairing_link` returns the server URL
   normalised (above), the one `login_pairing` contacts, and null for a
   link whose URL has a user name or password, a query or a fragment.
