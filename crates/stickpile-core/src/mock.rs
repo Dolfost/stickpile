@@ -3,8 +3,8 @@
 //!
 //! It implements the contract of `stickpile_api::routes` closely enough for
 //! the clients: bearer tokens (password + optional TOTP login, pairing
-//! codes), sets, uploads,
-//! tar import/export via `stickpile-setfmt`, the `GET /items` cache feed with
+//! codes), sets, uploads, tar import/export via `stickpile-setfmt`, the
+//! `GET /items` cache feed with
 //! cursors and tombstones, files, set cover images, likes, a naive substring
 //! search (with `is:` filters), usage dedup, popular, `/stats/me`, jobs and a
 //! few admin routes. Test hooks: a controllable
