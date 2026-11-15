@@ -32,4 +32,40 @@
     <string name="app_error_not_a_pairing_qr">Цей QR-код не для підключення пристрою до stickpile. Відскануйте код із розділу Налаштування, Додати пристрій, на вебсторінці свого сервера.</string>
 
     <string name="app_broken_title">Не вдається відкрити вашу бібліотеку</string>
+
+    <string name="onboarding_welcome_title">Вітаємо в stickpile</string>
+    <string name="onboarding_welcome_text">Ваші стікери й меми з вашого власного сервера, у текстовому полі будь-якого застосунку.</string>
+    <string name="onboarding_scan_text">На вебсторінці свого сервера відкрийте Налаштування й виберіть Додати пристрій. Потім відскануйте QR-код, який там з\'явиться.</string>
+    <string name="onboarding_scan">Сканувати QR-код</string>
+    <string name="onboarding_scan_prompt">Наведіть камеру на QR-код на вебсторінці свого сервера</string>
+    <string name="onboarding_enter_code">Ввести код вручну</string>
+    <string name="onboarding_use_address">Увійти за адресою сервера</string>
+    <string name="onboarding_back_to_library">Назад до бібліотеки</string>
+    <string name="onboarding_camera_refused">Без камери QR-код не відсканувати. Введіть код вручну.</string>
+
+    <string name="onboarding_link_title">Підключити цей телефон</string>
+    <string name="onboarding_link_text">Підключити цей телефон до цього сервера?</string>
+    <string name="onboarding_link_warning">Підключайтеся лише до сервера, якому довіряєте. Якщо телефон уже ввійшов на інший сервер, він вийде з нього.</string>
+    <string name="onboarding_pair">Підключити</string>
+
+    <string name="onboarding_code_title">Код підключення пристрою</string>
+    <string name="onboarding_code_text">На вебсторінці свого сервера відкрийте Налаштування й виберіть Додати пристрій. Введіть адресу сервера й код, який там з\'явиться.</string>
+    <string name="onboarding_code_label">Код підключення</string>
+    <string name="onboarding_code_hint">12 літер і цифр</string>
+    <string name="onboarding_code_display">Код: %1$s</string>
+
+    <string name="onboarding_server_label">Адреса сервера</string>
+    <string name="onboarding_server_title">Вхід на ваш сервер</string>
+    <string name="onboarding_server_text">Адреса вашого сервера stickpile, така, як ви відкриваєте його в браузері.</string>
+    <string name="onboarding_sign_in_title">Вхід</string>
+    <string name="onboarding_sign_in_server">Сервер: %1$s</string>
+    <string name="onboarding_tailnet_text">Якщо телефон у тому самому tailnet, що й сервер, Tailscale впустить вас без пароля.</string>
+    <string name="onboarding_tailnet">Увійти через Tailscale</string>
+    <string name="onboarding_tailnet_unknown">Сервер не знає цей телефон через Tailscale. Під\'єднайте телефон до tailnet сервера або увійдіть із паролем.</string>
+    <string name="onboarding_or">або</string>
+    <string name="onboarding_username">Ім\'я користувача</string>
+    <string name="onboarding_password">Пароль</string>
+    <string name="onboarding_totp">Код двофакторної автентифікації</string>
+    <string name="onboarding_totp_notice">Цей обліковий запис використовує двофакторну автентифікацію. Введіть код із застосунку автентифікації.</string>
+    <string name="onboarding_sign_in">Увійти</string>
 </resources>
