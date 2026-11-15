@@ -103,13 +103,35 @@ class InsertFlowTest {
     }
 
     @Test
+    fun whenTheServerIsOutOfReachACachedFileIsStillShared() {
+        val unreachable = PrepareResult.Error(LibraryErrorKind.UNREACHABLE)
+        assertEquals(
+            listOf("prepare field", "prepare share", "send shared.png") to InsertOutcome.Sent("shared.png"),
+            run(unreachable, send = true),
+        )
+        assertEquals(
+            listOf("prepare field", "prepare share", "send shared.png", "copy shared.png") to
+                InsertOutcome.Copied("shared.png"),
+            run(unreachable, send = false),
+        )
+        // Nothing cached either: the share's error is the failure.
+        assertEquals(
+            listOf("prepare field", "prepare share") to InsertOutcome.Failed(LibraryErrorKind.UNREACHABLE),
+            run(unreachable, share = unreachable),
+        )
+    }
+
+    @Test
     fun otherErrorsEndItAtOnce() {
         listOf(
             LibraryErrorKind.NOT_SIGNED_IN,
             LibraryErrorKind.UNAUTHORIZED,
-            LibraryErrorKind.UNREACHABLE,
             LibraryErrorKind.NOT_FOUND,
+            LibraryErrorKind.RATE_LIMITED,
+            LibraryErrorKind.INVALID_INPUT,
+            LibraryErrorKind.SERVER,
             LibraryErrorKind.IO,
+            LibraryErrorKind.OTHER,
         ).forEach { kind ->
             assertEquals(listOf("prepare field") to InsertOutcome.Failed(kind), run(PrepareResult.Error(kind)))
         }

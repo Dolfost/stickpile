@@ -7,8 +7,9 @@ import io.github.dolfost.stickpile.rust.LibraryErrorKind
  * (docs/android.md, "Choosing what to insert"), as a pure state machine:
  *
  * 1. a rendition the field accepts, committed with `commitContent`;
- * 2. else (nothing fits, or the field refused it) a rendition for sharing,
- *    sent with `ACTION_SEND` to the editor's app;
+ * 2. else (nothing fits, the server is out of reach, or the field refused
+ *    it) a rendition for sharing, sent with `ACTION_SEND` to the editor's
+ *    app;
  * 3. else that file's URI on the clipboard, saying so.
  *
  * Which rendition fits is the library's decision; this only orders the
@@ -59,13 +60,20 @@ object InsertFlow {
     /** What a file shared to another app may be. */
     val SHARE_TYPES = listOf("image/*", "video/*")
 
+    /** Errors of the field's rendition after which a rendition for sharing is still tried. */
+    private val TRY_SHARING = setOf(LibraryErrorKind.NOTHING_FITS, LibraryErrorKind.UNREACHABLE)
+
     fun <P> start(fieldMimeTypes: List<String>): InsertStep<P> = InsertStep.PrepareForField(fieldMimeTypes)
 
-    /** Nothing fits the field: share instead; any other error ends it (sharing would fail the same way). */
+    /**
+     * Nothing fits the field, or the server is out of reach (the original
+     * may still be in the cache): share instead. Any other error ends it
+     * (sharing would fail the same way).
+     */
     fun <P> afterFieldPrepared(result: PrepareResult<P>): InsertStep<P> = when (result) {
         is PrepareResult.Ready -> InsertStep.Commit(result.prepared)
         is PrepareResult.Error ->
-            if (result.kind == LibraryErrorKind.NOTHING_FITS) {
+            if (result.kind in TRY_SHARING) {
                 InsertStep.PrepareForSharing
             } else {
                 InsertStep.Done(InsertOutcome.Failed(result.kind))
