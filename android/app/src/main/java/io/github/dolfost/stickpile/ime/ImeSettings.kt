@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ime
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * The picker keyboard's settings (docs/android-plan.md 4.7), shown on the
@@ -13,17 +14,17 @@ class ImeSettings(context: Context) {
     /** Search for the draft already in the text field (one line, at most 60 characters). */
     var searchDraft: Boolean
         get() = prefs.getBoolean(SEARCH_DRAFT, true)
-        set(value) = prefs.edit().putBoolean(SEARCH_DRAFT, value).apply()
+        set(value) = prefs.edit { putBoolean(SEARCH_DRAFT, value) }
 
     /** Delete that draft when a result found from it is inserted. */
     var deleteDraft: Boolean
         get() = prefs.getBoolean(DELETE_DRAFT, true)
-        set(value) = prefs.edit().putBoolean(DELETE_DRAFT, value).apply()
+        set(value) = prefs.edit { putBoolean(DELETE_DRAFT, value) }
 
     /** Stay open after inserting, instead of switching back to the previous keyboard. */
     var stayOpen: Boolean
         get() = prefs.getBoolean(STAY_OPEN, false)
-        set(value) = prefs.edit().putBoolean(STAY_OPEN, value).apply()
+        set(value) = prefs.edit { putBoolean(STAY_OPEN, value) }
 
     private companion object {
         const val PREFS = "ime_settings"

@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.provider
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * The keyboards (other apps, by package name) the user lets read the
@@ -23,7 +24,7 @@ class KeyboardAllowlist(context: Context) {
     /** A refused caller: remember it for the settings screen. */
     @Synchronized
     fun notePending(packageName: String) {
-        if (!isApproved(packageName)) write(PENDING, pending() + packageName)
+        if (!isApproved(packageName) && packageName !in pending()) write(PENDING, pending() + packageName)
     }
 
     @Synchronized
@@ -46,7 +47,7 @@ class KeyboardAllowlist(context: Context) {
     private fun read(key: String): Set<String> = prefs.getStringSet(key, emptySet())?.toSet() ?: emptySet()
 
     private fun write(key: String, value: Set<String>) {
-        prefs.edit().putStringSet(key, value.toSet()).apply()
+        prefs.edit { putStringSet(key, value.toSet()) }
     }
 
     private companion object {
