@@ -3,6 +3,7 @@ package io.github.dolfost.stickpile.provider
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
+import androidx.core.net.toUri
 import io.github.dolfost.stickpile.rust.Prepared
 import java.io.File
 
@@ -26,7 +27,7 @@ object PreparedFiles {
     fun uriFor(context: Context, prepared: Prepared): Uri {
         val name = fileName(prepared)
         val token = tokens.register(PreparedTokens.Entry(prepared.path, prepared.mimeType, name))
-        return Uri.parse(ProviderRoutes.preparedUri(token, name))
+        return ProviderRoutes.preparedUri(token, name).toUri()
     }
 
     private fun fileName(prepared: Prepared): String =
