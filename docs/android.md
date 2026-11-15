@@ -315,13 +315,17 @@ separator), `kind` (`still`, `animation` or `video`), `width`, `height`,
 
 Pack columns: `_id`, `pack_id`, `name`, `owner`, `item_count`.
 
-Offline the provider answers from the cache, like the app does.
+Offline the provider answers from the cache, like the app does. When the
+library fails, a query returns an empty cursor whose extras carry `error`
+(the codes of `prepare` below). `limit` defaults to 50 and is capped at 200.
 
 ### Files
 
 - `/thumb/<item id>`: `openFile` read-only, the item's thumbnail (WebP).
 - `/prepared/<token>/<file name>`: `openFile` read-only, a rendition made by
   `prepare`. Readable by any caller that presents a valid token (see below).
+  A `query` on it answers the `OpenableColumns` (`_display_name`, `_size`),
+  as `FileProvider` does, since receiving apps ask for them.
 
 ### Calls
 
@@ -329,7 +333,8 @@ Offline the provider answers from the cache, like the app does.
   editor's package), `mime_types` (string array, what the field accepts)
   and `sticker` (boolean). Returns a bundle with `uri` (string,
   `content://io.github.dolfost.stickpile.stickers/prepared/<token>/<file name>`),
-  `mime_type` and `label`; or a bundle with `error` (one of
+  `mime_type` and `label` (the file name, `<item name>.<ext>`); or a bundle
+  with `error` (one of
   `nothing_fits`, `not_found`, `not_signed_in`, `unreachable`, `failed`).
   The token is 128 random bits, valid for one hour, kept in memory only.
 - `call("used", <item id>, extras)` with extras `variant` (string, from the
@@ -354,4 +359,6 @@ custom permissions have an install-order problem).
   grants are not relied on, since on an exported provider they do not
   distinguish callers.
 - Path traversal, unknown paths and writes are rejected; files are opened
-  read-only.
+  read-only. The access check comes before routing, so an unknown path from
+  a caller that is not approved is refused like any other.
+- A `/search` ranks for the app named by `package` (`target_for_package`).
