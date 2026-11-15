@@ -78,7 +78,7 @@ class PickerInputMethodService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         val read = readDraft(info)
-        if (!restarting || read != null) draft = read
+        draft = InputRestart.draft(restarting, read, draft)
         picker?.start(read?.query, restarting)
         syncInBackground()
     }

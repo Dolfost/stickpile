@@ -139,7 +139,7 @@ internal class PickerView(
      * is shown, unless there is a new draft.
      */
     fun start(query: String?, restarting: Boolean) {
-        if (started && restarting && (query == null || query == draftQuery)) return
+        if (InputRestart.keepsView(started, restarting, query, draftQuery)) return
         started = true
         draftQuery = query
         likes.clear()
