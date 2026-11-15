@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
 use stickpile_api::{pairing, ItemSummary, PairRequest, TokenRequest, UploadMeta, Variant};
-use stickpile_core::client::UploadFile as CoreUploadFile;
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
 use stickpile_quick::suggest::{self, Vocabulary};
 
@@ -897,17 +896,12 @@ impl StickpileLibrary {
     /// content. To upload several, call this once per file. Throws
     /// `InvalidInput` (field `file`) when the server refuses the file (not
     /// a picture or video it takes, too large), `NotFound` for a pack that
-    /// is not the account's, `Io` when the file cannot be read.
+    /// is not the account's, `Io` when the file cannot be read. The file is
+    /// streamed from disk, never read into memory whole.
     pub async fn upload(&self, set_id: String, file: UploadFile) -> Result<Item, LibraryError> {
         self.write(move |inner| async move {
             let session = inner.session();
             let path = PathBuf::from(&file.path);
-            let read_path = path.clone();
-            let bytes = tokio::task::spawn_blocking(move || std::fs::read(&read_path))
-                .await?
-                .map_err(|e| LibraryError::Io {
-                    detail: format!("{}: {e}", path.display()),
-                })?;
             let filename = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -926,14 +920,9 @@ impl StickpileLibrary {
                 emojis: listed(file.emojis),
                 ..UploadMeta::default()
             };
-            let upload = CoreUploadFile {
-                filename,
-                bytes,
-                mime: None,
-            };
             let results = session
                 .client()
-                .upload(&set_id, vec![upload], Some(&[meta]))
+                .upload_path(&set_id, &path, &filename, Some(&meta))
                 .await
                 .map_err(|e| LibraryError::input(e, "file"))?;
             let result = results

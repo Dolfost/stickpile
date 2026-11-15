@@ -173,6 +173,40 @@ async fn upload_adds_one_file_to_a_pack() {
 }
 
 #[tokio::test]
+async fn upload_sends_the_file_as_it_is_on_disk() {
+    let (server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    // Noise, so that the file is some hundreds of KiB and goes out in many
+    // chunks.
+    let mut seed = 0x2545_f491_u32;
+    let img = image::RgbaImage::from_fn(300, 300, |_, _| {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        image::Rgba(seed.to_le_bytes())
+    });
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+    let bytes = bytes.into_inner();
+    assert!(bytes.len() > 300_000, "{}", bytes.len());
+    let file = dir.path().join("noise.png");
+    std::fs::write(&file, &bytes).unwrap();
+
+    let upload = UploadFile {
+        path: file.display().to_string(),
+        name: None,
+        keywords: vec![],
+        emojis: vec![],
+    };
+    let item = lib.upload(items[3].set_id.clone(), upload).await.unwrap();
+    assert_eq!((item.name.as_str(), item.width, item.height), ("noise", 300, 300));
+    let st = server.state();
+    let stored = st.items.iter().find(|i| i.item.id == item.id).unwrap();
+    assert!(stored.files[&Variant::Original] == bytes, "the same bytes");
+}
+
+#[tokio::test]
 async fn pairing_input_needs_no_network() {
     let dir = tempfile::tempdir().unwrap();
     let lib = open(dir.path(), &stickpile_core::mock::dead_url());

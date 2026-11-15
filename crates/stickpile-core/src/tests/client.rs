@@ -277,6 +277,54 @@ async fn upload_reports_duplicates() {
 }
 
 #[tokio::test]
+async fn upload_path_streams_a_file() {
+    let server = MockServer::start();
+    let token = server.state().issue_token("alice", "t");
+    let set = server.state().add_set("alice", "a", "A", Visibility::Private);
+    let client = client_for(&server.url, Some(token));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("upload-1.tmp");
+    let gif = gif_bytes(4, 7);
+    std::fs::write(&path, &gif).unwrap();
+
+    let meta = UploadMeta {
+        keywords: Some(vec!["meow".into()]),
+        ..Default::default()
+    };
+    let res = client
+        .upload_path(&set.id, &path, "cat.gif", Some(&meta))
+        .await
+        .unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].file, "cat.gif");
+    let item = res[0].item.as_ref().unwrap();
+    assert_eq!(item.name, "cat", "named after the part's file name");
+    assert_eq!(item.keywords, vec!["meow"]);
+    // The server received the file as it is on disk.
+    let stored = server
+        .state()
+        .items
+        .iter()
+        .find(|i| i.item.id == item.id)
+        .map(|i| i.files[&Variant::Original].clone());
+    assert_eq!(stored, Some(gif));
+
+    // No metadata; and a file that is not there.
+    let res = client.upload_path(&set.id, &path, "again.gif", None).await.unwrap();
+    assert!(res[0].already_in_set);
+    let missing = dir.path().join("gone.png");
+    let e = client
+        .upload_path(&set.id, &missing, "gone.png", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, CoreError::Io(io) if io.kind() == std::io::ErrorKind::NotFound),
+        "{e}"
+    );
+    assert!(e.to_string().contains("gone.png"), "{e}");
+}
+
+#[tokio::test]
 async fn import_dir_and_export_round_trip() {
     let server = MockServer::start();
     let token = server.state().issue_token("alice", "t");

@@ -411,6 +411,41 @@ impl ApiClient {
                 .map_err(map_reqwest)?;
             form = form.part("file", part);
         }
+        self.send_upload(set_id, form, meta).await
+    }
+
+    /// [`ApiClient::upload`] of one file on disk, streamed from it: the file
+    /// is never read into memory whole (a shared video may be gigabytes), and
+    /// the part carries its length. `filename` names the part, as
+    /// [`UploadFile::filename`] does (the MIME type is guessed from it);
+    /// `meta` is the file's metadata. An `Io` error when the file cannot be
+    /// opened.
+    pub async fn upload_path(
+        &self,
+        set_id: &str,
+        file: &Path,
+        filename: &str,
+        meta: Option<&UploadMeta>,
+    ) -> Result<Vec<UploadResult>> {
+        let in_context =
+            |e: std::io::Error| CoreError::Io(std::io::Error::new(e.kind(), format!("{}: {e}", file.display())));
+        let f = tokio::fs::File::open(file).await.map_err(in_context)?;
+        let len = f.metadata().await.map_err(in_context)?.len();
+        let part = Part::stream_with_length(f, len)
+            .file_name(filename.to_string())
+            .mime_str(mime_from_name(filename))
+            .map_err(map_reqwest)?;
+        let form = Form::new().part("file", part);
+        self.send_upload(set_id, form, meta.map(std::slice::from_ref)).await
+    }
+
+    /// Send the `file` parts of `form` with `meta` to [`routes::SET_ITEMS`].
+    async fn send_upload(
+        &self,
+        set_id: &str,
+        mut form: Form,
+        meta: Option<&[UploadMeta]>,
+    ) -> Result<Vec<UploadResult>> {
         if let Some(meta) = meta {
             let json = serde_json::to_vec(meta).map_err(|e| CoreError::Other(e.to_string()))?;
             let part = Part::bytes(json).mime_str("application/json").map_err(map_reqwest)?;
