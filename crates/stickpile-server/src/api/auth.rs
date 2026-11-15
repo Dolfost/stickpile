@@ -6,12 +6,13 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use stickpile_api::routes as r;
 use stickpile_api::{
-    ApiError, ApiToken, ChangePassword, CreateToken, RegisterRequest, TokenCreated, TokenRequest, TotpCode, TotpSetup,
-    UpdateMe, User,
+    ApiError, ApiToken, ChangePassword, CreateToken, PairRequest, PairingCreated, RegisterRequest, TokenCreated,
+    TokenRequest, TotpCode, TotpSetup, UpdateMe, User,
 };
 
 use super::empty;
 use crate::auth::login::{self, LoginPurpose};
+use crate::auth::pairing;
 use crate::auth::{ClientIp, CurrentUser};
 use crate::error::AppResult;
 use crate::service::account;
@@ -47,6 +48,31 @@ pub async fn token(
     )
     .await;
     Ok(Json(created))
+}
+
+/// Exchange a one-time pairing code for an API token of the account that
+/// created it (no password). The code works once and for five minutes.
+#[utoipa::path(post, path = r::AUTH_PAIR, tag = "auth", request_body = PairRequest,
+    responses((status = 200, body = TokenCreated),
+              (status = 400, description = "Bad token name (the code is not spent)", body = ApiError),
+              (status = 401, description = "`unauthorized`: the code is wrong, expired or already used (always the same body)", body = ApiError),
+              (status = 429, body = ApiError)))]
+pub async fn pair(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(req): Json<PairRequest>,
+) -> AppResult<Json<TokenCreated>> {
+    Ok(Json(pairing::exchange(&state, &req, ip).await?))
+}
+
+/// Create a one-time pairing code for the caller's account, valid for five
+/// minutes; the code and its `stickpile://pair` link are shown only here.
+#[utoipa::path(post, path = r::PAIRINGS, tag = "auth",
+    responses((status = 201, body = PairingCreated), (status = 401, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn create_pairing(State(state): State<AppState>, user: CurrentUser) -> AppResult<Response> {
+    let created = pairing::create(&state, &user).await?;
+    Ok((StatusCode::CREATED, Json(created)).into_response())
 }
 
 /// Self-service registration per the server's policy (closed / invite / open).

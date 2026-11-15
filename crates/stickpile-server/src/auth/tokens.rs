@@ -39,7 +39,7 @@ impl TokenRow {
 
 const COLUMNS: &str = "id, user_id, name, prefix, created_at, last_used_at, expires_at, revoked_at";
 
-fn validate_name(name: &str) -> AppResult<String> {
+pub(crate) fn validate_name(name: &str) -> AppResult<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 100 {
         return Err(AppError::bad_request("token name must be 1..=100 characters"));

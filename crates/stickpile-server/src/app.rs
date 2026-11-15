@@ -324,10 +324,11 @@ pub fn spawn_background(state: &AppState, cancel: &CancellationToken) -> Vec<Joi
     handles
 }
 
-/// Expired sessions, stale temp files, idle rate-limit keys, old finished
-/// jobs and tombstones, orphaned media.
+/// Expired sessions and pairing codes, stale temp files, idle rate-limit
+/// keys, old finished jobs and tombstones, orphaned media.
 pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     let sessions = auth::session::purge_expired(&state.db).await?;
+    let pairing_codes = auth::pairing::purge(&state.db).await?;
     let tmp = state.config.tmp_dir();
     let stale =
         tokio::task::spawn_blocking(move || files::purge_old_files_blocking(&tmp, Duration::from_secs(86_400))).await?;
@@ -336,9 +337,10 @@ pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     let tombstones = service::items::purge_tombstones(&state.db, 180 * 86_400).await?;
     let media = gc_orphan_media(state).await?;
     let checkouts = service::gitpack::gc_checkouts(state).await? as u64;
-    if sessions + stale as u64 + jobs + tombstones + media + checkouts > 0 {
+    if sessions + pairing_codes + stale as u64 + jobs + tombstones + media + checkouts > 0 {
         tracing::info!(
             sessions,
+            pairing_codes,
             stale_tmp = stale,
             jobs,
             tombstones,

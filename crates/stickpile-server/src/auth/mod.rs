@@ -18,6 +18,7 @@
 //! requests must pass the same-origin check. Bearer requests are exempt.
 
 pub mod login;
+pub mod pairing;
 pub mod password;
 pub mod session;
 pub mod tailscale;

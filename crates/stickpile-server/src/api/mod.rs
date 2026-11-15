@@ -35,6 +35,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::OPENAPI, get(openapi::openapi_json))
         // auth & account
         .route(r::AUTH_TOKEN, post(auth::token))
+        .route(r::AUTH_PAIR, post(auth::pair))
         .route(r::AUTH_REGISTER, post(auth::register))
         .route(r::ME, get(auth::me).patch(auth::update_me))
         .route(r::ME_PASSWORD, put(auth::change_password))
@@ -43,6 +44,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::ME_TOTP_DISABLE, post(auth::totp_disable))
         .route(r::TOKENS, get(auth::list_tokens).post(auth::create_token))
         .route(r::TOKEN, axum::routing::delete(auth::revoke_token))
+        .route(r::PAIRINGS, post(auth::create_pairing))
         // sets
         .route(r::SETS, get(sets::list).post(sets::create))
         .route(r::SETS_IMPORT, post(sets::import).layer(big))

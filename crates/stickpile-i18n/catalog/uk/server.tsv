@@ -13,6 +13,7 @@ severity must be error, warning or info	severity має бути error, warning 
 an invitation code is required	потрібен код запрошення
 invalid credentials	неправильні облікові дані
 invalid or expired invitation code	недійсний або прострочений код запрошення
+invalid or expired pairing code	недійсний або прострочений код підключення пристрою
 registration is closed	реєстрацію закрито
 CSRF token mismatch	токен CSRF не збігається
 account disabled	обліковий запис вимкнено

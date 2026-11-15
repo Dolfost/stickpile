@@ -158,11 +158,25 @@ impl RateLimiters {
     /// password spraying across usernames, while one caller still cannot lock
     /// out a particular account of someone else beyond its own username bucket.
     pub fn check_login(&self, ip: Option<IpAddr>, username: &str) -> AppResult<()> {
-        match ip {
-            Some(ip) => check(&self.login_ip, ip.to_string())?,
-            None => check(&self.login_unknown_ip, UNKNOWN_IP_KEY.to_string())?,
-        }
+        self.check_login_ip(ip)?;
         check(&self.login_user, username.trim().to_lowercase())
+    }
+
+    /// Pairing-code exchanges (`POST /api/v1/auth/pair`): the per-client-IP
+    /// part of [`Self::check_login`], in the same buckets, so pairing
+    /// attempts and password logins from one address share one budget
+    /// (callers with an unknown IP share the larger bucket). A code belongs
+    /// to no username, so there is no per-username bucket; the code's 60
+    /// random bits stand in for it (docs/security.md#pairing).
+    pub fn check_pairing(&self, ip: Option<IpAddr>) -> AppResult<()> {
+        self.check_login_ip(ip)
+    }
+
+    fn check_login_ip(&self, ip: Option<IpAddr>) -> AppResult<()> {
+        match ip {
+            Some(ip) => check(&self.login_ip, ip.to_string()),
+            None => check(&self.login_unknown_ip, UNKNOWN_IP_KEY.to_string()),
+        }
     }
 
     /// Unauthenticated git webhook calls, per client IP (callers with an
@@ -339,6 +353,26 @@ mod tests {
         assert_eq!(ok, 2 * UNKNOWN_IP_LOGIN_FACTOR as usize);
         // Callers with a known IP are not affected.
         assert!(l.check_login(Some("192.0.2.9".parse().unwrap()), "user0").is_ok());
+    }
+
+    #[test]
+    fn pairing_shares_the_login_ip_buckets() {
+        let l = RateLimiters::new(&crate::config::LimitsConfig {
+            login_per_minute: 3,
+            ..Default::default()
+        });
+        let ip = Some("192.0.2.20".parse().unwrap());
+        assert!(l.check_pairing(ip).is_ok());
+        assert!(l.check_login(ip, "alice").is_ok());
+        assert!(l.check_pairing(ip).is_ok());
+        assert_eq!(l.check_pairing(ip).unwrap_err().code, "rate_limited");
+        assert_eq!(l.check_login(ip, "bob").unwrap_err().code, "rate_limited");
+        // Other addresses and the usernames' own buckets are untouched.
+        assert!(l.check_pairing(Some("192.0.2.21".parse().unwrap())).is_ok());
+        assert!(l.check_login(Some("192.0.2.22".parse().unwrap()), "alice").is_ok());
+        // Unknown IPs share the larger bucket, as for logins.
+        let ok = (0..30).filter(|_| l.check_pairing(None).is_ok()).count();
+        assert_eq!(ok, 3 * UNKNOWN_IP_LOGIN_FACTOR as usize);
     }
 
     #[test]
