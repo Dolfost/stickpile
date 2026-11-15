@@ -12,8 +12,9 @@ it accepts. So the app is:
 
 1. **An engine** that owns the account, the sync, the offline cache and the
    files, and serves them to keyboards through a content provider.
-2. **A picker keyboard** in the same app: an input method with no typing
-   keys. Switch to it from any keyboard, tap a sticker, and it switches back.
+2. **A picker keyboard** in the same app: an input method that inserts
+   stickers. Switch to it from any keyboard, search or browse, tap a
+   sticker, and it switches back. Its keys type only into its own search.
 3. **A share target**: "Share -> stickpile" uploads a picture into a set.
 
 Layout: `crates/stickpile-android` (the Rust library, behind UniFFI),
@@ -53,6 +54,44 @@ transfer: the API token never leaves the phone.
 After signing in, the app says who is signed in where ("Signed in as alice
 on stickers.example.org") and walks you through turning on the keyboard.
 
+## The library
+
+The app's main screen: a search field, the tabs Recent, Liked, Packs and
+Most used, and a grid.
+
+- **Search** as on the desktop ([search syntax](#search-syntax)); results
+  follow the typing. Under the field the app offers what fits what is
+  typed: the filter keys (`tag:`, `vibe:`, `e:`, ...), the values of the
+  filter being typed (`vibe:sar` offers `sarcastic`), the emojis for `e:`,
+  and for a bare word the tags, vibes and packs containing it (`rea`
+  offers `tag:reaction`). A tap puts it in.
+- **Safe mode** (the shield) hides the stickers tagged `nsfw` from every
+  list and search, and says how many it hid.
+- **Sticker info** (the eye) shows or hides the information over each
+  tile: a GIF, WEBP or VIDEO badge and an NSFW mark, a heart on the ones
+  you liked, the name, the emojis and vibe, the tags, and a line with the
+  format and resolution, times copied, likes and the quality score. The
+  menu's "Sticker info" (also in Settings) turns each piece on or off and
+  sets the tile size. Safe mode and these choices are shared with the
+  keyboard.
+- **Tap** a sticker to share it; **long press** for its details: the
+  pack and owner, the numbers, the vibe, emojis, tags and keywords (a tap
+  on one searches for it), and Share, Like or Unlike, and Open in browser
+  (its page in the web UI).
+- The menu also has the search syntax, Sync now and Settings; pulling the
+  grid down syncs too.
+
+### Search syntax
+
+`cat "big chungus"` (words and phrases; typos are forgiven), `e:😂`,
+`vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`, `type:gif` (gif,
+png, webp, jpeg, mp4, webm, still, animated, video), `is:mine`,
+`is:liked`, `is:public`, `q>70`, `likes>=2`, `copies<5`, `sort:likes`
+(relevance, recent, likes, copies, quality); `tag:a tag:b` is either; a
+leading `-` leaves out (`-tag:nsfw`). A misspelled or half-typed filter
+value searches for the closest one. The app and the keyboard show this
+list from their menus.
+
 ## The picker keyboard
 
 Turn it on once: the app's walk-through opens the system's keyboard
@@ -67,12 +106,23 @@ Using it:
   for what is in the field (one line, at most 60 characters). It reads only
   plain text fields: not numbers, phone numbers, email addresses, links or
   passwords, not fields that ask keyboards for no suggestions, and not
-  incognito fields. Or browse the tabs Recent, Liked and Sets; the row of
-  emojis narrows the grid.
+  incognito fields.
+- Or tap its search box: keys of its own come up (English, Ukrainian
+  with the globe key, and digits and symbols), and the results follow the
+  typing, with the same offers under the box as in the app. What you type
+  there goes only into that search, never into the chat. Done, or a tap
+  on the grid, puts the keys away. A sticker picked after you changed the
+  search leaves the field's text alone.
+- Or browse the tabs Recent, Liked, Most used and Sets; the row of emojis
+  narrows the grid.
+- The shield is safe mode and the menu has the sticker info, the tile
+  size and the search syntax, all shared with the app.
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
-- Long press: like or unlike, send as a sticker (Telegram), share.
+- Long press: the sticker's details (pack, numbers, vibe, emojis and tags;
+  a tap on one searches for it) with Send, Send as a sticker (Telegram),
+  Like or Unlike, and Share.
 - The keyboard button at the top goes back to your keyboard at any time.
 
 Its settings (in the app's settings): search what is typed, delete what was
@@ -102,8 +152,9 @@ Account (sign out; an account signed in by its tailnet identity has no
 token to revoke, so it shows "Signed in through Tailscale" and offers to
 change the server instead), sync (sync now, the last sync, uses waiting to
 be sent), the offline cache (its size, clear it, which also revokes every
-prepared file's URI), the keyboard's switches and
-walk-through, the keyboards allowed to read stickers, and licences.
+prepared file's URI), the sticker info (safe mode, what the tiles show,
+the tile size), the keyboard's switches and walk-through, the keyboards
+allowed to read stickers, and licences.
 
 The app syncs in the background every 15 minutes when there is a network
 (WorkManager), and when the app or the keyboard opens. Offline, search, the
