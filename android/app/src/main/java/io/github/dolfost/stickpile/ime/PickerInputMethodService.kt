@@ -189,29 +189,39 @@ class PickerInputMethodService : InputMethodService() {
         PrepareResult.Error(e.kind)
     }
 
-    /** `commitContent` with the prepared file's URI, after deleting the draft it was found by. */
+    /**
+     * `commitContent` with the prepared file's URI; only when the field took
+     * it, the draft it was found by is deleted. A field that refuses keeps
+     * its text, and the flow goes on to sharing.
+     */
     private fun commit(prepared: Prepared, editor: EditorInfo, fromDraft: Boolean): Boolean {
         val ic = currentInputConnection ?: return false
         val uri = PreparedFiles.uriFor(this, prepared)
-        ic.beginBatchEdit()
-        try {
-            // Not while text is being composed.
-            ic.finishComposingText()
-            if (fromDraft && settings.deleteDraft) deleteDraft(ic)
-        } finally {
-            ic.endBatchEdit()
-        }
+        // Not while text is being composed.
+        ic.finishComposingText()
         val content = InputContentInfoCompat(uri, ClipDescription(prepared.displayName, arrayOf(prepared.mimeType)), null)
-        return InputConnectionCompat.commitContent(
+        val committed = InputConnectionCompat.commitContent(
             ic,
             editor,
             content,
             InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION,
             null,
         )
+        if (committed && fromDraft && settings.deleteDraft) {
+            ic.beginBatchEdit()
+            try {
+                deleteDraft(ic)
+            } finally {
+                ic.endBatchEdit()
+            }
+        }
+        return committed
     }
 
-    /** Deletes the draft, if the field still holds just that. */
+    /**
+     * Deletes the draft, if the field still holds just that (an editor that
+     * put the picture into the text changed it: then nothing is deleted).
+     */
     private fun deleteDraft(ic: InputConnection) {
         val expected = draft ?: return
         val now = DraftQuery.read(
