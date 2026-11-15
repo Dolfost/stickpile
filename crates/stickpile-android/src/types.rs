@@ -1,0 +1,277 @@
+//! The records and enums of the interface, each converted from its
+//! `stickpile-api` counterpart (no UniFFI derive goes on those).
+
+use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, User};
+
+/// Where the library keeps its files: absolute paths inside the app's
+/// private storage.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct LibraryDirs {
+    /// The client config (`config.toml`, the desktop's format). Need not
+    /// exist: missing means the defaults. `Library.set_server_url`
+    /// writes it.
+    pub config_file: String,
+    /// The offline cache: the item database, thumbnails, prepared files.
+    pub cache_dir: String,
+    /// The API token, one line, mode 0600. Need not exist: signed out.
+    pub token_file: String,
+}
+
+/// How requests are authenticated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AuthKind {
+    /// By the stored API token.
+    Token,
+    /// Without a token: the server knows this device by its tailnet
+    /// identity (behind `tailscale serve`).
+    Tailnet,
+}
+
+/// The account the library is signed in to.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Account {
+    pub username: String,
+    /// `None` when the account has none of its own (it equals the username).
+    pub display_name: Option<String>,
+    /// The server the account is on.
+    pub server_url: String,
+    pub auth: AuthKind,
+    pub is_admin: bool,
+}
+
+impl Account {
+    pub(crate) fn new(user: &User, server_url: &str, auth: AuthKind) -> Account {
+        let display = user.display_name.trim();
+        Account {
+            username: user.username.clone(),
+            display_name: (!display.is_empty() && display != user.username).then(|| display.to_string()),
+            server_url: server_url.to_string(),
+            auth,
+            is_admin: user.role == Role::Admin,
+        }
+    }
+}
+
+/// The chat app a picture goes to; it decides which rendition fits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum Target {
+    Telegram,
+    Discord,
+    Signal,
+    Whatsapp,
+    Slack,
+    /// Anything else.
+    Generic,
+}
+
+impl From<TargetApp> for Target {
+    fn from(t: TargetApp) -> Self {
+        match t {
+            TargetApp::Telegram => Target::Telegram,
+            TargetApp::Discord => Target::Discord,
+            TargetApp::Signal => Target::Signal,
+            TargetApp::Whatsapp => Target::Whatsapp,
+            TargetApp::Slack => Target::Slack,
+            TargetApp::Generic => Target::Generic,
+        }
+    }
+}
+
+impl From<Target> for TargetApp {
+    fn from(t: Target) -> Self {
+        match t {
+            Target::Telegram => TargetApp::Telegram,
+            Target::Discord => TargetApp::Discord,
+            Target::Signal => TargetApp::Signal,
+            Target::Whatsapp => TargetApp::Whatsapp,
+            Target::Slack => TargetApp::Slack,
+            Target::Generic => TargetApp::Generic,
+        }
+    }
+}
+
+/// What an item is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum MediaKind {
+    /// A picture: PNG, JPEG, a WebP or GIF of one frame.
+    Still,
+    /// An animated GIF or WebP.
+    Animation,
+    /// An MP4 or WebM.
+    Video,
+}
+
+impl From<stickpile_api::MediaKind> for MediaKind {
+    fn from(k: stickpile_api::MediaKind) -> Self {
+        match k {
+            stickpile_api::MediaKind::Still => MediaKind::Still,
+            stickpile_api::MediaKind::Animation => MediaKind::Animation,
+            stickpile_api::MediaKind::Video => MediaKind::Video,
+        }
+    }
+}
+
+/// A sticker or meme.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Item {
+    pub id: String,
+    pub name: String,
+    /// The pack (set) it is in.
+    pub set_id: String,
+    pub set_name: String,
+    pub emojis: Vec<String>,
+    pub keywords: Vec<String>,
+    /// One label such as `happy` or `sarcastic`, if it has one.
+    pub vibe: Option<String>,
+    pub tags: Vec<String>,
+    pub kind: MediaKind,
+    /// Of the original, in pixels (0 when unknown).
+    pub width: u32,
+    pub height: u32,
+    /// Likes by all users.
+    pub likes: u64,
+    /// Times it was sent, by all users.
+    pub copies: u64,
+}
+
+impl From<&ItemSummary> for Item {
+    fn from(i: &ItemSummary) -> Self {
+        Item {
+            id: i.id.clone(),
+            name: i.name.clone(),
+            set_id: i.set_id.clone(),
+            set_name: i.set_name.clone(),
+            emojis: i.emojis.clone(),
+            keywords: i.keywords.clone(),
+            vibe: i.vibe.clone(),
+            tags: i.tags.clone(),
+            kind: i.kind.into(),
+            width: i.width,
+            height: i.height,
+            likes: i.likes,
+            copies: i.copies,
+        }
+    }
+}
+
+/// A list of items.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ItemList {
+    pub items: Vec<Item>,
+    /// The server could not be reached and the offline cache answered.
+    pub offline: bool,
+}
+
+/// A pack (a set of items, as the server calls it).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Pack {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    /// The owner's username.
+    pub owner: String,
+    pub item_count: u32,
+    /// The signed-in account owns it.
+    pub mine: bool,
+}
+
+impl Pack {
+    pub(crate) fn new(s: &SetSummary, me: Option<&str>) -> Pack {
+        Pack {
+            id: s.id.clone(),
+            slug: s.slug.clone(),
+            name: s.name.clone(),
+            owner: s.owner_username.clone(),
+            item_count: u32::try_from(s.item_count).unwrap_or(u32::MAX),
+            mine: me == Some(s.owner_username.as_str()),
+        }
+    }
+}
+
+/// A list of packs.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PackList {
+    pub packs: Vec<Pack>,
+    /// The server could not be reached and the offline cache answered.
+    pub offline: bool,
+}
+
+/// The values offered under the search field while a `key:value` filter is
+/// typed (`vibe:sar`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Suggestions {
+    /// The filter as typed, with its colon and a leading `-`: `vibe:`, `-tag:`.
+    pub key: String,
+    /// Best first. Accepting one replaces the typed value with it.
+    pub words: Vec<String>,
+    /// The index in `words` of the value the search uses now (draw it
+    /// highlighted); `None` while no value is typed.
+    pub chosen: Option<u32>,
+}
+
+impl From<stickpile_quick::suggest::Suggestions> for Suggestions {
+    fn from(s: stickpile_quick::suggest::Suggestions) -> Self {
+        let chosen = s.chosen().and_then(|i| u32::try_from(i).ok());
+        Suggestions {
+            key: s.key,
+            words: s.words,
+            chosen,
+        }
+    }
+}
+
+/// What a pairing link (the QR code) says.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PairingLink {
+    /// The server's URL, `http://` or `https://`, without a trailing `/`.
+    pub server_url: String,
+    /// The code in its display form (`7KQ2-M9XA-4FTR`).
+    pub code: String,
+}
+
+/// A rendition of an item as a file, ready to be inserted.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Prepared {
+    /// The file, in the cache: absolute.
+    pub path: String,
+    /// The MIME type to commit it as; always one the field accepts.
+    pub mime_type: String,
+    /// The file's name, `<item name>.<extension>` (`grumpy cat.png`).
+    pub display_name: String,
+    /// The chat app the editor's package was taken for.
+    pub target: Target,
+    /// The rendition's name (`original`, `png`, `tg_sticker`,
+    /// `tg_video_sticker`, `discord_gif`, `mp4`); give it back to
+    /// `Library.record_use`.
+    pub variant: String,
+    /// It is the sticker rendition (asked for, and the app has stickers).
+    pub sticker: bool,
+}
+
+/// One file to upload.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct UploadFile {
+    /// The file: absolute. Its name (with the extension) is the upload's
+    /// file name.
+    pub path: String,
+    /// The item's name; `None`: the server names it after the file.
+    pub name: Option<String>,
+    pub keywords: Vec<String>,
+    pub emojis: Vec<String>,
+}
+
+/// Where the background sync stands.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SyncState {
+    /// When the last sync went through, unix seconds; `None`: not since the
+    /// account or server changed. After a restart of the app this is the
+    /// server's time of that sync (the cache's sync cursor).
+    pub last_sync: Option<i64>,
+    /// Why the last attempt failed; `None` when it went through (or none
+    /// was made since the library was opened).
+    pub last_error: Option<crate::LibraryErrorKind>,
+    /// Uses recorded on this device and not yet sent to the server.
+    pub pending_usage: u32,
+    /// A sync is due: `Library.sync_if_due` would sync now.
+    pub due: bool,
+}

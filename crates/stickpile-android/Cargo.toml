@@ -25,5 +25,27 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+stickpile-api.workspace = true
 stickpile-core.workspace = true
-uniffi = "0.32"
+# The search suggestions (`suggest`), display-free: no X11 without its
+# `x11` feature.
+stickpile-quick.workspace = true
+# `tokio`: async functions run under `async_runtime = "tokio"`.
+uniffi = { version = "0.32", features = ["tokio"] }
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# `stickpile_core::settings::set_value` takes a TOML value.
+toml.workspace = true
+url.workspace = true
+
+# The device model for the token name (`ro.product.model`).
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+stickpile-core = { workspace = true, features = ["mock"] }
+# `bindgen`: the test that generates the Kotlin bindings.
+uniffi = { version = "0.32", features = ["tokio", "bindgen"] }
+tempfile.workspace = true
+image.workspace = true
