@@ -353,6 +353,32 @@ pub struct TokenCreated {
     pub user: User,
 }
 
+/// A new one-time pairing code ([`crate::routes::PAIRINGS`]). Returned once:
+/// the server keeps only a hash of the code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PairingCreated {
+    /// The code in its display form, e.g. `7KQ2-M9XA-4FTR`: 12 characters of
+    /// Crockford's base32 in groups of four ([`crate::pairing`]).
+    pub code: String,
+    /// When the code stops working, unix seconds (five minutes after creation).
+    pub expires_at: i64,
+    /// `stickpile://pair?url=<server's public URL>&code=<code>`, both values
+    /// percent-encoded: the content of the QR code.
+    pub pairing_url: String,
+}
+
+/// Exchange a pairing code for an API token ([`crate::routes::AUTH_PAIR`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PairRequest {
+    /// The code as shown or typed: case, spaces and dashes do not matter, and
+    /// `O`, `I`, `L` read as `0`, `1`, `1`.
+    pub code: String,
+    /// Shown in the token list, e.g. "Pixel 8".
+    pub token_name: String,
+}
+
 /// Self-service registration ([`crate::routes::AUTH_REGISTER`]).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

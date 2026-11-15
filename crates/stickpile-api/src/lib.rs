@@ -5,10 +5,12 @@
 //! * [`routes`]: every REST path, so server and clients cannot drift.
 //! * [`query`]: the keyboard-first search syntax (`e:😂 set:cats q>70 ...`).
 //! * [`profiles`]: what each target chat app accepts.
+//! * [`pairing`]: pairing codes and the `stickpile://pair` links of their QR codes.
 //!
 //! Enable the `openapi` feature to derive `utoipa::ToSchema` on all DTOs.
 
 pub mod model;
+pub mod pairing;
 pub mod profiles;
 pub mod query;
 pub mod routes;

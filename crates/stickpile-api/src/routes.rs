@@ -2,7 +2,7 @@
 //! clients with [`path`].
 //!
 //! Authentication for every `/api/v1` route except [`AUTH_TOKEN`],
-//! [`AUTH_REGISTER`], [`OPENAPI`] and [`GIT_WEBHOOK`]: `Authorization: Bearer
+//! [`AUTH_PAIR`], [`AUTH_REGISTER`], [`OPENAPI`] and [`GIT_WEBHOOK`]: `Authorization: Bearer
 //! <token>`, the tailnet identity from the trusted `tailscale serve` proxy, or
 //! the web session cookie (cookie-authenticated non-GET requests additionally
 //! need `X-CSRF-Token`). See docs/api.md.
@@ -16,6 +16,9 @@ pub const OPENAPI: &str = "/api/v1/openapi.json";
 // --- auth & tokens -----------------------------------------------------------
 /// POST [`crate::model::TokenRequest`] -> [`crate::model::TokenCreated`]. Password (+TOTP) login for API clients.
 pub const AUTH_TOKEN: &str = "/api/v1/auth/token";
+/// POST [`crate::model::PairRequest`] -> [`crate::model::TokenCreated`]. Unauthenticated:
+/// exchanges a one-time pairing code (from [`PAIRINGS`]) for an API token.
+pub const AUTH_PAIR: &str = "/api/v1/auth/pair";
 /// POST [`crate::model::RegisterRequest`] -> [`crate::model::User`] (201). Unauthenticated;
 /// obeys the server's registration policy (closed / invite / open).
 pub const AUTH_REGISTER: &str = "/api/v1/auth/register";
@@ -33,6 +36,9 @@ pub const ME_TOTP_DISABLE: &str = "/api/v1/me/totp/disable";
 pub const TOKENS: &str = "/api/v1/tokens";
 /// DELETE: revoke
 pub const TOKEN: &str = "/api/v1/tokens/{id}";
+/// POST -> [`crate::model::PairingCreated`] (201): a one-time pairing code for
+/// the caller's account, valid for five minutes ([`crate::pairing`]).
+pub const PAIRINGS: &str = "/api/v1/pairings";
 
 // --- sets ----------------------------------------------------------------------
 /// GET `?scope=mine|public|all` -> `Vec<SetSummary>`; POST [`crate::model::CreateSet`] -> [`crate::model::Set`]
