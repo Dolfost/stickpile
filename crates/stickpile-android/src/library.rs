@@ -1,4 +1,4 @@
-//! The [`Library`] object: one [`Session`] on a Tokio runtime of its own,
+//! The [`StickpileLibrary`] object: one [`Session`] on a Tokio runtime of its own,
 //! plus what the app needs around it (the sync schedule, the config file,
 //! the items it has shown).
 
@@ -27,7 +27,7 @@ const SEEN_MAX: usize = 4096;
 
 /// Cache `meta` key prefix of the favorites last read from the server, per
 /// user id: their ids, one per line. The cache keeps no likes, so this is
-/// what [`Library::favorites`] answers with offline.
+/// what [`StickpileLibrary::favorites`] answers with offline.
 const FAVORITES_KEY: &str = "android_favorites:";
 
 /// The stickpile library: an account on one server, its offline cache, and
@@ -35,21 +35,26 @@ const FAVORITES_KEY: &str = "android_favorites:";
 /// called from any thread. `suspend` methods run on the library's own Tokio
 /// runtime; the others only read local state (the config, the offline
 /// cache) and return quickly.
+///
+/// docs/android.md calls it `Library`; that name clashes in Kotlin with
+/// `com.sun.jna.Library`, which every UniFFI Kotlin file imports.
 #[derive(uniffi::Object)]
-pub struct Library {
+pub struct StickpileLibrary {
     /// `Some` until the library is dropped.
     runtime: Option<tokio::runtime::Runtime>,
     handle: tokio::runtime::Handle,
     inner: Arc<Inner>,
 }
 
-impl std::fmt::Debug for Library {
+impl std::fmt::Debug for StickpileLibrary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Library").field("dirs", &self.inner.dirs).finish()
+        f.debug_struct("StickpileLibrary")
+            .field("dirs", &self.inner.dirs)
+            .finish()
     }
 }
 
-impl Drop for Library {
+impl Drop for StickpileLibrary {
     fn drop(&mut self) {
         // Never blocks, so it is fine wherever the last reference goes.
         if let Some(rt) = self.runtime.take() {
@@ -358,7 +363,7 @@ async fn open_session(config: ClientConfig) -> Result<Session, LibraryError> {
     Ok(Session::open(config).await?.with_client_name(crate::client_name()))
 }
 
-impl Library {
+impl StickpileLibrary {
     /// Run `f` on the runtime. When the caller stops waiting (the Kotlin
     /// coroutine was cancelled), the work is aborted: for calls that only
     /// read.
@@ -386,7 +391,7 @@ impl Library {
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl Library {
+impl StickpileLibrary {
     /// Open the library: read `dirs.config_file` if it exists (else the
     /// defaults), keep the cache and the token in `dirs.cache_dir` and
     /// `dirs.token_file`, and open the offline cache. Nothing goes to the
@@ -398,7 +403,7 @@ impl Library {
     /// defaults), `Io` when the cache cannot be opened, `Other` for a token
     /// file readable by others.
     #[uniffi::constructor]
-    pub fn new(dirs: LibraryDirs) -> Result<Arc<Library>, LibraryError> {
+    pub fn new(dirs: LibraryDirs) -> Result<Arc<StickpileLibrary>, LibraryError> {
         let path = |field: &str, p: &str| {
             let p = PathBuf::from(p);
             if p.is_absolute() {
@@ -450,7 +455,7 @@ impl Library {
             crate::version(),
             inner.session().config().server_url
         );
-        Ok(Arc::new(Library {
+        Ok(Arc::new(StickpileLibrary {
             runtime: Some(runtime),
             handle,
             inner: Arc::new(inner),
@@ -968,6 +973,6 @@ mod tests {
     #[test]
     fn library_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<Library>();
+        assert_send_sync::<StickpileLibrary>();
     }
 }

@@ -2,7 +2,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use stickpile_android::{Account, AuthKind, Library, LibraryDirs, LibraryErrorKind};
+use stickpile_android::{Account, AuthKind, LibraryDirs, LibraryErrorKind, StickpileLibrary};
 use stickpile_core::mock::{dead_url, MockServer};
 
 use super::*;
@@ -11,7 +11,7 @@ use super::*;
 async fn opens_with_the_defaults_or_the_config_file() {
     let dir = tempfile::tempdir().unwrap();
     // No config file: the defaults, nothing written.
-    let lib = Library::new(dirs(dir.path())).unwrap();
+    let lib = StickpileLibrary::new(dirs(dir.path())).unwrap();
     assert_eq!(lib.server_url(), "http://localhost:8080");
     assert!(!config_path(dir.path()).exists());
     assert!(dir.path().join("cache/cache.sqlite3").exists(), "the cache is opened");
@@ -28,17 +28,17 @@ async fn refuses_relative_paths_and_broken_config_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut d = dirs(dir.path());
     d.cache_dir = "cache".into();
-    assert_eq!(invalid_field(Library::new(d)), "cache_dir");
+    assert_eq!(invalid_field(StickpileLibrary::new(d)), "cache_dir");
     let d = LibraryDirs {
         config_file: "config.toml".into(),
         ..dirs(dir.path())
     };
-    assert_eq!(invalid_field(Library::new(d)), "config_file");
+    assert_eq!(invalid_field(StickpileLibrary::new(d)), "config_file");
 
     std::fs::write(config_path(dir.path()), "server_url = [").unwrap();
-    assert_eq!(invalid_field(Library::new(dirs(dir.path()))), "config_file");
+    assert_eq!(invalid_field(StickpileLibrary::new(dirs(dir.path()))), "config_file");
     std::fs::write(config_path(dir.path()), "server_url = \"ftp://x\"").unwrap();
-    assert_eq!(invalid_field(Library::new(dirs(dir.path()))), "config_file");
+    assert_eq!(invalid_field(StickpileLibrary::new(dirs(dir.path()))), "config_file");
 }
 
 #[tokio::test]
@@ -64,7 +64,7 @@ async fn set_server_url_saves_it_and_reopens() {
 
     // A new library reads it back.
     drop(lib);
-    let again = Library::new(dirs(dir.path())).unwrap();
+    let again = StickpileLibrary::new(dirs(dir.path())).unwrap();
     assert_eq!(again.server_url(), server.url);
 
     // Bad URLs change nothing.
@@ -184,7 +184,7 @@ async fn login_password_stores_the_token() {
     assert!(server.state().tokens.iter().any(|t| t.info.name == "Android (phone)"));
     assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
     // A new library finds the token.
-    let again = Library::new(dirs(dir.path())).unwrap();
+    let again = StickpileLibrary::new(dirs(dir.path())).unwrap();
     assert_eq!(again.account().await.unwrap().unwrap().auth, AuthKind::Token);
 }
 
@@ -266,7 +266,7 @@ async fn login_pairing_sets_the_server_and_stores_the_token() {
         .await
         .unwrap();
     assert_eq!(ids(&found.items), vec![items[0].id.clone()]);
-    let again = Library::new(dirs(dir.path())).unwrap();
+    let again = StickpileLibrary::new(dirs(dir.path())).unwrap();
     assert_eq!(again.account().await.unwrap().unwrap().auth, AuthKind::Token);
 
     // A used code.

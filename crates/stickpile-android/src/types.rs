@@ -8,7 +8,7 @@ use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, User};
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct LibraryDirs {
     /// The client config (`config.toml`, the desktop's format). Need not
-    /// exist: missing means the defaults. `Library.set_server_url`
+    /// exist: missing means the defaults. `StickpileLibrary.set_server_url`
     /// writes it.
     pub config_file: String,
     /// The offline cache: the item database, thumbnails, prepared files.
@@ -242,7 +242,7 @@ pub struct Prepared {
     pub target: Target,
     /// The rendition's name (`original`, `png`, `tg_sticker`,
     /// `tg_video_sticker`, `discord_gif`, `mp4`); give it back to
-    /// `Library.record_use`.
+    /// `StickpileLibrary.record_use`.
     pub variant: String,
     /// It is the sticker rendition (asked for, and the app has stickers).
     pub sticker: bool,
@@ -272,6 +272,6 @@ pub struct SyncState {
     pub last_error: Option<crate::LibraryErrorKind>,
     /// Uses recorded on this device and not yet sent to the server.
     pub pending_usage: u32,
-    /// A sync is due: `Library.sync_if_due` would sync now.
+    /// A sync is due: `StickpileLibrary.sync_if_due` would sync now.
     pub due: bool,
 }

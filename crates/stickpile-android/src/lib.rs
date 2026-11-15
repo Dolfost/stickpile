@@ -3,7 +3,9 @@
 //! `io.github.dolfost.stickpile.rust`). The contract is docs/android.md,
 //! "Bridge interface".
 //!
-//! The app holds one [`Library`]: a [`stickpile_core::Session`] (the
+//! The app holds one [`StickpileLibrary`] (the contract's `Library`, renamed
+//! because Kotlin's `Library` is `com.sun.jna.Library`, which the generated
+//! bindings import), a [`stickpile_core::Session`] (the
 //! account, the offline cache, the usage queue) on a Tokio runtime of its
 //! own, behind a lock so that changing the server can replace it. Its
 //! `async` methods are Kotlin `suspend` functions (`async_runtime =
@@ -49,7 +51,7 @@ mod library;
 pub mod types;
 
 pub use error::{LibraryError, LibraryErrorKind};
-pub use library::Library;
+pub use library::StickpileLibrary;
 pub use types::*;
 
 /// The stickpile version this library was built from (the workspace's).

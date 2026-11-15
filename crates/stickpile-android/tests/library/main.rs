@@ -1,4 +1,4 @@
-//! Host tests of [`Library`] against the in-process mock of the REST API
+//! Host tests of [`StickpileLibrary`] against the in-process mock of the REST API
 //! (`stickpile_core::mock`), through the same Rust API the bindings wrap.
 //! No network beyond the mock, no display.
 
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use stickpile_android::{Library, LibraryDirs, LibraryError, LibraryErrorKind};
+use stickpile_android::{LibraryDirs, LibraryError, LibraryErrorKind, StickpileLibrary};
 use stickpile_api::{ItemSummary, Visibility};
 use stickpile_core::mock::MockServer;
 
@@ -71,9 +71,9 @@ pub fn write_config(dir: &Path, url: &str) {
 }
 
 /// A library for the server at `url`, with whatever token `dir` holds.
-pub fn open(dir: &Path, url: &str) -> Arc<Library> {
+pub fn open(dir: &Path, url: &str) -> Arc<StickpileLibrary> {
     write_config(dir, url);
-    Library::new(dirs(dir)).unwrap()
+    StickpileLibrary::new(dirs(dir)).unwrap()
 }
 
 /// Store a token of alice's in `dir`, as a login would.
@@ -84,7 +84,7 @@ pub fn store_token(server: &MockServer, dir: &Path) -> String {
 }
 
 /// Signed in as alice on `server`.
-pub fn signed_in(server: &MockServer, dir: &Path) -> Arc<Library> {
+pub fn signed_in(server: &MockServer, dir: &Path) -> Arc<StickpileLibrary> {
     store_token(server, dir);
     open(dir, &server.url)
 }

@@ -5,7 +5,7 @@
 use stickpile_core::config::ConfigError;
 use stickpile_core::CoreError;
 
-/// Everything that can go wrong in a `Library` call. Each variant is
+/// Everything that can go wrong in a `StickpileLibrary` call. Each variant is
 /// a kind the app turns into its own (translated) text; `detail` says what
 /// happened in English, for logs only, and never contains a token or a
 /// password.

@@ -2,7 +2,8 @@
 //! interface of docs/android.md ("Bridge interface"): every function with
 //! its Kotlin signature, every record, enum and error variant. A change to
 //! the exported interface fails here until the contract and this list
-//! agree again.
+//! agree again. One known difference: the contract's `Library` is
+//! `StickpileLibrary` (Kotlin's `Library` is `com.sun.jna.Library`).
 //!
 //! The bindings are made like the Gradle build makes them (library mode,
 //! the crate's `uniffi.toml`), from the `libstickpile_android` cdylib that
@@ -10,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Every method of `LibraryInterface`, as the bindings declare it.
+/// Every method of `StickpileLibraryInterface`, as the bindings declare it.
 const METHODS: &[&str] = &[
     // account
     "fun `serverUrl`(): kotlin.String",
@@ -185,7 +186,7 @@ const ERRORS: &[(&str, &[&str])] = &[
     ("Other", &["detail: kotlin.String"]),
 ];
 
-/// The top-level functions besides `Library`.
+/// The top-level functions besides `StickpileLibrary`.
 const FUNCTIONS: &[&str] = &["fun `version`(): kotlin.String", "fun `clientName`(): kotlin.String"];
 
 fn cdylib() -> PathBuf {
@@ -263,12 +264,28 @@ fn the_kotlin_bindings_carry_the_contract() {
         }
     }
 
+    // No exported type may take the name of one the file imports
+    // (`com.sun.jna.Library` is why the object is `StickpileLibrary`).
+    let imported: Vec<&str> = kt
+        .lines()
+        .filter_map(|l| l.strip_prefix("import "))
+        .filter_map(|l| l.trim().rsplit('.').next())
+        .collect();
+    let exported = RECORDS.iter().chain(ENUMS).map(|(name, _)| *name).chain([
+        "StickpileLibrary",
+        "StickpileLibraryInterface",
+        "LibraryException",
+    ]);
+    for name in exported {
+        assert!(!imported.contains(&name), "{name} clashes with an import");
+    }
+
     // Exactly the contract's methods.
     let interface = kt
-        .split("public interface LibraryInterface {")
+        .split("public interface StickpileLibraryInterface {")
         .nth(1)
         .and_then(|s| s.split("companion object").next())
-        .expect("LibraryInterface");
+        .expect("StickpileLibraryInterface");
     let mut declared: Vec<&str> = interface
         .lines()
         .map(str::trim)
@@ -277,7 +294,7 @@ fn the_kotlin_bindings_carry_the_contract() {
     let mut want = METHODS.to_vec();
     declared.sort_unstable();
     want.sort_unstable();
-    assert_eq!(declared, want, "LibraryInterface differs from the contract");
+    assert_eq!(declared, want, "StickpileLibraryInterface differs from the contract");
 
     // Which of them throw LibraryException.
     let squashed = squash(&kt);
@@ -307,7 +324,7 @@ fn the_kotlin_bindings_carry_the_contract() {
 
     // The primary constructor (not async: UniFFI cannot make it so for Kotlin).
     assert!(squashed.contains(&squash(
-        "open class Library: Disposable, AutoCloseable, LibraryInterface {"
+        "open class StickpileLibrary: Disposable, AutoCloseable, StickpileLibraryInterface {"
     )));
     assert!(
         squashed.contains(&squash(
