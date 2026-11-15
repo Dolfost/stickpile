@@ -13,7 +13,6 @@
     <!-- The account owns no set; %1$s is the server's address. -->
     <string name="share_no_sets">You have no sets of your own yet. Make one in the web app at %1$s, then come back here.</string>
     <!-- The library lists only sets that hold something. -->
-    <string name="share_no_sets_note">A new set shows up here once it holds at least one picture.</string>
     <string name="share_check_again">Check again</string>
     <string name="share_retry">Retry</string>
 

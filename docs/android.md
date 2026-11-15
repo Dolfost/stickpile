@@ -122,6 +122,7 @@ object StickpileLibrary
   async fn most_used(limit: u32) throws -> ItemList
   async fn packs() throws -> PackList
   async fn pack_items(pack_id: String) throws -> ItemList
+  async fn own_packs() throws -> PackList               // the user's own, empty ones included (upload targets)
   fn suggestions(query: String) -> Suggestions?        // stickpile_quick::suggest
 
   // files

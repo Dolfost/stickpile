@@ -221,6 +221,46 @@ async fn packs_online_offline_and_signed_out() {
 }
 
 #[tokio::test]
+async fn own_packs_include_empty_ones_online() {
+    let (mut server, _) = seeded_server();
+    server.state().add_set("alice", "new", "New", Visibility::Private);
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    // packs leaves the empty set out; own_packs keeps it, and only alice's.
+    assert!(!lib.packs().await.unwrap().packs.iter().any(|p| p.name == "New"));
+    let own = lib.own_packs().await.unwrap();
+    assert!(!own.offline);
+    let mut names: Vec<(String, bool, u32)> = own
+        .packs
+        .iter()
+        .map(|p| (p.name.clone(), p.mine, p.item_count))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            ("Cats".into(), true, 3),
+            ("Memes".into(), true, 1),
+            ("New".into(), true, 0)
+        ]
+    );
+
+    // Offline: the own packs of the cached items (not the empty one).
+    lib.sync_now().await.unwrap();
+    server.stop();
+    let offline = lib.own_packs().await.unwrap();
+    assert!(offline.offline);
+    let mut names: Vec<String> = offline.packs.iter().map(|p| p.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, vec!["Cats".to_string(), "Memes".to_string()]);
+
+    server.restart();
+    let empty = tempfile::tempdir().unwrap();
+    let lib = open(empty.path(), &server.url);
+    assert_eq!(kind(lib.own_packs().await), LibraryErrorKind::NotSignedIn);
+}
+
+#[tokio::test]
 async fn pack_items_online_offline_and_unknown() {
     let (mut server, items) = seeded_server();
     let dir = tempfile::tempdir().unwrap();

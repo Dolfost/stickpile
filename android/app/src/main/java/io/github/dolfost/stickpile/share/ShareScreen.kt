@@ -108,10 +108,7 @@ fun ShareScreen(model: ShareViewModel, onOpenApp: () -> Unit, onClose: () -> Uni
                     TextButton(onClick = onClose) { Text(stringResource(R.string.share_close)) }
                     Button(onClick = onOpenApp) { Text(stringResource(R.string.share_open_app)) }
                 }
-                is Setup.NoOwnSets -> Message(
-                    stringResource(R.string.share_no_sets, setup.serverUrl),
-                    note = stringResource(R.string.share_no_sets_note),
-                ) {
+                is Setup.NoOwnSets -> Message(stringResource(R.string.share_no_sets, setup.serverUrl)) {
                     TextButton(onClick = onClose) { Text(stringResource(R.string.share_close)) }
                     Button(onClick = model::loadSetup) { Text(stringResource(R.string.share_check_again)) }
                 }

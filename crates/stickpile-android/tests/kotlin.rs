@@ -53,6 +53,7 @@ const METHODS: &[&str] = &[
     "suspend fun `syncNow`(): SyncState",
     "fun `syncState`(): SyncState",
     "fun `pendingUsage`(): kotlin.UInt",
+    "suspend fun `ownPacks`(): PackList",
     // cache
     "fun `cacheBytes`(): kotlin.ULong",
     "fun `clearCache`(): kotlin.ULong",

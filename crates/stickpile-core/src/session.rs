@@ -424,6 +424,29 @@ impl Session {
         }
     }
 
+    /// The viewer's own sets, empty ones included: where an upload can go
+    /// ([`Session::packs`] leaves empty sets out). Offline: the own sets
+    /// known from the cached items, so not the empty ones.
+    pub async fn own_packs(&self) -> Result<Listing<SetSummary>> {
+        match self.client.sets(Some("mine")).await {
+            Ok(mine) => Ok(Listing::online(mine)),
+            Err(e) if falls_back(&e) => {
+                tracing::debug!("own packs from the offline cache: {e}");
+                let me = self.cache.me()?.map(|u| u.username);
+                let sets: Vec<SetSummary> = self
+                    .cached_packs()?
+                    .into_iter()
+                    .filter(|s| me.as_deref() == Some(s.owner_username.as_str()))
+                    .collect();
+                if sets.is_empty() {
+                    return Err(e);
+                }
+                Ok(Listing::offline(sets))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Sets made up from the cached items, ordered like [`Session::packs`].
     /// The cache keeps no set records: visibility follows the offline
     /// index's rule (own private, the rest public) and the cover is the

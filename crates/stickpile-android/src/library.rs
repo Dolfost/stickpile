@@ -747,6 +747,26 @@ impl StickpileLibrary {
         .await
     }
 
+    /// The signed-in user's own packs, empty ones included: where an
+    /// upload can go (`packs` leaves empty packs out). Offline: the own
+    /// packs known from the cached items (`offline = true`), so not the
+    /// empty ones; throws `Unreachable` if none are cached.
+    pub async fn own_packs(&self) -> Result<PackList, LibraryError> {
+        self.read(|inner| async move {
+            let session = inner.session();
+            let listing = session.own_packs().await?;
+            Ok(PackList {
+                packs: listing
+                    .items
+                    .iter()
+                    .map(|s| Pack::new(s, Some(s.owner_username.as_str())))
+                    .collect(),
+                offline: listing.offline,
+            })
+        })
+        .await
+    }
+
     /// One pack's items in pack order. Offline: its cached items by name
     /// (`offline = true`); throws `Unreachable` if none are cached.
     pub async fn pack_items(&self, pack_id: String) -> Result<ItemList, LibraryError> {

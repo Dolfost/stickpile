@@ -117,9 +117,9 @@ class ShareViewModel(application: Application) : AndroidViewModel(application) {
         if (library.account() == null) {
             Setup.SignedOut
         } else {
-            val list = library.packs()
-            val own = list.packs.filter { it.mine }
-            if (own.isEmpty()) Setup.NoOwnSets(library.serverUrl()) else Setup.Ready(own, list.offline)
+            // Own sets, empty ones included (packs() leaves those out).
+            val list = library.ownPacks()
+            if (list.packs.isEmpty()) Setup.NoOwnSets(library.serverUrl()) else Setup.Ready(list.packs, list.offline)
         }
     } catch (e: LibraryException) {
         Log.w(TAG, "reading the account or sets failed: ${e.javaClass.simpleName}: ${e.message}")
