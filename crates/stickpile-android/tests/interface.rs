@@ -44,6 +44,8 @@ const CONTRACT: &[&str] = &[
     "async fn StickpileLibrary.packs() -> PackList throws LibraryError",
     "async fn StickpileLibrary.pack_items(pack_id: String) -> ItemList throws LibraryError",
     "fn StickpileLibrary.suggestions(query: String) -> Suggestions?",
+    "fn StickpileLibrary.hints(query: String) -> List<SearchHint>",
+    "fn StickpileLibrary.item_url(item_id: String) -> String?",
     // files
     "async fn StickpileLibrary.thumbnail(item_id: String) -> String throws LibraryError",
     "async fn StickpileLibrary.prepare(item_id: String, editor_package: String, accepted_mime_types: List<String>, sticker: Boolean) -> Prepared throws LibraryError",
@@ -65,13 +67,15 @@ const CONTRACT: &[&str] = &[
     // records
     "record LibraryDirs { config_file: String, cache_dir: String, token_file: String }",
     "record Account { username: String, display_name: String?, server_url: String, auth: AuthKind, is_admin: Boolean }",
-    "record Item { id: String, name: String, set_id: String, set_name: String, emojis: List<String>, \
-     keywords: List<String>, vibe: String?, tags: List<String>, kind: MediaKind, width: u32, height: u32, \
-     likes: u64, copies: u64 }",
+    "record Item { id: String, name: String, set_id: String, set_name: String, owner: String, \
+     emojis: List<String>, keywords: List<String>, vibe: String?, tags: List<String>, kind: MediaKind, \
+     format: MediaFormat, width: u32, height: u32, quality: u32?, likes: u64, copies: u64, nsfw: Boolean, \
+     liked: Boolean }",
     "record ItemList { items: List<Item>, offline: Boolean }",
     "record Pack { id: String, slug: String, name: String, owner: String, item_count: u32, mine: Boolean }",
     "record PackList { packs: List<Pack>, offline: Boolean }",
     "record Suggestions { key: String, words: List<String>, chosen: u32? }",
+    "record SearchHint { label: String, query: String, chosen: Boolean, kind: HintKind }",
     "record PairingLink { server_url: String, code: String }",
     "record Prepared { path: String, mime_type: String, display_name: String, target: Target, variant: String, \
      sticker: Boolean }",
@@ -81,6 +85,8 @@ const CONTRACT: &[&str] = &[
     "enum AuthKind { Token, Tailnet }",
     "enum Target { Telegram, Discord, Signal, Whatsapp, Slack, Generic }",
     "enum MediaKind { Still, Animation, Video }",
+    "enum MediaFormat { Png, Jpeg, Webp, Gif, Mp4, Webm }",
+    "enum HintKind { Value, Filter, Key }",
     "enum LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited, NothingFits, \
      InvalidInput, Server, Io, Other }",
     // the error

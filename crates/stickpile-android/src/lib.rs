@@ -47,6 +47,7 @@ uniffi::setup_scaffolding!();
 
 mod device;
 mod error;
+mod hints;
 mod library;
 pub mod types;
 

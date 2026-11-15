@@ -39,6 +39,8 @@ thiserror.workspace = true
 tracing.workspace = true
 # `stickpile_core::settings::set_value` takes a TOML value.
 toml.workspace = true
+# `item_url`: the item's page under the server URL.
+url.workspace = true
 
 # The device model for the token name (`ro.product.model`).
 [target.'cfg(target_os = "android")'.dependencies]

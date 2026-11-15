@@ -2,7 +2,7 @@
 //! plus what the app needs around it (the sync schedule, the config file,
 //! the items it has shown).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use stickpile_api::{pairing, ItemSummary, PairRequest, TokenCreated, TokenRequest, UploadMeta, User, Variant};
 use stickpile_core::session::{save_login, tailnet_login};
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
-use stickpile_quick::suggest::{self, Vocabulary};
+use stickpile_quick::suggest;
+
+use crate::hints::{self, Words};
 
 use crate::types::*;
 use crate::{device, LibraryError, LibraryErrorKind};
@@ -106,8 +108,9 @@ struct Inner {
     /// the two never overlap.
     busy: tokio::sync::Mutex<()>,
     seen: Mutex<HashMap<String, ItemSummary>>,
-    /// The suggestions' vocabulary and the cache generation it was made at.
-    vocabulary: Mutex<Option<(u64, Arc<Vocabulary>)>>,
+    /// The words of the suggestions and hints, and the cache generation
+    /// they were read at.
+    vocabulary: Mutex<Option<(u64, Arc<Words>)>>,
     generation: Mutex<Generation>,
 }
 
@@ -358,12 +361,18 @@ impl Inner {
         });
     }
 
-    fn list(&self, generation: u64, items: Vec<ItemSummary>, offline: bool) -> ItemList {
+    fn list(&self, generation: u64, session: &Session, items: Vec<ItemSummary>, offline: bool) -> ItemList {
         self.remember(generation, &items);
         ItemList {
-            items: items.iter().map(Item::from).collect(),
+            items: self.items(session, &items),
             offline,
         }
+    }
+
+    /// `items` for the app, marked liked as far as the saved favorites say.
+    fn items(&self, session: &Session, items: &[ItemSummary]) -> Vec<Item> {
+        let liked = Self::liked_ids(session);
+        items.iter().map(|i| Item::new(i, liked.contains(&i.id))).collect()
     }
 
     /// An item shown before, else the cached one; no request.
@@ -406,7 +415,7 @@ impl Inner {
         Ok(item)
     }
 
-    fn vocabulary(&self, session: &Session) -> Arc<Vocabulary> {
+    fn vocabulary(&self, session: &Session) -> Arc<Words> {
         let generation = session.cache().generation().unwrap_or(0);
         let mut slot = lock(&self.vocabulary);
         if let Some((g, v)) = slot.as_ref() {
@@ -415,10 +424,13 @@ impl Inner {
             }
         }
         let vocabulary = match session.offline_index() {
-            Ok(index) => Arc::new(Vocabulary::from_items(index.items())),
+            Ok(index) => {
+                let items: Vec<&ItemSummary> = index.items().collect();
+                Arc::new(Words::from_items(items.iter().copied()))
+            }
             Err(e) => {
                 tracing::debug!("no suggestions from the cache: {e}");
-                Arc::new(Vocabulary::default())
+                Arc::new(Words::default())
             }
         };
         *slot = Some((generation, vocabulary.clone()));
@@ -428,6 +440,22 @@ impl Inner {
     fn favorites_key(session: &Session) -> Option<String> {
         let me = session.cache().me().ok().flatten()?;
         Some(format!("{FAVORITES_KEY}{}", me.id))
+    }
+
+    /// The ids of the favorites last read from the server, with the likes
+    /// changed here since; empty when they were never read.
+    fn liked_ids(session: &Session) -> HashSet<String> {
+        let Some(key) = Self::favorites_key(session) else {
+            return HashSet::new();
+        };
+        match session.cache().meta_get(&key) {
+            Ok(Some(ids)) => ids.lines().filter(|l| !l.is_empty()).map(str::to_string).collect(),
+            Ok(None) => HashSet::new(),
+            Err(e) => {
+                tracing::debug!("reading the favorites: {e}");
+                HashSet::new()
+            }
+        }
     }
 
     /// Save `ids`, the favorites read online at `generation`, for offline,
@@ -827,12 +855,13 @@ impl StickpileLibrary {
             let query = if query.contains(':') {
                 let (inner2, session2) = (inner.clone(), session.clone());
                 let vocabulary = tokio::task::spawn_blocking(move || inner2.vocabulary(&session2)).await?;
-                suggest::resolve(query.trim(), &vocabulary).0
+                suggest::resolve(query.trim(), &vocabulary.vocab).0
             } else {
                 query.trim().to_string()
             };
             let out = session.search(&query, Some(target.into()), limit as usize).await?;
-            Ok(inner.list(generation, out.hits.into_iter().map(|h| h.item).collect(), out.offline))
+            let items = out.hits.into_iter().map(|h| h.item).collect();
+            Ok(inner.list(generation, &session, items, out.offline))
         })
         .await
     }
@@ -842,7 +871,7 @@ impl StickpileLibrary {
         let (generation, session) = self.inner.current();
         let items = session.recent(limit as usize);
         self.inner.remember(generation, &items);
-        items.iter().map(Item::from).collect()
+        self.inner.items(&session, &items)
     }
 
     /// The items the account liked, most used first. Offline: the
@@ -860,12 +889,12 @@ impl StickpileLibrary {
                     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
                     inner.save_favorites(generation, &session, &ids);
                     items.truncate(limit);
-                    Ok(inner.list(generation, items, false))
+                    Ok(inner.list(generation, &session, items, false))
                 }
                 Err(e) if falls_back(&e) => match inner.saved_favorites(&session)? {
                     Some(mut items) => {
                         items.truncate(limit);
-                        Ok(inner.list(generation, items, true))
+                        Ok(inner.list(generation, &session, items, true))
                     }
                     None => Err(e.into()),
                 },
@@ -882,7 +911,7 @@ impl StickpileLibrary {
         self.read(move |inner| async move {
             let (generation, session) = inner.current();
             let listing = session.most_used(limit as usize).await?;
-            Ok(inner.list(generation, listing.items, listing.offline))
+            Ok(inner.list(generation, &session, listing.items, listing.offline))
         })
         .await
     }
@@ -934,7 +963,7 @@ impl StickpileLibrary {
         self.read(move |inner| async move {
             let (generation, session) = inner.current();
             let listing = session.pack_items(&pack_id).await?;
-            Ok(inner.list(generation, listing.items, listing.offline))
+            Ok(inner.list(generation, &session, listing.items, listing.offline))
         })
         .await
     }
@@ -946,7 +975,40 @@ impl StickpileLibrary {
     /// network).
     pub fn suggestions(&self, query: String) -> Option<Suggestions> {
         let session = self.inner.session();
-        suggest::suggest(&query, &self.inner.vocabulary(&session)).map(Suggestions::from)
+        suggest::suggest(&query, &self.inner.vocabulary(&session).vocab).map(Suggestions::from)
+    }
+
+    /// What to offer under a search field while `query` is typed, each
+    /// offer with the whole query it makes (no network; the words are those
+    /// of the cached items):
+    ///
+    /// - a `key:value` filter being typed (`vibe:sar`, `-tag:`): its values,
+    ///   as `suggestions` ranks them, the one the search uses `chosen`;
+    /// - `e:` (or `emoji:`): the emojis of the cached items, most used first;
+    /// - a bare word (`rea`): the tags, vibes and packs containing it as
+    ///   filters (`tag:reaction`), those starting with it first, then the
+    ///   filter keys the word starts (`t`: `tag:`, `type:`);
+    /// - nothing, or a space at the end: the filter keys `tag:`, `vibe:`,
+    ///   `e:`, `set:`, `by:`, `type:`, `is:`, `sort:`.
+    ///
+    /// A leading `-` (leave out) stays on what is offered. Inside an
+    /// unfinished phrase (an odd number of `"`) nothing is offered. At most
+    /// 12 offers.
+    pub fn hints(&self, query: String) -> Vec<SearchHint> {
+        let session = self.inner.session();
+        hints::hints(&query, &self.inner.vocabulary(&session))
+    }
+
+    /// The item's page in the server's web UI (`<server>/items/<id>`);
+    /// `None` when the configured server URL is not an `http` or `https`
+    /// URL (no network).
+    pub fn item_url(&self, item_id: String) -> Option<String> {
+        let mut url = url::Url::parse(&self.inner.session().config().server_url).ok()?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return None;
+        }
+        url.path_segments_mut().ok()?.pop_if_empty().extend(["items", &item_id]);
+        Some(url.into())
     }
 
     // -- files ------------------------------------------------------------------
@@ -1088,7 +1150,7 @@ impl StickpileLibrary {
                 .ok_or_else(|| LibraryError::other("the server answered with no item"))?;
             let summary = session.item_summary(&item.id).await?;
             inner.remember(generation, std::slice::from_ref(&summary));
-            Ok(Item::from(&summary))
+            Ok(Item::new(&summary, false))
         })
         .await
     }

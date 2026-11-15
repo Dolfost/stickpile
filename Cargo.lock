@@ -3830,6 +3830,7 @@ dependencies = [
  "tracing",
  "uniffi",
  "uniffi_meta",
+ "url",
 ]
 
 [[package]]

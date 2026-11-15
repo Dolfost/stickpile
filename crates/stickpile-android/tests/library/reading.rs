@@ -1,6 +1,6 @@
 //! Search, the lists and the suggestions: online, offline and signed out.
 
-use stickpile_android::{LibraryErrorKind, MediaKind, Target};
+use stickpile_android::{HintKind, LibraryErrorKind, MediaFormat, MediaKind, Target};
 use stickpile_core::mock::dead_url;
 
 use super::*;
@@ -305,4 +305,74 @@ async fn pack_items_online_offline_and_unknown() {
     let out = tempfile::tempdir().unwrap();
     let lib = open(out.path(), &server.url);
     assert_eq!(kind(lib.pack_items(cats).await), LibraryErrorKind::NotSignedIn);
+}
+
+/// What the tiles show: the owner, the format, the nsfw tag, the
+/// account's likes once the favorites were read, and the item's page.
+#[tokio::test]
+async fn items_carry_what_the_tiles_show() {
+    let (server, items) = seeded_server();
+    {
+        let mut st = server.state();
+        let grumpy = st.items.iter_mut().find(|m| m.item.id == items[0].id).unwrap();
+        grumpy.item.tags = vec!["fun".into(), " NSFW ".into()];
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    let find = |list: &[stickpile_android::Item], id: &str| list.iter().find(|i| i.id == id).cloned().unwrap();
+
+    let found = lib.search("cat".into(), Target::Generic, 10).await.unwrap().items;
+    let grumpy = find(&found, &items[0].id);
+    let gif = find(&found, &items[1].id);
+    assert!(grumpy.nsfw, "tagged NSFW, any case");
+    assert!(!gif.nsfw);
+    assert_eq!((grumpy.owner.as_str(), grumpy.format), ("alice", MediaFormat::Png));
+    assert_eq!(gif.format, MediaFormat::Gif);
+    assert!(!grumpy.liked && !gif.liked, "the favorites were never read");
+
+    // The favorites are saved under the account the cache knows: after a sync.
+    lib.sync_now().await.unwrap();
+    assert!(lib.toggle_like(items[1].id.clone()).await.unwrap());
+    lib.favorites(1).await.unwrap();
+    let found = lib.search("cat".into(), Target::Generic, 10).await.unwrap().items;
+    assert!(find(&found, &items[1].id).liked);
+    assert!(!find(&found, &items[0].id).liked);
+
+    // A like made here shows at once, without reading the favorites again.
+    assert!(lib.toggle_like(items[0].id.clone()).await.unwrap());
+    let found = lib.search("cat".into(), Target::Generic, 10).await.unwrap().items;
+    assert!(find(&found, &items[0].id).liked);
+    assert!(!lib.toggle_like(items[1].id.clone()).await.unwrap());
+    let pack = lib.pack_items(items[0].set_id.clone()).await.unwrap().items;
+    assert!(!find(&pack, &items[1].id).liked);
+    assert!(find(&pack, &items[0].id).liked);
+
+    assert_eq!(
+        lib.item_url(items[0].id.clone()),
+        Some(format!("{}/items/{}", server.url.trim_end_matches('/'), items[0].id))
+    );
+}
+
+#[tokio::test]
+async fn hints_come_from_the_cache() {
+    let (server, _) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    let keys = lib.hints(String::new());
+    assert_eq!(keys[0].label, "tag:");
+    assert!(keys.iter().all(|h| h.kind == HintKind::Key));
+
+    lib.sync_now().await.unwrap();
+    let values = lib.hints("grumpy set:ca".into());
+    assert_eq!(values[0].label, "cats");
+    assert_eq!(values[0].query, "grumpy set:cats ");
+    assert!(values[0].chosen);
+    let filters = lib.hints("do".into());
+    assert!(
+        filters
+            .iter()
+            .any(|h| h.label == "set:dogs" && h.query == "set:dogs " && h.kind == HintKind::Filter),
+        "{filters:?}"
+    );
+    assert!(lib.hints("\"half a phr".into()).is_empty());
 }

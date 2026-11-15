@@ -262,6 +262,9 @@ object StickpileLibrary
   async fn pack_items(pack_id: String) throws -> ItemList
   async fn own_packs() throws -> PackList               // the user's own, empty ones included (upload targets)
   fn suggestions(query: String) -> Suggestions?        // stickpile_quick::suggest
+  fn hints(query: String) -> List<SearchHint>          // the offers under a search field, each with
+                                                       // the whole query it makes (no network)
+  fn item_url(item_id: String) -> String?              // the item's page in the web UI
 
   // files
   async fn thumbnail(item_id: String) throws -> String // path of the cached thumbnail
@@ -300,15 +303,21 @@ enum   LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, Rate
                           NothingFits, InvalidInput, Server, Io, Other }
 enum   Target      { Telegram, Discord, Signal, Whatsapp, Slack, Generic }
 enum   MediaKind   { Still, Animation, Video }
+enum   MediaFormat { Png, Jpeg, Webp, Gif, Mp4, Webm }
 record Item        { id: String, name: String, set_id: String, set_name: String,
-                     emojis: List<String>, keywords: List<String>, vibe: String?,
-                     tags: List<String>, kind: MediaKind, width: u32, height: u32,
-                     likes: u64, copies: u64 }
+                     owner: String, emojis: List<String>, keywords: List<String>,
+                     vibe: String?, tags: List<String>, kind: MediaKind,
+                     format: MediaFormat, width: u32, height: u32, quality: u32?,
+                     likes: u64, copies: u64,
+                     nsfw: Boolean,     // tagged nsfw, any case: safe mode hides it
+                     liked: Boolean }   // by the account, as the saved favorites say
 record ItemList    { items: List<Item>, offline: Boolean }
 record Pack        { id: String, slug: String, name: String, owner: String,
                      item_count: u32, mine: Boolean }
 record PackList    { packs: List<Pack>, offline: Boolean }
 record Suggestions { key: String, words: List<String>, chosen: u32? }
+enum   HintKind    { Value, Filter, Key }
+record SearchHint  { label: String, query: String, chosen: Boolean, kind: HintKind }
 record PairingLink { server_url: String, code: String }
 record Prepared    { path: String, mime_type: String, display_name: String,
                      target: Target, variant: String, sticker: Boolean }

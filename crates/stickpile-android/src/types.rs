@@ -111,6 +111,30 @@ impl From<stickpile_api::MediaKind> for MediaKind {
     }
 }
 
+/// The file format of an item's original.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum MediaFormat {
+    Png,
+    Jpeg,
+    Webp,
+    Gif,
+    Mp4,
+    Webm,
+}
+
+impl From<stickpile_api::MediaFormat> for MediaFormat {
+    fn from(f: stickpile_api::MediaFormat) -> Self {
+        match f {
+            stickpile_api::MediaFormat::Png => MediaFormat::Png,
+            stickpile_api::MediaFormat::Jpeg => MediaFormat::Jpeg,
+            stickpile_api::MediaFormat::Webp => MediaFormat::Webp,
+            stickpile_api::MediaFormat::Gif => MediaFormat::Gif,
+            stickpile_api::MediaFormat::Mp4 => MediaFormat::Mp4,
+            stickpile_api::MediaFormat::Webm => MediaFormat::Webm,
+        }
+    }
+}
+
 /// A sticker or meme.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Item {
@@ -119,37 +143,55 @@ pub struct Item {
     /// The pack (set) it is in.
     pub set_id: String,
     pub set_name: String,
+    /// The pack owner's username.
+    pub owner: String,
     pub emojis: Vec<String>,
     pub keywords: Vec<String>,
     /// One label such as `happy` or `sarcastic`, if it has one.
     pub vibe: Option<String>,
     pub tags: Vec<String>,
     pub kind: MediaKind,
+    /// The original's format.
+    pub format: MediaFormat,
     /// Of the original, in pixels (0 when unknown).
     pub width: u32,
     pub height: u32,
+    /// The server's quality score, 0 to 100, when it has one.
+    pub quality: Option<u32>,
     /// Likes by all users.
     pub likes: u64,
     /// Times it was sent, by all users.
     pub copies: u64,
+    /// Tagged `nsfw` (in any case): what safe mode hides.
+    pub nsfw: bool,
+    /// The signed-in account liked it, as far as this device knows: the
+    /// favorites last read (`StickpileLibrary.favorites`) and the likes
+    /// changed here since. False until the favorites were read once.
+    pub liked: bool,
 }
 
-impl From<&ItemSummary> for Item {
-    fn from(i: &ItemSummary) -> Self {
+impl Item {
+    /// The item with `liked` set from the account's known favorites.
+    pub(crate) fn new(i: &ItemSummary, liked: bool) -> Self {
         Item {
             id: i.id.clone(),
             name: i.name.clone(),
             set_id: i.set_id.clone(),
             set_name: i.set_name.clone(),
+            owner: i.owner_username.clone(),
             emojis: i.emojis.clone(),
             keywords: i.keywords.clone(),
             vibe: i.vibe.clone(),
             tags: i.tags.clone(),
             kind: i.kind.into(),
+            format: i.format.into(),
             width: i.width,
             height: i.height,
+            quality: i.quality.map(u32::from),
             likes: i.likes,
             copies: i.copies,
+            nsfw: stickpile_quick::model::is_nsfw(i),
+            liked,
         }
     }
 }
@@ -218,6 +260,33 @@ impl From<stickpile_quick::suggest::Suggestions> for Suggestions {
             chosen,
         }
     }
+}
+
+/// What a search hint offers (`StickpileLibrary.hints`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum HintKind {
+    /// A value of the filter being typed (`sarcastic` for `vibe:sar`, an
+    /// emoji for `e:`).
+    Value,
+    /// A whole filter for the word being typed (`tag:reaction` for `rea`).
+    Filter,
+    /// A filter key to type a value after (`tag:`).
+    Key,
+}
+
+/// One offer under the search field while a query is typed.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SearchHint {
+    /// What to show: `sarcastic`, `tag:reaction`, `vibe:`.
+    pub label: String,
+    /// The whole query once it is taken: the field's new text. Values and
+    /// filters end with a space (the next word starts), keys with their
+    /// colon (their values are offered next).
+    pub query: String,
+    /// The search uses this value now (a half-typed or misspelled value
+    /// searches for its best match): draw it highlighted.
+    pub chosen: bool,
+    pub kind: HintKind,
 }
 
 /// What a pairing link (the QR code) says.
