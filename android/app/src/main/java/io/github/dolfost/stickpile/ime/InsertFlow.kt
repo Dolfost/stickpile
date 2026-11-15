@@ -33,11 +33,12 @@ sealed interface InsertStep<out P> {
     data class Done<P>(val outcome: InsertOutcome<P>) : InsertStep<P>
 }
 
+/** How an insert ended; every outcome but [Failed] is a use ([InsertFlow.used]). */
 sealed interface InsertOutcome<out P> {
-    /** In the field: record the use. */
+    /** In the field. */
     data class Committed<P>(val prepared: P) : InsertOutcome<P>
 
-    /** Handed to the editor's app. */
+    /** Handed to the editor's app (its share screen was started). */
     data class Sent<P>(val prepared: P) : InsertOutcome<P>
 
     /** On the clipboard: tell the user to paste it. */
@@ -85,6 +86,18 @@ object InsertFlow {
 
     fun <P> afterCopy(prepared: P, copied: Boolean): InsertStep<P> =
         InsertStep.Done(if (copied) InsertOutcome.Copied(prepared) else InsertOutcome.Failed(LibraryErrorKind.OTHER))
+
+    /**
+     * The rendition to record a use of: every hand-off counts (in the
+     * field, sent to the editor's app, or on the clipboard, as the desktop
+     * counts a copy); null when nothing worked.
+     */
+    fun <P> used(outcome: InsertOutcome<P>): P? = when (outcome) {
+        is InsertOutcome.Committed -> outcome.prepared
+        is InsertOutcome.Sent -> outcome.prepared
+        is InsertOutcome.Copied -> outcome.prepared
+        is InsertOutcome.Failed -> null
+    }
 
     /** Whether a share can be aimed at the editor: a package, and not this app (whose share target uploads). */
     fun canSendTo(editorPackage: String?, ownPackage: String): Boolean =

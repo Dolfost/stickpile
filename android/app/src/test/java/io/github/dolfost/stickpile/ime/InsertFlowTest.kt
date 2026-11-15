@@ -3,6 +3,7 @@ package io.github.dolfost.stickpile.ime
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -128,6 +129,14 @@ class InsertFlowTest {
                 InsertOutcome.Failed(LibraryErrorKind.NOTHING_FITS),
             run(PrepareResult.Ready("field.png"), share = PrepareResult.Error(LibraryErrorKind.NOTHING_FITS)),
         )
+    }
+
+    @Test
+    fun everyHandOffIsAUse() {
+        assertEquals("field.png", InsertFlow.used(InsertOutcome.Committed("field.png")))
+        assertEquals("shared.png", InsertFlow.used(InsertOutcome.Sent("shared.png")))
+        assertEquals("shared.png", InsertFlow.used(InsertOutcome.Copied("shared.png")))
+        assertNull(InsertFlow.used(InsertOutcome.Failed(LibraryErrorKind.UNREACHABLE)))
     }
 
     @Test

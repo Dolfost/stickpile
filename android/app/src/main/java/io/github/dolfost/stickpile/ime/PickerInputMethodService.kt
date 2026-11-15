@@ -265,12 +265,9 @@ class PickerInputMethodService : InputMethodService() {
     }
 
     private fun finish(item: Item, editorPackage: String, outcome: InsertOutcome<Prepared>) {
+        InsertFlow.used(outcome)?.let { recordUse(item.id, it.variant, editorPackage) }
         when (outcome) {
-            is InsertOutcome.Committed -> {
-                recordUse(item.id, outcome.prepared.variant, editorPackage)
-                if (!settings.stayOpen) switchBack()
-            }
-            is InsertOutcome.Sent -> if (!settings.stayOpen) switchBack()
+            is InsertOutcome.Committed, is InsertOutcome.Sent -> if (!settings.stayOpen) switchBack()
             is InsertOutcome.Copied -> picker?.showStatus(R.string.ime_copied)
             is InsertOutcome.Failed -> picker?.showError(outcome.kind)
         }
