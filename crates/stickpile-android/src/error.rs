@@ -8,7 +8,9 @@ use stickpile_core::CoreError;
 /// Everything that can go wrong in a `StickpileLibrary` call. Each variant is
 /// a kind the app turns into its own (translated) text; `detail` says what
 /// happened in English, for logs only, and never contains a token or a
-/// password.
+/// password. URLs in it are cut down to their scheme, host, port and path:
+/// a request's query (a search query) or a URL's user name and password
+/// never reach the app's logs.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 pub enum LibraryError {
     /// No account: no token is stored and the server does not know this
@@ -87,16 +89,20 @@ impl LibraryError {
     pub(crate) fn invalid(field: &str, detail: impl Into<String>) -> LibraryError {
         LibraryError::InvalidInput {
             field: field.into(),
-            detail: detail.into(),
+            detail: redact_urls(&detail.into()),
         }
     }
 
     pub(crate) fn not_found(detail: impl Into<String>) -> LibraryError {
-        LibraryError::NotFound { detail: detail.into() }
+        LibraryError::NotFound {
+            detail: redact_urls(&detail.into()),
+        }
     }
 
     pub(crate) fn other(detail: impl Into<String>) -> LibraryError {
-        LibraryError::Other { detail: detail.into() }
+        LibraryError::Other {
+            detail: redact_urls(&detail.into()),
+        }
     }
 
     /// [`From<CoreError>`], except that the server refusing the request as
@@ -110,9 +116,53 @@ impl LibraryError {
     }
 }
 
+/// `text` with every URL in it (`scheme://...` up to the next whitespace)
+/// cut down to its scheme, host, port and path: a user name and password,
+/// a query and a fragment are dropped. Punctuation right after the URL
+/// (reqwest writes `for url (<url>): ...`) stays.
+pub(crate) fn redact_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(sep) = rest.find("://") {
+        let scheme_len = rest[..sep]
+            .bytes()
+            .rev()
+            .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+            .count();
+        let start = sep - scheme_len;
+        let end = rest[sep..].find(char::is_whitespace).map_or(rest.len(), |i| sep + i);
+        out.push_str(&rest[..start]);
+        if scheme_len == 0 {
+            // `://` without a scheme: not a URL.
+            out.push_str(&rest[start..end]);
+        } else {
+            out.push_str(&redact_url(&rest[start..end], sep - start));
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// One URL of [`redact_urls`]; `sep` is where its `://` starts.
+fn redact_url(url: &str, sep: usize) -> String {
+    let (scheme, after) = url.split_at(sep + 3);
+    let authority_len = after.find(['/', '?', '#']).unwrap_or(after.len());
+    let (authority, tail) = after.split_at(authority_len);
+    let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let path_len = tail.find(['?', '#']).unwrap_or(tail.len());
+    let (path, dropped) = tail.split_at(path_len);
+    // What closes the text around the URL, e.g. `)` or `):`.
+    let closing = dropped.len()
+        - dropped
+            .trim_end_matches([')', ']', '>', '"', '\'', ',', ';', ':', '.'])
+            .len();
+    format!("{scheme}{host}{path}{}", &dropped[dropped.len() - closing..])
+}
+
 impl From<CoreError> for LibraryError {
     fn from(e: CoreError) -> Self {
-        let detail = e.to_string();
+        let detail = redact_urls(&e.to_string());
         match e {
             CoreError::NotLoggedIn => LibraryError::NotSignedIn { detail },
             CoreError::Offline(_) => LibraryError::Unreachable { detail },
@@ -130,7 +180,7 @@ impl From<CoreError> for LibraryError {
 
 impl From<ConfigError> for LibraryError {
     fn from(e: ConfigError) -> Self {
-        let detail = e.to_string();
+        let detail = redact_urls(&e.to_string());
         match e {
             ConfigError::Parse { .. } | ConfigError::Invalid(_) | ConfigError::Edit { .. } => {
                 LibraryError::invalid("config_file", detail)
@@ -185,6 +235,57 @@ mod tests {
                 detail: "503: m (unavailable)".into()
             }
         );
+    }
+
+    #[test]
+    fn urls_in_details_lose_their_query_and_userinfo() {
+        for (text, want) in [
+            (
+                "error sending request for url (http://127.0.0.1:8080/api/v1/search?q=my+secret+crush&limit=50): client error (Connect)",
+                "error sending request for url (http://127.0.0.1:8080/api/v1/search): client error (Connect)",
+            ),
+            (
+                "https://alice:hunter2@s.example/base/api#frag and https://t.example/x?y=1",
+                "https://s.example/base/api and https://t.example/x",
+            ),
+            ("(https://u@h?q=x).", "(https://h)."),
+            ("http://h:81/p", "http://h:81/p"),
+            ("no url: ://x and a?b=c", "no url: ://x and a?b=c"),
+            ("\u{43f}\u{43e}\u{448}\u{443}\u{43a}: https://h/s?q=\u{43a}\u{456}\u{442}", "\u{43f}\u{43e}\u{448}\u{443}\u{43a}: https://h/s"),
+            ("", ""),
+        ] {
+            assert_eq!(redact_urls(text), want, "{text:?}");
+        }
+    }
+
+    /// A real transport error of the search, as reqwest words it, reaches
+    /// the app without the query.
+    #[tokio::test]
+    async fn search_errors_do_not_carry_the_query() {
+        let dead = stickpile_core::mock::dead_url();
+        let client = stickpile_core::ApiClient::new(
+            &dead.replace("http://", "http://alice:hunter2@"),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+        let params = stickpile_core::client::SearchParams {
+            q: "my secret crush".into(),
+            ..Default::default()
+        };
+        let e = client.search(&params).await.unwrap_err();
+        let raw = e.to_string();
+        assert!(raw.contains("secret") && raw.contains("/api/v1/search"), "{raw}");
+        let e = LibraryError::from(e);
+        assert_eq!(e.kind(), LibraryErrorKind::Unreachable);
+        let shown = e.to_string();
+        assert!(shown.contains("/api/v1/search"), "{shown}");
+        for secret in ["secret", "crush", "q=", "alice", "hunter2"] {
+            assert!(!shown.contains(secret), "{secret}: {shown}");
+        }
+        // Through `input` and the other helpers too.
+        let e = LibraryError::input(CoreError::Offline(raw.clone()), "file");
+        assert!(!e.to_string().contains("secret"), "{e}");
+        assert!(!LibraryError::other(raw).to_string().contains("secret"));
     }
 
     #[test]
