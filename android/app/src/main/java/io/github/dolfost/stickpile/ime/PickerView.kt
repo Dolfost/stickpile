@@ -26,6 +26,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.tabs.TabLayout
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.Columns
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.display.SafeMode
@@ -137,7 +138,7 @@ internal class PickerView(
         onOffer = { setQuery(it.query) },
         onFilter = { emoji -> itemsAdapter.submitList(EmojiFilters.narrow(items, emoji) { it.emojis }) },
     )
-    private val gridLayout = GridLayoutManager(context, PickerSearch.MIN_COLUMNS)
+    private val gridLayout = GridLayoutManager(context, Columns.DEFAULT)
     private val listLayout = LinearLayoutManager(context)
 
     private val details = DetailsPanel(
@@ -159,6 +160,7 @@ internal class PickerView(
         },
     )
     private val syntax = SyntaxPanel(root.findViewById(R.id.ime_syntax), ::setQuery)
+    private val columns = ColumnsPanel(root.findViewById(R.id.ime_columns), displaySettings)
     private val keys = SearchKeys(
         keysView,
         KeyLayout.forTag(settings.searchLayout) ?: KeyLayout.default(Locale.getDefault().language),
@@ -207,7 +209,7 @@ internal class PickerView(
         root.findViewById<View>(R.id.ime_back).setOnClickListener { actions.backToKeyboard() }
         root.findViewById<View>(R.id.ime_all_sets).setOnClickListener { show(PickerTab.SETS) }
         root.findViewById<View>(R.id.ime_more).setOnClickListener {
-            PickerMenu.show(it, displaySettings, ::showSyntax, actions::openApp)
+            PickerMenu.show(it, displaySettings, ::showColumns, ::showSyntax, actions::openApp)
         }
         root.findViewById<ImageView>(R.id.ime_search_icon).imageTintList =
             ColorStateList.valueOf(color(com.google.android.material.R.attr.colorOnSurfaceVariant))
@@ -265,6 +267,7 @@ internal class PickerView(
         hideKeys()
         closeDetails()
         syntax.close()
+        columns.close()
         this.query = query.orEmpty()
         showQuery()
         updateChipRows()
@@ -399,6 +402,7 @@ internal class PickerView(
         if (keysShown) return
         closeDetails()
         syntax.close()
+        columns.close()
         keysShown = true
         if (keysView.isEmpty()) keys.build()
         keysView.isVisible = true
@@ -646,10 +650,10 @@ internal class PickerView(
         showSafeMode()
         when {
             old.autoplay != new.autoplay -> {
-                if (old.tileSize != new.tileSize) applyColumns()
+                if (old.columns != new.columns) applyColumns()
                 itemsAdapter.rebindAll()
             }
-            old.tileSize != new.tileSize -> applyColumns()
+            old.columns != new.columns -> applyColumns()
             else -> itemsAdapter.refreshTiles()
         }
         if (old.safeMode != new.safeMode && started) reload(top = true)
@@ -682,7 +686,7 @@ internal class PickerView(
         val density = context.resources.displayMetrics.density
         val widthPx = context.resources.displayMetrics.widthPixels - 2 * gridPaddingPx
         val widthDp = (widthPx / density).toInt()
-        val normal = PickerSearch.spanCount(widthDp, display.tileSize)
+        val normal = PickerSearch.spanCount(widthDp, display.columns, context.resources.configuration.smallestScreenWidthDp)
         val span = if (keysShown) PickerSearch.typingSpanCount(widthDp, normal) else normal
         if (gridLayout.spanCount != span) gridLayout.spanCount = span
         look.maxLines = TileInfo.maxLines(widthDp / span, context.resources.configuration.fontScale)
@@ -708,6 +712,7 @@ internal class PickerView(
         if (busy) return
         hideKeys()
         syntax.close()
+        columns.close()
         details.show(item, likedOf(item))
     }
 
@@ -718,7 +723,15 @@ internal class PickerView(
     private fun showSyntax() {
         hideKeys()
         closeDetails()
+        columns.close()
         syntax.show()
+    }
+
+    private fun showColumns() {
+        hideKeys()
+        closeDetails()
+        syntax.close()
+        columns.show()
     }
 
     private fun title(t: PickerTab): String = context.getString(
@@ -733,9 +746,9 @@ internal class PickerView(
 
     private fun color(@AttrRes attr: Int): Int = MaterialColors.getColor(root, attr)
 
-    /** The widest a grid cell gets (three columns): the most a thumbnail is decoded at. */
+    /** The widest a grid cell gets (the fewest columns): the most a thumbnail is decoded at. */
     private fun largestCellPx(): Int =
-        (context.resources.displayMetrics.widthPixels - 2 * gridPaddingPx) / PickerSearch.MIN_COLUMNS
+        (context.resources.displayMetrics.widthPixels - 2 * gridPaddingPx) / Columns.MIN
 
     private companion object {
         const val STATUS_MILLIS = 5_000L

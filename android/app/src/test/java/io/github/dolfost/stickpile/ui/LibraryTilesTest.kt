@@ -59,6 +59,19 @@ class LibraryTilesTest {
     }
 
     @Test
+    fun aSmallTileKeepsTheLinesThatFit() {
+        val two = TileInfo.of(gif, Display(), maxLines = 2)
+        assertEquals("Grumpy", two.name)
+        assertEquals("GIF 320x240", two.shape)
+        assertEquals(null, two.mood)
+        assertEquals(null, two.tags)
+        assertEquals("GIF", two.badge)
+        val none = TileInfo.of(gif, Display(), maxLines = 0)
+        assertFalse(none.hasBand)
+        assertTrue(none.liked)
+    }
+
+    @Test
     fun safeModeDropsTheNsfwMarkAndAStillHasNoBadge() {
         assertFalse(TileInfo.of(gif, Display(safeMode = true)).nsfw)
         val still = TileInfo.of(item("2"), Display())

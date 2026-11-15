@@ -236,6 +236,11 @@
             layout="@layout/ime_syntax"
             android:visibility="gone" />
 
+        <include
+            android:id="@+id/ime_columns"
+            layout="@layout/ime_columns"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/ime_status"
             android:layout_width="match_parent"

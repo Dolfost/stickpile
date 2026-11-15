@@ -7,24 +7,28 @@ import androidx.annotation.StringRes
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.display.TileField
-import io.github.dolfost.stickpile.display.TileSize
 
 /**
  * The picker's menu (the button at the end of the search bar): what the
- * tiles show (all of it, and each field), the tile size, the search
- * syntax help, and the app. The changes go to the shared [DisplaySettings],
+ * tiles show (all of it, and each field), the stickers in a row (a
+ * slider, [ColumnsPanel]), the search syntax help, and the app. The changes go to the shared [DisplaySettings],
  * so the app shows them too.
  */
 internal object PickerMenu {
     private const val SHOW_INFO = 1
     private const val SYNTAX = 2
     private const val OPEN_APP = 3
+    private const val COLUMNS = 4
     private const val FIELDS = 100
-    private const val SIZES = 200
     private const val GROUP_FIELDS = 1
-    private const val GROUP_SIZES = 2
 
-    fun show(anchor: View, settings: DisplaySettings, onSyntax: () -> Unit, onOpenApp: () -> Unit) {
+    fun show(
+        anchor: View,
+        settings: DisplaySettings,
+        onColumns: () -> Unit,
+        onSyntax: () -> Unit,
+        onOpenApp: () -> Unit,
+    ) {
         val display = settings.current
         val popup = PopupMenu(anchor.context, anchor)
         val menu = popup.menu
@@ -37,10 +41,8 @@ internal object PickerMenu {
                 isEnabled = display.showInfo
             }
         }
-        val sizes = menu.addSubMenu(Menu.NONE, Menu.NONE, 1 + TileField.entries.size, R.string.display_tile_size)
-        for (size in TileSize.entries) sizes.add(GROUP_SIZES, SIZES + size.ordinal, size.ordinal, label(size))
-        sizes.setGroupCheckable(GROUP_SIZES, true, true)
-        sizes.findItem(SIZES + display.tileSize.ordinal).isChecked = true
+        val columns = anchor.context.getString(R.string.display_columns_menu, display.columns)
+        menu.add(Menu.NONE, COLUMNS, 1 + TileField.entries.size, columns)
         menu.add(Menu.NONE, SYNTAX, 2 + TileField.entries.size, R.string.display_syntax)
         menu.add(Menu.NONE, OPEN_APP, 3 + TileField.entries.size, R.string.ime_open_app)
         popup.setOnMenuItemClickListener { item ->
@@ -49,11 +51,11 @@ internal object PickerMenu {
                 id == SHOW_INFO -> settings.setShowInfo(!settings.current.showInfo)
                 id == SYNTAX -> onSyntax()
                 id == OPEN_APP -> onOpenApp()
+                id == COLUMNS -> onColumns()
                 id - FIELDS in TileField.entries.indices -> {
                     val field = TileField.entries[id - FIELDS]
                     settings.setField(field, field !in settings.current.fields)
                 }
-                id - SIZES in TileSize.entries.indices -> settings.setTileSize(TileSize.entries[id - SIZES])
                 else -> return@setOnMenuItemClickListener false
             }
             true
@@ -73,12 +75,5 @@ internal object PickerMenu {
         TileField.COPIES -> R.string.display_field_copies
         TileField.LIKES -> R.string.display_field_likes
         TileField.QUALITY -> R.string.display_field_quality
-    }
-
-    @StringRes
-    fun label(size: TileSize): Int = when (size) {
-        TileSize.SMALL -> R.string.display_tile_small
-        TileSize.MEDIUM -> R.string.display_tile_medium
-        TileSize.LARGE -> R.string.display_tile_large
     }
 }

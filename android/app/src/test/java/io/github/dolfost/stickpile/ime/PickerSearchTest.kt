@@ -1,7 +1,6 @@
 package io.github.dolfost.stickpile.ime
 
 import io.github.dolfost.stickpile.display.SyntaxHelp
-import io.github.dolfost.stickpile.display.TileSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,12 +28,10 @@ class PickerSearchTest {
     }
 
     @Test
-    fun theColumnsFollowTheTileSize() {
-        assertEquals(4, PickerSearch.spanCount(352, TileSize.SMALL))
-        assertEquals(3, PickerSearch.spanCount(352, TileSize.MEDIUM))
-        assertEquals(3, PickerSearch.spanCount(352, TileSize.LARGE))
-        assertEquals(5, PickerSearch.spanCount(800, TileSize.LARGE))
-        assertEquals(PickerSearch.MIN_COLUMNS, PickerSearch.spanCount(200, TileSize.SMALL))
+    fun theColumnsAreTheStickersInARow() {
+        assertEquals(3, PickerSearch.spanCount(411, 3, narrowDp = 411))
+        assertEquals(8, PickerSearch.spanCount(411, 8, narrowDp = 411))
+        assertEquals("sideways: more of the same size", 6, PickerSearch.spanCount(914, 3, narrowDp = 411))
     }
 
     @Test

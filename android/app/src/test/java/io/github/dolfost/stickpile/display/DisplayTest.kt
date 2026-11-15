@@ -11,6 +11,18 @@ import org.junit.Test
 
 class DisplayTest {
     @Test
+    fun theColumnsAreKeptInRangeAndFillAWiderGrid() {
+        assertEquals(Columns.MIN, Columns.clamp(0))
+        assertEquals(Columns.MAX, Columns.clamp(99))
+        assertEquals(5, Columns.clamp(5))
+        assertEquals(4, Columns.count(4, widthDp = 411, narrowDp = 411))
+        assertEquals(4, Columns.count(4, widthDp = 380, narrowDp = 411))
+        assertEquals(8, Columns.count(4, widthDp = 914, narrowDp = 411))
+        assertEquals(Columns.MAX, Columns.count(12, widthDp = 411, narrowDp = 411))
+        assertEquals(3, Columns.count(3, widthDp = 0, narrowDp = 0))
+    }
+
+    @Test
     fun safeModeLeavesNsfwOutOfTheSearchAndTheLists() {
         assertEquals("cat -tag:nsfw", SafeMode.query(" cat ", safe = true))
         assertEquals("cat", SafeMode.query("cat", safe = false))

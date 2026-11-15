@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -51,9 +53,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Autoplay
+import io.github.dolfost.stickpile.display.Columns
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.Stat
 import io.github.dolfost.stickpile.display.TileField
+import io.github.dolfost.stickpile.ime.TileInfo as LineFit
 import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.motion.MotionPolicy
 import io.github.dolfost.stickpile.motion.Motions
@@ -69,8 +73,9 @@ private val LikedRed = Color(0xFFFF5A6E)
 private val BandStyle = TextStyle(color = OnScrim, fontSize = 10.sp, lineHeight = 12.sp)
 
 /**
- * The items as tiles at least [Display.tileSize] wide, with what [display]
- * asks over each thumbnail. A tap shares an item, a long press opens its
+ * The items as tiles, [Display.columns] in a row (more in a wider window,
+ * [Columns.count]), with what [display] asks over each thumbnail, as many
+ * lines as fit the tile. A tap shares an item, a long press opens its
  * details.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -86,40 +91,51 @@ internal fun ItemGrid(
     val haptics = LocalHapticFeedback.current
     val shareLabel = stringResource(R.string.library_share)
     val detailsLabel = stringResource(R.string.library_details_open)
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(display.tileSize.minDp.dp),
-        contentPadding = PaddingValues(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        // Keys must be unique: an item listed twice is drawn once.
-        items(items.distinctBy { it.id }, key = { it.id }) { item ->
-            val info = remember(item, display) { TileInfo.of(item, display) }
-            Box(
-                Modifier
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .combinedClickable(
-                        onClickLabel = shareLabel,
-                        onLongClickLabel = detailsLabel,
-                        onLongClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onDetails(item)
-                        },
-                        onClick = { onShare(item) },
-                    )
-                    .semantics { contentDescription = item.name },
-                contentAlignment = Alignment.Center,
-            ) {
-                ItemPicture(library, item, display.autoplay, display.tileSize.minDp * 2)
-                TileOverlays(info)
-                if (preparing == item.id) CircularProgressIndicator(Modifier.size(32.dp))
+    val configuration = LocalConfiguration.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val widthDp = maxWidth.value.toInt()
+        val count = Columns.count(display.columns, widthDp, configuration.smallestScreenWidthDp)
+        val gap = if (count > TIGHT_ABOVE) 4.dp else 8.dp
+        val tileDp = ((widthDp - 16) / count).coerceAtLeast(1)
+        val maxLines = LineFit.maxLines(tileDp, configuration.fontScale)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(count),
+            contentPadding = PaddingValues(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalArrangement = Arrangement.spacedBy(gap),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            // Keys must be unique: an item listed twice is drawn once.
+            items(items.distinctBy { it.id }, key = { it.id }) { item ->
+                val info = remember(item, display, maxLines) { TileInfo.of(item, display, maxLines) }
+                Box(
+                    Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .combinedClickable(
+                            onClickLabel = shareLabel,
+                            onLongClickLabel = detailsLabel,
+                            onLongClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDetails(item)
+                            },
+                            onClick = { onShare(item) },
+                        )
+                        .semantics { contentDescription = item.name },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ItemPicture(library, item, display.autoplay, tileDp)
+                    TileOverlays(info)
+                    if (preparing == item.id) CircularProgressIndicator(Modifier.size(32.dp))
+                }
             }
         }
     }
 }
+
+/** More columns than this: the tiles stand closer. */
+private const val TIGHT_ABOVE = 4
 
 /** The badges top left, the like top right, the band of texts at the bottom. */
 @Composable

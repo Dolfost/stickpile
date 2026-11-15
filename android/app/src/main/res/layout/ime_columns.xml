@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Stickers in a row (ime.ColumnsPanel), opened from the picker's menu: a
+  strip over the top of the grid with the count and a slider. The grid
+  under it follows the slider. Clickable, so that taps do not reach the
+  grid under it.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="top"
+    android:background="?attr/colorSurfaceContainerHigh"
+    android:clickable="true"
+    android:elevation="2dp"
+    android:focusable="false"
+    android:orientation="vertical"
+    android:paddingBottom="4dp"
+    tools:ignore="Overdraw">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="0dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:accessibilityHeading="true"
+            android:text="@string/display_columns"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            tools:targetApi="p" />
+
+        <TextView
+            android:id="@+id/ime_columns_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:importantForAccessibility="no"
+            android:paddingHorizontal="8dp"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_columns_close"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:contentDescription="@string/ime_close"
+            android:tooltipText="@string/ime_close"
+            app:icon="@drawable/ic_clear" />
+    </LinearLayout>
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/ime_columns_slider"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="8dp"
+        android:contentDescription="@string/display_columns"
+        android:stepSize="1"
+        android:valueFrom="2"
+        android:valueTo="8"
+        app:labelBehavior="gone" />
+</LinearLayout>

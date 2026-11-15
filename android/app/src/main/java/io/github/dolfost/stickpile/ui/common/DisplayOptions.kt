@@ -7,30 +7,39 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Autoplay
+import io.github.dolfost.stickpile.display.Columns
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.display.TileField
-import io.github.dolfost.stickpile.display.TileSize
+import kotlin.math.roundToInt
 
 /**
  * What the sticker tiles show, as switches, for the library's sheet and
  * the settings: safe mode when [withSafeMode], all the info at once, each
- * field (dimmed while the info is off), the tile size, and when GIFs and
- * videos play. A change is saved in [settings] at once, which the app and
+ * field (dimmed while the info is off), the stickers in a row, and when
+ * GIFs and videos play. A change is saved in [settings] at once, which the app and
  * the keyboard both follow.
  */
 @Composable
@@ -54,21 +63,7 @@ fun DisplayOptions(display: Display, settings: DisplaySettings, withSafeMode: Bo
             settings.setField(field, it)
         }
     }
-    ListItem(headlineContent = { Text(stringResource(R.string.display_tile_size)) }, colors = Transparent)
-    SingleChoiceSegmentedButtonRow(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        TileSize.entries.forEachIndexed { i, size ->
-            SegmentedButton(
-                selected = size == display.tileSize,
-                onClick = { settings.setTileSize(size) },
-                shape = SegmentedButtonDefaults.itemShape(i, TileSize.entries.size),
-                label = { Text(stringResource(size.label)) },
-            )
-        }
-    }
+    ColumnsSlider(display.columns, settings::setColumns)
     ListItem(
         headlineContent = { Text(stringResource(R.string.display_autoplay)) },
         supportingContent = { Text(stringResource(R.string.display_autoplay_text)) },
@@ -88,6 +83,32 @@ fun DisplayOptions(display: Display, settings: DisplaySettings, withSafeMode: Bo
             )
         }
     }
+}
+
+/**
+ * Stickers in a row ([Columns]), as a slider: the grids follow it while it
+ * moves, and the value is saved when it is let go.
+ */
+@Composable
+private fun ColumnsSlider(columns: Int, onChange: (Int) -> Unit) {
+    var value by remember(columns) { mutableIntStateOf(columns) }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.display_columns)) },
+        supportingContent = { Text(stringResource(R.string.display_columns_text)) },
+        trailingContent = { Text(value.toString(), style = MaterialTheme.typography.titleMedium) },
+        colors = Transparent,
+    )
+    Slider(
+        value = value.toFloat(),
+        onValueChange = { value = Columns.clamp(it.roundToInt()) },
+        onValueChangeFinished = { onChange(value) },
+        valueRange = Columns.MIN.toFloat()..Columns.MAX.toFloat(),
+        steps = Columns.MAX - Columns.MIN - 1,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .semantics { stateDescription = value.toString() },
+    )
 }
 
 /** On any background: a sheet's or a screen's. */
@@ -123,14 +144,6 @@ val TileField.label: Int
         TileField.COPIES -> R.string.display_field_copies
         TileField.LIKES -> R.string.display_field_likes
         TileField.QUALITY -> R.string.display_field_quality
-    }
-
-@get:StringRes
-val TileSize.label: Int
-    get() = when (this) {
-        TileSize.SMALL -> R.string.display_tile_small
-        TileSize.MEDIUM -> R.string.display_tile_medium
-        TileSize.LARGE -> R.string.display_tile_large
     }
 
 @get:StringRes

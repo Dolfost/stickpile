@@ -1,6 +1,6 @@
 package io.github.dolfost.stickpile.ime
 
-import io.github.dolfost.stickpile.display.TileSize
+import io.github.dolfost.stickpile.display.Columns
 
 /** The picker's tabs. */
 enum class PickerTab { RESULTS, RECENT, LIKED, MOST_USED, SETS }
@@ -14,9 +14,6 @@ object PickerSearch {
 
     /** The size of a cell while the search keys show, in dp: small, so that two rows fit above the keys. */
     const val TYPING_CELL_DP = 56
-
-    /** The fewest columns of the grid. */
-    const val MIN_COLUMNS = 3
 
     /** The tabs for [query]: Results first while it is not blank. */
     fun tabs(query: String): List<PickerTab> =
@@ -32,8 +29,12 @@ object PickerSearch {
     fun fromDraft(draft: String?, query: String, resultsFor: String?): Boolean =
         draft != null && resultsFor != null && query.trim() == draft && resultsFor.trim() == draft
 
-    /** Columns of the grid [widthDp] wide: as many as fit at [size], at least [MIN_COLUMNS]. */
-    fun spanCount(widthDp: Int, size: TileSize): Int = maxOf(MIN_COLUMNS, widthDp / size.minDp)
+    /**
+     * Columns of the grid [widthDp] wide for the setting [columns] (stickers
+     * in a row with the phone upright), on a screen whose narrower side is
+     * [narrowDp]: [Columns.count].
+     */
+    fun spanCount(widthDp: Int, columns: Int, narrowDp: Int): Int = Columns.count(columns, widthDp, narrowDp)
 
     /** Columns while the search keys show: smaller cells than [spanCount] gives, never fewer of them. */
     fun typingSpanCount(widthDp: Int, spanCount: Int): Int = maxOf(spanCount, widthDp / TYPING_CELL_DP)

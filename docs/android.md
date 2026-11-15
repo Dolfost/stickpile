@@ -72,7 +72,10 @@ Most used, and a grid.
   you liked, the name, the emojis and vibe, the tags, and a line with the
   format and resolution, times copied, likes and the quality score. The
   menu's "Sticker info" (also in Settings) turns each piece on or off and
-  sets the tile size. Safe mode and these choices are shared with the
+  sets the stickers in a row, 2 to 8, with a slider (with the phone
+  upright; held sideways, more of the same size fit). A small tile shows
+  only the lines that fit: the name first, then the stats line, the tags,
+  and the emojis and vibe. Safe mode and these choices are shared with the
   keyboard.
 - **GIFs and videos play** in the grid and the details, looping and
   without sound, instead of showing their first frame. Each one's file is
@@ -120,9 +123,10 @@ Using it:
   search leaves the field's text alone.
 - Or browse the tabs Recent, Liked, Most used and Sets; the row of emojis
   narrows the grid.
-- The shield is safe mode and the menu has the sticker info, the tile
-  size and the search syntax, all shared with the app. GIFs and videos
-  play here too, as the app's "Play GIFs and videos" says.
+- The shield is safe mode and the menu has the sticker info, the
+  stickers in a row (a slider over the top of the grid, which follows it
+  as it moves) and the search syntax, all shared with the app. GIFs and
+  videos play here too, as the app's "Play GIFs and videos" says.
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
@@ -162,9 +166,9 @@ token to revoke, so it shows "Signed in through Tailscale" and offers to
 change the server instead), sync (sync now, the last sync, uses waiting to
 be sent), the offline cache (its size, clear it, which also revokes every
 prepared file's URI), the sticker info (safe mode, what the tiles show,
-the tile size, when GIFs and videos play), the keyboard's height,
-switches and walk-through, the keyboards
-allowed to read stickers, and licences.
+the stickers in a row, when GIFs and videos play), the keyboard's
+height, switches and walk-through, the keyboards allowed to read
+stickers, and licences.
 
 The app syncs in the background every 15 minutes when there is a network
 (WorkManager), and when the app or the keyboard opens. Offline, search, the

@@ -35,11 +35,28 @@ enum class TileField {
     QUALITY,
 }
 
-/** How large the tiles are: the smallest width of a grid column. */
-enum class TileSize(val minDp: Int) {
-    SMALL(80),
-    MEDIUM(112),
-    LARGE(150),
+/**
+ * How many stickers a row of the grids holds: [Display.columns] with the
+ * phone upright. A wider window (the phone held sideways, a tablet's
+ * landscape) fits more of the same size. Pure.
+ */
+object Columns {
+    const val MIN = 2
+    const val MAX = 8
+    const val DEFAULT = 3
+
+    fun clamp(columns: Int): Int = columns.coerceIn(MIN, MAX)
+
+    /**
+     * The columns of a grid [widthDp] wide for the setting [columns], on a
+     * screen whose narrower side is [narrowDp]: [columns] across the narrow
+     * side, and as many tiles of that size as fit a wider grid.
+     */
+    fun count(columns: Int, widthDp: Int, narrowDp: Int): Int {
+        val c = clamp(columns)
+        if (widthDp <= 0 || narrowDp <= 0 || widthDp <= narrowDp) return c
+        return maxOf(c, c * widthDp / narrowDp)
+    }
 }
 
 /**
@@ -66,7 +83,8 @@ data class Display(
     val safeMode: Boolean = false,
     val showInfo: Boolean = true,
     val fields: Set<TileField> = TileField.entries.toSet(),
-    val tileSize: TileSize = TileSize.MEDIUM,
+    /** Stickers in a row with the phone upright ([Columns]). */
+    val columns: Int = Columns.DEFAULT,
     val autoplay: Autoplay = Autoplay.ALWAYS,
 ) {
     /** The tiles show [field] now. */
