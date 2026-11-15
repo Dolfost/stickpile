@@ -224,6 +224,27 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun refusingAnOpenedLinkWhileSignedInLeavesOnboarding() = runTest(main.dispatcher) {
+        library.parsePairingLink = { link }
+        vm.openLink("stickpile://pair?url=https://s.example&code=7KQ2M9XA4FTR")
+        advanceUntilIdle()
+        // Someone is signed in: no step before, back to the library.
+        assertFalse(vm.back(canLeave = true))
+        assertNull(vm.state.link)
+        assertFalse(vm.state.canConfirm)
+    }
+
+    @Test
+    fun refusingAScannedLinkGoesBackToTheFirstScreen() = runTest(main.dispatcher) {
+        library.parsePairingLink = { link }
+        vm.scanned("stickpile://pair?url=https://s.example&code=7KQ2M9XA4FTR")
+        advanceUntilIdle()
+        assertTrue(vm.back(canLeave = true))
+        assertEquals(OnboardingStep.WELCOME, vm.state.step)
+        assertNull(vm.state.link)
+    }
+
+    @Test
     fun aBrokenLinkSaysSo() = runTest(main.dispatcher) {
         vm.openLink("stickpile://pair?nothing")
         advanceUntilIdle()

@@ -59,6 +59,8 @@ data class OnboardingState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
     /** The link to confirm (CONFIRM_LINK), its server URL as the library normalised it. */
     val link: PairingLink? = null,
+    /** [link] is one the app was opened with (not a scanned QR code): refusing it leaves onboarding. */
+    val linkOpened: Boolean = false,
     /** Who pairing with [link] replaces; null when nobody is signed in. */
     val replaces: Replaced? = null,
     /**
@@ -128,8 +130,15 @@ class OnboardingViewModel(
     fun showServer() = go(OnboardingStep.SERVER)
 
     /** Back one screen; false when there is nowhere to go back to (welcome). */
-    fun back(): Boolean {
+    fun back(canLeave: Boolean = false): Boolean {
         if (state.busy) return true
+        if (canLeave && state.step == OnboardingStep.CONFIRM_LINK && state.linkOpened) {
+            // Refusing a link that came from elsewhere goes back to where
+            // the user was, not to this flow's first screen.
+            arming?.cancel()
+            state = state.copy(link = null, linkOpened = false, replaces = null, pairReady = false)
+            return false
+        }
         val to = when (state.step) {
             OnboardingStep.WELCOME -> return false
             OnboardingStep.SIGN_IN -> OnboardingStep.SERVER
@@ -137,7 +146,7 @@ class OnboardingViewModel(
         }
         state = if (to == OnboardingStep.WELCOME) {
             arming?.cancel()
-            state.copy(step = to, link = null, replaces = null, pairReady = false, error = null, notice = null)
+            state.copy(step = to, link = null, linkOpened = false, replaces = null, pairReady = false, error = null, notice = null)
         } else {
             state.copy(step = to, error = null, notice = null)
         }
@@ -178,7 +187,7 @@ class OnboardingViewModel(
     fun openLink(text: String) {
         if (text == openedLink) return
         openedLink = text
-        askToPair(text, R.string.app_error_not_a_pairing_link)
+        askToPair(text, R.string.app_error_not_a_pairing_link, opened = true)
     }
 
     /** Pair with the link the confirmation shows, once its Pair button is ready. */
@@ -194,7 +203,7 @@ class OnboardingViewModel(
      */
     fun scanned(contents: String?) {
         if (contents == null || state.busy) return
-        askToPair(contents, R.string.app_error_not_a_pairing_qr)
+        askToPair(contents, R.string.app_error_not_a_pairing_qr, opened = false)
     }
 
     /** The camera permission was refused: typing the code is the way left. */
@@ -253,9 +262,10 @@ class OnboardingViewModel(
      * Read [text] as a pairing link and ask before pairing with it: the
      * confirmation names the server and the account it replaces, and its
      * Pair button waits [PAIR_DELAY_MS]. A newer link wins over one still
-     * being read. Not a link: [notALink] on the first screen.
+     * being read. Not a link: [notALink] on the first screen. [opened]: the
+     * app was opened with it (else it was scanned).
      */
-    private fun askToPair(text: String, @StringRes notALink: Int) {
+    private fun askToPair(text: String, @StringRes notALink: Int, opened: Boolean) {
         preparing?.cancel()
         state = state.copy(preparing = true)
         preparing = viewModelScope.launch {
@@ -267,6 +277,7 @@ class OnboardingViewModel(
                     preparing = false,
                     step = OnboardingStep.WELCOME,
                     link = null,
+                    linkOpened = false,
                     replaces = null,
                     pairReady = false,
                     error = Message(notALink),
@@ -277,6 +288,7 @@ class OnboardingViewModel(
                     preparing = false,
                     step = OnboardingStep.CONFIRM_LINK,
                     link = link,
+                    linkOpened = opened,
                     replaces = replaces,
                     pairReady = false,
                     error = null,

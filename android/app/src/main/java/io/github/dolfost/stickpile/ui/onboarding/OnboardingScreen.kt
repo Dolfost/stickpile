@@ -81,9 +81,9 @@ fun OnboardingScreen(
     val state = vm.state
     LaunchedEffect(link) { if (link != null) vm.openLink(link) }
     LaunchedEffect(state.account) { state.account?.let(onSignedIn) }
-    BackHandler(enabled = state.step != OnboardingStep.WELCOME || canCancel) {
-        if (!vm.back() && canCancel) onCancel()
-    }
+    // One step back; off onboarding (to the library) where there is none.
+    val back = { if (!vm.back(canLeave = canCancel) && canCancel) onCancel() }
+    BackHandler(enabled = state.step != OnboardingStep.WELCOME || canCancel, onBack = back)
 
     val title = when (state.step) {
         OnboardingStep.WELCOME -> null
@@ -99,7 +99,7 @@ fun OnboardingScreen(
                 TopAppBar(
                     title = { Text(stringResource(title)) },
                     navigationIcon = {
-                        IconButton(onClick = { vm.back() }, enabled = !state.busy) {
+                        IconButton(onClick = back, enabled = !state.busy) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.app_action_back))
                         }
                     },
@@ -118,7 +118,7 @@ fun OnboardingScreen(
             ) {
                 when (state.step) {
                     OnboardingStep.WELCOME -> Welcome(vm, canCancel, onCancel)
-                    OnboardingStep.CONFIRM_LINK -> ConfirmLink(vm)
+                    OnboardingStep.CONFIRM_LINK -> ConfirmLink(vm, onCancel = back)
                     OnboardingStep.CODE -> PairByCode(vm)
                     OnboardingStep.SERVER -> ServerAddress(vm, signedIn = canCancel)
                     OnboardingStep.SIGN_IN -> SignIn(vm)
@@ -181,7 +181,7 @@ private fun ColumnScope.Welcome(vm: OnboardingViewModel, canCancel: Boolean, onC
  * pairing replaces. The Pair button waits a moment after the link changed.
  */
 @Composable
-private fun ConfirmLink(vm: OnboardingViewModel) {
+private fun ConfirmLink(vm: OnboardingViewModel, onCancel: () -> Unit) {
     val state = vm.state
     val link = state.link ?: return
     Text(stringResource(R.string.onboarding_link_text))
@@ -211,7 +211,7 @@ private fun ConfirmLink(vm: OnboardingViewModel) {
     }
     Text(stringResource(R.string.onboarding_link_warning), style = MaterialTheme.typography.bodyMedium)
     BusyButton(stringResource(R.string.onboarding_pair), enabled = state.canConfirm, busy = state.busy, onClick = vm::confirmLink)
-    TextButton(onClick = { vm.back() }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+    TextButton(onClick = onCancel, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.app_action_cancel))
     }
 }
