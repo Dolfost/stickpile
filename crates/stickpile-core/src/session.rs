@@ -244,22 +244,7 @@ impl Session {
     /// cache and build the clipboard offers.
     pub async fn prepare_copy(&self, item: &ItemSummary, target: TargetApp, sticker: bool) -> Result<PreparedCopy> {
         let (variant, is_sticker, warning) = pick_variant(item, target, sticker)?;
-        let ext = variant_extension(item, variant.variant);
-        let rel = format!(
-            "clip/{}.{}/{}.{ext}",
-            safe_component(&item.media_id),
-            variant.variant.as_str(),
-            clip_file_stem(&item.name, &item.id)
-        );
-        let file = match self.cache.lookup_file(&rel, Some(variant.size_bytes))? {
-            Some(p) => p,
-            None => {
-                let abs = self.cache.abs(&rel);
-                self.client.download_item_file(&item.id, variant.variant, &abs).await?;
-                self.cache.register_file(&rel)?;
-                abs
-            }
-        };
+        let (rel, file) = self.materialise(item, &variant).await?;
         // `[copy]` padding / flattening; the offers below are built from the result.
         let (file, mime) = adjust_copy_file(
             &self.cache,
@@ -292,9 +277,57 @@ impl Session {
         })
     }
 
+    /// One given rendition of `item` as a file in the cache, downloaded
+    /// unless it is cached already, so it works offline once fetched. The
+    /// file is the one [`Session::prepare_copy`] uses for that rendition,
+    /// named `<item name>.<format extension>` ([`clip_file_stem`],
+    /// [`variant_extension`]). Unlike `prepare_copy` nothing is chosen and
+    /// nothing is adjusted (`[copy]` padding): the Android input method picks
+    /// the rendition itself ([`crate::insert::variant_for`]). An error if the
+    /// item has no such rendition.
+    pub async fn fetch_variant(&self, item: &ItemSummary, variant: Variant) -> Result<PathBuf> {
+        let info = item
+            .variants
+            .iter()
+            .find(|v| v.variant == variant)
+            .ok_or_else(|| CoreError::Other(format!("{}: no {} rendition", item.name, variant.as_str())))?;
+        self.materialise(item, info).await.map(|(_, file)| file)
+    }
+
+    /// The cache file of a rendition (`clip/<media>.<variant>/<name>.<ext>`)
+    /// and its path relative to the cache, downloaded unless cached.
+    async fn materialise(&self, item: &ItemSummary, variant: &VariantInfo) -> Result<(String, PathBuf)> {
+        let ext = variant_extension(item, variant.variant);
+        let rel = format!(
+            "clip/{}.{}/{}.{ext}",
+            safe_component(&item.media_id),
+            variant.variant.as_str(),
+            clip_file_stem(&item.name, &item.id)
+        );
+        let file = match self.cache.lookup_file(&rel, Some(variant.size_bytes))? {
+            Some(p) => p,
+            None => {
+                let abs = self.cache.abs(&rel);
+                self.client.download_item_file(&item.id, variant.variant, &abs).await?;
+                self.cache.register_file(&rel)?;
+                abs
+            }
+        };
+        Ok((rel, file))
+    }
+
     /// Queue a usage event and try to flush in the background. Works offline.
     pub fn record_copy(&self, item: &ItemSummary, prepared: &PreparedCopy) -> Result<()> {
-        let event = copy_event(item, Some(prepared.target), Some(prepared.variant), &self.client_name);
+        self.record_use(item, prepared.target, prepared.variant)
+    }
+
+    /// [`Session::record_copy`] without a [`PreparedCopy`]: `item` went to
+    /// `target` as `variant` (the Android input method inserts a rendition
+    /// it fetched with [`Session::fetch_variant`]). Adds it to the copy
+    /// history ([`Session::recent`]), queues a usage event and tries to
+    /// flush in the background. Works offline.
+    pub fn record_use(&self, item: &ItemSummary, target: TargetApp, variant: Variant) -> Result<()> {
+        let event = copy_event(item, Some(target), Some(variant), &self.client_name);
         self.cache.add_history(item, &event)?;
         self.usage.push(&event)?;
         if self.is_logged_in() {

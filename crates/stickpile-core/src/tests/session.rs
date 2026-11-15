@@ -229,6 +229,71 @@ async fn record_copy_queues_flushes_and_feeds_recent() {
 }
 
 #[tokio::test]
+async fn fetch_variant_materialises_the_given_rendition() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await;
+    server
+        .state()
+        .add_variant(&items[0].id, Variant::TgSticker, "image/webp", webp_bytes(32, 32, 1));
+    let mut item = items[0].clone();
+    item.variants = server.state().items[0].item.media.variants.clone();
+
+    // The sticker rendition, though prepare_copy would pick the original here.
+    let sticker = session.fetch_variant(&item, Variant::TgSticker).await.unwrap();
+    assert_eq!(sticker.file_name().unwrap(), "grumpy cat.webp");
+    assert!(sticker.starts_with(dir.path().join("cache/clip")));
+    assert_eq!(std::fs::read(&sticker).unwrap(), webp_bytes(32, 32, 1));
+    // The original is the very file prepare_copy uses for it.
+    let original = session.fetch_variant(&item, Variant::Original).await.unwrap();
+    assert_eq!(original.file_name().unwrap(), "grumpy cat.png");
+    let p = session.prepare_copy(&item, TargetApp::Discord, false).await.unwrap();
+    assert_eq!(p.file, original);
+    // A rendition the item does not have.
+    let err = session.fetch_variant(&item, Variant::Mp4).await.unwrap_err();
+    assert!(err.to_string().contains("no mp4 rendition"), "{err}");
+
+    // Cached: no download, also with the server gone.
+    let downloads = |s: &crate::mock::MockServer| s.state().requests.iter().filter(|r| r.contains("/file/")).count();
+    let before = downloads(&server);
+    server.stop();
+    assert_eq!(session.fetch_variant(&item, Variant::TgSticker).await.unwrap(), sticker);
+    assert_eq!(downloads(&server), before);
+    // Not cached and the server gone: offline.
+    assert!(session
+        .fetch_variant(&items[1], Variant::Original)
+        .await
+        .unwrap_err()
+        .is_offline());
+}
+
+#[tokio::test]
+async fn record_use_records_target_and_variant() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await.with_client_name("test/1");
+    session
+        .record_use(&items[1], TargetApp::Telegram, Variant::Mp4)
+        .unwrap();
+    assert_eq!(session.recent(5)[0].id, items[1].id);
+    assert!(wait_until(|| server.state().usage.len() == 1).await, "background flush");
+    let ev = server.state().usage[0].clone();
+    assert_eq!(ev.item_id, items[1].id);
+    assert_eq!(ev.target, Some(TargetApp::Telegram));
+    assert_eq!(ev.variant, Some(Variant::Mp4));
+    assert_eq!(ev.client.as_deref(), Some("test/1"));
+
+    // Offline: kept in the queue and in the history.
+    server.stop();
+    session
+        .record_use(&items[2], TargetApp::Generic, Variant::Original)
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(session.pending_usage(), 1);
+    assert_eq!(session.recent(5)[0].id, items[2].id);
+}
+
+#[tokio::test]
 async fn copy_works_offline_from_cache_and_queues_usage() {
     let (server, items) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
