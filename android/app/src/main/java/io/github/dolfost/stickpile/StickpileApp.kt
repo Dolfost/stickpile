@@ -2,14 +2,17 @@ package io.github.dolfost.stickpile
 
 import android.app.Application
 import android.content.Context
+import android.os.SystemClock
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.rust.LibraryDirs
+import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import java.io.File
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -62,17 +65,18 @@ class StickpileApp : Application() {
     /**
      * Read the account's favorites in the background (at most every few
      * minutes), so that the items' `liked` marks know them: the library
-     * marks items from the favorites it last read. Failures are only
-     * logged; the marks then stay as they were.
+     * marks items from the favorites it last read. Returns the read, to
+     * load the shown list again after it; null when one ran lately.
+     * Failures are only logged; the marks then stay as they were.
      */
-    fun refreshLikes() {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (likesReadAt != 0L && now - likesReadAt < LIKES_EVERY_MS) return
+    fun refreshLikes(): Job? {
+        val now = SystemClock.elapsedRealtime()
+        if (likesReadAt != 0L && now - likesReadAt < LIKES_EVERY_MS) return null
         likesReadAt = now
-        scope.launch {
+        return scope.launch {
             try {
                 library.favorites(1u)
-            } catch (e: io.github.dolfost.stickpile.rust.LibraryException) {
+            } catch (e: LibraryException) {
                 likesReadAt = 0L
                 Log.i(TAG, "favorites not read: ${e.javaClass.simpleName}")
             }
