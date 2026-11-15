@@ -12,6 +12,11 @@ import java.security.SecureRandom
  *
  * Tokens are secrets: never log them, nor the URIs that carry them.
  *
+ * At most [capacity] tokens live at once, the oldest going first. Tokens
+ * made for another app (through the provider's `prepare`) are also capped
+ * per calling uid at [perCallerCapacity], so that one keyboard asking for
+ * many cannot push out the tokens of the others and of the app itself.
+ *
  * @param clock milliseconds of a monotonic clock (`SystemClock.elapsedRealtime`).
  * @param random fills an array with random bytes.
  */
@@ -20,26 +25,43 @@ class PreparedTokens(
     private val random: (ByteArray) -> Unit = defaultRandom::nextBytes,
     private val lifetimeMillis: Long = LIFETIME_MILLIS,
     private val capacity: Int = CAPACITY,
+    private val perCallerCapacity: Int = PER_CALLER_CAPACITY,
 ) {
     /** A prepared file: where it is, its MIME type and the name in its URI. */
     data class Entry(val path: String, val mimeType: String, val fileName: String)
 
-    private class Registered(val token: ByteArray, val entry: Entry, val created: Long)
+    private class Registered(val token: ByteArray, val entry: Entry, val created: Long, val caller: Int?)
 
     // Oldest first.
     private val registered = ArrayDeque<Registered>()
 
-    /** A new token for [entry], as 32 lowercase hex characters. */
+    /**
+     * A new token for [entry], as 32 lowercase hex characters. [caller] is
+     * the uid of the other app it is made for, whose oldest token goes when
+     * it has [perCallerCapacity] live ones; null for the app's own (the
+     * picker, sharing), which only [capacity] limits.
+     */
     @Synchronized
-    fun register(entry: Entry): String {
+    fun register(entry: Entry, caller: Int? = null): String {
         val now = clock()
         dropExpired(now)
+        if (caller != null) {
+            while (registered.count { it.caller == caller } >= perCallerCapacity) {
+                registered.removeAt(registered.indexOfFirst { it.caller == caller })
+            }
+        }
         while (registered.size >= capacity) registered.removeFirst()
         val bytes = ByteArray(TOKEN_BYTES)
         random(bytes)
         val token = hex(bytes)
-        registered.addLast(Registered(token.toByteArray(Charsets.US_ASCII), entry, now))
+        registered.addLast(Registered(token.toByteArray(Charsets.US_ASCII), entry, now, caller))
         return token
+    }
+
+    /** Revokes every token: no URI handed out before opens a file any more. */
+    @Synchronized
+    fun clear() {
+        registered.clear()
     }
 
     /**
@@ -79,6 +101,9 @@ class PreparedTokens(
 
         /** At most this many live tokens; the oldest goes first. */
         const val CAPACITY = 512
+
+        /** At most this many live tokens made for one other app (by uid); its oldest goes first. */
+        const val PER_CALLER_CAPACITY = 64
 
         private val defaultRandom = SecureRandom()
 

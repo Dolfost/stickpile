@@ -82,4 +82,65 @@ class PreparedTokensTest {
         assertNull(tokens.lookup(made[0], "1.png"))
         assertNotNull(tokens.lookup(made[3], "4.png"))
     }
+
+    @Test
+    fun everyTokenCanBeRevokedAtOnce() {
+        val tokens = PreparedTokens(clock = { now })
+        val own = tokens.register(entry)
+        val other = tokens.register(entry, caller = KEYBOARD)
+        tokens.clear()
+        assertEquals(0, tokens.size())
+        assertNull(tokens.lookup(own, entry.fileName))
+        assertNull(tokens.lookup(other, entry.fileName))
+        // New tokens work again.
+        val again = tokens.register(entry)
+        assertEquals(entry, tokens.lookup(again, entry.fileName))
+    }
+
+    @Test
+    fun anotherAppsOldestTokenGoesWhenItHasTooMany() {
+        val tokens = PreparedTokens(clock = { now }, capacity = 10, perCallerCapacity = 2)
+        val own = tokens.register(entry.copy(fileName = "own.png"))
+        val first = tokens.register(entry.copy(fileName = "a1.png"), caller = KEYBOARD)
+        val second = tokens.register(entry.copy(fileName = "a2.png"), caller = KEYBOARD)
+        val others = tokens.register(entry.copy(fileName = "b1.png"), caller = OTHER_KEYBOARD)
+        val third = tokens.register(entry.copy(fileName = "a3.png"), caller = KEYBOARD)
+        assertNull(tokens.lookup(first, "a1.png"))
+        assertNotNull(tokens.lookup(second, "a2.png"))
+        assertNotNull(tokens.lookup(third, "a3.png"))
+        // Neither the other keyboard's nor the app's own token went for it.
+        assertNotNull(tokens.lookup(others, "b1.png"))
+        assertNotNull(tokens.lookup(own, "own.png"))
+        assertEquals(4, tokens.size())
+    }
+
+    @Test
+    fun oneKeyboardCannotPushOutTheOthers() {
+        val tokens = PreparedTokens(clock = { now }, capacity = 8, perCallerCapacity = 3)
+        val own = (1..3).map { tokens.register(entry.copy(fileName = "own$it.png")) }
+        val others = tokens.register(entry.copy(fileName = "b.png"), caller = OTHER_KEYBOARD)
+        repeat(100) { tokens.register(entry.copy(fileName = "a$it.png"), caller = KEYBOARD) }
+        assertEquals(7, tokens.size())
+        own.forEachIndexed { i, token -> assertNotNull(tokens.lookup(token, "own${i + 1}.png")) }
+        assertNotNull(tokens.lookup(others, "b.png"))
+    }
+
+    @Test
+    fun theAppsOwnTokensAreLimitedOnlyByTheCapacity() {
+        val tokens = PreparedTokens(clock = { now }, capacity = 5, perCallerCapacity = 2)
+        val made = (1..5).map { tokens.register(entry.copy(fileName = "$it.png")) }
+        assertEquals(5, tokens.size())
+        made.forEachIndexed { i, token -> assertNotNull(tokens.lookup(token, "${i + 1}.png")) }
+    }
+
+    @Test
+    fun theDefaultCapsLeaveRoomForSeveralKeyboards() {
+        assertEquals(64, PreparedTokens.PER_CALLER_CAPACITY)
+        assertTrue(PreparedTokens.CAPACITY >= 4 * PreparedTokens.PER_CALLER_CAPACITY)
+    }
+
+    private companion object {
+        const val KEYBOARD = 10_200
+        const val OTHER_KEYBOARD = 10_201
+    }
 }

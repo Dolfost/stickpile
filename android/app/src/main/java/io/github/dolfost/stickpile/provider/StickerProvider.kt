@@ -129,9 +129,15 @@ class StickerProvider : ContentProvider() {
         val editorPackage = extras?.getString(KEY_PACKAGE).orEmpty()
         val mimeTypes = extras?.getStringArray(KEY_MIME_TYPES)?.toList().orEmpty()
         val sticker = extras?.getBoolean(KEY_STICKER, false) ?: false
+        val callingUid = Binder.getCallingUid()
         return try {
             val prepared = withLibrary { it.prepare(itemId, editorPackage, mimeTypes, sticker) }
-            val uri = PreparedFiles.uriFor(ctx(), prepared)
+            // Another app's tokens are capped per uid; the app's own are not.
+            val uri = if (callingUid == Process.myUid()) {
+                PreparedFiles.uriFor(ctx(), prepared)
+            } else {
+                PreparedFiles.uriForCaller(prepared, callingUid)
+            }
             Bundle().apply {
                 putString(KEY_URI, uri.toString())
                 putString(KEY_MIME_TYPE, prepared.mimeType)
