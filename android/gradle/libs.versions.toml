@@ -1,13 +1,60 @@
-# Versions of the Android build: plugins from Google's Maven, libraries from
-# Maven Central (see docs/android.md, "Build from source").
+# Versions of the Android build: plugins and libraries from Google's Maven
+# and Maven Central only, all free software (see docs/android.md, "Build
+# from source"). No Google Play Services, Firebase, ML Kit, crash reporters
+# or analytics, directly or transitively.
 [versions]
 agp = "9.5.1"
-jna = "5.19.1"
+# Built-in Kotlin (AGP 9) compiles with the Kotlin Gradle plugin on the
+# build classpath; the Compose compiler plugin must have the same version.
+kotlin = "2.4.21"
+compose-bom = "2026.09.00"
+activity = "1.13.0"
+lifecycle = "2.11.0"
+core = "1.19.1"
+recyclerview = "1.4.0"
+material = "1.14.0"
+work = "2.12.0"
 kotlinx-coroutines = "1.11.0"
+jna = "5.19.1"
+zxing-android-embedded = "4.3.0"
+zxing-core = "3.5.4"
+junit = "4.13.2"
 
 [libraries]
-jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+# Build classpath (android/build.gradle.kts), not app dependencies.
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+
+# Activities: Jetpack Compose with Material 3 (versions from the BOM).
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-material-icons-core = { module = "androidx.compose.material:material-icons-core" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
+
+# The input method: classic Views with a Material Components theme.
+androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+
+# Background sync (work-runtime has CoroutineWorker; work-runtime-ktx is
+# now an empty alias of it).
+androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
+
+# UniFFI's Kotlin bindings call the native library through JNA (as an aar,
+# for its libjnidispatch.so).
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+
+# QR scanning on the pairing screen; zxing-android-embedded asks for an
+# older zxing core, the newer one is declared on its own.
+zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxing-android-embedded" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing-core" }
+
+# Unit tests on the JVM.
+junit = { module = "junit:junit", version.ref = "junit" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

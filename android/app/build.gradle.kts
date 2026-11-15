@@ -1,5 +1,8 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
 }
 
 // The repository root: the Rust workspace the native library is built from.
@@ -35,8 +38,16 @@ android {
 
     buildTypes {
         release {
+            // No R8: JNA and the UniFFI bindings look classes and methods
+            // up by name at run time, so shrinking them needs keep rules,
+            // and there are none. No signing config either: the release
+            // APK is unsigned, and whoever publishes it signs it.
             isMinifyEnabled = false
         }
+    }
+
+    buildFeatures {
+        compose = true
     }
 
     compileOptions {
@@ -52,9 +63,39 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     // UniFFI's Kotlin bindings call the native library through JNA.
     implementation(libs.jna) { artifact { type = "aar" } }
+    implementation(libs.kotlinx.coroutines.android)
+
+    // Activities (Compose).
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.core.ktx)
+
+    // The input method (Views).
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.material)
+
+    // Sync.
+    implementation(libs.androidx.work.runtime)
+
+    // Pairing by QR code.
+    implementation(libs.zxing.android.embedded)
+    implementation(libs.zxing.core)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // The workspace version, from the root Cargo.toml.
