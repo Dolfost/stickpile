@@ -100,6 +100,8 @@
 
     <!-- The walk-through that turns the picker keyboard on. %1$s: the keyboard's name (ime_name). -->
     <string name="keyboard_setup_title">The sticker keyboard</string>
+    <!-- The first line after a sign-in: %1$s the username, %2$s the host of the server. -->
+    <string name="keyboard_setup_signed_in_as">Signed in as %1$s on %2$s.</string>
     <string name="keyboard_setup_intro">stickpile comes with a keyboard of its own, without keys: switch to it in any chat, tap a sticker, and you are back on your usual keyboard.</string>
     <string name="keyboard_setup_enable_title">1. Turn it on</string>
     <string name="keyboard_setup_enable_text">In the list of keyboards, turn on %1$s. Android may warn that a keyboard can read what you type: this one reads only the text in the field, to search for stickers, and you can turn that off in the settings.</string>

@@ -76,6 +76,7 @@
     <string name="onboarding_sign_in">Увійти</string>
 
     <string name="keyboard_setup_title">Клавіатура стікерів</string>
+    <string name="keyboard_setup_signed_in_as">Ви ввійшли як %1$s на %2$s.</string>
     <string name="keyboard_setup_intro">stickpile має власну клавіатуру, без клавіш: перемкніться на неї в будь-якому чаті, торкніться стікера, і ви знову на своїй звичній клавіатурі.</string>
     <string name="keyboard_setup_enable_title">1. Увімкніть її</string>
     <string name="keyboard_setup_enable_text">У списку клавіатур увімкніть %1$s. Android може попередити, що клавіатура здатна читати все, що ви вводите: ця читає лише текст у полі, щоб шукати стікери, і це можна вимкнути в налаштуваннях.</string>

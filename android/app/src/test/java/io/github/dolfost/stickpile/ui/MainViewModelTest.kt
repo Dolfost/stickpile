@@ -6,11 +6,14 @@ import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.main.MainRoute
 import io.github.dolfost.stickpile.ui.main.MainViewModel
+import io.github.dolfost.stickpile.ui.main.isAnotherAccount
 import io.github.dolfost.stickpile.ui.main.routeAfterAccountCheck
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -22,9 +25,15 @@ class MainViewModelTest {
 
     private val library = FakeLibrary()
     private val signedIn = mutableListOf<StickpileLibraryInterface>()
+    private var accountChanges = 0
 
     private fun model(open: suspend () -> Result<StickpileLibraryInterface> = { Result.success(library) }) =
-        MainViewModel(open = open, signedIn = { signedIn += it }, log = { _, _ -> })
+        MainViewModel(
+            open = open,
+            signedIn = { signedIn += it },
+            accountChanged = { accountChanges++ },
+            log = { _, _ -> },
+        )
 
     @Test
     fun theAccountCheckDecidesTheFirstScreen() {
@@ -122,12 +131,40 @@ class MainViewModelTest {
         vm.start()
         advanceUntilIdle()
         val before = vm.session
-        vm.onSignedIn()
+        vm.onSignedIn(alice)
         assertEquals(MainRoute.KeyboardSetup, vm.route)
+        // The walk-through names who is signed in.
+        assertEquals(alice, vm.signedInAs)
         assertEquals(listOf<StickpileLibraryInterface>(library), signedIn)
         assertEquals(before + 1, vm.session)
         vm.onKeyboardSetupDone()
         assertEquals(MainRoute.Library, vm.route)
+    }
+
+    @Test
+    fun aSignInAsAnotherAccountOrServerRevokesWhatWasHandedOut() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        // Alice again, on her server (a link while signed in): nothing changed.
+        vm.onSignedIn(alice)
+        assertEquals(0, accountChanges)
+        vm.onSignedIn(alice.copy(username = "bob"))
+        assertEquals(1, accountChanges)
+        vm.onSignedIn(alice.copy(username = "bob", serverUrl = "https://other.example"))
+        assertEquals(2, accountChanges)
+    }
+
+    @Test
+    fun aSignInAfterNobodyCountsAsAnotherAccount() = runTest(main.dispatcher) {
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        vm.onSignedIn(alice)
+        assertEquals(1, accountChanges)
+        assertTrue(isAnotherAccount(null, alice))
+        assertFalse(isAnotherAccount(alice, alice.copy(displayName = "Alice", isAdmin = true)))
     }
 
     @Test

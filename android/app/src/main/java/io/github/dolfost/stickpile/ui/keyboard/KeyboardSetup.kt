@@ -44,7 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.ime.PickerInputMethodService
+import io.github.dolfost.stickpile.rust.Account
 import io.github.dolfost.stickpile.ui.common.FailureLog
+import io.github.dolfost.stickpile.ui.common.hostOf
 
 /** The picker keyboard's service class, as the system lists input methods. */
 val PICKER_SERVICE: String = PickerInputMethodService::class.java.name
@@ -66,11 +68,12 @@ fun isPickerEnabled(context: Context): Boolean {
  * The walk-through that turns the picker keyboard on and shows how to
  * switch to it (docs/android-plan.md 4.8): after a sign-in, and from the
  * settings. [onBack] null: no back arrow (after a sign-in, where "skip"
- * is offered instead).
+ * is offered instead). [signedInAs]: the account just signed in, named
+ * on the first line with its server's host.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun KeyboardSetupScreen(onDone: () -> Unit, onBack: (() -> Unit)?) {
+fun KeyboardSetupScreen(onDone: () -> Unit, onBack: (() -> Unit)?, signedInAs: Account? = null) {
     val context = LocalContext.current
     var enabled by remember { mutableStateOf(isPickerEnabled(context)) }
     // Back from the system settings: look again.
@@ -103,6 +106,14 @@ fun KeyboardSetupScreen(onDone: () -> Unit, onBack: (() -> Unit)?) {
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (signedInAs != null) {
+                val host = hostOf(signedInAs.serverUrl) ?: signedInAs.serverUrl
+                Text(
+                    stringResource(R.string.keyboard_setup_signed_in_as, signedInAs.username, host),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Text(stringResource(R.string.keyboard_setup_intro))
 
             Step(

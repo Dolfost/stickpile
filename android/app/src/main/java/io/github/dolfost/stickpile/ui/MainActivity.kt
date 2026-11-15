@@ -17,6 +17,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.sync.SyncScheduler
 import io.github.dolfost.stickpile.ui.common.Doing
@@ -53,6 +54,12 @@ class MainActivity : ComponentActivity() {
                 MainViewModel(
                     open = { openLibrary(context) },
                     signedIn = { library -> startSync(context, library) },
+                    accountChanged = {
+                        // Another account or server: what was handed out
+                        // for the last one goes.
+                        PreparedFiles.revokeAll()
+                        Thumbnails.clear()
+                    },
                 )
             }
         }
@@ -125,15 +132,11 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
                 vm = onboarding,
                 link = route.link,
                 canCancel = route.canCancel,
-                onSignedIn = {
-                    // Another account: the decoded thumbnails of the last one go.
-                    Thumbnails.clear()
-                    vm.onSignedIn()
-                },
+                onSignedIn = vm::onSignedIn,
                 onCancel = vm::onOnboardingCancelled,
             )
         }
-        MainRoute.KeyboardSetup -> KeyboardSetupScreen(onDone = vm::onKeyboardSetupDone, onBack = null)
+        MainRoute.KeyboardSetup -> KeyboardSetupScreen(onDone = vm::onKeyboardSetupDone, onBack = null, signedInAs = vm.signedInAs)
         MainRoute.Library -> {
             if (library == null) return Loading()
             val screen = viewModel(key = "library-${vm.session}") { LibraryViewModel(library) }

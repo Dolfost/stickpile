@@ -58,16 +58,23 @@ fun routeAfterAccountCheck(result: Result<Account?>): MainRoute = result.fold(
     },
 )
 
+/** Whether a sign-in as [after] is another account or server than [before] (null: not known). */
+fun isAnotherAccount(before: Account?, after: Account): Boolean =
+    before == null || before.username != after.username || before.serverUrl != after.serverUrl
+
 /**
  * The launcher's state: opens the library, decides the first screen, and
  * moves between onboarding, the keyboard walk-through and the library.
  *
  * [open] opens the library (off the main thread); [signedIn] runs when an
- * account is known (schedule the background sync, sync if due).
+ * account is known (schedule the background sync, sync if due);
+ * [accountChanged] when a sign-in changed the account or the server (what
+ * was handed out for the last one goes).
  */
 class MainViewModel(
     private val open: suspend () -> Result<StickpileLibraryInterface>,
     private val signedIn: (StickpileLibraryInterface) -> Unit,
+    private val accountChanged: () -> Unit = {},
     private val log: FailureLog = FailureLog.android,
 ) : ViewModel() {
 
@@ -86,6 +93,12 @@ class MainViewModel(
     var session: Int by mutableIntStateOf(0)
         private set
 
+    /** The account onboarding signed in last, for the next screen to name; null before. */
+    var signedInAs: Account? by mutableStateOf(null)
+        private set
+
+    /** Who is signed in as far as this knows; null when nobody or not known. */
+    private var account: Account? = null
     private var pendingLink: String? = null
     private var started = false
 
@@ -108,6 +121,7 @@ class MainViewModel(
             library = lib
             val result = catching { lib.account() }
             result.exceptionOrNull()?.let { log.failed(Doing.CHECKING_ACCOUNT, it) }
+            account = result.getOrNull()
             var next = routeAfterAccountCheck(result)
             if (next == MainRoute.Library) signedIn(lib)
             val link = pendingLink
@@ -132,8 +146,11 @@ class MainViewModel(
         }
     }
 
-    /** Onboarding signed someone in: on to the keyboard walk-through. */
-    fun onSignedIn() {
+    /** Onboarding signed [account] in: on to the keyboard walk-through, which names it. */
+    fun onSignedIn(account: Account) {
+        if (isAnotherAccount(this.account, account)) accountChanged()
+        this.account = account
+        signedInAs = account
         library?.let(signedIn)
         session++
         route = MainRoute.KeyboardSetup

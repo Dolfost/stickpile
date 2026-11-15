@@ -58,6 +58,7 @@ import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.rust.Account
 import io.github.dolfost.stickpile.ui.common.Message
 import io.github.dolfost.stickpile.ui.common.isUnencrypted
 import io.github.dolfost.stickpile.ui.common.text
@@ -66,7 +67,7 @@ import io.github.dolfost.stickpile.ui.common.text
  * Onboarding: scan the server's QR code, or type the code, or sign in with
  * the server's address (Tailscale, or a password). [link] is a pairing link
  * the app was opened with; [canCancel] offers a way back to the library
- * (someone is signed in already).
+ * (someone is signed in already). [onSignedIn] gets the account signed in.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,12 +75,12 @@ fun OnboardingScreen(
     vm: OnboardingViewModel,
     link: String?,
     canCancel: Boolean,
-    onSignedIn: () -> Unit,
+    onSignedIn: (Account) -> Unit,
     onCancel: () -> Unit,
 ) {
     val state = vm.state
     LaunchedEffect(link) { if (link != null) vm.openLink(link) }
-    LaunchedEffect(state.account) { if (state.account != null) onSignedIn() }
+    LaunchedEffect(state.account) { state.account?.let(onSignedIn) }
     BackHandler(enabled = state.step != OnboardingStep.WELCOME || canCancel) {
         if (!vm.back() && canCancel) onCancel()
     }
