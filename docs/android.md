@@ -74,6 +74,11 @@ Most used, and a grid.
   menu's "Sticker info" (also in Settings) turns each piece on or off and
   sets the tile size. Safe mode and these choices are shared with the
   keyboard.
+- **GIFs and videos play** in the grid and the details, looping and
+  without sound, instead of showing their first frame. Each one's file is
+  downloaded the first time it plays and kept in the offline cache. "Play
+  GIFs and videos" (in "Sticker info" and Settings) is Always, Wi-Fi only
+  (on mobile data only the ones already downloaded play) or Never.
 - **Tap** a sticker to share it; **long press** for its details: the
   pack and owner, the numbers, the vibe, emojis, tags and keywords (a tap
   on one searches for it), and Share, Like or Unlike, and Open in browser
@@ -116,7 +121,8 @@ Using it:
 - Or browse the tabs Recent, Liked, Most used and Sets; the row of emojis
   narrows the grid.
 - The shield is safe mode and the menu has the sticker info, the tile
-  size and the search syntax, all shared with the app.
+  size and the search syntax, all shared with the app. GIFs and videos
+  play here too, as the app's "Play GIFs and videos" says.
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
@@ -125,8 +131,11 @@ Using it:
   Like or Unlike, and Share.
 - The keyboard button at the top goes back to your keyboard at any time.
 
-Its settings (in the app's settings): search what is typed, delete what was
-typed when a result from it is inserted, and stay open after inserting.
+Its settings (in the app's settings): the keyboard height (the sticker
+grid at 60% to 160% of its usual height, never more than half the
+screen; it applies the next time the keyboard opens), search what is
+typed, delete what was typed when a result from it is inserted, and stay
+open after inserting.
 
 ### Other keyboards
 
@@ -153,7 +162,8 @@ token to revoke, so it shows "Signed in through Tailscale" and offers to
 change the server instead), sync (sync now, the last sync, uses waiting to
 be sent), the offline cache (its size, clear it, which also revokes every
 prepared file's URI), the sticker info (safe mode, what the tiles show,
-the tile size), the keyboard's switches and walk-through, the keyboards
+the tile size, when GIFs and videos play), the keyboard's height,
+switches and walk-through, the keyboards
 allowed to read stickers, and licences.
 
 The app syncs in the background every 15 minutes when there is a network
@@ -534,7 +544,15 @@ is one process; these pieces are shared by its parts:
   pending (refused) ones. It reads the package manager: call it off the
   main thread.
 - `ime.ImeSettings`: the picker keyboard's switches (search the draft,
-  delete the draft, stay open).
+  delete the draft, stay open) and its height (`ime.PickerHeight`).
+- `motion.Motions`: the moving renditions for the grids and details of
+  the app and the keyboard (the bridge's `motion`, after a short wait so
+  that a fling downloads nothing, at most three downloads at once), and
+  the decoded animated pictures (`ImageDecoder`, API 28 and later).
+  `motion.LoopingVideoView` plays a video in a `TextureView` with a
+  muted, looping `MediaPlayer`, only while on screen and at most six at
+  once in the process (`motion.Slots`); `motion.MotionPolicy` says when
+  an item plays (`display.Autoplay`).
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server
