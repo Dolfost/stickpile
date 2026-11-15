@@ -41,12 +41,17 @@ transfer: the API token never leaves the phone.
 2. In the app, "Scan a QR code" (the camera permission is asked for then),
    or type the server address and the code. Scanning the code with the
    phone's camera app opens a `stickpile://pair` link, which opens
-   stickpile and asks before it signs in.
+   stickpile. Either way the app asks first: it shows the server's host
+   (an internationalised name as punycode), the whole address, the account
+   it replaces, and whether the address is plain `http://`; the Pair
+   button takes a tap a second after the link shown changed. A link is
+   used once: reopening the app from Recents does not offer it again.
 3. Without the web UI at hand: type the server address, then "Sign in with
    Tailscale" (on a tailnet, no password) or a username and password (and
    a TOTP code if the account has one).
 
-After signing in, the app walks you through turning on the keyboard.
+After signing in, the app says who is signed in where ("Signed in as alice
+on stickers.example.org") and walks you through turning on the keyboard.
 
 ## The picker keyboard
 
@@ -79,7 +84,9 @@ Another keyboard (such as a patched Unexpected Keyboard) can show your
 stickers through the app's content provider ([Provider contract](#provider-contract)).
 It must be allowed first: the first time it asks, it is refused and appears
 under Settings, "Keyboards that may read your stickers", where you allow
-it.
+it after a confirmation that names the app (label and package) and what
+it can read; the confirmation ignores taps that come through another
+app's window drawn over it.
 
 ## Sharing to stickpile
 
@@ -91,8 +98,11 @@ out.
 
 ## Settings
 
-Account (sign out), sync (sync now, the last sync, uses waiting to be
-sent), the offline cache (its size, clear it), the keyboard's switches and
+Account (sign out; an account signed in by its tailnet identity has no
+token to revoke, so it shows "Signed in through Tailscale" and offers to
+change the server instead), sync (sync now, the last sync, uses waiting to
+be sent), the offline cache (its size, clear it, which also revokes every
+prepared file's URI), the keyboard's switches and
 walk-through, the keyboards allowed to read stickers, and licences.
 
 The app syncs in the background every 15 minutes when there is a network
@@ -399,12 +409,18 @@ is one process; these pieces are shared by its parts:
 - `ime.ImeSettings`: the picker keyboard's switches (search the draft,
   delete the draft, stay open).
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
-  login, `cancel(context)` after a logout.
+  login, `cancel(context)` after a logout (in the app's scope, also when
+  the settings screen went) and when onboarding saved another server
+  address.
 - `provider.PreparedFiles`: `uriFor(context, prepared)` turns a file from
   `StickpileLibrary.prepare` into a `/prepared/<token>/<name>` provider URI,
   for the input method's `commitContent` and for sharing from the app;
-  `revokeAll()` revokes every token at once (sign-out, a change of server
-  or account, clearing the cache).
+  `revokeAll()` revokes every token at once: after a sign-out and a cache
+  clear (settings), after a sign-in as another account or on another
+  server, and when onboarding saved another server address (launcher).
+- `ui.common.AccountChanges`: counts the account changes made away from the
+  launcher; the launcher watches it while resumed and asks again who is
+  signed in when it moved.
 
 Packages: `ui` (onboarding, the library screen, settings, licences),
 `ime` (the picker keyboard), `provider` (the content provider below),
