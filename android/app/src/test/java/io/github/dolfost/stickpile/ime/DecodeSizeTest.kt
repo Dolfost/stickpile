@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +55,25 @@ class DecodeSizeTest {
         assertEquals(1, DecodeSize.sampleSize(0, 0, 512))
         assertEquals(1, DecodeSize.sampleSize(-5, 100, 0))
         assertEquals(1, DecodeSize.sampleSize(100, 100, 512))
+    }
+
+    @Test
+    fun aWholeFrameIsDecodedOnlyUpTo4K() {
+        assertTrue(DecodeSize.wholeFrameFits(1920, 1080))
+        assertTrue(DecodeSize.wholeFrameFits(3840, 2160))
+        assertTrue(DecodeSize.wholeFrameFits(2160, 3840))
+        assertFalse(DecodeSize.wholeFrameFits(7680, 4320))
+        assertFalse(DecodeSize.wholeFrameFits(3841, 2160))
+        // Overflowing in Int would make this look small.
+        assertFalse(DecodeSize.wholeFrameFits(65_536, 65_536))
+    }
+
+    @Test
+    fun aFrameOfUnknownSizeIsNotDecodedWhole() {
+        assertFalse(DecodeSize.wholeFrameFits(null, 1080))
+        assertFalse(DecodeSize.wholeFrameFits(1920, null))
+        assertFalse(DecodeSize.wholeFrameFits(0, 1080))
+        assertFalse(DecodeSize.wholeFrameFits(-1920, -1080))
     }
 
     @Test

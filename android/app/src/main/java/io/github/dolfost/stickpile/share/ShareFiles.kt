@@ -12,6 +12,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.scale
+import io.github.dolfost.stickpile.ime.DecodeSize
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -161,8 +162,10 @@ object ShareFiles {
     }
 
     /**
-     * A preview of the copy at [path], at most about [sizePx] on its longer
-     * side: the picture, or a video's first frame. Null when it cannot be
+     * A preview of the copy at [path], at most [sizePx] on its longer side:
+     * the picture, or a video's first frame. The file is whatever another
+     * app shared, so it is never decoded at its full size ([DecodeSize]),
+     * and any failure to decode it is no preview. Null when it cannot be
      * decoded.
      */
     fun preview(path: String, isVideo: Boolean, sizePx: Int): Bitmap? = try {
@@ -174,35 +177,28 @@ object ShareFiles {
 
     private fun root(context: Context) = File(context.cacheDir, DIR)
 
-    private fun sampleSize(width: Int, height: Int, sizePx: Int): Int {
-        var sample = 1
-        while (maxOf(width, height) / (sample * 2) >= sizePx) sample *= 2
-        return sample
-    }
-
-    /** [width] by [height] scaled down (never up) to at most [sizePx] on the longer side. */
-    private fun fit(width: Int, height: Int, sizePx: Int): Pair<Int, Int> {
-        val scale = sizePx.toFloat() / maxOf(width, height)
-        if (scale >= 1f) return width to height
-        return maxOf(1, (width * scale).toInt()) to maxOf(1, (height * scale).toInt())
+    /** [bitmap] scaled down to at most [sizePx] on its longer side, if it is larger. */
+    private fun fitted(bitmap: Bitmap, sizePx: Int): Bitmap? {
+        val (w, h) = DecodeSize.fit(bitmap.width, bitmap.height, sizePx) ?: return null
+        return if (w == bitmap.width && h == bitmap.height) bitmap else bitmap.scale(w, h)
     }
 
     private fun picture(path: String, sizePx: Int): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             // ImageDecoder also turns a photo the way its EXIF data says.
             return ImageDecoder.decodeBitmap(ImageDecoder.createSource(File(path))) { decoder, info, _ ->
-                val (w, h) = fit(info.size.width, info.size.height, sizePx)
+                val (w, h) = DecodeSize.fit(info.size.width, info.size.height, sizePx) ?: throw IOException("no size")
                 decoder.setTargetSize(w, h)
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, sizePx) }
-        val bitmap = BitmapFactory.decodeFile(path, options) ?: return null
-        val (w, h) = fit(bitmap.width, bitmap.height, sizePx)
-        return if (w == bitmap.width) bitmap else bitmap.scale(w, h)
+        DecodeSize.fit(bounds.outWidth, bounds.outHeight, sizePx) ?: return null
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = DecodeSize.sampleSize(bounds.outWidth, bounds.outHeight, sizePx)
+        }
+        return fitted(BitmapFactory.decodeFile(path, options) ?: return null, sizePx)
     }
 
     private fun videoFrame(path: String, sizePx: Int): Bitmap? {
@@ -212,9 +208,12 @@ object ShareFiles {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 return retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, sizePx, sizePx)
             }
+            // API 26 decodes the whole frame: only when the video says it is not huge.
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            if (!DecodeSize.wholeFrameFits(width, height)) return null
             val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
-            val (w, h) = fit(frame.width, frame.height, sizePx)
-            return if (w == frame.width) frame else frame.scale(w, h)
+            return fitted(frame, sizePx)
         } finally {
             retriever.release()
         }

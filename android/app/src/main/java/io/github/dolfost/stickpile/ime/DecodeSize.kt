@@ -40,4 +40,15 @@ object DecodeSize {
 
     /** The longest side to decode a picker thumbnail at: no larger than its cell, at most [MAX_THUMBNAIL_PX]. */
     fun thumbnailPx(cellPx: Int): Int = cellPx.coerceIn(1, MAX_THUMBNAIL_PX)
+
+    /** The most pixels decoded whole where nothing smaller can be asked for (a 4K frame, 33 MB). */
+    const val MAX_WHOLE_PIXELS = 3840L * 2160L
+
+    /**
+     * Whether a picture of [width] by [height] may be decoded at its full
+     * size (a video frame on API 26, which cannot be asked for smaller):
+     * both known, positive, and at most [MAX_WHOLE_PIXELS].
+     */
+    fun wholeFrameFits(width: Int?, height: Int?): Boolean =
+        width != null && height != null && width > 0 && height > 0 && width.toLong() * height <= MAX_WHOLE_PIXELS
 }
