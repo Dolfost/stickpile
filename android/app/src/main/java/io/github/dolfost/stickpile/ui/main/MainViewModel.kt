@@ -13,6 +13,7 @@ import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.common.FailureLog
 import io.github.dolfost.stickpile.ui.common.catching
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /** Which screen the launcher shows. */
@@ -69,13 +70,16 @@ fun isAnotherAccount(before: Account?, after: Account): Boolean =
  * [open] opens the library (off the main thread); [signedIn] runs when an
  * account is known (schedule the background sync, sync if due);
  * [accountChanged] when a sign-in changed the account or the server (what
- * was handed out for the last one goes).
+ * was handed out for the last one goes). [accountVersion] is
+ * [io.github.dolfost.stickpile.ui.common.AccountChanges.version] when the
+ * view model is made.
  */
 class MainViewModel(
     private val open: suspend () -> Result<StickpileLibraryInterface>,
     private val signedIn: (StickpileLibraryInterface) -> Unit,
     private val accountChanged: () -> Unit = {},
     private val log: FailureLog = FailureLog.android,
+    accountVersion: Int = 0,
 ) : ViewModel() {
 
     var route: MainRoute by mutableStateOf(MainRoute.Starting)
@@ -101,6 +105,11 @@ class MainViewModel(
     private var account: Account? = null
     private var pendingLink: String? = null
     private var started = false
+    private var checking: Job? = null
+    private var seenAccountVersion = accountVersion
+
+    /** The account changed elsewhere during onboarding: leaving it asks again. */
+    private var stale = false
 
     /** Decide the first screen; once per view model (a rotation does not repeat it). */
     fun start() {
@@ -112,7 +121,9 @@ class MainViewModel(
     /** Ask again who is signed in (retry, or after the account changed elsewhere). */
     fun check() {
         route = MainRoute.Starting
-        viewModelScope.launch {
+        stale = false
+        checking?.cancel()
+        checking = viewModelScope.launch {
             val lib = library ?: open().getOrElse { e ->
                 log.failed(Doing.OPENING, e)
                 route = MainRoute.Broken(Failure.of(e))
@@ -133,6 +144,22 @@ class MainViewModel(
         }
     }
 
+    /**
+     * [io.github.dolfost.stickpile.ui.common.AccountChanges.version], while
+     * the launcher is resumed: when it moved, the account changed elsewhere
+     * (a sign-out in the settings), so ask again who is signed in. Onboarding
+     * stays up; leaving it asks.
+     */
+    fun onAccountChanges(version: Int) {
+        if (version == seenAccountVersion) return
+        seenAccountVersion = version
+        account = null
+        when (route) {
+            is MainRoute.Onboarding -> stale = true
+            else -> if (started) check()
+        }
+    }
+
     /** The app was opened with a pairing link (`stickpile://pair?...`): pair with it. */
     fun openLink(link: String) {
         when (val now = route) {
@@ -150,6 +177,7 @@ class MainViewModel(
     fun onSignedIn(account: Account) {
         if (isAnotherAccount(this.account, account)) accountChanged()
         this.account = account
+        stale = false
         signedInAs = account
         library?.let(signedIn)
         session++
@@ -159,7 +187,7 @@ class MainViewModel(
     /** Onboarding was left without signing in (only offered when someone is signed in). */
     fun onOnboardingCancelled() {
         session++
-        route = MainRoute.Library
+        if (stale) check() else route = MainRoute.Library
     }
 
     /** Skip the account check's failure: sign in anew. */

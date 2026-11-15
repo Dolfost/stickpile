@@ -20,8 +20,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.sync.SyncScheduler
+import io.github.dolfost.stickpile.ui.common.AccountChanges
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.common.FailureLog
@@ -62,8 +65,11 @@ class SettingsActivity : ComponentActivity() {
 /**
  * The launcher afresh, in a new task: it asks again who is signed in, and
  * no screen of the account before stays behind. This screen goes.
+ * Nothing when this screen is going already: the launcher notices a
+ * sign-out by itself (AccountChanges).
  */
 private fun ComponentActivity.restartMain() {
+    if (isFinishing || isDestroyed) return
     startActivity(
         Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
@@ -96,10 +102,18 @@ private fun SettingsContent(onFinish: () -> Unit, onSignIn: () -> Unit, onSigned
     val vm = viewModel {
         SettingsViewModel(
             library,
-            onCacheCleared = { Thumbnails.clear() },
+            background = StickpileApp.from(appContext).scope,
+            onCacheCleared = {
+                Thumbnails.clear()
+                // The files the tokens pointed to are gone.
+                PreparedFiles.revokeAll()
+            },
+            // In the app's scope, also when this screen went half-way.
             onSignedOut = {
                 SyncScheduler.cancel(appContext)
                 Thumbnails.clear()
+                PreparedFiles.revokeAll()
+                AccountChanges.changed()
             },
         )
     }

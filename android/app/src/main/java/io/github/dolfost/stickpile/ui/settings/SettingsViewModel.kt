@@ -15,6 +15,7 @@ import io.github.dolfost.stickpile.ui.common.Message
 import io.github.dolfost.stickpile.ui.common.catching
 import io.github.dolfost.stickpile.ui.common.messageFor
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -53,10 +54,13 @@ sealed interface SettingsEvent {
  * The library side of the settings: the account, the sync, the cache, and
  * signing out. The non-suspend library calls run on [io].
  * [onCacheCleared] and [onSignedOut] are what the rest of the app must
- * hear of (drop the decoded thumbnails; stop the background sync).
+ * hear of (drop the decoded thumbnails and the prepared files' tokens;
+ * stop the background sync). Signing out runs in [background], the app's
+ * scope, so that it ends with its follow-ups even when the screen goes.
  */
 class SettingsViewModel(
     private val library: StickpileLibraryInterface,
+    private val background: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val log: FailureLog = FailureLog.android,
     private val onCacheCleared: () -> Unit = {},
@@ -134,11 +138,16 @@ class SettingsViewModel(
         }
     }
 
-    /** Sign out (the screen asked first); then the background sync stops. */
+    /**
+     * Sign out (the screen asked first); then [onSignedOut] (the background
+     * sync stops, ...). Both run in [background], on the main thread: leaving
+     * the screen half-way does not stop them, and the screen hears of the
+     * end only if it is still there.
+     */
     fun signOut() {
         if (state.signingOut) return
         state = state.copy(signingOut = true)
-        viewModelScope.launch {
+        background.launch(Dispatchers.Main.immediate) {
             catching { library.logout() }.fold(
                 onSuccess = {
                     onSignedOut()

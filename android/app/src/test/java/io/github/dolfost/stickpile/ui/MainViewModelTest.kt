@@ -33,6 +33,7 @@ class MainViewModelTest {
             signedIn = { signedIn += it },
             accountChanged = { accountChanges++ },
             log = { _, _ -> },
+            accountVersion = 0,
         )
 
     @Test
@@ -165,6 +166,47 @@ class MainViewModelTest {
         assertEquals(1, accountChanges)
         assertTrue(isAnotherAccount(null, alice))
         assertFalse(isAnotherAccount(alice, alice.copy(displayName = "Alice", isAdmin = true)))
+    }
+
+    @Test
+    fun aSignOutElsewhereShowsOnboardingWhenTheLauncherIsBack() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        library.calls.clear()
+        // Resumed, nothing changed: no new question.
+        vm.onAccountChanges(0)
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), library.calls)
+        // Signed out in the settings.
+        library.account = { null }
+        vm.onAccountChanges(1)
+        advanceUntilIdle()
+        assertEquals(listOf("account"), library.calls)
+        assertEquals(MainRoute.Onboarding(), vm.route)
+    }
+
+    @Test
+    fun anAccountChangeDuringOnboardingAsksAgainWhenItIsLeft() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        vm.openLink("link")
+        library.calls.clear()
+        // Signed out elsewhere while onboarding was up.
+        library.account = { null }
+        vm.onAccountChanges(1)
+        advanceUntilIdle()
+        assertEquals(MainRoute.Onboarding("link", canCancel = true), vm.route)
+        assertEquals(emptyList<String>(), library.calls)
+        vm.onOnboardingCancelled()
+        advanceUntilIdle()
+        assertEquals(MainRoute.Onboarding(), vm.route)
+        // Who signs in next is another account as far as the launcher knows.
+        vm.onSignedIn(alice)
+        assertEquals(1, accountChanges)
     }
 
     @Test

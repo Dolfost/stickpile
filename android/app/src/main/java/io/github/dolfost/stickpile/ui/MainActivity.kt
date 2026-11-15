@@ -12,6 +12,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -20,6 +23,7 @@ import io.github.dolfost.stickpile.StickpileApp
 import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.sync.SyncScheduler
+import io.github.dolfost.stickpile.ui.common.AccountChanges
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.FailureLog
 import io.github.dolfost.stickpile.ui.common.FailureScreen
@@ -60,6 +64,7 @@ class MainActivity : ComponentActivity() {
                         PreparedFiles.revokeAll()
                         Thumbnails.clear()
                     },
+                    accountVersion = AccountChanges.version.value,
                 )
             }
         }
@@ -72,6 +77,13 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) consume(intent)
         addOnNewIntentListener(::consume)
         vm.start()
+        // Back from the settings (or anywhere the account changed): ask
+        // again, also when a sign-out ended after its screen went.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                AccountChanges.version.collect(vm::onAccountChanges)
+            }
+        }
         setContent {
             StickpileTheme {
                 Surface(Modifier.fillMaxSize()) {

@@ -1,5 +1,9 @@
 package io.github.dolfost.stickpile.ui
 
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.LibraryException
@@ -9,7 +13,10 @@ import io.github.dolfost.stickpile.ui.settings.KeyboardEntry
 import io.github.dolfost.stickpile.ui.settings.SettingsEvent
 import io.github.dolfost.stickpile.ui.settings.SettingsViewModel
 import io.github.dolfost.stickpile.ui.settings.sortedEntries
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -29,15 +36,20 @@ class SettingsViewModelTest {
     private val library = FakeLibrary()
     private var cacheCleared = 0
     private var signedOut = 0
-    private val vm by lazy {
-        SettingsViewModel(
-            library,
-            io = main.dispatcher,
-            log = { _, _ -> },
-            onCacheCleared = { cacheCleared++ },
-            onSignedOut = { signedOut++ },
-        )
-    }
+
+    /** The app's scope: it outlives the view model. */
+    private val background = CoroutineScope(SupervisorJob() + main.dispatcher)
+
+    private fun model() = SettingsViewModel(
+        library,
+        background = background,
+        io = main.dispatcher,
+        log = { _, _ -> },
+        onCacheCleared = { cacheCleared++ },
+        onSignedOut = { signedOut++ },
+    )
+
+    private val vm by lazy { model() }
 
     @Test
     fun showsTheAccountTheSyncAndTheCache() = runTest(main.dispatcher) {
@@ -113,6 +125,25 @@ class SettingsViewModelTest {
         assertEquals(1, signedOut)
         assertTrue(vm.state.signedOut)
         assertNull(vm.state.account)
+    }
+
+    @Test
+    fun aSignOutEndsWithItsFollowUpsWhenTheScreenGoes() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val gate = CompletableDeferred<Unit>()
+        library.logout = { gate.await() }
+        val store = ViewModelStore()
+        val vm = ViewModelProvider.create(store, viewModelFactory { initializer { model() } })[SettingsViewModel::class]
+        advanceUntilIdle()
+        vm.signOut()
+        advanceUntilIdle()
+        assertTrue(vm.state.signingOut)
+        // The screen goes (its view models are cleared) before the server answers.
+        store.clear()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertTrue("logout" in library.calls)
+        assertEquals(1, signedOut)
     }
 
     @Test
