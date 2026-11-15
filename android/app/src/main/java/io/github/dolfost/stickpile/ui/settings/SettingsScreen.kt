@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -51,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.dolfost.stickpile.R
@@ -348,19 +350,14 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
     }
 }
 
+/** A switch with its title and explanation; the whole row toggles it. */
 @Composable
-private fun SwitchItem(
-    title: String,
-    text: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onChange: (Boolean) -> Unit,
-) {
+private fun SwitchItem(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(text) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
-        modifier = Modifier.clickable(enabled = enabled) { onChange(!checked) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
     )
 }
 
