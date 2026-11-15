@@ -22,7 +22,10 @@ members = [
 [workspace.package]
 version = "0.5.2"
 edition = "2021"
-rust-version = "1.85"
+# The highest `rust-version` among the locked dependencies (ort, which the
+# server's default `clip` feature builds); check with
+# `cargo metadata --format-version 1 | jq` over `.packages[].rust_version`.
+rust-version = "1.92"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Dolfost/stickpile"
 authors = ["Vladyslav Rehan <rehanvladyslav@gmail.com>"]
