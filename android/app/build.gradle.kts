@@ -1,0 +1,121 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+// The repository root: the Rust workspace the native library is built from.
+val repoRoot: File = rootProject.projectDir.parentFile
+
+// What cargo-ndk builds, for every ABI of the one universal APK.
+val rustAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+val minSdkVersion = 26
+val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
+val uniffiKotlin = layout.buildDirectory.dir("generated/uniffi/kotlin")
+
+android {
+    namespace = "io.github.dolfost.stickpile"
+    compileSdk = 37
+    // Keep in step with nix/android-shell.nix and F-Droid's recipe.
+    ndkVersion = "28.2.13676358"
+
+    defaultConfig {
+        applicationId = "io.github.dolfost.stickpile"
+        minSdk = minSdkVersion
+        targetSdk = 37
+        // Literals: F-Droid's update checker reads them from this file.
+        // versionName is the workspace version; versionCode is
+        // major * 1000000 + minor * 1000 + patch. checkStickpileVersion
+        // fails the build when either disagrees with Cargo.toml.
+        versionCode = 5002
+        versionName = "0.5.2"
+        // One universal APK with these ABIs only (JNA ships more).
+        ndk {
+            abiFilters += rustAbis
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.directories.add(rustJniLibs.get().asFile.path)
+            kotlin.directories.add(uniffiKotlin.get().asFile.path)
+        }
+    }
+}
+
+dependencies {
+    // UniFFI's Kotlin bindings call the native library through JNA.
+    implementation(libs.jna) { artifact { type = "aar" } }
+}
+
+// The workspace version, from the root Cargo.toml.
+fun workspaceVersion(): String {
+    val toml = repoRoot.resolve("Cargo.toml").readText()
+    val section = toml.substringAfter("[workspace.package]")
+    return Regex("""(?m)^version\s*=\s*"([^"]+)"""").find(section)?.groupValues?.get(1)
+        ?: throw GradleException("no version in [workspace.package] of Cargo.toml")
+}
+
+val checkStickpileVersion = tasks.register("checkStickpileVersion") {
+    description = "Fails when versionName or versionCode disagree with the workspace version."
+    val name = android.defaultConfig.versionName
+    val code = android.defaultConfig.versionCode
+    val cargoToml = repoRoot.resolve("Cargo.toml")
+    inputs.file(cargoToml)
+    doLast {
+        val version = workspaceVersion()
+        val parts = version.split(".").map { it.toIntOrNull() ?: throw GradleException("version $version is not x.y.z") }
+        val expectedCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
+        if (name != version || code != expectedCode) {
+            throw GradleException(
+                "android/app/build.gradle.kts has versionName $name and versionCode $code, " +
+                    "but Cargo.toml says $version (versionCode $expectedCode)",
+            )
+        }
+    }
+}
+
+// libstickpile_android.so for every ABI, into build/rustJniLibs/<abi>/.
+// Always --release --locked: this is what F-Droid builds.
+val cargoNdk = tasks.register<Exec>("cargoNdk") {
+    description = "Builds the Rust library (crates/stickpile-android) with cargo-ndk."
+    workingDir = repoRoot
+    val args = mutableListOf("cargo", "ndk")
+    rustAbis.forEach { args += listOf("-t", it) }
+    args += listOf(
+        "--platform", minSdkVersion.toString(),
+        "-o", rustJniLibs.get().asFile.path,
+        "build", "--release", "--locked", "-p", "stickpile-android",
+    )
+    commandLine(args)
+}
+
+// The Kotlin side of the interface, generated from the built library (the
+// interface is read from the library itself; any ABI's copy will do).
+val uniffiBindings = tasks.register<Exec>("uniffiBindings") {
+    description = "Generates the Kotlin bindings of the Rust library with uniffi-bindgen."
+    dependsOn(cargoNdk)
+    workingDir = repoRoot
+    val out = uniffiKotlin.get().asFile
+    doFirst { delete(out) }
+    commandLine(
+        "cargo", "run", "--release", "--locked", "-p", "stickpile-android",
+        "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
+        "generate", "--language", "kotlin", "--no-format",
+        "--out-dir", out.path,
+        rustJniLibs.get().file("arm64-v8a/libstickpile_android.so").asFile.path,
+    )
+}
+
+tasks.named("preBuild") {
+    dependsOn(checkStickpileVersion, uniffiBindings)
+}

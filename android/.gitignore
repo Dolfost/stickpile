@@ -1,0 +1,6 @@
+# Gradle and Android build output; the native libraries and the Kotlin
+# bindings are generated into app/build/ on every build.
+.gradle/
+.kotlin/
+build/
+local.properties

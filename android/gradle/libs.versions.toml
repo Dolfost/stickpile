@@ -1,0 +1,13 @@
+# Versions of the Android build: plugins from Google's Maven, libraries from
+# Maven Central (see docs/android.md, "Build from source").
+[versions]
+agp = "9.5.1"
+jna = "5.19.1"
+kotlinx-coroutines = "1.11.0"
+
+[libraries]
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
