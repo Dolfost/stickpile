@@ -5,6 +5,8 @@ import android.content.Context
 import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import java.io.File
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,10 +39,21 @@ class StickpileApp : Application() {
         )
     }
 
-    /** For work that must finish even when the screen that started it goes. */
-    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * For work that must finish even when the screen that started it goes.
+     * An exception nobody caught (a Rust panic arrives as UniFFI's
+     * `InternalException`) is logged instead of taking the process down,
+     * which also hosts the keyboard and the provider.
+     */
+    val scope: CoroutineScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+            Log.e(TAG, "background work failed: ${e.javaClass.simpleName}")
+        },
+    )
 
     companion object {
+        private const val TAG = "stickpile"
+
         /** The application object from any context. */
         fun from(context: Context): StickpileApp = context.applicationContext as StickpileApp
     }

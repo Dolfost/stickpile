@@ -30,6 +30,14 @@ object PreparedFiles {
         return ProviderRoutes.preparedUri(token, name).toUri()
     }
 
+    /**
+     * Revokes every token at once, so no URI handed out before opens a file
+     * any more: after a sign-out, a change of server or account, and when the
+     * cache is cleared. Stub until the keyboard fixes fill it in; the
+     * signature is fixed, the settings and onboarding screens call it.
+     */
+    fun revokeAll() {}
+
     private fun fileName(prepared: Prepared): String =
         ProviderRoutes.fileName(prepared.displayName.ifEmpty { File(prepared.path).name })
 }
