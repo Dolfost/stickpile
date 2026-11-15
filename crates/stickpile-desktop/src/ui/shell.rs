@@ -25,7 +25,9 @@ use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::FocusEnv;
-use stickpile_quick::model::{self, safe_label, Command, Event, Level, Model, OpenInfo, StickerMode};
+use stickpile_quick::model::{
+    self, safe_label, Command, Event, HelpPage, Level, Model, OpenInfo, StickerMode, SuggestionLine,
+};
 use stickpile_quick::{Mode, Tab, View};
 
 use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
@@ -59,6 +61,7 @@ gridview.stickpile-grid > child:selected:hover { background-color: alpha(@accent
 .stickpile-warn { color: @warning_color; }
 .stickpile-pill { font-size: 0.9em; padding: 0 4px; border-radius: 6px; }
 .stickpile-tags { font-size: 0.7em; padding: 1px 5px; }
+.stickpile-vibe { font-size: 0.7em; font-style: italic; padding: 1px 5px; }
 label.stickpile-heart { color: #ff5470; }
 .stickpile-footer { padding: 4px 10px; }
 .stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
@@ -68,7 +71,13 @@ label.stickpile-heart { color: #ff5470; }
 .stickpile-tab-number { font-size: 0.8em; font-feature-settings: "tnum"; opacity: 0.55; }
 .stickpile-tabs button.stickpile-current { background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; font-weight: bold; }
 .stickpile-tabs button.stickpile-current .stickpile-tab-number { opacity: 0.9; }
+.stickpile-tabs button.stickpile-version { min-height: 0; padding: 2px 6px; font-size: 0.8em; font-weight: normal; font-feature-settings: "tnum"; opacity: 0.55; }
+.stickpile-tabs button.stickpile-version:hover { opacity: 1; }
 .stickpile-header { padding: 6px 8px; min-height: 34px; }
+.stickpile-suggest { padding: 0 8px 4px 8px; }
+.stickpile-suggest button { min-height: 0; padding: 1px 7px; font-weight: normal; }
+.stickpile-suggest button.stickpile-chosen { background-color: alpha(@accent_bg_color, 0.2); color: @accent_color; font-weight: bold; }
+.stickpile-suggest-key { font-family: monospace; }
 .stickpile-mode { font-size: 0.75em; font-weight: bold; padding: 1px 6px; border-radius: 4px; }
 .stickpile-mode.insert { background-color: @accent_bg_color; color: @accent_fg_color; }
 .stickpile-mode.normal { background-color: alpha(currentColor, 0.12); }
@@ -142,6 +151,10 @@ struct Widgets {
     status: gtk::Label,
     /// The selection's stats, above the footer row.
     details: gtk::Label,
+    /// The values offered for the filter being typed, under the header;
+    /// it clips what does not fit instead of widening the window.
+    suggest: gtk::ScrolledWindow,
+    suggest_box: gtk::Box,
 }
 
 pub struct Shell {
@@ -160,6 +173,10 @@ pub struct Shell {
     rendering: Cell<bool>,
     rendered_revision: Cell<u64>,
     scrolled_to: Cell<Option<(View, usize)>>,
+    /// The suggestion line on screen.
+    suggest_shown: RefCell<Option<SuggestionLine>>,
+    /// The help page on screen (`None`: hidden, or to be drawn again).
+    help_shown: Cell<Option<HelpPage>>,
     /// The tab on screen at the last render (`None`: hidden), to notice a
     /// page coming into view.
     shown: Cell<Option<Tab>>,
@@ -256,6 +273,8 @@ impl Shell {
             rendering: Cell::new(false),
             rendered_revision: Cell::new(u64::MAX),
             scrolled_to: Cell::new(None),
+            suggest_shown: RefCell::new(None),
+            help_shown: Cell::new(None),
             shown: Cell::new(None),
             layout: Cell::new(None),
             layout_queued: Cell::new(false),
@@ -318,7 +337,7 @@ impl Shell {
         tracing::info!("language: {lang}");
         stickpile_i18n::global::set(lang);
         self.w.tabs.relabel();
-        help::relabel(&self.w.help);
+        self.help_shown.set(None);
         self.me.relabel();
         self.settings.relabel();
         relabel_widgets(&self.w);
@@ -569,6 +588,15 @@ impl Shell {
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
             Command::SaveTile { tile, on } => self.save_bool(glue::tile_key(tile), on),
             Command::SaveSafeMode { on } => self.save_bool(glue::SAFE_MODE_KEY, on),
+            Command::LoadVocabulary => {
+                if let Some(b) = self.backend() {
+                    self.spawn(b.vocabulary(), |this, vocab| {
+                        if let Some(vocab) = vocab {
+                            this.dispatch(Event::VocabularyLoaded(vocab));
+                        }
+                    });
+                }
+            }
             Command::SaveHistory(history) => {
                 let path = self.history_path.clone();
                 runtime().spawn_blocking(move || {
@@ -632,6 +660,43 @@ impl Shell {
             };
             done(&this, out);
         });
+    }
+
+    /// The line of values offered under the search field.
+    fn show_suggestions(&self, line: Option<&SuggestionLine>) {
+        let row = &self.w.suggest_box;
+        while let Some(child) = row.first_child() {
+            row.remove(&child);
+        }
+        self.w.suggest.set_visible(line.is_some());
+        let Some(line) = line else {
+            return;
+        };
+        let key = gtk::Label::new(Some(&line.key));
+        key.add_css_class("dim-label");
+        key.add_css_class("caption");
+        key.add_css_class("stickpile-suggest-key");
+        row.append(&key);
+        for (i, word) in line.words.iter().enumerate() {
+            let b = gtk::Button::builder()
+                .label(word)
+                .can_focus(false)
+                .action_name("win.suggest")
+                .action_target(&(i as u32).to_variant())
+                .build();
+            b.add_css_class("flat");
+            b.add_css_class("caption");
+            if line.chosen == Some(i) {
+                b.add_css_class("stickpile-chosen");
+            }
+            row.append(&b);
+        }
+        let hint = gtk::Label::new(Some(t("Tab")));
+        hint.add_css_class("dim-label");
+        hint.add_css_class("caption");
+        hint.set_margin_start(4);
+        hint.set_tooltip_text(Some(t("Tab / Shift+Tab: put in the next / previous value")));
+        row.append(&hint);
     }
 
     fn open_uri(&self, uri: &str) {
@@ -737,7 +802,19 @@ impl Shell {
             self.scrolled_to.set(at);
         }
 
-        w.help.set_visible(m.help_visible());
+        let page = m.help_page();
+        if let Some(p) = page.filter(|p| self.help_shown.get() != Some(*p)) {
+            // Drawn when it opens: the count keys follow the setting.
+            help::show(&w.help, p, m.config().counts);
+        }
+        self.help_shown.set(page);
+        w.help.set_visible(page.is_some());
+
+        let line = m.suggestions();
+        if *self.suggest_shown.borrow() != line {
+            self.show_suggestions(line.as_ref());
+            *self.suggest_shown.borrow_mut() = line;
+        }
 
         let f = m.footer();
         match f.mode {
@@ -764,6 +841,7 @@ impl Shell {
         w.safe.set_active(f.safe);
         w.safe_label.set_label(safe_label(f.safe));
         set_class(&w.safe_label, "accent", f.safe);
+        w.details.set_visible(f.details_row);
         w.details.set_label(&f.details);
         w.details
             .set_tooltip_text((!f.details.is_empty()).then_some(f.details.as_str()));
@@ -1322,6 +1400,20 @@ impl Shell {
         let this = self.clone();
         w.tabs.help.connect_clicked(move |_| this.dispatch(Event::ToggleHelp));
         let this = self.clone();
+        w.tabs
+            .version
+            .connect_clicked(move |_| this.open_uri(stickpile_quick::PROJECT_URL));
+        // The suggestion buttons are made per line: they name this action
+        // with their index.
+        let accept = gio::SimpleAction::new("suggest", Some(glib::VariantTy::UINT32));
+        let this = self.clone();
+        accept.connect_activate(move |_, index| {
+            if let Some(i) = index.and_then(|v| v.get::<u32>()) {
+                this.dispatch(Event::AcceptSuggestion(i as usize));
+            }
+        });
+        w.window.add_action(&accept);
+        let this = self.clone();
         w.back.connect_clicked(move |_| this.dispatch(Event::PackBack));
         let click = gtk::GestureClick::new();
         let this = self.clone();
@@ -1519,8 +1611,15 @@ impl Shell {
             tags.add_css_class("osd");
             tags.add_css_class("stickpile-pill");
             tags.add_css_class("stickpile-tags");
-            // Emojis and the heart along the top, the warning, tags and the
-            // GIF badge along the bottom. Clicks go through to the cell.
+            let vibe = gtk::Label::builder()
+                .max_width_chars(12)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            vibe.add_css_class("osd");
+            vibe.add_css_class("stickpile-pill");
+            vibe.add_css_class("stickpile-vibe");
+            // Emojis, the vibe and the heart along the top, the warning, tags
+            // and the GIF badge along the bottom. Clicks go through to the cell.
             let row = |valign, parts: &[&gtk::Widget]| {
                 let row = gtk::Box::builder().spacing(3).valign(valign).can_target(false).build();
                 row.add_css_class("stickpile-tile-row");
@@ -1530,7 +1629,10 @@ impl Shell {
                 row
             };
             let spacer = || gtk::Box::builder().hexpand(true).build().upcast::<gtk::Widget>();
-            let top = row(gtk::Align::Start, &[emojis.upcast_ref(), &spacer(), heart.upcast_ref()]);
+            let top = row(
+                gtk::Align::Start,
+                &[emojis.upcast_ref(), &spacer(), vibe.upcast_ref(), heart.upcast_ref()],
+            );
             let bottom = row(
                 gtk::Align::End,
                 &[warn.upcast_ref(), tags.upcast_ref(), &spacer(), badge.upcast_ref()],
@@ -1562,6 +1664,10 @@ impl Shell {
                 .bind(&tags, "label", gtk::Widget::NONE);
             item.chain_property::<StickerObject>("has-tags")
                 .bind(&tags, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("vibe")
+                .bind(&vibe, "label", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("has-vibe")
+                .bind(&vibe, "visible", gtk::Widget::NONE);
 
             let source = gtk::DragSource::new();
             source.set_actions(gdk::DragAction::COPY);
@@ -1674,9 +1780,19 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     header.append(&title);
     header.append(&entry);
     header.append(&count);
+    let suggest_box = gtk::Box::builder().spacing(4).build();
+    suggest_box.add_css_class("stickpile-suggest");
+    let suggest = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .child(&suggest_box)
+        .visible(false)
+        .build();
     let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
     top.append(&tabs.root);
     top.append(&header);
+    top.append(&suggest);
 
     let store = gio::ListStore::new::<StickerObject>();
     let selection = single_selection(&store);
@@ -1807,6 +1923,8 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         safe_label,
         status,
         details,
+        suggest,
+        suggest_box,
     };
     relabel_widgets(&w);
     w

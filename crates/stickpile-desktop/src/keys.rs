@@ -15,7 +15,8 @@
 //!   the first (Latin) layout when the active one has no such key, so vim
 //!   keys work with a Cyrillic layout active.
 //!
-//! Tab / Shift+Tab, Alt+1..7 and F1 work in every mode.
+//! Tab / Shift+Tab, Alt+1..7, F1 and F2 work in every mode (in the search
+//! field, Tab puts in an offered value first).
 
 use stickpile_quick::model::{Event, Nav};
 use stickpile_quick::{Mode, NormalKey, Tab};
@@ -146,6 +147,7 @@ pub fn map_key(k: &KeyPress<'_>, mode: Mode, tab: Tab) -> Option<Event> {
             "Tab" | "KP_Tab" => return Some(Event::CycleTab { backwards: m.shift }),
             "ISO_Left_Tab" => return Some(Event::CycleTab { backwards: true }),
             "F1" if !m.shift => return Some(Event::ToggleHelp),
+            "F2" if !m.shift => return Some(Event::ToggleSyntax),
             _ => {}
         }
     }
@@ -399,6 +401,7 @@ mod tests {
                 assert_eq!(p("7", ALT), Some(Event::ShowTab(Tab::Settings)));
                 assert_eq!(p("KP_4", ALT), Some(Event::ShowTab(Tab::Packs)));
                 assert_eq!(p("F1", NONE), Some(Event::ToggleHelp));
+                assert_eq!(p("F2", NONE), Some(Event::ToggleSyntax));
             }
         }
     }

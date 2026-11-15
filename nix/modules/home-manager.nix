@@ -262,6 +262,18 @@ in
             show_tags = setting types.bool true ''
               An item's tags on its tile (`zt` in Normal mode).
             '';
+            show_vibe = setting types.bool true ''
+              An item's vibe (sarcastic, tired, ...) on its tile (`zv` in
+              Normal mode).
+            '';
+            show_details = setting types.bool true ''
+              The selected item's pack, format, size, copies, likes and
+              quality in a row above the footer (`zi` in Normal mode).
+            '';
+            counts = setting types.bool false ''
+              Digits in Normal mode start a count (`3j`, `5G`). A lone 1-7
+              then switches tabs after a short wait; off, it switches at once.
+            '';
             safe_mode = setting types.bool false ''
               Safe mode: the popup hides items tagged `nsfw` (`S` in Normal
               mode switches it).

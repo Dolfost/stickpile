@@ -1,11 +1,13 @@
 import AppKit
 
-/// The key help over the main area: sections in two columns on a card.
+/// The help over the main area (the keys or the search syntax): sections
+/// in two columns on a card.
 final class HelpOverlay: NSView {
     private let card = HelpCard()
     private let scroll = NSScrollView()
     private let content = FlippedView()
     private var sections: [HelpSection] = []
+    private var hint = ""
 
     override var isFlipped: Bool { true }
 
@@ -27,10 +29,12 @@ final class HelpOverlay: NSView {
         return card.frame.contains(p) ? super.hitTest(point) : nil
     }
 
-    func update(_ help: [HelpSection]?) {
+    /// `hint`: the line under the tables (how to close them).
+    func update(_ help: [HelpSection]?, hint newHint: String) {
         setShown(help != nil)
-        guard let help, help != sections else { return }
+        guard let help, help != sections || newHint != hint else { return }
         sections = help
+        hint = newHint
         rebuild()
     }
 
@@ -83,10 +87,10 @@ final class HelpOverlay: NSView {
         }
         let cols = CGFloat(columns().count)
         let width = cols * (keyWidth + 12 + actionWidth) + max(0, cols - 1) * colGap
-        let hint = label(tr("? or Esc closes this"), size: 11, color: .secondaryLabelColor)
-        hint.alignment = .right
-        hint.frame = NSRect(x: 0, y: maxY + 10, width: width, height: 15)
-        content.addSubview(hint)
+        let closes = label(hint, size: 11, color: .secondaryLabelColor)
+        closes.alignment = .right
+        closes.frame = NSRect(x: 0, y: maxY + 10, width: width, height: 15)
+        content.addSubview(closes)
         contentSize = NSSize(width: width, height: maxY + 25)
         content.frame = NSRect(origin: .zero, size: contentSize)
         needsLayout = true

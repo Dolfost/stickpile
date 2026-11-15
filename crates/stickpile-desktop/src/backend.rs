@@ -15,6 +15,7 @@ use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
 use stickpile_i18n::global::t;
 use stickpile_quick::model::Results;
+use stickpile_quick::suggest::Vocabulary;
 
 pub type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -188,6 +189,9 @@ pub trait Backend: Send + Sync + 'static {
     /// Set the account's language (`None`: automatic), so the web UI and
     /// other clients follow the one chosen here.
     fn set_account_language(self: Arc<Self>, code: Option<String>) -> BoxFut<Result<(), String>>;
+    /// The values the search suggests: the vibes, tags, packs and owners of
+    /// the items the viewer can see (the offline cache).
+    fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary>;
 }
 
 /// The item's page in the web UI of the server at `server_url`.
@@ -321,6 +325,20 @@ impl Backend for CoreBackend {
                 hits: out.hits,
                 offline: out.offline,
             })
+        })
+    }
+
+    fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary> {
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || match self.session.offline_index() {
+                Ok(index) => Vocabulary::from_items(index.items()),
+                Err(e) => {
+                    tracing::debug!("no suggestions from the cache: {e}");
+                    Vocabulary::default()
+                }
+            })
+            .await
+            .unwrap_or_default()
         })
     }
 

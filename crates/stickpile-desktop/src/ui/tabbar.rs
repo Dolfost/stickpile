@@ -1,4 +1,5 @@
-//! The row of numbered tabs at the top of the popup, and the help button.
+//! The row of numbered tabs at the top of the popup, the version (it opens
+//! the project page) and the help button.
 
 use gtk::prelude::*;
 use stickpile_i18n::global::t;
@@ -11,6 +12,7 @@ pub struct TabBar {
     buttons: Vec<(Tab, gtk::Button)>,
     labels: Vec<gtk::Label>,
     pub help: gtk::Button,
+    pub version: gtk::Button,
 }
 
 impl TabBar {
@@ -43,6 +45,14 @@ impl TabBar {
             .collect();
         let spacer = gtk::Box::builder().hexpand(true).build();
         root.append(&spacer);
+        let version = gtk::Button::builder()
+            .label(stickpile_quick::version_label())
+            .can_focus(false)
+            .valign(gtk::Align::Center)
+            .build();
+        version.add_css_class("flat");
+        version.add_css_class("stickpile-version");
+        root.append(&version);
         let help = gtk::Button::builder().label("?").can_focus(false).build();
         help.add_css_class("flat");
         help.add_css_class("stickpile-tab");
@@ -53,6 +63,7 @@ impl TabBar {
             buttons,
             labels,
             help,
+            version,
         };
         bar.relabel();
         bar
@@ -68,6 +79,10 @@ impl TabBar {
         self.help.set_tooltip_text(Some(t("Keys (? or F1)")));
         self.help
             .update_property(&[gtk::accessible::Property::Label(t("Keys"))]);
+        let about = stickpile_quick::version_tooltip();
+        self.version.set_tooltip_text(Some(&about));
+        self.version
+            .update_property(&[gtk::accessible::Property::Label(&about)]);
     }
 
     pub fn connect(&self, f: impl Fn(Tab) + Clone + 'static) {

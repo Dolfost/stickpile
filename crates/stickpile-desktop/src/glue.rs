@@ -52,7 +52,10 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
             favorites: cfg.ui.mark_favorites,
             emojis: cfg.ui.show_emojis,
             tags: cfg.ui.show_tags,
+            vibe: cfg.ui.show_vibe,
+            details: cfg.ui.show_details,
         },
+        counts: cfg.ui.counts,
         safe_mode: cfg.ui.safe_mode,
         ..ModelConfig::default()
     }
@@ -67,6 +70,8 @@ pub fn tile_key(tile: Tile) -> &'static str {
         Tile::Favorites => "ui.mark_favorites",
         Tile::Emojis => "ui.show_emojis",
         Tile::Tags => "ui.show_tags",
+        Tile::Vibe => "ui.show_vibe",
+        Tile::Details => "ui.show_details",
     }
 }
 
@@ -236,13 +241,16 @@ mod tests {
         cfg.ui.start_tab = "most_used".into();
         cfg.ui.start_mode = StartMode::Insert;
         cfg.ui.show_tags = false;
+        cfg.ui.show_vibe = false;
+        cfg.ui.counts = true;
         cfg.ui.safe_mode = true;
         let m = model_config(&cfg);
         assert!(m.safe_mode);
         assert!(!m.modal);
         assert_eq!(m.start_tab, Some(Tab::MostUsed));
         assert_eq!(m.start_mode, Mode::Insert);
-        assert!(!m.tiles.tags && m.tiles.emojis && m.tiles.favorites);
+        assert!(!m.tiles.tags && !m.tiles.vibe && m.tiles.emojis && m.tiles.favorites);
+        assert!(m.counts);
     }
 
     #[test]

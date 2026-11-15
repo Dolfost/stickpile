@@ -161,7 +161,7 @@ final class GridItem: NSCollectionViewItem {
     }
 }
 
-/// One tile, drawn in one go: selection, thumbnail, emojis, heart, tags, badge.
+/// One tile, drawn in one go: selection, thumbnail, emojis, vibe, heart, tags, badge.
 final class GridCell: NSView {
     enum Kind { case items, packs }
 
@@ -171,7 +171,7 @@ final class GridCell: NSView {
     var pack: PackView?
     var selected = false { didSet { if oldValue != selected { needsDisplay = true } } }
     var thumbPx: CGFloat = 128
-    var tiles = Tiles(favorites: true, emojis: true, tags: true)
+    var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true)
     weak var thumbs: ThumbStore?
     weak var grid: GridCollectionView?
 
@@ -185,8 +185,21 @@ final class GridCell: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let box = bounds.insetBy(dx: 2, dy: 2)
         if selected {
-            NSColor.controlAccentColor.withAlphaComponent(0.45).setFill()
+            // The material behind the popup takes the colours of what is
+            // under the window, and the accent may be Graphite (gray), so a
+            // tint alone gets lost: a solid ring in the text colour (black on
+            // light, white on dark) with an edge in the window colour inside
+            // it shows on any backdrop.
+            NSColor.controlAccentColor.withAlphaComponent(0.28).setFill()
             NSBezierPath(roundedRect: box, xRadius: 10, yRadius: 10).fill()
+            let ring = NSBezierPath(roundedRect: box.insetBy(dx: 1.5, dy: 1.5), xRadius: 8.5, yRadius: 8.5)
+            ring.lineWidth = 3
+            NSColor.labelColor.setStroke()
+            ring.stroke()
+            let edge = NSBezierPath(roundedRect: box.insetBy(dx: 3.75, dy: 3.75), xRadius: 6.25, yRadius: 6.25)
+            edge.lineWidth = 1.5
+            NSColor.windowBackgroundColor.setStroke()
+            edge.stroke()
         }
         let side = max(8, min(thumbPx, bounds.width - cellExtra, bounds.height - cellExtra - (kind == .packs ? packLabels : 0)))
         let area = NSRect(x: floor((bounds.width - side) / 2), y: cellExtra / 2, width: side, height: side)
@@ -217,11 +230,23 @@ final class GridCell: NSView {
         let inner = area.insetBy(dx: 3, dy: 3)
         let pillBg = NSColor.black.withAlphaComponent(0.55)
         var bottomLeft = inner.minX
+        var topLeft = inner.minX
         if tiles.emojis, !e.emojis.isEmpty {
             let font = NSFont.systemFont(ofSize: 12)
             let w = min(inner.width * 0.6, textWidth(e.emojis, font) + 8)
             drawPill(e.emojis, in: NSRect(x: inner.minX, y: inner.minY, width: w, height: 18), font: font,
                      fg: .white, bg: pillBg, radius: 6)
+            topLeft = inner.minX + w + 3
+        }
+        if tiles.vibe, !e.vibe.isEmpty {
+            let base = NSFont.systemFont(ofSize: 9, weight: .medium)
+            let font = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
+            let right = inner.maxX - (tiles.favorites && e.liked ? 23 : 0)
+            let w = min(right - topLeft, textWidth(e.vibe, font) + 10)
+            if w > 16 {
+                drawPill(e.vibe, in: NSRect(x: right - w, y: inner.minY + 1.5, width: w, height: 15),
+                         font: font, fg: .white, bg: pillBg, radius: 5)
+            }
         }
         if tiles.favorites, e.liked {
             let r = NSRect(x: inner.maxX - 20, y: inner.minY, width: 20, height: 18)
@@ -296,7 +321,7 @@ final class GridView: NSScrollView, NSCollectionViewDataSource {
     private(set) var packs: [PackView] = []
     private(set) var selected: Int?
     private var thumbPx: CGFloat = 128
-    private var tiles = Tiles(favorites: true, emojis: true, tags: true)
+    private var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true)
     /// The usable size changed (width and height without the insets).
     var onSize: ((NSSize) -> Void)?
 

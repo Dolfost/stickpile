@@ -5,7 +5,7 @@
 use gtk::gdk;
 use gtk::glib;
 use gtk::subclass::prelude::*;
-use stickpile_quick::model::{Entry, Tiles};
+use stickpile_quick::model::{self, Entry, Tiles};
 
 mod imp {
     use std::cell::{Cell, RefCell};
@@ -43,6 +43,11 @@ mod imp {
         pub tags: RefCell<String>,
         #[property(get, set)]
         pub has_tags: Cell<bool>,
+        /// The vibe label to show; empty: none.
+        #[property(get, set)]
+        pub vibe: RefCell<String>,
+        #[property(get, set)]
+        pub has_vibe: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -73,6 +78,7 @@ impl StickerObject {
         } else {
             String::new()
         };
+        let vibe = if tiles.vibe { model::vibe(&entry.item) } else { "" };
         glib::Object::builder()
             .property("item-id", &entry.item.id)
             .property("texture", texture)
@@ -85,6 +91,8 @@ impl StickerObject {
             .property("emojis", emojis)
             .property("has-tags", !tags.is_empty())
             .property("tags", tags)
+            .property("has-vibe", !vibe.is_empty())
+            .property("vibe", vibe)
             .build()
     }
 }

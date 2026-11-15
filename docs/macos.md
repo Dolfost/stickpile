@@ -65,8 +65,13 @@ Cmd+T cycles the target app, Cmd+S flips sticker mode, Cmd+Shift+S (or `S`
 in Normal mode) flips safe mode, which hides the items tagged `nsfw`,
 Cmd+D likes the item, and Cmd+1..7 switch tabs (Alt+1..7 on Linux). The
 footer shows the selected item's stats (pack, format, size, copies,
-likes, quality) above the mode, the target and the toggles. Control works as Ctrl too. The
-vim keys of Normal mode work with a Cyrillic layout active.
+likes, quality) above the mode, the target and the toggles (`zi` hides
+them). While a filter such as `vibe:` is typed, its values are offered in
+a line under the search field; Tab puts one in (see
+[search suggestions](desktop.md#search-suggestions)), and F2 (fn+F2 on
+most keyboards) or `g/` shows the search syntax. The version next to `?`
+opens the project page. Control works as Ctrl too. The vim keys of Normal
+mode work with a Cyrillic layout active.
 
 ## Target detection
 

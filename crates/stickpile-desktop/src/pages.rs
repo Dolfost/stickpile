@@ -295,7 +295,7 @@ mod tests {
                 }
             }
         }
-        for section in stickpile_quick::HELP {
+        for section in stickpile_quick::HELP.iter().chain(stickpile_quick::SYNTAX) {
             need(section.title);
             for (keys, what) in section.keys {
                 need(keys);

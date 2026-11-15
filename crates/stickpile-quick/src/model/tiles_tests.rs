@@ -105,7 +105,27 @@ fn start_mode_normal_opens_every_tab_in_normal() {
     open(&mut m);
     assert_eq!(m.mode(), Mode::Normal, "every opening");
     m.handle(Event::ShowTab(Tab::Packs));
-    assert_eq!(m.mode(), Mode::Insert, "a tab switched to keeps its own mode");
+    assert_eq!(m.mode(), Mode::Normal, "a switch never starts typing");
+}
+
+#[test]
+fn a_tab_switch_never_starts_typing() {
+    let mut m = Model::new(ModelConfig {
+        start_tab: Some(Tab::Recent),
+        ..cfg()
+    });
+    open(&mut m);
+    assert_eq!(m.mode(), Mode::Normal);
+    for tab in [Tab::Search, Tab::Packs] {
+        m.handle(Event::ShowTab(tab));
+        assert_eq!(m.mode(), Mode::Normal, "{tab:?} has a field, but no typing");
+    }
+    keys(&mut m, "i");
+    assert_eq!(m.mode(), Mode::Insert);
+    m.handle(Event::ShowTab(Tab::Search));
+    assert_eq!(m.mode(), Mode::Insert, "typing goes on where there is a field");
+    m.handle(Event::ShowTab(Tab::Recent));
+    assert_eq!(m.mode(), Mode::Normal, "and stops where there is none");
 }
 
 #[test]
@@ -248,6 +268,36 @@ fn z_keys_show_and_hide_and_are_saved() {
         }]
     );
     assert_eq!(m.footer().status, "Favorite marks shown");
+}
+
+#[test]
+fn zv_shows_and_hides_the_vibe() {
+    let (mut m, _) = recent_with_marks();
+    assert!(m.tiles().vibe, "on by default");
+    let revision = m.entries_revision();
+    let cmds = keys(&mut m, "zv");
+    assert_eq!(
+        cmds,
+        [Command::SaveTile {
+            tile: Tile::Vibe,
+            on: false
+        }]
+    );
+    assert!(!m.tiles().vibe);
+    assert!(m.entries_revision() > revision, "the tiles are drawn again");
+    assert_eq!(m.footer().status, "Vibe hidden");
+    keys(&mut m, "zv");
+    assert!(m.tiles().vibe);
+    assert_eq!(m.footer().status, "Vibe shown");
+}
+
+#[test]
+fn a_tile_shows_the_vibe_trimmed() {
+    let mut it = item("v");
+    it.vibe = Some(" sarcastic ".into());
+    assert_eq!(vibe(&it), "sarcastic");
+    it.vibe = None;
+    assert_eq!(vibe(&it), "");
 }
 
 #[test]

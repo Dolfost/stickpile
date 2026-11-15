@@ -245,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         v.frame = controller.panel.contentView?.bounds ?? .zero
         v.layoutSubtreeIfNeeded()
         if let frame = controller.panel.contentView?.superview {
-            for b in v.tabBar.subviews.prefix(2) + [v.header.field] {
+            for b in v.tabBar.subviews.prefix(3) + [v.header.field] {
                 let p = b.convert(NSPoint(x: b.bounds.midX, y: b.bounds.midY), to: nil)
                 let hit = frame.hitTest(frame.convert(p, from: nil))
                 var name = hit.map { String(describing: type(of: $0)) } ?? "nothing"

@@ -146,6 +146,21 @@ pub struct Footer {
     /// GIF 512×512 · copied 12 times · ♥ 3 · quality 87"); empty when
     /// nothing is selected.
     pub details: String,
+    /// Show the stats row (`ui.show_details`, `zi`); it keeps its place
+    /// while `details` is empty.
+    pub details_row: bool,
+}
+
+/// The values offered under the search field while a `key:` filter is
+/// typed (`vibe:sar`).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SuggestionView {
+    /// The filter as typed: "vibe:", "-tag:".
+    pub key: String,
+    /// Best first; a click is [`Popup::accept_suggestion`] with the index.
+    pub words: Vec<String>,
+    /// The word the search uses now: drawn highlighted.
+    pub chosen: Option<u32>,
 }
 
 /// One cell of the item grid.
@@ -166,6 +181,8 @@ pub struct EntryView {
     pub emojis: String,
     /// The item's tags, comma separated (only when [`Tiles::tags`] is on).
     pub tags: String,
+    /// The item's vibe label (only when [`Tiles::vibe`] is on).
+    pub vibe: String,
 }
 
 /// One cell of the pack list.
@@ -185,6 +202,7 @@ pub struct Tiles {
     pub favorites: bool,
     pub emojis: bool,
     pub tags: bool,
+    pub vibe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -370,8 +388,13 @@ pub struct ViewState {
     /// Thumbnail size in points (a cell is this plus [`CELL_EXTRA`]).
     pub thumb_px: u32,
     pub tiles: Tiles,
-    /// The key help overlay, when it is shown (F1, `?`).
+    /// The help overlay, when it is shown: the keys (F1, `?`) or the search
+    /// syntax (F2, `g/`).
     pub help: Option<Vec<HelpSection>>,
+    /// The line under the help: how to close it.
+    pub help_hint: String,
+    /// The values offered for the filter being typed.
+    pub suggestions: Option<SuggestionView>,
     pub footer: Footer,
     pub me: MeView,
     pub settings: SettingsView,
@@ -591,6 +614,11 @@ impl Popup {
         self.driver.toggle_safe();
     }
 
+    /// A click on an offered value ([`SuggestionView::words`]).
+    pub fn accept_suggestion(&self, index: u32) {
+        self.driver.accept_suggestion(index);
+    }
+
     /// A click on the footer's target app: the next one.
     pub fn cycle_target(&self) {
         self.driver.cycle_target();
@@ -673,6 +701,24 @@ pub fn trf(text: String, args: std::collections::HashMap<String, String>) -> Str
 #[uniffi::export]
 pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// The version next to the help button: `v0.5.1`.
+#[uniffi::export]
+pub fn version_label() -> String {
+    stickpile_quick::version_label()
+}
+
+/// What hovering the version says, in the current language.
+#[uniffi::export]
+pub fn version_tooltip() -> String {
+    stickpile_quick::version_tooltip()
+}
+
+/// The project page clicking the version opens.
+#[uniffi::export]
+pub fn project_url() -> String {
+    stickpile_quick::PROJECT_URL.to_string()
 }
 
 /// The default `config.toml`.

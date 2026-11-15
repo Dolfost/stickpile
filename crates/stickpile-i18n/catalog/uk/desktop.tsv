@@ -42,7 +42,8 @@ Tabs	Вкладки
 Me, Settings	Я, Налаштування
 h j k l, arrows	h j k l, стрілки
 3j, 2l	3j, 2l
-gg / G, 5G	gg / G, 5G
+gg / G	gg / G
+5G	5G
 0 / $	0 / $
 Ctrl+d / Ctrl+u	Ctrl+d / Ctrl+u
 y, Enter	y, Enter
@@ -51,7 +52,7 @@ f	f
 gx	gx
 t / T	t / T
 s	s
-zf / ze / zt	zf / ze / zt
+zf / ze / zt / zv	zf / ze / zt / zv
 /	/
 i, a	i, a
 ?	?
@@ -72,7 +73,8 @@ Enter, Space	Enter, пробіл
 i	i
 move	переміщення
 move with a count	переміщення на кілька кроків
-first / last / fifth item	перший / останній / п'ятий стікер
+first / last item	перший / останній стікер
+fifth item	п'ятий стікер
 start / end of the row	початок / кінець рядка
 half a page down / up	пів сторінки вниз / вгору
 copy for the target app	копіювати для застосунку-адресата
@@ -81,7 +83,7 @@ add to / remove from favorites	додати до вибраного / прибр
 open the item in the browser	відкрити стікер у браузері
 next / previous target app	наступний / попередній застосунок-адресат
 toggle sticker mode	перемкнути режим стікерів
-favorite marks / emojis / tags on the tiles	позначки вибраного / емодзі / теги на плитках
+favorite marks / emojis / tags / vibe on the tiles	позначки вибраного / емодзі / теги / настрій на плитках
 new search	новий пошук
 edit the query	редагувати запит
 this help	ця довідка
@@ -118,6 +120,10 @@ Show emojis	Показувати емодзі
 An item's emojis on its tile (ze in Normal mode).	Емодзі стікера на його плитці (ze у звичайному режимі).
 Show tags	Показувати теги
 An item's tags on its tile (zt in Normal mode).	Теги стікера на його плитці (zt у звичайному режимі).
+Show vibe	Показувати настрій
+An item's vibe (sarcastic, tired, ...) on its tile (zv in Normal mode).	Настрій стікера (sarcastic, tired, ...) на його плитці (zv у звичайному режимі).
+Counts	Лічильники
+Digits in Normal mode start a count (3j, 5G). A lone 1-7 then switches tabs after a short wait; off, it switches at once.	Цифри у звичайному режимі починають лічильник (3j, 5G). Тоді окрема цифра 1-7 перемикає вкладку після короткої паузи; якщо вимкнено, перемикає одразу.
 Recent items	Нещодавні стікери
 Recently copied items shown before typing.	Нещодавно скопійовані стікери, які видно до введення запиту.
 Most results shown for a search.	Найбільша кількість результатів пошуку.
@@ -245,3 +251,46 @@ Ctrl+Shift+S	Ctrl+Shift+S
 Safe mode: hide items tagged nsfw (S, Cmd+Shift+S)	Безпечний режим: ховати стікери з тегом nsfw (S, Cmd+Shift+S)
 No matches for “{query}” with safe mode on	Нічого не знайдено за “{query}” у безпечному режимі
 {n} item hidden by safe mode (tagged nsfw)|{n} items hidden by safe mode (tagged nsfw)	Безпечний режим сховав {n} стікер (з тегом nsfw)|Безпечний режим сховав {n} стікери (з тегом nsfw)|Безпечний режим сховав {n} стікерів (з тегом nsfw)
+Vibe shown	Настрій показано
+Vibe hidden	Настрій приховано
+Stickpile {version}: open the project page	Stickpile {version}: відкрити сторінку проєкту
+Item stats shown	Статистику стікера показано
+Item stats hidden	Статистику стікера приховано
+zi	zi
+the item stats row	рядок статистики стікера
+g/, F2	g/, F2
+search syntax	синтаксис пошуку
+put in the next / previous offered value	вставити наступне / попереднє запропоноване значення
+Suggestions	Підказки
+cat "big chungus"	cat "big chungus"
+words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven	слова й фрази в назві, ключових словах, емодзі, настрої, тегах і наборі; друкарські помилки не заважають
+e:😂	e:😂
+vibe:tired	vibe:tired
+has this vibe	має цей настрій
+tag:reaction	tag:reaction
+has this tag	має цей тег
+set:cats	set:cats
+in this pack (its slug or name)	у цьому наборі (його slug або назва)
+by:alice	by:alice
+in a pack of this user	у наборі цього користувача
+type:gif	type:gif
+gif, png, webp, jpeg, mp4, webm, still, animated, video	gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)
+is:mine, is:liked, is:public	is:mine, is:liked, is:public
+yours, liked by you, public	ваші, вподобані вами, публічні
+q>70, likes>=2, copies<5	q>70, likes>=2, copies<5
+quality, likes, copies (> >= < <= =)	якість, вподобання, копіювання (> >= < <= =)
+sort:likes	sort:likes
+relevance, recent, likes, copies, quality	relevance (доречність), recent (нові), likes (вподобання), copies (копіювання), quality (якість)
+tag:a tag:b	tag:a tag:b
+either of them	будь-який із них
+-tag:nsfw, -word	-tag:nsfw, -word
+leave out	виключити
+vibe: tag: set: by:	vibe: tag: set: by:
+the values in use are offered under the field, most used first	значення, що вже використовуються, з'являються під полем, найуживаніші першими
+vibe:sarcstic	vibe:sarcstic
+a typo or a half-typed value searches for the closest one	значення з друкарською помилкою чи недописане шукає найближче
+F2 or Esc closes this	F2 або Esc закриває довідку
+Tab	Tab
+Tab / Shift+Tab: put in the next / previous value	Tab / Shift+Tab: вставити наступне / попереднє значення
+Show item stats	Показувати статистику стікера
+The selected item's pack, format, size, copies, likes and quality in a row above the footer (zi in Normal mode).	Набір, формат, розмір, копіювання, вподобання та якість вибраного стікера в рядку над нижньою панеллю (zi у звичайному режимі).

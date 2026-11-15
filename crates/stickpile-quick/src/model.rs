@@ -30,6 +30,7 @@ use stickpile_i18n::global::{t, t_dyn, t_template, tf, tp};
 
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
+use crate::suggest::{resolve, suggest, Suggestions, Vocabulary};
 use crate::tabs::{Mode, PageKey, Tab, View};
 use crate::vim::{Cmd, Fed, NormalKey, Pending};
 
@@ -71,6 +72,10 @@ pub struct ModelConfig {
     pub tiles: Tiles,
     /// See [`DEFAULT_KEY_TIMEOUT_MS`].
     pub key_timeout_ms: u64,
+    /// Normal-mode digits start a count (`3j`, `5G`) on the grids
+    /// (`ui.counts`). Then a lone `1`..`7` switches tabs only after
+    /// [`ModelConfig::key_timeout_ms`]; without counts it switches at once.
+    pub counts: bool,
     /// Start with safe mode on (`ui.safe_mode`): items tagged
     /// [`NSFW_TAG`] are hidden. `S` changes it and saves the setting.
     pub safe_mode: bool,
@@ -84,14 +89,19 @@ pub fn is_nsfw(item: &ItemSummary) -> bool {
     item.tags.iter().any(|t| t.trim().eq_ignore_ascii_case(NSFW_TAG))
 }
 
-/// What the item tiles show next to the thumbnail (`ui.mark_favorites`,
-/// `ui.show_emojis`, `ui.show_tags`).
+/// What the popup shows besides the thumbnails: the marks on the tiles
+/// (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`)
+/// and the stats row of the footer (`ui.show_details`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tiles {
     /// A heart on the items the viewer liked ([`Entry::liked`]).
     pub favorites: bool,
     pub emojis: bool,
     pub tags: bool,
+    /// The item's vibe label ("sarcastic"), see [`vibe`].
+    pub vibe: bool,
+    /// The footer's row of the selection's stats ([`Footer::details`]).
+    pub details: bool,
 }
 
 impl Default for Tiles {
@@ -100,6 +110,8 @@ impl Default for Tiles {
             favorites: true,
             emojis: true,
             tags: true,
+            vibe: true,
+            details: true,
         }
     }
 }
@@ -110,6 +122,8 @@ impl Tiles {
             Tile::Favorites => self.favorites,
             Tile::Emojis => self.emojis,
             Tile::Tags => self.tags,
+            Tile::Vibe => self.vibe,
+            Tile::Details => self.details,
         }
     }
 
@@ -118,20 +132,58 @@ impl Tiles {
             Tile::Favorites => self.favorites = on,
             Tile::Emojis => self.emojis = on,
             Tile::Tags => self.tags = on,
+            Tile::Vibe => self.vibe = on,
+            Tile::Details => self.details = on,
         }
     }
 }
 
-/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`).
+/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`, `zv`, `zi`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
     Favorites,
     Emojis,
     Tags,
+    Vibe,
+    /// The stats row.
+    Details,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 3] = [Tile::Favorites, Tile::Emojis, Tile::Tags];
+    pub const ALL: [Tile; 5] = [Tile::Favorites, Tile::Emojis, Tile::Tags, Tile::Vibe, Tile::Details];
+}
+
+/// What the overlay over the popup shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpPage {
+    /// The keys ([`crate::vim::HELP`]): `?`, F1.
+    Keys,
+    /// The search syntax ([`crate::vim::SYNTAX`]): `g/`, F2.
+    Syntax,
+}
+
+/// The line of values offered under the search field while a `key:`
+/// filter is typed (see [`crate::suggest`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuggestionLine {
+    /// The filter as typed: `vibe:`, `-tag:`.
+    pub key: String,
+    /// Best first.
+    pub words: Vec<String>,
+    /// The word the search uses now (Tab puts in the next one).
+    pub chosen: Option<usize>,
+}
+
+/// Tab is cycling through the values of [`Suggestions`].
+#[derive(Debug, Clone, PartialEq)]
+struct Completion {
+    line: Suggestions,
+    index: usize,
+}
+
+/// The item's vibe as a tile shows it: the label, trimmed; empty for none.
+pub fn vibe(item: &ItemSummary) -> &str {
+    item.vibe.as_deref().map_or("", str::trim)
 }
 
 impl Default for ModelConfig {
@@ -151,6 +203,7 @@ impl Default for ModelConfig {
             start_mode: Mode::Insert,
             tiles: Tiles::default(),
             key_timeout_ms: DEFAULT_KEY_TIMEOUT_MS,
+            counts: false,
             safe_mode: false,
         }
     }
@@ -283,6 +336,12 @@ pub enum Event {
     TextFocus(bool),
     /// F1 or a help button: show or hide the key help.
     ToggleHelp,
+    /// F2: show or hide the search syntax.
+    ToggleSyntax,
+    /// A click on a value of the [`SuggestionLine`]: put it in.
+    AcceptSuggestion(usize),
+    /// Answer to [`Command::LoadVocabulary`].
+    VocabularyLoaded(Vocabulary),
     /// Ctrl+D or a like button: like / unlike the selected item.
     ToggleFavorite,
     /// Answer to [`Command::ToggleFavorite`]: the item's new liked state.
@@ -375,6 +434,9 @@ pub enum Command {
         tile: Tile,
         on: bool,
     },
+    /// Fetch the values the search suggests (the vibes, tags, packs and
+    /// owners of the cached items); answer with [`Event::VocabularyLoaded`].
+    LoadVocabulary,
     /// Safe mode was switched: save it as `ui.safe_mode`.
     SaveSafeMode {
         on: bool,
@@ -559,6 +621,10 @@ impl Status {
                 (Tile::Emojis, false) => t("Emojis hidden"),
                 (Tile::Tags, true) => t("Tags shown"),
                 (Tile::Tags, false) => t("Tags hidden"),
+                (Tile::Vibe, true) => t("Vibe shown"),
+                (Tile::Vibe, false) => t("Vibe hidden"),
+                (Tile::Details, true) => t("Item stats shown"),
+                (Tile::Details, false) => t("Item stats hidden"),
             }
             .into(),
             Status::Safe { on: false, .. } => t("Safe mode off: items tagged nsfw are shown").into(),
@@ -626,8 +692,11 @@ pub struct Footer {
     /// The selection's stats, one line: name, set, format and size, copies,
     /// likes, quality ("cat · Cats · GIF 512×512 · copied 12 times · ♥ 3 ·
     /// quality 87"); a pack's name, item count and owner on the pack list;
-    /// empty when nothing is selected.
+    /// empty when nothing is selected, or with the row hidden.
     pub details: String,
+    /// Show the stats row ([`Tiles::details`], `zi`); when on, the row
+    /// keeps its place even while `details` is empty.
+    pub details_row: bool,
 }
 
 /// The footer's safe mode toggle: "safe: on", "safe: off".
@@ -922,9 +991,13 @@ pub struct Model {
     tab: Tab,
     mode: Mode,
     pending: Pending,
-    help: bool,
+    help: Option<HelpPage>,
     /// The search query (the text field on the Search tab).
     query: String,
+    /// What the search field suggests (see [`crate::suggest`]).
+    vocab: Vocabulary,
+    /// Tab is putting in the suggested values one after another.
+    completion: Option<Completion>,
     recent: Vec<ItemSummary>,
     results: Vec<SearchHit>,
     offline: bool,
@@ -997,6 +1070,8 @@ fn cancels_pending(event: &Event) -> bool {
             | Event::ShowTab(_)
             | Event::CycleTab { .. }
             | Event::ToggleHelp
+            | Event::ToggleSyntax
+            | Event::AcceptSuggestion(_)
             | Event::ToggleFavorite
             | Event::PackBack
     )
@@ -1015,8 +1090,10 @@ impl Model {
             tab,
             mode: opening_mode(&cfg, tab),
             pending: Pending::default(),
-            help: false,
+            help: None,
             query: String::new(),
+            vocab: Vocabulary::default(),
+            completion: None,
             recent: Vec::new(),
             results: Vec::new(),
             offline: false,
@@ -1085,9 +1162,33 @@ impl Model {
     pub fn pending(&self) -> String {
         self.pending.display()
     }
-    /// Draw the key help ([`crate::vim::HELP`]) over the popup.
+    /// Draw the help ([`Model::help_page`]) over the popup.
     pub fn help_visible(&self) -> bool {
+        self.help.is_some()
+    }
+    /// Which help is drawn over the popup.
+    pub fn help_page(&self) -> Option<HelpPage> {
         self.help
+    }
+    /// The values offered under the search field, when a `key:` filter is
+    /// being typed on the Search tab.
+    pub fn suggestions(&self) -> Option<SuggestionLine> {
+        if self.tab != Tab::Search {
+            return None;
+        }
+        if let Some(c) = &self.completion {
+            return Some(SuggestionLine {
+                key: c.line.key.clone(),
+                words: c.line.words.clone(),
+                chosen: Some(c.index),
+            });
+        }
+        let s = suggest(&self.query, &self.vocab)?;
+        Some(SuggestionLine {
+            chosen: s.chosen(),
+            key: s.key,
+            words: s.words,
+        })
     }
     /// Text of the text field on this tab: the search query, the pack
     /// filter, or the item filter of the opened pack; empty elsewhere.
@@ -1224,7 +1325,12 @@ impl Model {
             pending: self.pending.display(),
             safe: self.safe,
             hidden: self.hidden,
-            details: self.details(),
+            details: if self.tiles.details {
+                self.details()
+            } else {
+                String::new()
+            },
+            details_row: self.tiles.details,
         }
     }
 
@@ -1325,6 +1431,9 @@ impl Model {
             Event::Normal(key) => self.normal_key(key),
             Event::ShowTab(tab) => self.show_tab(tab),
             Event::CycleTab { backwards } => {
+                if let Some(cmds) = self.complete(backwards) {
+                    return cmds;
+                }
                 let tab = if backwards { self.tab.prev() } else { self.tab.next() };
                 self.show_tab(tab)
             }
@@ -1337,7 +1446,25 @@ impl Model {
                 Vec::new()
             }
             Event::ToggleHelp => {
-                self.help = !self.help;
+                self.toggle_help(HelpPage::Keys);
+                Vec::new()
+            }
+            Event::ToggleSyntax => {
+                self.toggle_help(HelpPage::Syntax);
+                Vec::new()
+            }
+            Event::AcceptSuggestion(index) => self.accept_suggestion(index),
+            Event::VocabularyLoaded(vocab) => {
+                if vocab == self.vocab {
+                    return Vec::new();
+                }
+                self.vocab = vocab;
+                // A search typed before the values were known goes out again,
+                // with its filters resolved now.
+                if self.visible && !self.query.trim().is_empty() && self.completion.is_none() {
+                    self.generation += 1;
+                    return vec![self.search_command(0)];
+                }
                 Vec::new()
             }
             Event::ToggleFavorite => self.toggle_favorite(),
@@ -1389,7 +1516,8 @@ impl Model {
             self.tab = tab;
         }
         self.mode = opening_mode(&self.cfg, self.tab);
-        self.help = false;
+        self.help = None;
+        self.completion = None;
         self.memory = Default::default();
         self.packs.filter.clear();
         self.packs.open = None;
@@ -1399,7 +1527,7 @@ impl Model {
         self.most_used.loading = None;
         self.favorites.loading = None;
         self.packs.sets.loading = None;
-        let mut cmds = vec![Command::Present, Command::CancelSearch];
+        let mut cmds = vec![Command::Present, Command::CancelSearch, Command::LoadVocabulary];
         cmds.extend(self.enter_tab());
         // The other tabs need the favorites for their marks.
         if self.tiles.favorites && self.tab != Tab::Favorites {
@@ -1476,7 +1604,7 @@ impl Model {
         Vec::new()
     }
 
-    /// `zf`, `ze`, `zt`.
+    /// `zf`, `ze`, `zt`, `zv`, `zi`.
     fn toggle_tile(&mut self, tile: Tile) -> Vec<Command> {
         let on = !self.tiles.get(tile);
         let mut cmds = self.set_tile(tile, on);
@@ -1529,8 +1657,10 @@ impl Model {
         self.memory[self.tab.index()] = self.selected_id();
         self.tab = tab;
         self.pending.clear();
-        if self.cfg.modal {
-            self.mode = tab.default_mode();
+        // A switch never starts typing: Normal stays Normal, and Insert
+        // stays only where there is a text field to type in.
+        if self.cfg.modal && !tab.has_text_field() {
+            self.mode = Mode::Normal;
         }
         self.enter_tab()
     }
@@ -1612,6 +1742,11 @@ impl Model {
 
     /// Escape from Insert mode (or with `modal` off).
     fn escape(&mut self) -> Vec<Command> {
+        // An overlay is closed first: typing goes on under it.
+        if self.help.is_some() {
+            self.help = None;
+            return Vec::new();
+        }
         if self.cfg.modal && self.mode == Mode::Insert {
             self.set_mode(Mode::Normal);
             return Vec::new();
@@ -1621,8 +1756,8 @@ impl Model {
 
     /// Escape with no text field to leave: close the help, leave the pack, hide.
     fn escape_normal(&mut self) -> Vec<Command> {
-        if self.help {
-            self.help = false;
+        if self.help.is_some() {
+            self.help = None;
             return Vec::new();
         }
         if self.tab == Tab::Packs && self.packs.open.is_some() {
@@ -1635,7 +1770,7 @@ impl Model {
         if !self.cfg.modal || !self.visible || self.mode != Mode::Normal {
             return Vec::new();
         }
-        let counts = self.view() != View::Page;
+        let counts = self.cfg.counts && self.view() != View::Page;
         match self.pending.feed(key, counts) {
             Fed::Wait { timeout } => timeout
                 .map(|seq| Command::KeyTimeout {
@@ -1713,11 +1848,15 @@ impl Model {
             Cmd::Safe => self.toggle_safe(),
             Cmd::Browser if items => self.open_in_browser(),
             Cmd::Help => {
-                self.help = !self.help;
+                self.toggle_help(HelpPage::Keys);
                 Vec::new()
             }
-            Cmd::Quit if self.help => {
-                self.help = false;
+            Cmd::Syntax => {
+                self.toggle_help(HelpPage::Syntax);
+                Vec::new()
+            }
+            Cmd::Quit if self.help.is_some() => {
+                self.help = None;
                 Vec::new()
             }
             Cmd::Quit => self.hide(),
@@ -1787,6 +1926,7 @@ impl Model {
         if q == self.query {
             return Vec::new();
         }
+        self.completion = None;
         self.query = q;
         self.generation += 1;
         if !self.query.trim().is_empty() {
@@ -1812,10 +1952,15 @@ impl Model {
         if self.copying.is_none() && self.tab == Tab::Search {
             self.status = Status::Searching;
         }
-        let mut query = self.query.trim().to_string();
+        // Half-typed or misspelled filter values go out as the value they
+        // most likely mean (see `suggest::resolve`).
+        let mut query = resolve(self.query.trim(), &self.vocab).0;
         if self.safe {
             // The server leaves them out, so the results still fill the list.
-            query.push_str(&format!(" -tag:{NSFW_TAG}"));
+            if !query.is_empty() {
+                query.push(' ');
+            }
+            query.push_str(&format!("-tag:{NSFW_TAG}"));
         }
         Command::Search {
             query,
@@ -2382,6 +2527,76 @@ impl Model {
         Vec::new()
     }
 
+    fn toggle_help(&mut self, page: HelpPage) {
+        self.help = if self.help == Some(page) { None } else { Some(page) };
+    }
+
+    /// Tab in the search field while values are offered: put in the
+    /// chosen one, then the next ones (`backwards`: the previous ones).
+    /// `None` when there is nothing to complete (Tab switches tabs).
+    fn complete(&mut self, backwards: bool) -> Option<Vec<Command>> {
+        if self.tab != Tab::Search || self.mode != Mode::Insert || !self.visible {
+            return None;
+        }
+        let (line, index) = match self.completion.take() {
+            Some(c) => {
+                let n = c.line.words.len();
+                let i = if backwards {
+                    (c.index + n - 1) % n
+                } else {
+                    (c.index + 1) % n
+                };
+                (c.line, i)
+            }
+            None => {
+                let s = suggest(&self.query, &self.vocab)?;
+                let n = s.words.len();
+                let i = match s.chosen() {
+                    // Nothing typed yet: the first value, or the last backwards.
+                    None if backwards => n - 1,
+                    None => 0,
+                    // What is typed is already a value: Tab goes on from it.
+                    Some(c) if s.words[c] == s.typed.to_lowercase() => {
+                        if backwards {
+                            (c + n - 1) % n
+                        } else {
+                            (c + 1) % n
+                        }
+                    }
+                    Some(c) => c,
+                };
+                (s, i)
+            }
+        };
+        self.query.truncate(line.start);
+        self.query.push_str(&line.words[index]);
+        self.completion = Some(Completion { line, index });
+        self.generation += 1;
+        Some(vec![self.search_command(0)])
+    }
+
+    /// A click on an offered value: put it in and finish the filter.
+    fn accept_suggestion(&mut self, index: usize) -> Vec<Command> {
+        if self.tab != Tab::Search {
+            return Vec::new();
+        }
+        let (start, word) = match self.completion.take() {
+            Some(c) => (c.line.start, c.line.words.get(index).cloned()),
+            None => match suggest(&self.query, &self.vocab) {
+                Some(s) => (s.start, s.words.get(index).cloned()),
+                None => return Vec::new(),
+            },
+        };
+        let Some(word) = word else {
+            return Vec::new();
+        };
+        self.query.truncate(start);
+        self.query.push_str(&word);
+        self.query.push(' ');
+        self.generation += 1;
+        vec![self.search_command(0)]
+    }
+
     fn open_in_browser(&mut self) -> Vec<Command> {
         self.selected_item_id()
             .map(|item_id| Command::OpenInBrowser { item_id })
@@ -2475,6 +2690,7 @@ pub(crate) mod tests {
                 favorites: false,
                 ..Tiles::default()
             },
+            counts: true,
             ..ModelConfig::default()
         }
     }
@@ -3502,3 +3718,5 @@ mod tiles_tests;
 
 #[cfg(test)]
 mod safe_tests;
+#[cfg(test)]
+mod suggest_tests;

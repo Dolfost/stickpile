@@ -94,7 +94,10 @@ start_mode = "normal"   # normal | insert: the mode the popup opens in
 mark_favorites = true   # a heart on the items you liked
 show_emojis = true      # an item's emojis on its tile
 show_tags = true        # an item's tags on its tile
+show_vibe = true        # an item's vibe on its tile
+show_details = true     # the selected item's stats above the footer
 safe_mode = false       # hide the items tagged nsfw (S in the popup)
+counts = false          # digits start a count (3j, 5G); tab digits then wait
 language = "auto"       # auto | en | uk: the popup's language (auto: the account's, else the system's)
 
 [copy]                  # `copy` and the popup
@@ -162,7 +165,10 @@ sticker = ["text/uri-list"]
 | `ui.mark_favorites` | `true` | a heart on the tiles of items you liked |
 | `ui.show_emojis` | `true` | an item's emojis on its tile |
 | `ui.show_tags` | `true` | an item's tags on its tile |
+| `ui.show_vibe` | `true` | an item's vibe on its tile |
+| `ui.show_details` | `true` | the selected item's stats in a row above the popup's footer |
 | `ui.safe_mode` | `false` | safe mode: the popup hides the items tagged `nsfw` (`S` switches it) |
+| `ui.counts` | `false` | Normal-mode digits start a count (`3j`, `5G`); a lone 1-7 then switches tabs after a short wait instead of at once |
 | `ui.language` | `"auto"` | the popup's language: `auto` (the account's, else the system's), `en` or `uk`; see [languages.md](languages.md) |
 | `copy.square` | `"off"` | pad non-square stills and sticker renditions to a square: `off`, `transparent` or `white` margins |
 | `copy.background` | `"keep"` | `white` fills the transparent pixels of stills copied as images |

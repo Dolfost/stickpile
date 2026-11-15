@@ -168,13 +168,16 @@ Me, with the login form.
 | 7 Settings | the everyday settings, saved and applied at once ([below](#settings)) |
 
 From top to bottom the window has the tab row (click a tab, or press its
-number; `?` opens the key help), a header with the title ("Packs / Cats"
+number; on the right the client's version, which opens the project page on
+GitHub, and `?`, the key help), a header with the title ("Packs / Cats"
 inside a pack, with a back arrow), the text field on Search and Packs
-(an item count on the other grids), the grid or page, and the footer. Its
-first line has the selected item's stats: name, pack, format and size, how
-often it was copied, likes and quality ("cat · Cats · GIF 320×240 · copied
-12 times · ♥ 3 · quality 87"; on the pack list a pack's name, item count
-and owner). Under it: the mode (INSERT / NORMAL), keys of a command still
+(an item count on the other grids), the line of
+[suggestions](#search-suggestions) while a filter is typed, the grid or
+page, and the footer. Its first line has the selected item's stats: name,
+pack, format and size, how often it was copied, likes and quality ("cat ·
+Cats · GIF 320×240 · copied 12 times · ♥ 3 · quality 87"; on the pack list
+a pack's name, item count and owner); `zi` in Normal mode hides and shows
+it (`ui.show_details`). Under it: the mode (INSERT / NORMAL), keys of a command still
 being typed, the target app, the sticker and safe mode toggles and the
 status. Every tab fetches its list again each time it is shown, so it is
 never older than the last look.
@@ -182,10 +185,11 @@ never older than the last look.
 The grid fills the window: `ui.columns` sets how many thumbnails a row has
 at the default window size, and a wider or narrower window shows more or
 fewer per row. Each tile shows, over the thumbnail, the item's emojis
-(top left), a heart if you liked it (top right) and its tags (bottom).
-`zf`, `ze` and `zt` in Normal mode turn the heart, the emojis and the tags
-on and off, and the Settings tab has a switch for each
-(`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`). The heart marks
+(top left), its vibe and a heart if you liked it (top right) and its tags
+(bottom). `zf`, `ze`, `zt` and `zv` in Normal mode turn the heart, the
+emojis, the tags and the vibe on and off, and the Settings tab has a switch
+for each (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`,
+`ui.show_vibe`). The heart marks
 the items the Favorites tab lists (fetched each time the popup opens) and
 the ones you like or unlike since.
 
@@ -198,17 +202,40 @@ is saved as `ui.safe_mode`, so it holds after a restart (unless a read-only
 `config.toml` sets it). Tag the items in the web UI (Tags field: `nsfw`).
 Pack covers on the pack list are not filtered.
 
+### Search suggestions
+
+While a filter is typed in the search field (`vibe:`, `tag:`, `-tag:`,
+`set:`, `by:`, `type:`, `is:`, `sort:`), a line under the field offers its
+values: the vibes, tags, packs and owners of the items you can see (from
+the offline cache), most used first, and the fixed words of `type:`, `is:`
+and `sort:`. They match what is typed so far: its start first, then
+anywhere in the value, then with a typo or two forgiven, so `vibe:sarcstic`
+and `vibe:sacr` still offer `sarcastic`. The line pushes the grid down
+instead of covering it, and goes away with the space after the value.
+
+The search does not wait for the value to be finished: a half-typed or
+misspelled value is searched as its best match (the highlighted one), so
+`vibe:sar` already shows the sarcastic stickers. Tab puts the highlighted
+value into the field, and pressing it again goes on to the next one
+(Shift+Tab: the previous one); a click on a value puts it in and finishes
+the filter. Without a filter being typed, Tab switches tabs as before.
+
+F2 (or `g/` in Normal mode) shows the whole search syntax over the popup,
+as `?` shows the keys.
+
 ## Keys
 
 Keys work vim-style, in two modes:
 
-- **Insert**: the text field has the keys. Switching to Search or Packs
-  puts you in Insert, so typing starts right away.
-- **Normal**: single keys act on the grid. Recent, Most used, Favorites,
-  Me and Settings are shown in Normal; Escape leaves Insert for Normal.
+- **Insert**: the text field has the keys.
+- **Normal**: single keys act on the grid. Escape leaves Insert for Normal;
+  `i` or `/` go back to typing.
 
-The popup opens in Normal (`i` or `/` to type). With
-`ui.start_mode = "insert"` it opens in Insert on Search and Packs.
+Switching tabs never starts typing: from Normal mode every tab is shown in
+Normal, and Insert mode stays on only when the tab switched to has a text
+field too (Search and Packs). The popup opens in Normal (`i` or `/` to
+type). With `ui.start_mode = "insert"` it opens in Insert on Search and
+Packs.
 
 The footer shows the mode and, like vim's showcmd, the keys of a command
 still being typed (`3`, `g`, `12g`, `z`). `?` (or F1) shows all keys over the
@@ -219,6 +246,7 @@ popup.
 | Key | Action |
 |---|---|
 | typing | search (after a 120 ms pause; an empty query shows recently used items). On Packs: filter the packs by name, or inside a pack its items by name, keyword or emoji |
+| Tab / Shift+Tab | while a filter is typed (`vibe:sa`): put in the next / previous [suggested value](#search-suggestions); otherwise the next / previous tab |
 | arrow keys | move in the grid |
 | Home / End | first / last item |
 | Page Up / Page Down | one screen up / down |
@@ -233,8 +261,8 @@ popup.
 | Key | Action |
 |---|---|
 | h j k l, arrow keys | move left, down, up, right |
-| 3j, 2l | move with a count |
-| gg / G | first / last item (`5G` or `5gg`: the fifth) |
+| 3j, 2l | move with a count (with `ui.counts` on, see below) |
+| gg / G | first / last item (with counts, `5G` or `5gg`: the fifth) |
 | 0 / $ | start / end of the row |
 | Ctrl+d / Ctrl+u | half a screen down / up |
 | y, Enter | copy the selected item for the current target, hide |
@@ -244,19 +272,22 @@ popup.
 | t / T | next / previous target app |
 | s | toggle sticker mode |
 | S | safe mode: hide or show the items tagged `nsfw` (saved like a setting) |
-| zf / ze / zt | show or hide the favorite hearts / emojis / tags on the tiles (saved like a setting) |
+| zf / ze / zt / zv | show or hide the favorite hearts / emojis / tags / vibe on the tiles (saved like a setting) |
+| zi | show or hide the selected item's stats row above the footer (saved like a setting) |
 | / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
 | i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
 | 1 to 7 | go to that tab |
 | gt / gT | next / previous tab (`3gt`: tab 3) |
 | ? | show or hide the key help |
+| g/ | show or hide the search syntax (as F2) |
 | q, Escape | hide; Escape first cancels a half-typed command, closes the help, or leaves an opened pack |
 
-A digit is both a tab number and the start of a count: `3j` moves three
-rows down, while a lone `3` switches to tab 3 after a short pause
-(400 ms), or at once when the next key is not a motion. On Me and
-Settings, which have nothing to count, digits switch at once. Unknown
-keys do nothing.
+A digit switches to its tab at once. With `ui.counts = true` digits also
+start a count: `3j` moves three rows down and `5G` goes to the fifth item,
+but then a lone `3` can only switch to tab 3 after a short pause (400 ms),
+or at once when the next key is not a motion. On Me and Settings, which
+have nothing to count, digits always switch at once. Unknown keys do
+nothing.
 
 **Packs.** The Packs tab lists your packs. Enter, or `o` in Normal mode,
 opens the selected one: its items fill the grid, the header reads
@@ -278,11 +309,12 @@ closes it), and `i` edits the row's text or number field. Editing a field
 | Tab / Shift+Tab | next / previous tab, wrapping |
 | Alt+1 to Alt+7 | go to that tab |
 | F1 | show or hide the key help |
+| F2 | show or hide the search syntax |
 | Ctrl+T / Ctrl+Shift+T | next / previous target app |
 | Ctrl+S | toggle sticker mode; kept until stickpile-desktop restarts (the footer toggle does the same) |
 | Ctrl+Shift+S | safe mode on / off (as `S`) |
 
-In a text field on Me or Settings only Escape, the tab keys and F1 are
+In a text field on Me or Settings only Escape, the tab keys, F1 and F2 are
 taken by the popup; every other key goes to the field.
 
 The Normal-mode keys and the Ctrl shortcuts are read by physical key, so
@@ -445,7 +477,10 @@ start_mode = "normal" # normal | insert: the mode the popup opens in
 mark_favorites = true # a heart on the items you liked (zf)
 show_emojis = true   # an item's emojis on its tile (ze)
 show_tags = true     # an item's tags on its tile (zt)
+show_vibe = true     # an item's vibe on its tile (zv)
+show_details = true  # the selected item's stats above the footer (zi)
 safe_mode = false    # hide items tagged nsfw (S)
+counts = false       # digits start a count (3j, 5G); tab digits then wait
 language = "auto"    # auto | en | uk: the popup's language (docs/languages.md)
 
 [copy]

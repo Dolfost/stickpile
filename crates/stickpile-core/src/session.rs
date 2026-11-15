@@ -194,7 +194,8 @@ impl Session {
         })
     }
 
-    fn offline_index(&self) -> Result<Arc<OfflineIndex>> {
+    /// The cached items, indexed; built again only when the cache changed.
+    pub fn offline_index(&self) -> Result<Arc<OfflineIndex>> {
         let generation = self.cache.generation()?;
         let mut slot = self.offline.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(idx) = slot.as_ref().filter(|i| i.generation() == generation) {

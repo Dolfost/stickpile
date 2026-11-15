@@ -35,11 +35,13 @@ final class FakePopup: PopupControl {
             tab: .search, view: .items, focus: .field, title: "Search", hasField: true, query: "cat",
             placeholder: "Search, or try e:... set:cats type:gif vibe:tired", count: "", back: false,
             entriesRevision: 0, entries: nil, packs: nil, selected: 0, columns: 6, thumbPx: 128,
-            tiles: Tiles(favorites: true, emojis: true, tags: true), help: nil,
+            tiles: Tiles(favorites: true, emojis: true, tags: true, vibe: true), help: nil,
+            helpHint: "? or Esc closes this", suggestions: nil,
             footer: Footer(mode: "INSERT", insert: true, pending: "", target: "Telegram",
                            targetHint: "auto: com.tdesktop.Telegram", sticker: .off, stickerLabel: "sticker: off",
                            status: "24 results", level: .info, safe: false, safeLabel: "safe: off",
-                           details: "cat · Cats · GIF 320×240 · copied 12 times · ♥ 3 · quality 87"),
+                           details: "cat · Cats · GIF 320×240 · copied 12 times · ♥ 3 · quality 87",
+                           detailsRow: true),
             me: MeView(loading: false, who: nil, detail: "", account: nil, form: nil, tailnetLogin: false,
                        busy: false, message: nil, retry: false, clearSecrets: false),
             settings: SettingsView(error: nil, note: "", path: "", warnings: [], groups: [], saveError: nil)
@@ -96,7 +98,8 @@ final class FakePopup: PopupControl {
                 tooltip: "\(FakePopup.names[k])\nPack: Cats\n\(FakePopup.emojis[k % FakePopup.emojis.count]) cat, cute",
                 incompatible: i % 9 == 7, liked: i % 4 == 1,
                 emojis: i % 3 == 0 ? FakePopup.emojis[k % FakePopup.emojis.count] : "",
-                tags: i % 5 == 0 ? "cat, cute, wave" : "")
+                tags: i % 5 == 0 ? "cat, cute, wave" : "",
+                vibe: i % 4 == 2 ? "sarcastic" : (i % 7 == 3 ? "tired" : ""))
         }
     }
 
@@ -345,6 +348,19 @@ final class FakePopup: PopupControl {
     func queryChanged(text: String) {
         state.query = text
         state.footer.status = text.isEmpty ? "" : "Searching..."
+        let last = text.split(separator: " ", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+        state.suggestions = last.hasPrefix("vibe:")
+            ? SuggestionView(key: "vibe:", words: ["sarcastic", "sad", "happy", "tired", "angry", "confused"],
+                             chosen: 0)
+            : nil
+        render()
+    }
+
+    func acceptSuggestion(index: UInt32) {
+        guard let s = state.suggestions, Int(index) < s.words.count else { return }
+        let head = state.query.split(separator: " ", omittingEmptySubsequences: false).dropLast().joined(separator: " ")
+        state.query = (head.isEmpty ? "" : head + " ") + s.key + s.words[Int(index)] + " "
+        state.suggestions = nil
         render()
     }
 

@@ -1,8 +1,10 @@
 //! `--demo DIR`: a backend that serves the media files of one directory, so
 //! the popup, the clipboard offers and drag-and-drop can be exercised without
 //! a server (and before `stickpile-core` is complete). Search is a plain
-//! substring match over file names (`-word` and `-tag:x` exclude); a file
-//! with the word `nsfw` in its name is tagged `nsfw`, for safe mode. Offers
+//! substring match over file names (`-word` and `-tag:x` exclude, `tag:x`
+//! and `vibe:x` filter); a file with the word `nsfw` in its name is tagged
+//! `nsfw`, for safe mode, and one with a word of [`DEMO_VIBES`] in its name
+//! has that vibe. Offers
 //! follow the same `clipboard`
 //! config as the real client. Each subdirectory is a pack (a directory from
 //! `stickpile backup` works), the loose files are one more; favorites and
@@ -21,6 +23,19 @@ use stickpile_core::clipboard::{adjust, ClipOffer};
 use stickpile_core::config::{ClipboardConfig, CopyConfig};
 use stickpile_core::{ClientConfig, PreparedCopy};
 use stickpile_quick::model::Results;
+use stickpile_quick::suggest::Vocabulary;
+
+/// Words of a file name that become its vibe.
+pub const DEMO_VIBES: [&str; 8] = [
+    "happy",
+    "sad",
+    "angry",
+    "tired",
+    "sarcastic",
+    "excited",
+    "confused",
+    "party",
+];
 
 use crate::backend::{AuthKind, Backend, BoxFut, Credentials, LoginError, Profile};
 use crate::offers;
@@ -121,6 +136,7 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
         .cloned()
         .into_iter()
         .collect();
+    let vibe = keywords.iter().find(|k| DEMO_VIBES.contains(&k.as_str())).cloned();
     ItemSummary {
         id: file_name.clone(),
         set_id: LOOSE_PACK.into(),
@@ -130,7 +146,7 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
         name: stem.clone(),
         keywords,
         emojis: vec![],
-        vibe: None,
+        vibe,
         tags,
         kind: kind_of(format),
         format,
@@ -284,14 +300,17 @@ impl DemoBackend {
             .iter()
             .filter(|i| {
                 let hay = format!("{} {}", i.summary.name.to_lowercase(), i.summary.keywords.join(" "));
+                let s = &i.summary;
+                let has = |w: &str| match w.split_once(':') {
+                    Some(("tag", tag)) => s.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)),
+                    Some(("vibe", vibe)) => s.vibe.as_deref().is_some_and(|v| v.eq_ignore_ascii_case(vibe)),
+                    _ => hay.contains(w),
+                };
                 words
                     .iter()
                     .all(|w| match w.strip_prefix('-').filter(|n| !n.is_empty()) {
-                        Some(not) => match not.strip_prefix("tag:") {
-                            Some(tag) => !i.summary.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)),
-                            None => !hay.contains(not),
-                        },
-                        None => hay.contains(w.as_str()),
+                        Some(not) => !has(not),
+                        None => has(w),
                     })
             })
             .take(limit)
@@ -545,6 +564,10 @@ impl Backend for DemoBackend {
         Box::pin(async move { self.recent_now(limit) })
     }
 
+    fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary> {
+        Box::pin(async move { Vocabulary::from_items(self.items.iter().map(|i| &i.summary)) })
+    }
+
     fn thumbnail(self: Arc<Self>, item: ItemSummary) -> BoxFut<Result<PathBuf, String>> {
         Box::pin(async move {
             let demo = self.find(&item.id).ok_or("unknown item")?;
@@ -680,6 +703,17 @@ mod tests {
         assert_eq!(b.search_now("", 2).len(), 2);
         assert_eq!(ids("-cat -sticker -clip"), ["dance_party.gif"]);
         assert_eq!(ids("party -tag:nsfw"), ["dance_party.gif"]);
+        assert_eq!(ids("vibe:party"), ["dance_party.gif"], "party is a vibe word");
+        assert!(ids("vibe:sad").is_empty());
+        assert_eq!(ids("-vibe:party -cat -sticker"), ["clip.mp4"]);
+    }
+
+    #[test]
+    fn the_vocabulary_has_the_vibes_and_packs() {
+        let (_d, b) = fixture();
+        let v = Vocabulary::from_items(b.items.iter().map(|i| &i.summary));
+        assert_eq!(v.vibes, ["party"]);
+        assert!(v.sets.contains(&LOOSE_PACK.to_string()));
     }
 
     #[test]

@@ -26,6 +26,7 @@ fn special(code: u16) -> Option<&'static str> {
         116 => "Page_Up",
         121 => "Page_Down",
         122 => "F1",
+        120 => "F2",
         49 => "space",
         _ => return None,
     })

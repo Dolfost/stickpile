@@ -704,6 +704,11 @@ impl OfflineIndex {
         self.items.get(id)
     }
 
+    /// Every cached item, in no particular order.
+    pub fn items(&self) -> impl Iterator<Item = &ItemSummary> {
+        self.items.values()
+    }
+
     /// Search with the server's query syntax (no image-content matching; the
     /// liked set is unknown offline, so `is:liked` matches nothing).
     pub fn search(&self, query: &str, target: Option<TargetApp>, limit: usize) -> Vec<SearchHit> {

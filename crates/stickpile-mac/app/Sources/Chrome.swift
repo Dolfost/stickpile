@@ -84,13 +84,16 @@ final class TextButton: NSView {
     }
 }
 
-/// The numbered tabs and the help button.
+/// The numbered tabs, the version (it opens the project page) and the help
+/// button.
 final class TabBar: NSView {
     var onTab: ((TabId) -> Void)?
     var onHelp: (() -> Void)?
+    var onVersion: (() -> Void)?
     private var tabs: [TabLabel] = []
     private var buttons: [TextButton] = []
     private let help = TextButton()
+    private let version = TextButton()
 
     override var isFlipped: Bool { true }
 
@@ -99,6 +102,12 @@ final class TabBar: NSView {
         help.text = "?"
         help.action = { [weak self] in self?.onHelp?() }
         addSubview(help)
+        version.text = versionLabel()
+        version.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+        version.color = .secondaryLabelColor
+        version.padding = 6
+        version.action = { [weak self] in self?.onVersion?() }
+        addSubview(version)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -126,6 +135,7 @@ final class TabBar: NSView {
 
     func relabel() {
         help.toolTip = tr("Keys (? or F1)")
+        version.toolTip = versionTooltip()
     }
 
     override func layout() {
@@ -134,7 +144,8 @@ final class TabBar: NSView {
         var x: CGFloat = 8
         // Tabs shrink evenly when the window is narrow.
         let helpWidth = help.fittingWidth
-        let room = bounds.width - x - 8 - helpWidth - 6
+        let versionWidth = version.fittingWidth
+        let room = bounds.width - x - 8 - helpWidth - versionWidth - 6
         let widths = buttons.map(\.fittingWidth)
         let total = widths.reduce(0, +) + CGFloat(max(0, buttons.count - 1)) * 2
         let scale = total > room && total > 0 ? room / total : 1
@@ -143,6 +154,7 @@ final class TabBar: NSView {
             x += floor(w * scale) + 2
         }
         help.frame = NSRect(x: bounds.width - 8 - helpWidth, y: 0, width: helpWidth, height: h)
+        version.frame = NSRect(x: help.frame.minX - versionWidth, y: 0, width: versionWidth, height: h)
     }
 }
 
@@ -254,13 +266,80 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
     @objc private func fieldAction() { report() }
 }
 
-/// The selection's stats on top; under them mode, pending keys, target,
-/// sticker and safe mode toggles, status.
+/// The values offered for the filter being typed (`vibe:sar`), in one line
+/// under the header; what does not fit is left out.
+final class SuggestBar: NSView {
+    static let height: CGFloat = 24
+    var onAccept: ((Int) -> Void)?
+    private let key = label("", size: 11, color: .secondaryLabelColor)
+    private let hint = label("", size: 11, color: .tertiaryLabelColor)
+    private var buttons: [TextButton] = []
+    private var shown: SuggestionView?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        key.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        [key, hint].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func relabel() {
+        hint.setText(tr("Tab"))
+        hint.toolTip = tr("Tab / Shift+Tab: put in the next / previous value")
+    }
+
+    func update(_ s: SuggestionView?) {
+        guard s != shown else { return }
+        shown = s
+        buttons.forEach { $0.removeFromSuperview() }
+        buttons = (s?.words ?? []).enumerated().map { i, word in
+            let b = TextButton()
+            b.text = word
+            b.font = .systemFont(ofSize: 11.5)
+            b.currentFont = .systemFont(ofSize: 11.5, weight: .semibold)
+            b.padding = 7
+            b.current = s?.chosen.map { Int($0) } == i
+            b.action = { [weak self] in self?.onAccept?(i) }
+            addSubview(b)
+            return b
+        }
+        key.setText(s?.key ?? "")
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let h = bounds.height
+        var x: CGFloat = 12
+        let keyWidth = key.textWidth
+        key.frame = NSRect(x: x, y: floor((h - 15) / 2), width: keyWidth, height: 15)
+        x += keyWidth + 4
+        let hintWidth = hint.textWidth
+        let right = bounds.width - 12 - hintWidth - 6
+        for b in buttons {
+            let w = b.fittingWidth
+            b.isHidden = x + w > right
+            guard !b.isHidden else { continue }
+            b.frame = NSRect(x: x, y: 0, width: w, height: h)
+            x += w + 2
+        }
+        hint.frame = NSRect(x: x + 4, y: floor((h - 15) / 2), width: hintWidth, height: 15)
+    }
+}
+
+/// The selection's stats on top (unless hidden: `zi`); under them mode,
+/// pending keys, target, sticker and safe mode toggles, status.
 final class FooterBar: NSView {
     /// The row under the stats line.
     static let rowHeight: CGFloat = 30
-    /// The whole bar.
-    static let height: CGFloat = 48
+    /// The whole bar with the stats line.
+    static let fullHeight: CGFloat = 48
+
+    /// The bar's height now: without the stats line when it is hidden.
+    var height: CGFloat { footer?.detailsRow == false ? FooterBar.rowHeight : FooterBar.fullHeight }
 
     private let details = label("", size: 11, color: .secondaryLabelColor)
     private let mode = ModeLabel()
@@ -306,7 +385,11 @@ final class FooterBar: NSView {
 
     func update(_ f: Footer) {
         guard f != footer else { return }
+        if f.detailsRow != footer?.detailsRow {
+            superview?.needsLayout = true
+        }
         footer = f
+        details.setShown(f.detailsRow)
         mode.text = f.mode ?? ""
         mode.insert = f.insert
         mode.setShown(f.mode != nil)

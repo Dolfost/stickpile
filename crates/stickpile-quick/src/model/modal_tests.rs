@@ -170,8 +170,11 @@ fn opens_on_the_start_tab_in_its_mode() {
         });
         assert_eq!(m.tab(), tab);
         assert_eq!(m.mode(), tab.default_mode(), "{tab:?}");
-        assert_eq!(cmds[..2], [Command::Present, Command::CancelSearch]);
-        let load = &cmds[2..];
+        assert_eq!(
+            cmds[..3],
+            [Command::Present, Command::CancelSearch, Command::LoadVocabulary]
+        );
+        let load = &cmds[3..];
         match tab {
             Tab::Search | Tab::Recent => assert_eq!(load, [Command::LoadRecent { limit: 5 }]),
             Tab::MostUsed => assert_eq!(
@@ -488,13 +491,36 @@ fn digits_without_a_grid_switch_at_once() {
     let mut m = open_on(Tab::Me);
     let cmds = key(&mut m, '4');
     assert_eq!(m.tab(), Tab::Packs);
-    assert_eq!(m.mode(), Mode::Insert);
+    assert_eq!(m.mode(), Mode::Normal);
     assert!(packs_gen(&cmds).is_some());
     let mut m = open_on(Tab::Settings);
     assert!(keys(&mut m, "89").is_empty());
     assert_eq!(m.tab(), Tab::Settings);
     key(&mut m, '2');
     assert_eq!(m.tab(), Tab::Recent);
+}
+
+#[test]
+fn without_counts_a_digit_switches_at_once() {
+    let mut m = opened(ModelConfig { counts: false, ..cfg() }, None);
+    m.handle(Event::ShowTab(Tab::Recent));
+    m.handle(Event::RecentLoaded(items(9)));
+    let cmds = key(&mut m, '3');
+    assert_eq!(m.tab(), Tab::MostUsed, "no wait");
+    assert!(
+        cmds.iter().all(|c| !matches!(c, Command::KeyTimeout { .. })),
+        "{cmds:?}"
+    );
+    assert!(m.pending().is_empty());
+    key(&mut m, '2');
+    m.handle(Event::RecentLoaded(items(9)));
+    keys(&mut m, "3j");
+    assert_eq!(m.tab(), Tab::MostUsed, "3 is a tab, not a count");
+    key(&mut m, '2');
+    m.handle(Event::RecentLoaded(items(9)));
+    keys(&mut m, "l0");
+    assert_eq!(m.tab(), Tab::Recent, "0 is still the row start");
+    assert_eq!(m.selected(), Some(0));
 }
 
 #[test]
@@ -508,9 +534,9 @@ fn gt_and_gt_backwards_wrap() {
     assert_eq!(m.tab(), Tab::Settings);
     keys(&mut m, "gt");
     assert_eq!(m.tab(), Tab::Search);
-    assert_eq!(m.mode(), Mode::Insert, "Search starts typing");
-    assert!(keys(&mut m, "gt").is_empty(), "typed into the query, not Normal keys");
-    assert_eq!(m.tab(), Tab::Search);
+    assert_eq!(m.mode(), Mode::Normal, "a switch does not start typing");
+    keys(&mut m, "gt");
+    assert_eq!(m.tab(), Tab::Recent, "so the keys stay Normal keys");
 
     let mut m = open_on(Tab::Recent);
     keys(&mut m, "5gt");
@@ -529,7 +555,7 @@ fn tab_and_shift_tab_cycle_in_both_modes() {
     assert_eq!((m.tab(), m.mode()), (Tab::Recent, Mode::Normal));
     m.handle(Event::CycleTab { backwards: false });
     m.handle(Event::CycleTab { backwards: false });
-    assert_eq!((m.tab(), m.mode()), (Tab::Packs, Mode::Insert));
+    assert_eq!((m.tab(), m.mode()), (Tab::Packs, Mode::Normal));
     m.handle(Event::CycleTab { backwards: true });
     assert_eq!(m.tab(), Tab::MostUsed);
     for _ in 0..3 {

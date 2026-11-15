@@ -84,6 +84,14 @@ pub struct UiConfig {
     pub show_emojis: bool,
     /// An item's tags on its tile.
     pub show_tags: bool,
+    /// An item's vibe label on its tile.
+    pub show_vibe: bool,
+    /// The selection's stats (name, pack, format, copies, likes, quality)
+    /// in a row above the footer.
+    pub show_details: bool,
+    /// Normal-mode digits start a count (`3j`, `5G`); a lone 1-7 then
+    /// switches tabs after a short wait instead of at once.
+    pub counts: bool,
     /// Safe mode: the popup hides items tagged `nsfw` (`S` in Normal mode
     /// switches it and saves this).
     pub safe_mode: bool,
@@ -148,6 +156,9 @@ impl Default for UiConfig {
             mark_favorites: true,
             show_emojis: true,
             show_tags: true,
+            show_vibe: true,
+            show_details: true,
+            counts: false,
             safe_mode: false,
             language: "auto".into(),
         }
@@ -502,13 +513,14 @@ mod tests {
     fn ui_and_copy_keys() {
         let c = ClientConfig::from_toml(
             "[ui]\nmodal = false\nstart_tab = \"most_used\"\nstart_mode = \"insert\"\nmark_favorites = false\n\
-             show_emojis = false\nshow_tags = false\nsafe_mode = true\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
+             show_emojis = false\nshow_tags = false\nshow_vibe = false\nshow_details = false\ncounts = true\nsafe_mode = true\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
         )
         .unwrap();
         assert!(!c.ui.modal);
         assert_eq!(c.ui.start_tab, "most_used");
         assert_eq!(c.ui.start_mode, StartMode::Insert);
-        assert!(!c.ui.mark_favorites && !c.ui.show_emojis && !c.ui.show_tags);
+        assert!(!c.ui.mark_favorites && !c.ui.show_emojis && !c.ui.show_tags && !c.ui.show_vibe);
+        assert!(c.ui.counts && !c.ui.show_details);
         assert!(c.ui.safe_mode);
         assert_eq!(c.copy.square, SquarePad::White);
         assert_eq!(c.copy.background, Background::White);
@@ -516,7 +528,8 @@ mod tests {
         assert!(d.ui.modal);
         assert_eq!(d.ui.start_tab, "last");
         assert_eq!(d.ui.start_mode, StartMode::Normal);
-        assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags);
+        assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags && d.ui.show_vibe);
+        assert!(!d.ui.counts && d.ui.show_details);
         assert!(!d.ui.safe_mode);
         assert_eq!(d.ui.language, "auto");
         for l in LANGUAGES {

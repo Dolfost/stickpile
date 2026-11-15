@@ -1,8 +1,12 @@
-//! The key help drawn over the popup (`?`, F1), from `stickpile_quick::HELP`.
+//! The help drawn over the popup: the keys (`?`, F1, from
+//! `stickpile_quick::HELP`) or the search syntax (`g/`, F2, from
+//! `stickpile_quick::SYNTAX`).
 
 use gtk::prelude::*;
 use stickpile_i18n::global::{t, t_dyn};
-use stickpile_quick::HELP;
+use stickpile_quick::model::HelpPage;
+use stickpile_quick::vim::help_lists;
+use stickpile_quick::{HELP, SYNTAX};
 
 use crate::pages;
 
@@ -17,25 +21,28 @@ pub fn build() -> gtk::Widget {
         .build();
     card.add_css_class("stickpile-help");
     card.set_visible(false);
-    fill(&card);
     card.upcast()
 }
 
-/// Draw the help again in the current language.
-pub fn relabel(card: &gtk::Widget) {
+/// Draw `page` in the current language; `counts`: list the count keys
+/// ([`stickpile_quick::ModelConfig::counts`]).
+pub fn show(card: &gtk::Widget, page: HelpPage, counts: bool) {
     let Some(card) = card.downcast_ref::<gtk::Box>() else {
         return;
     };
     while let Some(child) = card.first_child() {
         card.remove(&child);
     }
-    fill(card);
+    match page {
+        HelpPage::Keys => fill(card, HELP, counts, t("? or Esc closes this")),
+        HelpPage::Syntax => fill(card, SYNTAX, true, t("F2 or Esc closes this")),
+    }
 }
 
-/// The key tables (from `stickpile_quick::HELP`, translated) into `card`.
-fn fill(card: &gtk::Box) {
+/// The tables of `sections`, translated, into `card`, with `hint` under them.
+fn fill(card: &gtk::Box, sections: &[stickpile_quick::HelpSection], counts: bool, hint: &str) {
     let grid = gtk::Box::builder().spacing(24).build();
-    for column in pages::help_columns(HELP) {
+    for column in pages::help_columns(sections) {
         let col = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(3)
@@ -50,7 +57,8 @@ fn fill(card: &gtk::Box) {
             title.add_css_class("heading");
             col.append(&title);
             let keys = gtk::Grid::builder().column_spacing(14).row_spacing(2).build();
-            for (row, (k, what)) in section.keys.iter().enumerate() {
+            let shown = section.keys.iter().filter(|(k, _)| help_lists(k, counts));
+            for (row, (k, what)) in shown.enumerate() {
                 let key = gtk::Label::builder()
                     .label(t_dyn(k))
                     .xalign(0.0)
@@ -76,11 +84,7 @@ fn fill(card: &gtk::Box) {
         }
         grid.append(&col);
     }
-    let hint = gtk::Label::builder()
-        .label(t("? or Esc closes this"))
-        .xalign(1.0)
-        .margin_top(10)
-        .build();
+    let hint = gtk::Label::builder().label(hint).xalign(1.0).margin_top(10).build();
     hint.add_css_class("dim-label");
     hint.add_css_class("caption");
     // The padding is inside the scrolled area: at its edge the first

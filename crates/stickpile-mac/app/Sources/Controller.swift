@@ -15,6 +15,7 @@ protocol PopupControl: AnyObject {
     func toggleHelp()
     func toggleSticker()
     func toggleSafe()
+    func acceptSuggestion(index: UInt32)
     func cycleTarget()
     func packBack()
     func textFocus(focused: Bool)
@@ -90,11 +91,13 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         let v = view
         v.tabBar.onTab = { [weak self] tab in self?.send { $0.showTab(tab: tab) } }
         v.tabBar.onHelp = { [weak self] in self?.send { $0.toggleHelp() } }
+        v.tabBar.onVersion = { if let url = URL(string: projectUrl()) { NSWorkspace.shared.open(url) } }
         v.header.onBack = { [weak self] in self?.send { $0.packBack() } }
         v.header.onQuery = { [weak self] text in self?.send { $0.queryChanged(text: text) } }
         v.footer.target.action = { [weak self] in self?.send { $0.cycleTarget() } }
         v.footer.sticker.action = { [weak self] in self?.send { $0.toggleSticker() } }
         v.footer.safe.action = { [weak self] in self?.send { $0.toggleSafe() } }
+        v.suggest.onAccept = { [weak self] i in self?.send { $0.acceptSuggestion(index: UInt32(i)) } }
         for grid in [v.itemsGrid, v.packsGrid] {
             grid.collection.onSelect = { [weak self] i in self?.send { $0.select(index: UInt32(i)) } }
             grid.collection.onActivate = { [weak self] i in self?.send { $0.activate(index: UInt32(i)) } }
@@ -230,6 +233,11 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         v.showError(s.error, configPath: s.configPath)
         v.tabBar.update(tabs: s.tabs, current: s.tab)
         v.header.update(s)
+        if v.suggest.isHidden != (s.suggestions == nil) {
+            v.suggest.setShown(s.suggestions != nil)
+            v.needsLayout = true
+        }
+        v.suggest.update(s.suggestions)
         thumbs.pixelSize = CGFloat(s.thumbPx) * max(2, panel.backingScaleFactor)
         if let e = s.entries { v.itemsGrid.setEntries(e) }
         if let p = s.packs { v.packsGrid.setPacks(p) }
@@ -247,7 +255,7 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         let cursor = s.footer.mode != nil
         v.mePage.setCursor(on: cursor && s.view == .me)
         v.settingsPage.setCursor(on: cursor && s.view == .settings)
-        v.help.update(s.help)
+        v.help.update(s.help, hint: s.helpHint)
         v.footer.update(s.footer)
         v.needsLayout = true
         if panel.isVisible {

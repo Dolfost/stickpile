@@ -22,8 +22,8 @@ use stickpile_desktop::{glue, pages, sync};
 use stickpile_i18n::global::{t, tf, tp};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::{FocusBackend, WindowInfo};
-use stickpile_quick::model::{self, Command, Event, Model, OpenInfo, StickerMode};
-use stickpile_quick::{Mode, Tab, View, HELP};
+use stickpile_quick::model::{self, Command, Event, HelpPage, Model, OpenInfo, StickerMode};
+use stickpile_quick::{Mode, Tab, View, HELP, SYNTAX};
 
 use crate::bridge::*;
 use crate::keys::{mac_key_names, MacKey};
@@ -454,6 +454,10 @@ impl Driver {
         self.dispatch(Event::ToggleSafe);
     }
 
+    pub fn accept_suggestion(&self, index: u32) {
+        self.dispatch(Event::AcceptSuggestion(index as usize));
+    }
+
     pub fn cycle_target(&self) {
         self.dispatch(Event::CycleTarget { backwards: false });
     }
@@ -641,6 +645,14 @@ impl Driver {
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
             Command::SaveTile { tile, on } => self.save_bool(glue::tile_key(tile), on),
             Command::SaveSafeMode { on } => self.save_bool(glue::SAFE_MODE_KEY, on),
+            Command::LoadVocabulary => {
+                let Some(b) = self.backend() else { return };
+                self.spawn(b.vocabulary(), |d, vocab| {
+                    if let Some(vocab) = vocab {
+                        d.dispatch(Event::VocabularyLoaded(vocab));
+                    }
+                });
+            }
             Command::SaveHistory(history) => {
                 let path = self.lock().history_path.clone();
                 self.rt.spawn_blocking(move || {
@@ -731,6 +743,11 @@ impl Driver {
                     } else {
                         String::new()
                     },
+                    vibe: if tiles.vibe {
+                        model::vibe(&e.item).to_string()
+                    } else {
+                        String::new()
+                    },
                 })
                 .collect()
         });
@@ -774,6 +791,7 @@ impl Driver {
             safe: f.safe,
             safe_label: model::safe_label(f.safe).to_string(),
             details: f.details,
+            details_row: f.details_row,
         };
         let focus = match m.mode() {
             _ if !m.is_visible() => FocusWish::Keep,
@@ -828,8 +846,19 @@ impl Driver {
                 favorites: tiles.favorites,
                 emojis: tiles.emojis,
                 tags: tiles.tags,
+                vibe: tiles.vibe,
             },
-            help: m.help_visible().then(help),
+            help: m.help_page().map(|page| help(page, m.config().counts)),
+            help_hint: match m.help_page() {
+                Some(HelpPage::Syntax) => t("F2 or Esc closes this"),
+                _ => t("? or Esc closes this"),
+            }
+            .to_string(),
+            suggestions: m.suggestions().map(|s| SuggestionView {
+                key: s.key,
+                words: s.words,
+                chosen: s.chosen.map(|i| i as u32),
+            }),
             footer,
             me: s.me.view(),
             settings: s.settings.view(&s.config_path),
@@ -1227,14 +1256,21 @@ fn effective_lang(cfg: &ClientConfig, account: Option<Lang>, system: &[String]) 
 }
 
 /// The key help, translated, with Mac key names.
-fn help() -> Vec<HelpSection> {
-    let mut sections: Vec<HelpSection> = HELP
+/// The sections of `page`; `counts`: list the count keys
+/// ([`stickpile_quick::ModelConfig::counts`]).
+fn help(page: HelpPage, counts: bool) -> Vec<HelpSection> {
+    let source = match page {
+        HelpPage::Keys => HELP,
+        HelpPage::Syntax => SYNTAX,
+    };
+    let mut sections: Vec<HelpSection> = source
         .iter()
         .map(|s| HelpSection {
             title: stickpile_i18n::global::t_dyn(s.title),
             keys: s
                 .keys
                 .iter()
+                .filter(|(k, _)| stickpile_quick::vim::help_lists(k, counts))
                 .map(|(k, what)| HelpKey {
                     keys: mac_key_names(&stickpile_i18n::global::t_dyn(k)),
                     action: stickpile_i18n::global::t_dyn(what),

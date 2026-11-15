@@ -50,6 +50,7 @@ final class PopupPanel: NSPanel {
 final class PopupView: NSView {
     let tabBar = TabBar()
     let header = HeaderBar()
+    let suggest = SuggestBar()
     let content = FlippedView()
     let itemsGrid: GridView
     let packsGrid: GridView
@@ -85,7 +86,8 @@ final class PopupView: NSView {
         help.autoresizingMask = [.width, .height]
         help.isHidden = true
         content.addSubview(help)
-        [tabBar, header, topLine, content, bottomLine, footer, errorPage].forEach(addSubview)
+        suggest.isHidden = true
+        [tabBar, header, suggest, topLine, content, bottomLine, footer, errorPage].forEach(addSubview)
         errorPage.isHidden = true
     }
 
@@ -96,8 +98,11 @@ final class PopupView: NSView {
         let w = bounds.width, h = bounds.height
         tabBar.frame = NSRect(x: 0, y: topInset, width: w, height: 32)
         header.frame = NSRect(x: 0, y: topInset + 34, width: w, height: 42)
-        topLine.frame = NSRect(x: 0, y: header.frame.maxY, width: w, height: 1)
-        let footerHeight = FooterBar.height
+        // The suggestions push the grid down rather than cover it.
+        let suggestHeight = suggest.isHidden ? 0 : SuggestBar.height
+        suggest.frame = NSRect(x: 0, y: header.frame.maxY, width: w, height: suggestHeight)
+        topLine.frame = NSRect(x: 0, y: header.frame.maxY + suggestHeight, width: w, height: 1)
+        let footerHeight = footer.height
         footer.frame = NSRect(x: 0, y: h - footerHeight, width: w, height: footerHeight)
         bottomLine.frame = NSRect(x: 0, y: h - footerHeight - 1, width: w, height: 1)
         content.frame = NSRect(x: 0, y: topLine.frame.maxY, width: w, height: max(0, bottomLine.frame.minY - topLine.frame.maxY))
@@ -126,6 +131,7 @@ final class PopupView: NSView {
     func relabel() {
         tabBar.relabel()
         header.relabel()
+        suggest.relabel()
         footer.relabel()
         mePage.relabel()
     }

@@ -87,6 +87,8 @@ pub(crate) enum Cmd {
     Browser,
     /// `?`
     Help,
+    /// `g/`: the search syntax.
+    Syntax,
     /// `q`
     Quit,
     Escape,
@@ -94,7 +96,8 @@ pub(crate) enum Cmd {
     Back,
     /// `o`
     Open,
-    /// `zf`, `ze`, `zt`: show or hide favorite marks, emojis or tags on the tiles.
+    /// `zf`, `ze`, `zt`, `zv`: show or hide favorite marks, emojis, tags or
+    /// the vibe on the tiles; `zi` the stats row.
     Tile(Tile),
 }
 
@@ -185,6 +188,7 @@ impl Pending {
                 },
                 NormalKey::Char('T') => Some(Cmd::PrevTab(count.unwrap_or(1))),
                 NormalKey::Char('x') => Some(Cmd::Browser),
+                NormalKey::Char('/') => Some(Cmd::Syntax),
                 _ => None,
             };
             return Fed::Run(cmd.into_iter().collect());
@@ -196,6 +200,8 @@ impl Pending {
                 NormalKey::Char('f') => Some(Tile::Favorites),
                 NormalKey::Char('e') => Some(Tile::Emojis),
                 NormalKey::Char('t') => Some(Tile::Tags),
+                NormalKey::Char('v') => Some(Tile::Vibe),
+                NormalKey::Char('i') => Some(Tile::Details),
                 _ => None,
             };
             return Fed::Run(tile.map(Cmd::Tile).into_iter().collect());
@@ -286,6 +292,15 @@ pub struct HelpSection {
     pub keys: &'static [(&'static str, &'static str)],
 }
 
+/// The [`HELP`] keys that need [`crate::ModelConfig::counts`].
+pub const COUNT_KEYS: [&str; 2] = ["3j, 2l", "5G"];
+
+/// Whether the help lists `keys` (the first of a [`HELP`] pair): the count
+/// keys only when counts are on.
+pub fn help_lists(keys: &str, counts: bool) -> bool {
+    counts || !COUNT_KEYS.contains(&keys)
+}
+
 /// The key help the shell draws when [`crate::Model::help_visible`] is on.
 pub const HELP: &[HelpSection] = &[
     HelpSection {
@@ -293,7 +308,8 @@ pub const HELP: &[HelpSection] = &[
         keys: &[
             ("h j k l, arrows", "move"),
             ("3j, 2l", "move with a count"),
-            ("gg / G, 5G", "first / last / fifth item"),
+            ("gg / G", "first / last item"),
+            ("5G", "fifth item"),
             ("0 / $", "start / end of the row"),
             ("Ctrl+d / Ctrl+u", "half a page down / up"),
             ("y, Enter", "copy for the target app"),
@@ -303,10 +319,15 @@ pub const HELP: &[HelpSection] = &[
             ("t / T", "next / previous target app"),
             ("s", "toggle sticker mode"),
             ("S", "safe mode: hide or show items tagged nsfw"),
-            ("zf / ze / zt", "favorite marks / emojis / tags on the tiles"),
+            (
+                "zf / ze / zt / zv",
+                "favorite marks / emojis / tags / vibe on the tiles",
+            ),
+            ("zi", "the item stats row"),
             ("/", "new search"),
             ("i, a", "edit the query"),
             ("?", "this help"),
+            ("g/, F2", "search syntax"),
             ("q, Esc", "hide"),
         ],
     },
@@ -329,6 +350,7 @@ pub const HELP: &[HelpSection] = &[
         title: "Insert mode",
         keys: &[
             ("typing", "search, filter packs"),
+            ("Tab / Shift+Tab", "put in the next / previous offered value"),
             ("arrows, Page Up / Down, Home / End", "move"),
             ("Enter / Shift+Enter", "copy / copy with sticker mode flipped"),
             ("Ctrl+T / Ctrl+S / Ctrl+D", "target app / sticker mode / favorite"),
@@ -343,6 +365,45 @@ pub const HELP: &[HelpSection] = &[
             ("h l", "change a choice or a number"),
             ("Enter, Space", "press, toggle, open a choice"),
             ("i", "edit the field; Esc leaves it"),
+        ],
+    },
+];
+
+/// The search syntax the shell draws for [`crate::model::HelpPage::Syntax`]
+/// (`g/`, F2); see `stickpile_api::query`.
+pub const SYNTAX: &[HelpSection] = &[
+    HelpSection {
+        title: "Search syntax",
+        keys: &[
+            (
+                "cat \"big chungus\"",
+                "words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven",
+            ),
+            ("e:😂", "has this emoji"),
+            ("vibe:tired", "has this vibe"),
+            ("tag:reaction", "has this tag"),
+            ("set:cats", "in this pack (its slug or name)"),
+            ("by:alice", "in a pack of this user"),
+            ("type:gif", "gif, png, webp, jpeg, mp4, webm, still, animated, video"),
+            ("is:mine, is:liked, is:public", "yours, liked by you, public"),
+            ("q>70, likes>=2, copies<5", "quality, likes, copies (> >= < <= =)"),
+            ("sort:likes", "relevance, recent, likes, copies, quality"),
+            ("tag:a tag:b", "either of them"),
+            ("-tag:nsfw, -word", "leave out"),
+        ],
+    },
+    HelpSection {
+        title: "Suggestions",
+        keys: &[
+            (
+                "vibe: tag: set: by:",
+                "the values in use are offered under the field, most used first",
+            ),
+            ("Tab / Shift+Tab", "put in the next / previous offered value"),
+            (
+                "vibe:sarcstic",
+                "a typo or a half-typed value searches for the closest one",
+            ),
         ],
     },
 ];
@@ -440,6 +501,9 @@ mod tests {
         assert_eq!(run("zf"), [Cmd::Tile(Tile::Favorites)]);
         assert_eq!(run("ze"), [Cmd::Tile(Tile::Emojis)]);
         assert_eq!(run("zt"), [Cmd::Tile(Tile::Tags)]);
+        assert_eq!(run("zv"), [Cmd::Tile(Tile::Vibe)]);
+        assert_eq!(run("zi"), [Cmd::Tile(Tile::Details)]);
+        assert_eq!(run("g/"), [Cmd::Syntax]);
         assert_eq!(run("3zt"), [Cmd::Tile(Tile::Tags)], "a count is dropped");
         assert_eq!(run("zZ"), [], "unknown z-sequence is dropped");
         assert_eq!(run("zqj"), [Cmd::Move(Nav::Down, 1)]);
@@ -584,5 +648,15 @@ mod tests {
             .iter()
             .flat_map(|s| s.keys)
             .all(|(k, v)| k.is_ascii() && v.is_ascii()));
+    }
+
+    #[test]
+    fn the_count_keys_are_listed_only_with_counts() {
+        let listed: Vec<_> = HELP.iter().flat_map(|s| s.keys).map(|(k, _)| *k).collect();
+        for k in COUNT_KEYS {
+            assert!(listed.contains(&k), "{k} is a help line");
+            assert!(help_lists(k, true) && !help_lists(k, false));
+        }
+        assert!(help_lists("gg / G", false));
     }
 }
