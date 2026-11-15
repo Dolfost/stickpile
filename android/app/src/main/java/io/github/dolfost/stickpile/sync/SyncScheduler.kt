@@ -21,9 +21,9 @@ object SyncScheduler {
     const val WORK_NAME = "stickpile-sync"
 
     /**
-     * The delay before the one retry of a failed run ([SyncOutcome]):
-     * longer than the library's 60 s between two attempts, so that the
-     * retry finds a sync due.
+     * The delay before the one retry of a failed run ([SyncOutcome]): a
+     * server that was briefly down gets a second chance well before the
+     * next period.
      */
     const val RETRY_DELAY_MINUTES = 2L
 
