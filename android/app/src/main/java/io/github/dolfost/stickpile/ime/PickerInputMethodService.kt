@@ -320,9 +320,9 @@ class PickerInputMethodService : InputMethodService() {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    /** The draft in the field, when searching it is on and the field is not a password. */
+    /** The draft in the field, when searching it is on and the field is plain text ([DraftQuery.canRead]). */
     private fun readDraft(info: EditorInfo): Draft? {
-        if (!settings.searchDraft || DraftQuery.isSensitive(info.inputType)) return null
+        if (!settings.searchDraft || !DraftQuery.canRead(info.inputType, info.imeOptions)) return null
         val ic = currentInputConnection ?: return null
         return DraftQuery.read(
             ic.getTextBeforeCursor(DraftQuery.READ_LENGTH, 0),

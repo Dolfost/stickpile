@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ime
 
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -57,17 +58,71 @@ class DraftQueryTest {
         assertEquals(61, DraftQuery.READ_LENGTH)
     }
 
+    private val text = InputType.TYPE_CLASS_TEXT
+
     @Test
-    fun passwordFieldsAreNotRead() {
-        val text = InputType.TYPE_CLASS_TEXT
-        val number = InputType.TYPE_CLASS_NUMBER
-        assertTrue(DraftQuery.isSensitive(text or InputType.TYPE_TEXT_VARIATION_PASSWORD))
-        assertTrue(DraftQuery.isSensitive(text or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
-        assertTrue(DraftQuery.isSensitive(text or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD))
-        assertTrue(DraftQuery.isSensitive(number or InputType.TYPE_NUMBER_VARIATION_PASSWORD))
-        assertFalse(DraftQuery.isSensitive(text or InputType.TYPE_TEXT_FLAG_MULTI_LINE))
-        assertFalse(DraftQuery.isSensitive(text or InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE))
-        assertFalse(DraftQuery.isSensitive(number))
-        assertFalse(DraftQuery.isSensitive(InputType.TYPE_NULL))
+    fun plainTextFieldsAreRead() {
+        assertTrue(DraftQuery.canRead(text, 0))
+        assertTrue(DraftQuery.canRead(text or InputType.TYPE_TEXT_VARIATION_NORMAL, 0))
+        assertTrue(DraftQuery.canRead(text or InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE, 0))
+        assertTrue(DraftQuery.canRead(text or InputType.TYPE_TEXT_VARIATION_LONG_MESSAGE, 0))
+        // A chat app's message field, as typically flagged.
+        val chat = text or InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+            InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+        assertTrue(DraftQuery.canRead(chat, EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI))
+    }
+
+    @Test
+    fun otherTextVariationsAreNotRead() {
+        listOf(
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_SUBJECT,
+            InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_TEXT_VARIATION_PERSON_NAME,
+            InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
+            InputType.TYPE_TEXT_VARIATION_FILTER,
+            InputType.TYPE_TEXT_VARIATION_PHONETIC,
+        ).forEach { variation ->
+            assertFalse("variation $variation", DraftQuery.canRead(text or variation, 0))
+        }
+    }
+
+    @Test
+    fun otherClassesAreNotRead() {
+        listOf(
+            InputType.TYPE_NULL,
+            InputType.TYPE_CLASS_NUMBER,
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL,
+            InputType.TYPE_CLASS_PHONE,
+            InputType.TYPE_CLASS_DATETIME,
+            InputType.TYPE_CLASS_DATETIME or InputType.TYPE_DATETIME_VARIATION_TIME,
+        ).forEach { type ->
+            assertFalse("input type $type", DraftQuery.canRead(type, 0))
+        }
+    }
+
+    @Test
+    fun fieldsAskingForNoSuggestionsAreNotRead() {
+        assertFalse(DraftQuery.canRead(text or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 0))
+        assertFalse(
+            DraftQuery.canRead(
+                text or InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                0,
+            ),
+        )
+    }
+
+    @Test
+    fun incognitoFieldsAreNotRead() {
+        val incognito = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+        assertFalse(DraftQuery.canRead(text, incognito))
+        assertFalse(DraftQuery.canRead(text or InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE, incognito))
+        assertFalse(DraftQuery.canRead(text, incognito or EditorInfo.IME_ACTION_SEND))
     }
 }
