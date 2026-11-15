@@ -129,6 +129,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/totp", post(settings::totp_begin))
         .route("/settings/totp/confirm", post(settings::totp_confirm))
         .route("/settings/totp/disable", post(settings::totp_disable))
+        .route("/settings/pairing", post(settings::pairing_create))
         .route("/settings/tokens", post(settings::token_create))
         .route("/settings/tokens/{id}/revoke", post(settings::token_revoke))
         // admin

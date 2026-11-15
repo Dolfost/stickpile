@@ -81,6 +81,16 @@ Copy it now: it is not shown again.	Скопіюйте його зараз: бі
 Use it as	Використовуйте його як
 or paste it into the CLI or desktop client settings.	або вставте його в налаштування CLI чи настільного клієнта.
 Done	Готово
+# Add a device with a pairing code (settings.rs).
+Add a device	Додати пристрій
+Sign in the stickpile app on a phone or another computer without your password: it scans a QR code, or you type in a short code.	Увійдіть у застосунок stickpile на телефоні чи іншому комп'ютері без пароля: він сканує QR-код, або ви вводите короткий код.
+The code works once, for five minutes. The device gets an API token of its own, listed below.	Код діє один раз і лише п'ять хвилин. Пристрій отримує власний API-токен, його видно в списку нижче.
+QR code to sign in a new device	QR-код для входу на новому пристрої
+In the stickpile app on the new device, choose to scan a QR code and point the camera at this one.	У застосунку stickpile на новому пристрої виберіть сканування QR-коду й наведіть камеру на цей код.
+Or enter the server address and the code by hand:	Або введіть адресу сервера й код вручну:
+The code works once and expires at	Код діє один раз і спливає
+Until then, anyone who has it can sign in as you: show it only to your own devices.	Доти будь-хто, хто його має, може увійти від вашого імені: показуйте його лише своїм пристроям.
+New code	Новий код
 # Sign in and registration (auth.rs).
 Sign in	Увійти
 On the tailnet? Open stickpile through its tailnet address and you are signed in automatically.	У tailnet? Відкрийте stickpile за його адресою в tailnet, і вхід відбудеться автоматично.

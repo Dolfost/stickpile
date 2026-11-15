@@ -1,12 +1,15 @@
 //! Pairing a new device with a one-time code: `POST /api/v1/pairings`
-//! (signed in) and `POST /api/v1/auth/pair` (anonymous).
+//! (signed in) and `POST /api/v1/auth/pair` (anonymous), and Settings ->
+//! "Add a device" in the web UI.
 
 mod common;
+mod web_common;
 
 use common::{read, Resp, TestServer, TestUser};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 use stickpile_api::{pairing, routes, AuditEntry, PairingCreated, TokenCreated, User};
+use web_common::*;
 
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -447,4 +450,54 @@ async fn openapi_documents_pairing() {
     for name in ["PairRequest", "PairingCreated", "TokenCreated"] {
         assert!(schemas.get(name).is_some(), "schema {name}");
     }
+}
+
+#[tokio::test]
+async fn settings_add_a_device() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let b = Browser::login(&srv, &alice).await;
+
+    let page = b.get("/settings").await;
+    assert_page(&page);
+    let html = page.text();
+    assert!(html.contains("<section id=\"devices\" aria-labelledby=\"s-devices\">"));
+    assert!(html.contains("action=\"/settings/pairing\""));
+
+    // Without the CSRF token: refused, and no code is made.
+    let r = b.post_raw("/settings/pairing", &[]).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let codes = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pairing_codes")
+            .fetch_one(&srv.state.db)
+            .await
+            .unwrap()
+    };
+    assert_eq!(codes().await, 0);
+
+    let r = b.post_form("/settings/pairing", &[]).await;
+    assert_page(&r);
+    assert_eq!(r.header("cache-control").as_deref(), Some("no-store"));
+    let html = r.text();
+    assert!(html.contains("<svg class=\"qr\""), "QR code");
+    assert!(html.contains("aria-label=\"QR code to sign in a new device\""));
+    assert!(html.contains(&format!("<code>{}</code>", srv.base)), "server address");
+    let at = html.find("id=\"pairing-code\"").expect("code shown");
+    let code = html[at..]
+        .split_once('>')
+        .and_then(|(_, rest)| rest.split('<').next())
+        .unwrap()
+        .to_string();
+    assert!(pairing::normalize(&code).is_some(), "{code}");
+    assert!(html.contains("<time datetime="), "expiry shown");
+    assert_eq!(codes().await, 1);
+    // The code on the page signs a device in.
+    let token: TokenCreated = exchange(&srv, &code, "phone").await.expect(200).json();
+    assert_eq!(token.user.id, alice.id);
+
+    // Anonymous visitors are sent to the login page.
+    let r = Browser::anonymous(&srv).post_raw("/settings/pairing", &[]).await;
+    assert!(r.status.is_redirection(), "{}", r.status);
+    assert!(location(&r).starts_with("/login"), "{}", location(&r));
+    assert_eq!(codes().await, 1);
 }

@@ -1,20 +1,21 @@
 //! Account settings: profile (display name, Telegram user id), theme,
-//! password, TOTP enrolment (QR code as inline SVG) and API tokens.
+//! password, TOTP enrolment (QR code as inline SVG), adding a device with a
+//! pairing code (QR code too) and API tokens.
 
 use std::fmt::Write as _;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
-use stickpile_api::{ChangePassword, Theme, UpdateMe};
+use stickpile_api::{ChangePassword, PairingCreated, Theme, UpdateMe};
 
 use super::components::{opt_time, time_el, trusted};
 use super::layout::{self, Nav};
 use super::{safe_next, Ctx};
-use crate::auth::AuthMethod;
+use crate::auth::{pairing, AuthMethod};
 use crate::db::UserRow;
 use crate::error::{AppError, AppResult};
 use crate::i18n::{t, t_dyn, tf};
@@ -24,8 +25,14 @@ use crate::service::{account, telegram, ui};
 use crate::state::AppState;
 
 /// QR code of `data` as an SVG (dark modules on white, 4-module quiet
-/// zone), built from the module matrix: no `style` attributes.
+/// zone), built from the module matrix: no `style` attributes. Labelled for
+/// TOTP enrolment; [`qr_svg_labelled`] takes another label.
 pub fn qr_svg(data: &str) -> Option<String> {
+    qr_svg_labelled(data, t("QR code for your authenticator app"))
+}
+
+/// [`qr_svg`] with `label` as its accessible name.
+pub fn qr_svg_labelled(data: &str, label: &str) -> Option<String> {
     let code = qrcode::QrCode::new(data.as_bytes()).ok()?;
     let w = code.width();
     let colors = code.to_colors();
@@ -39,7 +46,7 @@ pub fn qr_svg(data: &str) -> Option<String> {
             }
         }
     }
-    let label = html! { (t("QR code for your authenticator app")) }.into_string();
+    let label = html! { (label) }.into_string();
     Some(format!(
         r##"<svg class="qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="220" height="220" role="img" aria-label="{label}" shape-rendering="crispEdges"><rect width="{size}" height="{size}" fill="#ffffff"/><path d="{d}" fill="#000000"/></svg>"##
     ))
@@ -80,6 +87,7 @@ enum Section {
     Appearance,
     Password,
     Totp,
+    Devices,
     Tokens,
 }
 
@@ -225,6 +233,16 @@ async fn render(
                     button type="submit" { (t("Set up two-step verification")) }
                 }
             }
+        }
+        section #devices aria-labelledby="s-devices" {
+            h2 #s-devices { (t("Add a device")) }
+            p { (t("Sign in the stickpile app on a phone or another computer without your password: it scans a QR code, or you type in a short code.")) }
+            (err(Section::Devices))
+            form.inline method="post" action="/settings/pairing" {
+                (ctx.csrf_input())
+                button type="submit" { (t("Add a device")) }
+            }
+            p.hint { (t("The code works once, for five minutes. The device gets an API token of its own, listed below.")) }
         }
         section #tokens aria-labelledby="s-tokens" {
             h2 #s-tokens { (t("API tokens")) }
@@ -573,6 +591,55 @@ pub async fn token_create(State(state): State<AppState>, ctx: Ctx, Form(f): Form
         p { a.button href="/settings#tokens" { (t("Done")) } }
     };
     Ok(ctx.page(t("New API token"), Nav::Settings, body).into_response())
+}
+
+/// The page that shows a new pairing code: its QR code, the code and the
+/// server's address for typing them in, and when it expires.
+fn pairing_page(state: &AppState, ctx: &Ctx, created: &PairingCreated) -> Markup {
+    let qr = qr_svg_labelled(&created.pairing_url, t("QR code to sign in a new device"));
+    let server = state.config.server.public_url.trim_end_matches('/');
+    let body = html! {
+        p.crumbs { a href="/settings#devices" { "\u{2190} " (t("Settings")) } }
+        h1 { (t("Add a device")) }
+        ol.steps {
+            li {
+                (t("In the stickpile app on the new device, choose to scan a QR code and point the camera at this one."))
+                @if let Some(svg) = qr { div.qr-box { (trusted(svg)) } }
+            }
+            li {
+                (t("Or enter the server address and the code by hand:"))
+                dl.kv {
+                    dt { (t("Server")) } dd { code { (server) } }
+                    dt { (t("Code")) } dd { code.secret #pairing-code { (created.code) } }
+                }
+            }
+        }
+        p {
+            (t("The code works once and expires at")) " " (time_el(created.expires_at)) ". "
+            (t("Until then, anyone who has it can sign in as you: show it only to your own devices."))
+        }
+        div.inline-row {
+            a.button href="/settings#devices" { (t("Done")) }
+            form.inline method="post" action="/settings/pairing" {
+                (ctx.csrf_input())
+                button type="submit" { (t("New code")) }
+            }
+        }
+    };
+    ctx.page(t("Add a device"), Nav::Settings, body)
+}
+
+/// "Add a device": a new pairing code for the signed-in user.
+pub async fn pairing_create(State(state): State<AppState>, ctx: Ctx) -> AppResult<Response> {
+    let created = match pairing::create(&state, &ctx.user).await {
+        Ok(c) => c,
+        Err(e) => return failed(&state, &ctx, Section::Devices, e).await,
+    };
+    let mut resp = pairing_page(&state, &ctx, &created).into_response();
+    // A live credential: keep the page out of every cache.
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(resp)
 }
 
 pub async fn token_revoke(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {
