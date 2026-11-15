@@ -108,6 +108,34 @@ struct Inner {
     seen: Mutex<HashMap<String, ItemSummary>>,
     /// The suggestions' vocabulary and the cache generation it was made at.
     vocabulary: Mutex<Option<(u64, Arc<Vocabulary>)>>,
+    generation: Mutex<Generation>,
+}
+
+/// Counts the account and server changes (logins, logouts, another
+/// server), so that what a read learnt is kept only when no change came in
+/// between: the items it showed (`seen`) and the favorites it saved for
+/// offline. A read that finishes after a change would otherwise write the
+/// old account's or server's data into the new one's. A read takes the
+/// count with its session ([`Inner::current`]) and writes through
+/// [`Inner::if_current`]; a change runs inside [`Inner::begin_change`].
+#[derive(Debug, Default)]
+struct Generation {
+    count: u64,
+    /// A change is under way.
+    changing: bool,
+}
+
+/// An account or server change under way; ends when dropped (also when
+/// the change fails).
+struct Change<'a>(&'a Inner);
+
+impl Drop for Change<'_> {
+    fn drop(&mut self) {
+        let mut g = lock(&self.0.generation);
+        // Reads that began during the change have the count of its start.
+        g.count += 1;
+        g.changing = false;
+    }
 }
 
 /// The sync schedule of the current session and account.
@@ -197,6 +225,37 @@ impl Inner {
         self.session.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// The session, with the generation to give [`Inner::if_current`] for
+    /// what is read from it.
+    fn current(&self) -> (u64, Arc<Session>) {
+        // The count first: a change replaces the session before it ends, so
+        // the session is never older than the count.
+        let generation = lock(&self.generation).count;
+        (generation, self.session())
+    }
+
+    /// Run `write` (keeping what a read learnt) unless an account or server
+    /// change began since `generation` was taken ([`Inner::current`]). A
+    /// change does not begin while `write` runs.
+    fn if_current(&self, generation: u64, write: impl FnOnce()) {
+        let g = lock(&self.generation);
+        if g.changing || g.count != generation {
+            tracing::debug!("a read ended after an account or server change; its results are not kept");
+            return;
+        }
+        write();
+    }
+
+    /// An account or server change begins; it ends when the result is
+    /// dropped. Until then no read keeps what it learnt, and none that
+    /// began before keeps it after. The caller holds `busy`.
+    fn begin_change(&self) -> Change<'_> {
+        let mut g = lock(&self.generation);
+        g.count += 1;
+        g.changing = true;
+        Change(self)
+    }
+
     /// Use `session` from now on (the server changed).
     fn replace_session(&self, session: Session) {
         let session = Arc::new(session);
@@ -272,6 +331,7 @@ impl Inner {
     /// the one it replaces ([`Inner::revoke_replaced_token`]).
     async fn adopt(&self, session: &Session, created: TokenCreated) -> Result<User, LibraryError> {
         self.revoke_replaced_token(session).await;
+        let _change = self.begin_change();
         save_login(session.config(), Some(session.cache()), &created)?;
         session.client().set_token(Some(created.token));
         self.account_changed();
@@ -284,18 +344,22 @@ impl Inner {
         lock(&self.seen).clear();
     }
 
-    fn remember(&self, items: &[ItemSummary]) {
-        let mut seen = lock(&self.seen);
-        if seen.len() + items.len() > SEEN_MAX {
-            seen.clear();
-        }
-        for item in items {
-            seen.insert(item.id.clone(), item.clone());
-        }
+    /// Keep `items`, read at `generation`, by id for `thumbnail`, `prepare`
+    /// and `record_use`.
+    fn remember(&self, generation: u64, items: &[ItemSummary]) {
+        self.if_current(generation, || {
+            let mut seen = lock(&self.seen);
+            if seen.len() + items.len() > SEEN_MAX {
+                seen.clear();
+            }
+            for item in items {
+                seen.insert(item.id.clone(), item.clone());
+            }
+        });
     }
 
-    fn list(&self, items: Vec<ItemSummary>, offline: bool) -> ItemList {
-        self.remember(&items);
+    fn list(&self, generation: u64, items: Vec<ItemSummary>, offline: bool) -> ItemList {
+        self.remember(generation, &items);
         ItemList {
             items: items.iter().map(Item::from).collect(),
             offline,
@@ -310,24 +374,35 @@ impl Inner {
         Ok(session.cache().item(id)?)
     }
 
-    /// An item shown before, else the cached one, else from the server.
-    async fn item_local_first(&self, session: &Session, id: &str) -> Result<ItemSummary, LibraryError> {
+    /// An item shown before, else the cached one, else from the server
+    /// (`session`, taken at `generation`).
+    async fn item_local_first(
+        &self,
+        generation: u64,
+        session: &Session,
+        id: &str,
+    ) -> Result<ItemSummary, LibraryError> {
         if let Some(item) = self.local_item(session, id)? {
             return Ok(item);
         }
         let item = session.item_summary(id).await?;
-        self.remember(std::slice::from_ref(&item));
+        self.remember(generation, std::slice::from_ref(&item));
         Ok(item)
     }
 
     /// An item shown before, else from the server (with its current
     /// renditions), else the cached one when the server is unreachable.
-    async fn item_fresh_first(&self, session: &Session, id: &str) -> Result<ItemSummary, LibraryError> {
+    async fn item_fresh_first(
+        &self,
+        generation: u64,
+        session: &Session,
+        id: &str,
+    ) -> Result<ItemSummary, LibraryError> {
         if let Some(item) = lock(&self.seen).get(id) {
             return Ok(item.clone());
         }
         let item = session.item_summary(id).await?;
-        self.remember(std::slice::from_ref(&item));
+        self.remember(generation, std::slice::from_ref(&item));
         Ok(item)
     }
 
@@ -355,7 +430,14 @@ impl Inner {
         Some(format!("{FAVORITES_KEY}{}", me.id))
     }
 
-    fn save_favorites(&self, session: &Session, ids: &[String]) {
+    /// Save `ids`, the favorites read online at `generation`, for offline,
+    /// under the account the cache names.
+    fn save_favorites(&self, generation: u64, session: &Session, ids: &[String]) {
+        self.if_current(generation, || Self::write_favorites(session, ids));
+    }
+
+    /// [`Inner::save_favorites`] without the generation check.
+    fn write_favorites(session: &Session, ids: &[String]) {
         let Some(key) = Self::favorites_key(session) else {
             return;
         };
@@ -382,23 +464,26 @@ impl Inner {
         Ok(Some(items))
     }
 
-    /// Keep the saved favorites in step with a like that went through.
-    fn favorite_changed(&self, session: &Session, item_id: &str, liked: bool) {
-        let Some(key) = Self::favorites_key(session) else {
-            return;
-        };
-        let Ok(Some(saved)) = session.cache().meta_get(&key) else {
-            return;
-        };
-        let mut ids: Vec<String> = saved
-            .lines()
-            .filter(|l| !l.is_empty() && *l != item_id)
-            .map(str::to_string)
-            .collect();
-        if liked {
-            ids.insert(0, item_id.to_string());
-        }
-        self.save_favorites(session, &ids);
+    /// Keep the saved favorites in step with a like that went through (on
+    /// `session`, taken at `generation`).
+    fn favorite_changed(&self, generation: u64, session: &Session, item_id: &str, liked: bool) {
+        self.if_current(generation, || {
+            let Some(key) = Self::favorites_key(session) else {
+                return;
+            };
+            let Ok(Some(saved)) = session.cache().meta_get(&key) else {
+                return;
+            };
+            let mut ids: Vec<String> = saved
+                .lines()
+                .filter(|l| !l.is_empty() && *l != item_id)
+                .map(str::to_string)
+                .collect();
+            if liked {
+                ids.insert(0, item_id.to_string());
+            }
+            Self::write_favorites(session, &ids);
+        });
     }
 
     fn sync_state(&self) -> SyncState {
@@ -522,6 +607,7 @@ impl StickpileLibrary {
             busy: tokio::sync::Mutex::new(()),
             seen: Mutex::new(HashMap::new()),
             vocabulary: Mutex::new(None),
+            generation: Mutex::new(Generation::default()),
         };
         tracing::info!(
             "stickpile {} (Android library), server {}",
@@ -566,6 +652,7 @@ impl StickpileLibrary {
             if same_server(&old.config().server_url, &url) {
                 return Ok(());
             }
+            let _change = inner.begin_change();
             inner.sign_out_for_new_server(&old).await?;
             inner.dirs.save_server_url(&url)?;
             let session = open_session(inner.dirs.load_config()?).await?;
@@ -688,6 +775,7 @@ impl StickpileLibrary {
                 .pair(&req)
                 .await
                 .map_err(|e| LibraryError::input(e, "token_name"))?;
+            let _change = inner.begin_change();
             let old = inner.session();
             if same_server(&old.config().server_url, &url) {
                 inner.revoke_replaced_token(&old).await;
@@ -714,6 +802,7 @@ impl StickpileLibrary {
     pub async fn logout(&self) -> Result<(), LibraryError> {
         self.write(|inner| async move {
             let _busy = inner.busy.lock().await;
+            let _change = inner.begin_change();
             let out = inner.session().logout().await?;
             if let Err(e) = &out.revoked {
                 tracing::warn!("the token was deleted but not revoked on the server: {e}");
@@ -734,7 +823,7 @@ impl StickpileLibrary {
     /// (`offline = true`, names and keywords only).
     pub async fn search(&self, query: String, target: Target, limit: u32) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let query = if query.contains(':') {
                 let (inner2, session2) = (inner.clone(), session.clone());
                 let vocabulary = tokio::task::spawn_blocking(move || inner2.vocabulary(&session2)).await?;
@@ -743,15 +832,16 @@ impl StickpileLibrary {
                 query.trim().to_string()
             };
             let out = session.search(&query, Some(target.into()), limit as usize).await?;
-            Ok(inner.list(out.hits.into_iter().map(|h| h.item).collect(), out.offline))
+            Ok(inner.list(generation, out.hits.into_iter().map(|h| h.item).collect(), out.offline))
         })
         .await
     }
 
     /// The items used last on this device, newest first (no network).
     pub fn recent(&self, limit: u32) -> Vec<Item> {
-        let items = self.inner.session().recent(limit as usize);
-        self.inner.remember(&items);
+        let (generation, session) = self.inner.current();
+        let items = session.recent(limit as usize);
+        self.inner.remember(generation, &items);
         items.iter().map(Item::from).collect()
     }
 
@@ -763,19 +853,19 @@ impl StickpileLibrary {
     /// does not shorten the list kept for offline.
     pub async fn favorites(&self, limit: u32) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let limit = limit as usize;
             match session.favorites(limit.max(FAVORITES_SAVED)).await {
                 Ok(mut items) => {
                     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
-                    inner.save_favorites(&session, &ids);
+                    inner.save_favorites(generation, &session, &ids);
                     items.truncate(limit);
-                    Ok(inner.list(items, false))
+                    Ok(inner.list(generation, items, false))
                 }
                 Err(e) if falls_back(&e) => match inner.saved_favorites(&session)? {
                     Some(mut items) => {
                         items.truncate(limit);
-                        Ok(inner.list(items, true))
+                        Ok(inner.list(generation, items, true))
                     }
                     None => Err(e.into()),
                 },
@@ -790,8 +880,9 @@ impl StickpileLibrary {
     /// (`offline = true`).
     pub async fn most_used(&self, limit: u32) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
-            let listing = inner.session().most_used(limit as usize).await?;
-            Ok(inner.list(listing.items, listing.offline))
+            let (generation, session) = inner.current();
+            let listing = session.most_used(limit as usize).await?;
+            Ok(inner.list(generation, listing.items, listing.offline))
         })
         .await
     }
@@ -841,8 +932,9 @@ impl StickpileLibrary {
     /// (`offline = true`); throws `Unreachable` if none are cached.
     pub async fn pack_items(&self, pack_id: String) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
-            let listing = inner.session().pack_items(&pack_id).await?;
-            Ok(inner.list(listing.items, listing.offline))
+            let (generation, session) = inner.current();
+            let listing = session.pack_items(&pack_id).await?;
+            Ok(inner.list(generation, listing.items, listing.offline))
         })
         .await
     }
@@ -864,8 +956,8 @@ impl StickpileLibrary {
     /// `Unreachable` if it is not cached.
     pub async fn thumbnail(&self, item_id: String) -> Result<String, LibraryError> {
         self.write(move |inner| async move {
-            let session = inner.session();
-            let item = inner.item_local_first(&session, &item_id).await?;
+            let (generation, session) = inner.current();
+            let item = inner.item_local_first(generation, &session, &item_id).await?;
             Ok(path_string(&session.thumbnail(&item).await?))
         })
         .await
@@ -887,8 +979,8 @@ impl StickpileLibrary {
         sticker: bool,
     ) -> Result<Prepared, LibraryError> {
         self.write(move |inner| async move {
-            let session = inner.session();
-            let item = inner.item_fresh_first(&session, &item_id).await?;
+            let (generation, session) = inner.current();
+            let item = inner.item_fresh_first(generation, &session, &item_id).await?;
             let target = stickpile_core::target_for_package(&editor_package);
             let choice =
                 stickpile_core::variant_for(&item, target, &accepted_mime_types, sticker).ok_or_else(|| {
@@ -942,9 +1034,9 @@ impl StickpileLibrary {
     /// liked). Needs the server.
     pub async fn toggle_like(&self, item_id: String) -> Result<bool, LibraryError> {
         self.write(move |inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let liked = session.toggle_like(&item_id).await?;
-            inner.favorite_changed(&session, &item_id, liked);
+            inner.favorite_changed(generation, &session, &item_id, liked);
             Ok(liked)
         })
         .await
@@ -959,7 +1051,7 @@ impl StickpileLibrary {
     /// streamed from disk, never read into memory whole.
     pub async fn upload(&self, set_id: String, file: UploadFile) -> Result<Item, LibraryError> {
         self.write(move |inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let path = PathBuf::from(&file.path);
             let filename = path
                 .file_name()
@@ -995,7 +1087,7 @@ impl StickpileLibrary {
                 .item
                 .ok_or_else(|| LibraryError::other("the server answered with no item"))?;
             let summary = session.item_summary(&item.id).await?;
-            inner.remember(std::slice::from_ref(&summary));
+            inner.remember(generation, std::slice::from_ref(&summary));
             Ok(Item::from(&summary))
         })
         .await

@@ -495,6 +495,64 @@ async fn a_token_that_cannot_be_revoked_does_not_hold_the_login_up() {
     assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
 }
 
+/// A read still waiting for the server when another account signs in
+/// keeps nothing for the new account: neither the items it showed nor the
+/// favorites it read.
+#[tokio::test]
+async fn a_read_that_ends_after_a_login_keeps_nothing() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    // Alice by her tailnet identity: no token, so bob's login revokes none
+    // and her slow read still answers as her.
+    server.state().tailnet_user = Some("alice".into());
+    let lib = open(dir.path(), &server.url);
+    lib.sync_now().await.unwrap();
+    let private = items[3].id.clone();
+    assert!(lib.toggle_like(private.clone()).await.unwrap());
+
+    server.state().search_delay = Some(Duration::from_millis(500));
+    let reading = tokio::spawn({
+        let lib = lib.clone();
+        async move { lib.favorites(10).await }
+    });
+    assert!(wait_until(|| requests(&server, "GET /api/v1/search") == 1).await);
+    lib.login_password("bob".into(), "hunter2".into(), None).await.unwrap();
+    let read = reading.await.unwrap().unwrap();
+    assert_eq!(ids(&read.items), vec![private.clone()], "alice's, read before");
+
+    // Bob has no favorites saved for offline ...
+    server.stop();
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "bob");
+    assert_eq!(kind(lib.favorites(10).await), LibraryErrorKind::Unreachable);
+    // ... and his library does not know alice's private item.
+    let used = lib.record_use(private, "original".into(), "".into());
+    assert_eq!(kind(used), LibraryErrorKind::NotFound);
+}
+
+/// The same for a read still waiting for the old server when the server
+/// changes.
+#[tokio::test]
+async fn a_read_that_ends_after_a_server_change_keeps_nothing() {
+    let (old, items) = seeded_server();
+    let new = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    old.state().tailnet_user = Some("alice".into());
+    let lib = open(dir.path(), &old.url);
+
+    old.state().search_delay = Some(Duration::from_millis(500));
+    let reading = tokio::spawn({
+        let lib = lib.clone();
+        async move { lib.search("fine".into(), stickpile_android::Target::Generic, 10).await }
+    });
+    assert!(wait_until(|| requests(&old, "GET /api/v1/search") == 1).await);
+    lib.set_server_url(new.url.clone()).await.unwrap();
+    let found = reading.await.unwrap().unwrap();
+    assert_eq!(ids(&found.items), vec![items[3].id.clone()]);
+
+    let used = lib.record_use(items[3].id.clone(), "original".into(), "".into());
+    assert_eq!(kind(used), LibraryErrorKind::NotFound);
+}
+
 #[tokio::test]
 async fn logout_deletes_and_revokes_the_token() {
     let (server, _) = seeded_server();
