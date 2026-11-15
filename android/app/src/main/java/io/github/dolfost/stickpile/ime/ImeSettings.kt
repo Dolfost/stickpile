@@ -26,10 +26,16 @@ class ImeSettings(context: Context) {
         get() = prefs.getBoolean(STAY_OPEN, false)
         set(value) = prefs.edit { putBoolean(STAY_OPEN, value) }
 
+    /** The letters of the picker's search keys ([KeyLayout.tag]); null until one is chosen. */
+    var searchLayout: String?
+        get() = prefs.getString(SEARCH_LAYOUT, null)
+        set(value) = prefs.edit { putString(SEARCH_LAYOUT, value) }
+
     private companion object {
         const val PREFS = "ime_settings"
         const val SEARCH_DRAFT = "search_draft"
         const val DELETE_DRAFT = "delete_draft"
         const val STAY_OPEN = "stay_open"
+        const val SEARCH_LAYOUT = "search_layout"
     }
 }

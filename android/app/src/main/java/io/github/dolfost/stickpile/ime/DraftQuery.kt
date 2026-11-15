@@ -5,7 +5,7 @@ import android.view.inputmethod.EditorInfo
 
 /**
  * The text already in the field, used as the search (docs/android-plan.md
- * 4.7): the picker has no typing keys, so the query is the draft.
+ * 4.7): the picker's query starts as the draft, and its own keys edit it.
  *
  * @property query what to search for (trimmed).
  * @property text the field's whole text as read.

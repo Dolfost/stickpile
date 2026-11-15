@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A sticker's details over the picker's grid (ime.DetailsPanel), opened by
+  a long press: a bigger thumbnail, the name, set, format and numbers, the
+  vibe, emojis and tags as chips that search for them, and what can be
+  done with it. Clickable, so that taps do not reach the grid under it;
+  opaque, as it covers the grid (lint's overdraw check assumes the
+  activities' window theme, which the input method's window does not use).
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurfaceContainerHigh"
+    android:clickable="true"
+    android:focusable="false"
+    android:paddingHorizontal="8dp"
+    android:paddingTop="8dp"
+    tools:ignore="Overdraw">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="48dp"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/ime_details_image"
+            android:layout_width="128dp"
+            android:layout_height="128dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter" />
+
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ime_details_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:id="@+id/ime_details_set"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/ime_details_facts"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/ime_details_chips"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    app:chipSpacingHorizontal="4dp"
+                    app:chipSpacingVertical="0dp" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_send"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/ime_details_send" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_sticker"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/ime_menu_send_sticker"
+            android:tooltipText="@string/ime_menu_send_sticker"
+            app:icon="@drawable/ic_sticker" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_like"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/ime_menu_like"
+            android:tooltipText="@string/ime_menu_like"
+            app:icon="@drawable/ic_heart_outline" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_share"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/ime_menu_share"
+            android:tooltipText="@string/ime_menu_share"
+            app:icon="@drawable/ic_share" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_close"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/ime_close"
+            android:tooltipText="@string/ime_close"
+            app:icon="@drawable/ic_clear" />
+    </LinearLayout>
+</FrameLayout>

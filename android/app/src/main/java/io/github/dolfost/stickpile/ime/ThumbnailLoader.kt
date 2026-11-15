@@ -78,7 +78,12 @@ internal class ThumbnailLoader(
         cache.evictAll()
     }
 
+    /**
+     * A cached drawable is shared: shown in another view since (the
+     * details), it now draws there. Set again, it draws here once more.
+     */
     private fun show(image: ImageView, drawable: Drawable) {
+        if (image.drawable === drawable) image.setImageDrawable(null)
         image.setImageDrawable(drawable)
         (drawable as? Animatable)?.start()
     }

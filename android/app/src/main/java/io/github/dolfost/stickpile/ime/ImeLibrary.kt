@@ -7,6 +7,7 @@ import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.Prepared
+import io.github.dolfost.stickpile.rust.SearchHint
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.rust.targetForPackage
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,11 @@ internal class ImeLibrary(private val app: StickpileApp) {
     suspend fun recent(): List<Item> = call { it.recent(LIMIT) }
 
     suspend fun favorites(): ItemList = call { it.favorites(LIMIT) }
+
+    suspend fun mostUsed(): ItemList = call { it.mostUsed(LIMIT) }
+
+    /** The offers under the search field for [query] as typed: no network, but native, so off the main thread too. */
+    suspend fun hints(query: String): List<SearchHint> = call { it.hints(query) }
 
     /** The package of the field being typed into, set by the service on each input start. */
     @Volatile

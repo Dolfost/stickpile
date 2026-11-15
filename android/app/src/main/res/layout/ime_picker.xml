@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The picker keyboard (ime.PickerView): the button back to the keyboard and
-  the tabs, a set's header, the emoji filters, and the grid with its
-  message, progress and status line. Inflated with Theme.Stickpile.Views.
-  The root paints the keyboard's background; lint's overdraw check assumes
-  the activities' window theme, which the input method's window does not use.
+  The picker keyboard (ime.PickerView): the search bar (the button back to
+  the keyboard, the search box, safe mode, the menu), the tabs, a set's
+  header, the offers or the emoji filters, the body (the grid with its
+  message, progress, status line and the details and syntax panels over
+  it) and the search keys. Inflated with Theme.Stickpile.Views. The root
+  paints the keyboard's background; lint's overdraw check assumes the
+  activities' window theme, which the input method's window does not use.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -30,15 +32,79 @@
             android:tooltipText="@string/ime_back_to_keyboard"
             app:icon="@drawable/ime_ic_keyboard" />
 
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/ime_tabs"
+        <RelativeLayout
+            android:id="@+id/ime_search_box"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="40dp"
             android:layout_weight="1"
-            android:background="@android:color/transparent"
-            app:tabGravity="start"
-            app:tabMode="scrollable" />
+            android:background="@drawable/ime_search_box"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingStart="12dp"
+            android:paddingEnd="0dp">
+
+            <ImageView
+                android:id="@+id/ime_search_icon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_search" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/ime_clear"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:contentDescription="@string/ime_search_clear"
+                android:tooltipText="@string/ime_search_clear"
+                android:visibility="gone"
+                app:icon="@drawable/ic_clear" />
+
+            <TextView
+                android:id="@+id/ime_query"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_alignWithParentIfMissing="true"
+                android:layout_centerVertical="true"
+                android:layout_toStartOf="@id/ime_clear"
+                android:layout_toEndOf="@id/ime_search_icon"
+                android:ellipsize="start"
+                android:hint="@string/ime_search_hint"
+                android:paddingHorizontal="8dp"
+                android:singleLine="true"
+                android:textAppearance="?attr/textAppearanceBodyLarge" />
+        </RelativeLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_safe"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/display_safe_mode"
+            android:tooltipText="@string/display_safe_mode"
+            app:icon="@drawable/ic_safe_off" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_more"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/ime_menu"
+            android:tooltipText="@string/ime_menu"
+            app:icon="@drawable/ic_more" />
     </LinearLayout>
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/ime_tabs"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@android:color/transparent"
+        app:tabGravity="start"
+        app:tabMode="scrollable" />
 
     <LinearLayout
         android:id="@+id/ime_set_header"
@@ -69,32 +135,50 @@
     </LinearLayout>
 
     <HorizontalScrollView
+        android:id="@+id/ime_hints_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/ime_hints"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:paddingHorizontal="8dp"
+            app:chipSpacingHorizontal="6dp"
+            app:singleLine="true" />
+    </HorizontalScrollView>
+
+    <HorizontalScrollView
         android:id="@+id/ime_filters_scroll"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="40dp"
         android:scrollbars="none"
         android:visibility="gone">
 
         <com.google.android.material.chip.ChipGroup
             android:id="@+id/ime_filters"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:paddingHorizontal="8dp"
+            app:chipSpacingHorizontal="6dp"
             app:selectionRequired="false"
             app:singleLine="true"
             app:singleSelection="true" />
     </HorizontalScrollView>
 
     <FrameLayout
+        android:id="@+id/ime_body"
         android:layout_width="match_parent"
-        android:layout_height="240dp">
+        android:layout_height="@dimen/ime_body_height">
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/ime_grid"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
-            android:padding="4dp" />
+            android:padding="@dimen/ime_grid_padding" />
 
         <LinearLayout
             android:id="@+id/ime_message_box"
@@ -131,6 +215,25 @@
             android:indeterminate="true"
             android:visibility="gone" />
 
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/ime_refreshing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:contentDescription="@string/ime_loading"
+            android:indeterminate="true"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/ime_details"
+            layout="@layout/ime_details"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/ime_syntax"
+            layout="@layout/ime_syntax"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/ime_status"
             android:layout_width="match_parent"
@@ -143,4 +246,13 @@
             android:textAppearance="?attr/textAppearanceBodyMedium"
             android:visibility="gone" />
     </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/ime_keys"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="2dp"
+        android:paddingVertical="3dp"
+        android:visibility="gone" />
 </LinearLayout>

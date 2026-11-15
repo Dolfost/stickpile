@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sizes of the picker keyboard (package ime). -->
+<resources>
+    <!-- The grid with its message and panels, while the search keys are hidden. -->
+    <dimen name="ime_body_height">240dp</dimen>
+    <!-- A row of the search keys. -->
+    <dimen name="ime_key_row_height">42dp</dimen>
+    <!-- The padding of the grid on each side; PickerView counts it to size the cells. -->
+    <dimen name="ime_grid_padding">4dp</dimen>
+    <!-- The icons in a tile's stats line. -->
+    <dimen name="ime_tile_icon">9dp</dimen>
+</resources>

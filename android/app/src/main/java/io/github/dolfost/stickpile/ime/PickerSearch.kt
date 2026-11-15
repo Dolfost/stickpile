@@ -1,0 +1,62 @@
+package io.github.dolfost.stickpile.ime
+
+import io.github.dolfost.stickpile.display.TileSize
+
+/** The picker's tabs. */
+enum class PickerTab { RESULTS, RECENT, LIKED, MOST_USED, SETS }
+
+/**
+ * The picker's decisions about its search, tabs and grid. Pure.
+ */
+object PickerSearch {
+    /** How long typing pauses before the search goes out. */
+    const val SEARCH_DELAY_MS = 120L
+
+    /** The size of a cell while the search keys show, in dp: small, so that two rows fit above the keys. */
+    const val TYPING_CELL_DP = 56
+
+    /** The fewest columns of the grid. */
+    const val MIN_COLUMNS = 3
+
+    /** The tabs for [query]: Results first while it is not blank. */
+    fun tabs(query: String): List<PickerTab> =
+        if (query.isBlank()) PickerTab.entries - PickerTab.RESULTS else PickerTab.entries
+
+    /**
+     * Whether a pick from the results counts as found by the draft, so
+     * that inserting it deletes the draft: the results shown are the
+     * draft's ([resultsFor], null when no results are shown) and the query
+     * is still the draft ([draft], null when none was read). Once the
+     * query is edited, nothing picked deletes the draft.
+     */
+    fun fromDraft(draft: String?, query: String, resultsFor: String?): Boolean =
+        draft != null && resultsFor != null && query.trim() == draft && resultsFor.trim() == draft
+
+    /** Columns of the grid [widthDp] wide: as many as fit at [size], at least [MIN_COLUMNS]. */
+    fun spanCount(widthDp: Int, size: TileSize): Int = maxOf(MIN_COLUMNS, widthDp / size.minDp)
+
+    /** Columns while the search keys show: smaller cells than [spanCount] gives, never fewer of them. */
+    fun typingSpanCount(widthDp: Int, spanCount: Int): Int = maxOf(spanCount, widthDp / TYPING_CELL_DP)
+
+    /**
+     * The query a value in the details makes: `tag:reaction `, `vibe:"very sad" `
+     * (quoted when it has a space, as the search syntax reads it).
+     */
+    fun filterQuery(key: String, value: String): String {
+        val v = value.trim()
+        return if (v.any(Char::isWhitespace)) "$key:\"$v\" " else "$key:$v "
+    }
+
+    /**
+     * The query an example of the syntax help puts in the field: the first
+     * of a list (`is:mine` of `is:mine, is:liked`), the first key of a row
+     * of keys (`vibe:`); a space after it unless it is a key waiting for
+     * its value.
+     */
+    fun exampleQuery(example: String): String {
+        val first = example.split(", ").first().trim()
+        val words = first.split(" ")
+        val q = if (words.size > 1 && words.all { it.endsWith(":") }) words.first() else first
+        return if (q.endsWith(":")) q else "$q "
+    }
+}

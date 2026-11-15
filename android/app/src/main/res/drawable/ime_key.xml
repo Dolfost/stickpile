@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A typing key of the picker's search keys: a rounded tile with the touch ripple. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="6dp" />
+            <solid android:color="?attr/colorSurfaceContainerHighest" />
+        </shape>
+    </item>
+</ripple>

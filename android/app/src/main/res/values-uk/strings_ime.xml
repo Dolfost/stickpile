@@ -3,10 +3,28 @@
 <resources>
     <string name="ime_back_to_keyboard">Назад до клавіатури</string>
 
+    <string name="ime_search_hint">Пошук стікерів</string>
+    <string name="ime_search_clear">Очистити пошук</string>
+    <string name="ime_menu">Більше дій</string>
+    <string name="ime_close">Закрити</string>
+
+    <string name="ime_tab_results">Результати</string>
     <string name="ime_tab_recent">Нещодавні</string>
     <string name="ime_tab_liked">Вподобані</string>
+    <string name="ime_tab_most_used">Найчастіші</string>
     <string name="ime_tab_sets">Набори</string>
-    <string name="ime_tab_results">Пошук: %1$s</string>
+
+    <string name="ime_layout_english">English</string>
+    <string name="ime_layout_ukrainian">Українська</string>
+    <string name="ime_key_symbols_label">123</string>
+    <string name="ime_key_letters_english">abc</string>
+    <string name="ime_key_letters_ukrainian">абв</string>
+    <string name="ime_key_symbols">Символи</string>
+    <string name="ime_key_letters">Літери</string>
+    <string name="ime_key_language">Наступна мова</string>
+    <string name="ime_key_space">Пробіл</string>
+    <string name="ime_key_backspace">Видалити</string>
+    <string name="ime_key_done">Готово</string>
 
     <string name="ime_all_sets">Усі набори</string>
     <string name="ime_set_summary">%1$s - %2$s</string>
@@ -19,6 +37,7 @@
 
     <string name="ime_empty_recent">Звідси ще нічого не надсилали. Виберіть стікер у вкладці \"Вподобані\" або \"Набори\".</string>
     <string name="ime_empty_liked">Ви ще нічого не вподобали.</string>
+    <string name="ime_empty_most_used">Ще нічого не надіслано.</string>
     <string name="ime_empty_sets">Наборів ще немає.</string>
     <string name="ime_empty_set">У цьому наборі порожньо.</string>
     <string name="ime_empty_results">За запитом \"%1$s\" нічого не знайдено.</string>
@@ -39,6 +58,7 @@
 
     <string name="ime_copied">Скопійовано. Поверніться до своєї клавіатури й вставте його.</string>
 
+    <string name="ime_details_send">Надіслати</string>
     <string name="ime_menu_like">Вподобати</string>
     <string name="ime_menu_unlike">Скасувати вподобання</string>
     <string name="ime_menu_send_sticker">Надіслати як стікер</string>

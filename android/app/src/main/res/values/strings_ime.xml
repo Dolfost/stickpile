@@ -4,11 +4,35 @@
     <!-- The button that switches back to the keyboard used before (content description). -->
     <string name="ime_back_to_keyboard">Back to the keyboard</string>
 
-    <!-- Tabs. ime_tab_results shows the text in the field the picker searched for. -->
+    <!-- The search bar: the search box (its hint and clear button) and the menu button (content description). -->
+    <string name="ime_search_hint">Search stickers</string>
+    <string name="ime_search_clear">Clear the search</string>
+    <string name="ime_menu">More options</string>
+    <string name="ime_close">Close</string>
+
+    <!-- Tabs. Results shows while something is searched for. -->
+    <string name="ime_tab_results">Results</string>
     <string name="ime_tab_recent">Recent</string>
     <string name="ime_tab_liked">Liked</string>
+    <string name="ime_tab_most_used">Most used</string>
     <string name="ime_tab_sets">Sets</string>
-    <string name="ime_tab_results">Search: %1$s</string>
+
+    <!--
+      The search keys: the names of the layouts (on the space bar, each in
+      its own language), the labels of the keys between letters and
+      symbols, and the content descriptions of the keys without a letter.
+    -->
+    <string name="ime_layout_english">English</string>
+    <string name="ime_layout_ukrainian">Українська</string>
+    <string name="ime_key_symbols_label">123</string>
+    <string name="ime_key_letters_english">abc</string>
+    <string name="ime_key_letters_ukrainian">абв</string>
+    <string name="ime_key_symbols">Symbols</string>
+    <string name="ime_key_letters">Letters</string>
+    <string name="ime_key_language">Next language</string>
+    <string name="ime_key_space">Space</string>
+    <string name="ime_key_backspace">Delete</string>
+    <string name="ime_key_done">Done</string>
 
     <!-- A set's items: the button back to the list of sets. -->
     <string name="ime_all_sets">All sets</string>
@@ -22,6 +46,7 @@
     <!-- Empty lists. -->
     <string name="ime_empty_recent">Nothing sent from here yet. Pick a sticker in Liked or Sets.</string>
     <string name="ime_empty_liked">Nothing liked yet.</string>
+    <string name="ime_empty_most_used">Nothing sent yet.</string>
     <string name="ime_empty_sets">No sets yet.</string>
     <string name="ime_empty_set">This set is empty.</string>
     <string name="ime_empty_results">Nothing found for \"%1$s\".</string>
@@ -45,7 +70,8 @@
     <!-- After a pick that could not go into the field directly. -->
     <string name="ime_copied">Copied. Switch back to your keyboard and paste it.</string>
 
-    <!-- Long press on a sticker. -->
+    <!-- Long press on a sticker: its details, and what can be done with it. -->
+    <string name="ime_details_send">Send</string>
     <string name="ime_menu_like">Like</string>
     <string name="ime_menu_unlike">Unlike</string>
     <string name="ime_menu_send_sticker">Send as sticker</string>

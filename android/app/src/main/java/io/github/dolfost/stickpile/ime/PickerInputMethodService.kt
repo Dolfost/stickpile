@@ -36,8 +36,9 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 
 /**
- * The picker keyboard (docs/android-plan.md 4.7): an input method with no
- * typing keys that inserts stickers. Its view is [PickerView]; this class
+ * The picker keyboard (docs/android-plan.md 4.7): an input method that
+ * inserts stickers. Its only keys type into its own search ([PickerView],
+ * [SearchKeys]), never into the field. Its view is [PickerView]; this class
  * owns the input connection, the insert ([InsertFlow]: `commitContent`,
  * else `ACTION_SEND` to the editor's app, else the clipboard) and the
  * switch back to the previous keyboard.
@@ -75,7 +76,8 @@ class PickerInputMethodService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         picker?.dispose()
-        val view = PickerView(ContextThemeWrapper(this, R.style.Theme_Stickpile_Views), scope, library, actions)
+        val themed = ContextThemeWrapper(this, R.style.Theme_Stickpile_Views)
+        val view = PickerView(themed, scope, library, app.display, settings, actions)
         picker = view
         return view.root
     }
@@ -84,9 +86,9 @@ class PickerInputMethodService : InputMethodService() {
     override fun onEvaluateFullscreenMode(): Boolean = false
 
     /**
-     * Shown with a hardware keyboard attached too: the picker has no typing
-     * keys, so a hardware keyboard does not replace it (the framework's
-     * default would hide it then).
+     * Shown with a hardware keyboard attached too: the picker types nothing
+     * into the field, so a hardware keyboard does not replace it (the
+     * framework's default would hide it then).
      */
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
@@ -98,7 +100,7 @@ class PickerInputMethodService : InputMethodService() {
         library.editorPackage = info.packageName.orEmpty()
         val read = readDraft(info)
         draft = InputRestart.draft(restarting, read, draft)
-        picker?.start(read?.query, restarting)
+        picker?.start(read?.query, restarting, app.refreshLikes())
         syncInBackground()
     }
 

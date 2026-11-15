@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Styles of the picker keyboard (package ime), used with Theme.Stickpile.Views. -->
+<resources>
+    <!-- A line of text at the bottom of a tile. -->
+    <style name="Widget.Stickpile.Ime.TileText" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/ime_tile_text</item>
+        <item name="android:textSize">9sp</item>
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <style name="Widget.Stickpile.Ime.TileText.Name">
+        <item name="android:textSize">10sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- A badge in the top corner of a tile: GIF, VIDEO, NSFW. -->
+    <style name="Widget.Stickpile.Ime.TileBadge" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:background">@drawable/ime_tile_badge</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:paddingHorizontal">3dp</item>
+        <item name="android:paddingVertical">1dp</item>
+        <item name="android:textColor">@color/ime_tile_text</item>
+        <item name="android:textSize">8sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <!--
+      A key of the search keys (SearchKeys creates them with these styles
+      and sets their size).
+    -->
+    <style name="Widget.Stickpile.Ime.Key" parent="">
+        <item name="android:background">@drawable/ime_key</item>
+        <item name="android:gravity">center</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:textSize">19sp</item>
+    </style>
+
+    <!-- A key that does something other than type: symbols, done. -->
+    <style name="Widget.Stickpile.Ime.Key.Action">
+        <item name="android:background">@drawable/ime_key_action</item>
+        <item name="android:textColor">?attr/colorOnSecondaryContainer</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="Widget.Stickpile.Ime.Key.Space">
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <!-- A key with an icon: language, backspace (tinted in code). -->
+    <style name="Widget.Stickpile.Ime.KeyIcon" parent="">
+        <item name="android:background">@drawable/ime_key_action</item>
+        <item name="android:scaleType">center</item>
+    </style>
+</resources>

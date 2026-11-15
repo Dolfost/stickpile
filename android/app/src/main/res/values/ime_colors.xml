@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Colours of the marks over the picker's tiles (package ime): they sit on
+  the sticker, not on the theme's surface, so they are the same in light
+  and dark.
+-->
+<resources>
+    <color name="ime_tile_scrim">#A6000000</color>
+    <color name="ime_tile_text">#FFFFFFFF</color>
+    <color name="ime_tile_badge">#B3000000</color>
+    <color name="ime_tile_nsfw">#E6C62828</color>
+    <color name="ime_tile_heart">#FFFF5A79</color>
+    <color name="ime_tile_heart_back">#73000000</color>
+</resources>
