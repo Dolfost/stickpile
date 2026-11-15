@@ -9,7 +9,7 @@ Code references are to `crates/stickpile-server/src/`.
 
 | Attacker | Can | Must not be able to |
 |---|---|---|
-| Anonymous internet client | reach the TCP listener | read or change anything except `healthz`, the OpenAPI document, login and registration (per policy); guess passwords quickly |
+| Anonymous internet client | reach the TCP listener | read or change anything except `healthz`, the OpenAPI document, login, pairing-code exchange and registration (per policy); guess passwords or pairing codes quickly |
 | Another user of the same server | use the API with their own account | see others' private sets, list or search others' unlisted sets, edit anything they do not own, learn what others uploaded (no cross-user near-duplicate hints) |
 | Malicious upload | be sent as any byte sequence with any name | execute, be served as HTML/script, smuggle metadata or polyglot payloads, exhaust memory with huge images or archives, escape the data directory |
 | Website visited by a tailnet or logged-in user | make the browser send cross-site requests | act with the user's session cookie or tailnet identity |
@@ -35,6 +35,8 @@ with a read-only root filesystem is part of the deployment
   once, optional expiry, revocable by the owner; `last_used_at` is recorded
   (at most once a minute). Revoked or expired tokens and tokens of disabled
   users are rejected (`auth/tokens.rs`).
+- **Pairing codes**: 60 random bits, stored as sha256, single use, five
+  minutes; exchanged anonymously for an API token. See [Pairing](#pairing).
 - **Passwords**: argon2id with the `argon2` crate defaults (19 MiB, t = 2,
   p = 1), hashed and verified on the blocking pool. Unknown users and users
   without a password are verified against a dummy hash so timing does not
@@ -59,6 +61,80 @@ with a read-only root filesystem is part of the deployment
   **and all API tokens** of the user (audit detail `tokens_revoked`).
   Disabling an account revokes its sessions; disabled users cannot
   authenticate by any method.
+
+### Pairing
+
+Pairing lets a new device (the phone app, or `stickpile login --code`) get
+an API token without a password typed on it ([api.md](api.md#pairing)). A
+signed-in user makes a one-time code, `POST /api/v1/pairings` or Settings,
+"Add a device" (a form with the session's CSRF token, like every other
+form); the device sends it to the anonymous `POST /api/v1/auth/pair`
+(`auth/pairing.rs`).
+
+- **Format and entropy.** 12 characters of Crockford's base32 (no `I`, `L`,
+  `O`, `U`), so 60 bits from the OS CSPRNG, shown as `7KQ2-M9XA-4FTR`.
+  Input is normalised before it is hashed (case, spaces and dashes ignored,
+  `O` read as `0`, `I` and `L` as `1`), so the forgiving reading costs no
+  entropy: it only maps typos onto the same code.
+- **Storage.** Only the sha256 of the canonical code is stored
+  (`pairing_codes`, migration `0011`), with the user, creation time, expiry
+  and when it was used. The code itself is only in the one response (and
+  the QR code of the web page, which is sent with `Cache-Control:
+  no-store`), never in the database or the audit log. A plain sha256 is
+  enough: the code is random, not chosen by a person, and a slow hash on an
+  anonymous endpoint would only spend CPU on every guess.
+- **Life and single use.** A code works for five minutes and once. The
+  exchange claims it with one statement, `UPDATE ... SET used_at = now
+  WHERE code_hash = ? AND used_at IS NULL AND expires_at > now RETURNING`,
+  so of two concurrent exchanges exactly one wins. The token name is
+  checked before, so a bad name does not spend the code. A code of an
+  account that was disabled after it was made is spent and refused. Used
+  and expired codes are deleted an hour after they expire (lazily when a
+  code is made, and by the periodic cleanup); until then a late attempt is
+  audited with the right reason.
+- **No oracle.** A wrong, expired or used code, a code of a disabled
+  account and input that cannot be a code (also long or empty input) all
+  get the same `401` with the same body (`invalid or expired pairing
+  code`). Every input takes the same path: it is hashed (malformed input as
+  it is, which matches no stored hash) and looked up with the one `UPDATE`;
+  a failure then reads the row by the same hash for the audit reason. The
+  lookup is by sha256, so its timing does not depend on how close a guess
+  is to a real code. What timing could at most tell is whether a row with
+  that hash exists, which is only the case for codes that are already used
+  or expired: dead codes, worthless to an attacker. A success takes longer
+  (a token is made), but a success is visible anyway.
+- **Rate limit.** Every exchange, successful or not, counts against the
+  per-client-IP login bucket (`limits.login_per_minute`), shared with
+  password logins and registrations; callers with an unknown IP share the
+  larger bucket, as for logins. A code belongs to no username, so there is
+  no per-username bucket: a server-wide bucket in its place would let
+  anyone block every pairing on the server, and the code's entropy makes it
+  unnecessary (below). Over the limit: 429 `rate_limited` with
+  `Retry-After`, before the code is looked at.
+- **Why 60 bits is enough.** With the default 10 attempts per minute and
+  address, one address gets 50 guesses during a code's five minutes. Even a
+  botnet of a million addresses, each at the full rate, makes 5 * 10^7
+  guesses in that time; with `k` codes alive at once it hits one with
+  probability about 5 * 10^7 * k / 2^60 = 4 * 10^-11 * k. Kept up for a
+  year with ten codes always alive (a self-hosted server has far fewer:
+  a code lives only while someone adds a device), that is about 5 * 10^-5,
+  with some five trillion `login_failed` entries in the audit log along the
+  way (and 170 000 requests a second, more than the server would answer). 40 bits would not be: the same botnet would have a 1 in 20 000
+  chance per code. The bits also cover a leaked database: finding a live
+  code from its sha256 takes about 2^59 hashes on average, on the order of
+  a GPU-year at 2 * 10^10 sha256 per second, against five minutes of life.
+- **What the token is.** The exchange makes an ordinary API token of the
+  account that made the code (no expiry, the `token_name` the device sent),
+  listed in Settings and revocable there. It skips TOTP: the code was made
+  by a session that already passed the account's sign-in. Anyone who sees
+  the code (or the QR code) before it is used or expires can sign in as
+  the user, which the page says.
+- **Audit.** Creation is `pairing.create` (actor, the pairing id, its
+  expiry). An exchange is recorded like a password login: `login` with
+  `method: pairing` and `token.create` with `via: pairing`; a failure is
+  `login_failed` with `method: pairing` and the reason (`unknown_code`,
+  `expired_code`, `used_code`, `disabled`) and, when the code was known, its
+  user as the actor.
 
 ### Authorization
 
@@ -151,6 +227,7 @@ In-memory GCRA limiters (`governor`, `security.rs`):
 | What | Key | Limit |
 |---|---|---|
 | Password logins (`/auth/token`, web login), registrations, password changes, TOTP confirm/disable | client IP **and** lowercased username, both must pass | `limits.login_per_minute` |
+| Pairing-code exchanges (`/auth/pair`) | client IP, the same buckets as password logins (no username: see [Pairing](#pairing)) | `limits.login_per_minute` |
 | Uploads and imports (also Telegram imports) | user | `limits.upload_per_minute` requests |
 | AI suggestions (`/api/v1/ai/suggest`, the upload tray) | user | `limits.ai_suggest_per_minute` requests |
 | Git webhook (`/api/v1/hooks/git/{id}`, unauthenticated) | client IP, checked before the signature | 60 per minute |
@@ -175,10 +252,11 @@ IP and JSON details. Writing an entry never fails the action it records.
 
 | Action | When |
 |---|---|
-| `login` | Successful password login (details: `api_token` or `web_session`) |
-| `login_failed` | Failed login (details: username, reason `unknown_user`, `password`, `disabled` or `totp`) |
+| `login` | Successful password login (details: `api_token` or `web_session`) or pairing-code exchange (method `pairing`, the pairing id) |
+| `login_failed` | Failed login (details: username, reason `unknown_user`, `password`, `disabled` or `totp`); failed pairing-code exchange (method `pairing`, reason `unknown_code`, `expired_code`, `used_code` or `disabled`) |
 | `register` | Self-service registration |
-| `token.create`, `token.revoke` | API token created (also by password login) or revoked |
+| `token.create`, `token.revoke` | API token created (also by password login, or by a pairing-code exchange: `via: pairing`) or revoked |
+| `pairing.create` | A pairing code was made (target: its id; details: `expires_at`; never the code) |
 | `user.update_self` | Own username (`{from, to}`), display name or Telegram user id changed (`PATCH /api/v1/me`) |
 | `gitpack.create` | A set was bound to a git repository (URL redacted) |
 | `password.change`, `totp.enable`, `totp.disable` | Account security changes |

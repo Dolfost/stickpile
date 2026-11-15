@@ -41,6 +41,7 @@ The Wayland and X11 clipboard backends are compiled in by default.
 
 ```sh
 stickpile login                         # passwordless on the tailnet, else asks for username/password
+                                        # (or: stickpile login --code <code from Settings, Add a device>)
 stickpile import ~/stickers/my-cats     # a set directory with set.toml + media files
 stickpile search cat type:gif           # search your library and public sets
 stickpile copy naahh --target discord   # best match onto the clipboard
@@ -185,7 +186,7 @@ a rebuild.
 ## Logging in
 
 `stickpile login` stores an API token in `token_file`. Later commands send it
-as `Authorization: Bearer …`. Three ways to get one:
+as `Authorization: Bearer ...`. Four ways to get one:
 
 1. **Tailnet, no password.** If the server sits behind `tailscale serve`, the
    proxy already identifies you. `stickpile login` with no options first asks
@@ -203,7 +204,22 @@ as `Authorization: Bearer …`. Three ways to get one:
 
    `--password-file` reads the first line. `--token-name` sets the name shown
    in the token list (default `stickpile-cli@<hostname>`).
-3. **A token made elsewhere.** Create one in the web UI or with
+3. **A pairing code, no password.** In the web UI, signed in on another
+   device, Settings, **Add a device** shows a one-time code such as
+   `7KQ2-M9XA-4FTR` (and a QR code for the phone app). Then:
+
+   ```sh
+   stickpile login --code 7KQ2-M9XA-4FTR
+   ```
+
+   The code is exchanged for a token (`POST /api/v1/auth/pair`) on the
+   configured `server_url` (or `--server`; the page shows the server's
+   address). Case, spaces and dashes do not matter, and `O`, `I`, `L` read
+   as `0`, `1`, `1`. A code works once, for five minutes; a wrong, expired
+   or used one is refused and the stored token, if any, stays.
+   `--token-name` works as above; `--code` cannot be combined with
+   `--username`, `--password-file` or `--totp`.
+4. **A token made elsewhere.** Create one in the web UI or with
    `stickpile tokens create <name>`, then write it to the token file yourself
    with mode 0600.
 
@@ -242,6 +258,7 @@ Item arguments take an item id (shown in `search` and `sets show`).
 
 ```sh
 stickpile login [--username U] [--password-file F] [--token-name N] [--totp CODE]
+stickpile login --code PAIRING-CODE [--token-name N]
 stickpile logout
 stickpile whoami            # username, role, TOTP, tailnet binding
 ```

@@ -23,9 +23,9 @@ Conventions:
 ## Authentication
 
 Every `/api/v1` route needs an authenticated caller except
-`POST /api/v1/auth/token`, `POST /api/v1/auth/register`,
-`GET /api/v1/openapi.json` and the git webhook. There are three ways to
-authenticate:
+`POST /api/v1/auth/token`, `POST /api/v1/auth/pair`,
+`POST /api/v1/auth/register`, `GET /api/v1/openapi.json` and the git
+webhook. There are three ways to authenticate:
 
 | Method | How | Typical client |
 |---|---|---|
@@ -34,7 +34,9 @@ authenticate:
 | Session cookie | `stickpile_session` cookie set by the web UI login | web UI |
 
 **Tokens** are created with a password (+TOTP) login,
-`POST /api/v1/auth/token` (`TokenRequest` -> `TokenCreated`), or by an
+`POST /api/v1/auth/token` (`TokenRequest` -> `TokenCreated`), with a
+one-time [pairing code](#pairing) made on a signed-in device,
+`POST /api/v1/auth/pair` (`PairRequest` -> `TokenCreated`), or by an
 already authenticated caller with `POST /api/v1/tokens`. The secret
 (`spk_` + 52 base32 characters) is returned once; the server stores only its
 sha256. Tokens can have an expiry and are revoked with
@@ -136,6 +138,7 @@ set's name, slug or visibility and new variants bump `updated_at` of its items.
 | Method and path | Body -> response | Notes |
 |---|---|---|
 | `POST /api/v1/auth/token` | `TokenRequest` -> `TokenCreated` | Password login for API clients. `401 totp_required` if the account has TOTP and no code was sent. Rate limited per IP and per username. |
+| `POST /api/v1/auth/pair` | `PairRequest` -> `TokenCreated` | **Anonymous.** Exchanges a [pairing code](#pairing) for a token of the account that made it; no password or TOTP. A wrong, expired or used code is always the same `401 unauthorized` (`invalid or expired pairing code`). `400` for a bad `token_name` (1-100 characters; the code is not spent). Rate limited per IP like password logins. |
 | `POST /api/v1/auth/register` | `RegisterRequest` -> `User` (201) | Policy `auth.registration`: `closed` -> 403; `invite` -> `invite_code` required, the account gets the invitation's role, codes are single-use; `open` -> role `user`. Usernames: 2-32 of `A-Za-z0-9_.-`, starting alphanumeric; passwords at least 8 characters. Rate limited like login. |
 | `GET /api/v1/me` | -> `User` | |
 | `PATCH /api/v1/me` | `UpdateMe` -> `User` | `username` (2-32 of `A-Z a-z 0-9 _ . -`, starting with a letter or digit; taken ignoring case -> 409; a change of case is allowed), `display_name` (empty resets it to the username), `telegram_user_id` (owner of exported Telegram packs; positive; `null` clears), `theme` (the web UI's colour theme: `system` follows the device, `light`, `dark`; any other value is refused with `bad_request`, 422 for an unknown name; `User.theme` reports it, `system` by default; not audited). Absent fields stay; every field is validated before anything changes. A rename keeps sessions, tokens and the tailnet login (they are bound to the user id), takes a display name equal to the old username along, refreshes the `by:` search and touches the user's items so clients refetch them (`updated_since`). The old name becomes free for others. Audited as `user.update_self` with `username: {from, to}`. |
@@ -146,9 +149,48 @@ set's name, slug or visibility and new variants bump `updated_at` of its items.
 | `GET /api/v1/tokens` | -> `[ApiToken]` | The caller's tokens (never the secrets). |
 | `POST /api/v1/tokens` | `CreateToken` -> `TokenCreated` | Optional `expires_at` (must be in the future). |
 | `DELETE /api/v1/tokens/{id}` | -> 204 | Revoke. Someone else's token -> 404. |
+| `POST /api/v1/pairings` | -> `PairingCreated` (201) | A [pairing code](#pairing) for the caller's own account, valid for five minutes. No body. Audited as `pairing.create`. |
 
 TOTP: SHA-1, 6 digits, 30 s steps, one step of clock skew either way. A code
 (step) is accepted only once.
+
+#### Pairing
+
+Pairing signs a new device in without typing a password on it. A signed-in
+user makes a code (`POST /api/v1/pairings`, or Settings, "Add a device" in
+the web UI, which shows it as a QR code), and the new device exchanges it
+(`POST /api/v1/auth/pair`) for an API token of its own. The design and its
+security reasoning are in [security.md](security.md#pairing).
+
+`PairingCreated` is returned once (the server keeps only a hash):
+
+```json
+{"code": "7KQ2-M9XA-4FTR", "expires_at": 1763211594,
+ "pairing_url": "stickpile://pair?url=https%3A%2F%2Fstickers.example.ts.net&code=7KQ2-M9XA-4FTR"}
+```
+
+- `code`: 12 characters of Crockford's base32 (`0-9` and `A-Z` without
+  `I`, `L`, `O`, `U`), 60 random bits, shown in groups of four.
+- `expires_at`: five minutes after creation (unix seconds).
+- `pairing_url`: the QR code's content,
+  `stickpile://pair?url=<server.public_url>&code=<code>`, both values
+  percent-encoded (RFC 3986 unreserved characters stay), the URL without a
+  trailing `/`.
+
+`PairRequest` is `{"code": "...", "token_name": "Pixel 8"}`. The code is
+read forgivingly, for typing by hand: case does not matter, spaces and
+dashes anywhere are ignored, `O` reads as `0`, `I` and `L` as `1`. The
+answer is exactly what `POST /api/v1/auth/token` returns (`TokenCreated`:
+the secret, the token's `ApiToken` with the given name and no expiry, and
+the `User`). A code works once: of two concurrent exchanges only one gets a
+token. Wrong, expired and used codes, codes of a disabled account and
+input that cannot be a code all get the same status and body.
+
+Clients: `stickpile_api::pairing` has the format (`normalize`, `display`,
+`link`, `parse_link`), `stickpile_core` the client calls
+(`ApiClient::create_pairing`, `ApiClient::pair`) and
+`Session::login_pairing`, which stores the token like a password login.
+The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 
 ### Sets
 
