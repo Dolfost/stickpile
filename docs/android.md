@@ -69,9 +69,10 @@ device.
 
 ## Bridge interface
 
-The Kotlin app reaches Rust through one UniFFI object, `Library`, exported
-by `crates/stickpile-android` (Kotlin package
-`io.github.dolfost.stickpile.rust`). It is a small surface over
+The Kotlin app reaches Rust through one UniFFI object, `StickpileLibrary`,
+exported by `crates/stickpile-android` (Kotlin package
+`io.github.dolfost.stickpile.rust`; not `Library`, which would clash with
+the `com.sun.jna.Library` that every generated file imports). It is a small surface over
 `stickpile_core::Session`; it does not use the desktop popup model.
 
 Rules for the interface:
@@ -84,25 +85,34 @@ Rules for the interface:
 - Every record and enum that crosses the bridge is defined in
   `crates/stickpile-android`, converted from the `stickpile-api` types. No
   UniFFI derive goes on `stickpile-api` types.
-- Errors are one enum, `LibraryError`. Each variant is a kind the app turns
-  into its own (translated) text; the `detail` string is for logs, never
-  shown as is.
+- Errors are one enum, `LibraryError` (Kotlin: the sealed class
+  `LibraryException`). Each variant is a kind the app turns into its own
+  (translated) text; the `detail` string is for logs, never shown as is.
+  `LibraryErrorKind` names the same variants without their fields (for
+  `SyncState.last_error`).
+- The enum `Target` shares its name with Kotlin's default-imported
+  `kotlin.annotation.Target`: app code imports
+  `io.github.dolfost.stickpile.rust.Target` explicitly.
+- Interface drift fails the tests: `crates/stickpile-android/tests/interface.rs`
+  checks the exported metadata against this list in every test run, and
+  `tests/kotlin.rs` (with `--features bindgen`) checks the generated Kotlin.
 - Paths are absolute strings inside the app's private storage.
 - The constructor is synchronous (UniFFI cannot generate async primary
   constructors for Kotlin).
 
 ```
-object Library
+object StickpileLibrary
   constructor(dirs: LibraryDirs) throws LibraryError
 
   // account
   fn server_url() -> String
-  async fn set_server_url(url: String) throws          // validated, saved, session reopened
+  async fn set_server_url(url: String) throws          // validated, saved, session reopened;
+                                                       // a different URL signs out first
   async fn account() throws -> Account?                // null: signed out
   async fn login_tailnet() throws -> Account?          // null: not on the tailnet
   async fn login_password(username: String, password: String, totp: String?) throws -> Account
   async fn login_pairing(server_url: String, code: String) throws -> Account
-                                                       // sets the URL, then Session::login_pairing
+                                                       // exchanges first; the URL is saved only on success
   async fn logout() throws
 
   // reading (offline: from the cache, ItemList.offline = true)
@@ -142,6 +152,8 @@ record LibraryDirs { config_file: String, cache_dir: String, token_file: String 
 record Account     { username: String, display_name: String?, server_url: String,
                      auth: AuthKind, is_admin: Boolean }
 enum   AuthKind    { Token, Tailnet }
+enum   LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
+                          NothingFits, InvalidInput, Server, Io, Other }
 enum   Target      { Telegram, Discord, Signal, Whatsapp, Slack, Generic }
 enum   MediaKind   { Still, Animation, Video }
 record Item        { id: String, name: String, set_id: String, set_name: String,
@@ -165,7 +177,7 @@ error  LibraryError {
   NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
   NothingFits,            // prepare: no rendition the field accepts
   InvalidInput { field },  // e.g. a malformed server URL or pairing code
-  Server { status },       // any other HTTP error
+  Server { status: u16 },  // any other HTTP error
   Io, Other
   (every variant also carries detail: String)
 }
@@ -179,6 +191,48 @@ and names the file `<item name>.<format extension>`. `Prepared.variant` is
 the variant's name (`original`, `tg_sticker`, ...), which `record_use`
 gets back. Pairing errors: a wrong, expired or used code is
 `Unauthorized`; a bad token name is `InvalidInput`.
+
+Behaviour the signatures do not show:
+
+- **Errors.** `CoreError` maps to `LibraryError` as documented in
+  `crates/stickpile-android/src/lib.rs`: a login that needs a TOTP code and
+  has none is `InvalidInput { field: "totp" }`; HTTP 400, 413, 415 and 422
+  are `InvalidInput` naming the call's field (`file` for `upload`,
+  `token_name` for pairing, `username` for a password login); 403 and other
+  statuses are `Server { status }`; cache and SQLite errors are `Io`. The
+  constructor gives `InvalidInput` for a path that is not absolute or a
+  config file that is not a valid config.
+- **Logins.** `login_pairing` exchanges the code with a client that has no
+  token, for `server_url`; only when that works does it save the URL, write
+  the token and reopen the session. A wrong code changes nothing, and the
+  old token never reaches the new server. The token is named
+  `Android (<device model>)`, or `Android (phone)` when the model is
+  unknown. `set_server_url` with a different URL first signs out
+  (revoking the token on the old server when it answers; the token file is
+  removed either way), so a token is never sent to another server.
+- **Account.** `account()` is null when no token is stored and when the
+  server rejects it; offline it is the cached user (`Unreachable` when
+  there is none). `display_name` is null when blank or equal to the
+  username.
+- **Offline favorites.** The library remembers the last favorites list it
+  read online (kept up to date by `toggle_like`) and answers from the
+  cached items with `offline = true`; `Unreachable` if it was never read
+  online.
+- **Sync.** `sync_if_due` returns at once when no sync is due or one is
+  running. Both sync calls throw a failure and also record it in
+  `last_error`. `last_sync` is the local time of this process's last sync,
+  else the cache's sync cursor (the server's clock), and null after an
+  account or server change; the policy starts from it, so a restarted app
+  does not sync at once.
+- **Search** resolves a half-typed `key:value` filter to its best
+  suggestion, as the desktop popup does. Reads (search, account, favorites,
+  most used, packs, pack items) stop when the calling coroutine is
+  cancelled; writes and file fetches run to their end.
+- **Pairing input.** `PairingLink.code` and `normalize_pairing_code` give
+  the display form `XXXX-XXXX-XXXX`.
+- **Upload.** With `name = null` the server names the item after the file
+  name (the path's last part), so the app names its temporary copy after
+  the shared file.
 
 ### Choosing what to insert
 
