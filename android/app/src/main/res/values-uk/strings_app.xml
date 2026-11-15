@@ -47,7 +47,10 @@
 
     <string name="onboarding_link_title">Підключити цей телефон</string>
     <string name="onboarding_link_text">Підключити цей телефон до цього сервера?</string>
-    <string name="onboarding_link_warning">Підключайтеся лише до сервера, якому довіряєте. Якщо телефон уже ввійшов на інший сервер, він вийде з нього.</string>
+    <string name="onboarding_link_warning">Підключайтеся лише до сервера, якому довіряєте.</string>
+    <string name="onboarding_replaces">Це замінить обліковий запис %1$s на %2$s.</string>
+    <string name="onboarding_replaces_unknown">Якщо телефон уже ввійшов на %1$s, це замінить той обліковий запис.</string>
+    <string name="onboarding_not_encrypted">Ця адреса починається з http://: з\'єднання не зашифроване.</string>
     <string name="onboarding_pair">Підключити</string>
 
     <string name="onboarding_code_title">Код підключення пристрою</string>

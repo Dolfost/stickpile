@@ -58,10 +58,16 @@
     <string name="onboarding_back_to_library">Back to the library</string>
     <string name="onboarding_camera_refused">Without the camera the QR code cannot be scanned. Enter the code instead.</string>
 
-    <!-- Onboarding: the app was opened with a pairing link. -->
+    <!-- Onboarding: the app was opened with a pairing link, or a QR code was scanned. -->
     <string name="onboarding_link_title">Pair this phone</string>
     <string name="onboarding_link_text">Pair this phone with this server?</string>
-    <string name="onboarding_link_warning">Pair only with a server you trust. If this phone is signed in to another server, it signs out of that one.</string>
+    <string name="onboarding_link_warning">Pair only with a server you trust.</string>
+    <!-- Who is signed in now: %1$s the username, %2$s the host of the server, such as stickers.example.org. -->
+    <string name="onboarding_replaces">This replaces %1$s on %2$s.</string>
+    <!-- The server could not say who is signed in. %1$s: the host of the server. -->
+    <string name="onboarding_replaces_unknown">If this phone is signed in on %1$s, this replaces that account.</string>
+    <!-- Under a server address that starts with http://, here and where the address is typed. -->
+    <string name="onboarding_not_encrypted">This address starts with http://: the connection is not encrypted.</string>
     <string name="onboarding_pair">Pair</string>
 
     <!-- Onboarding: the code typed in. -->

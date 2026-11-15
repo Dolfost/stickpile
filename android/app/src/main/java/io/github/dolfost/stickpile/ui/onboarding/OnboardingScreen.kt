@@ -59,6 +59,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.ui.common.Message
+import io.github.dolfost.stickpile.ui.common.isUnencrypted
 import io.github.dolfost.stickpile.ui.common.text
 
 /**
@@ -106,7 +107,7 @@ fun OnboardingScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (state.busy || state.preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
             Column(
                 Modifier
                     .fillMaxSize()
@@ -173,20 +174,55 @@ private fun ColumnScope.Welcome(vm: OnboardingViewModel, canCancel: Boolean, onC
     }
 }
 
+/**
+ * Pair with a link's server? Its host big (punycode as it came, so that a
+ * look-alike name shows as what it is), the whole address small, and what
+ * pairing replaces. The Pair button waits a moment after the link changed.
+ */
 @Composable
 private fun ConfirmLink(vm: OnboardingViewModel) {
-    val link = vm.state.link ?: return
+    val state = vm.state
+    val link = state.link ?: return
     Text(stringResource(R.string.onboarding_link_text))
-    Text(
-        link.serverUrl,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-    )
+    Column {
+        Text(
+            state.linkHost ?: link.serverUrl,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            link.serverUrl,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (isUnencrypted(link.serverUrl)) NotEncrypted()
+    state.replaces?.let { replaced ->
+        val username = replaced.username
+        Text(
+            if (username != null) {
+                stringResource(R.string.onboarding_replaces, username, replaced.host)
+            } else {
+                stringResource(R.string.onboarding_replaces_unknown, replaced.host)
+            },
+            fontWeight = FontWeight.Bold,
+        )
+    }
     Text(stringResource(R.string.onboarding_link_warning), style = MaterialTheme.typography.bodyMedium)
-    BusyButton(stringResource(R.string.onboarding_pair), enabled = !vm.state.busy, busy = vm.state.busy, onClick = vm::confirmLink)
-    TextButton(onClick = { vm.back() }, enabled = !vm.state.busy, modifier = Modifier.fillMaxWidth()) {
+    BusyButton(stringResource(R.string.onboarding_pair), enabled = state.canConfirm, busy = state.busy, onClick = vm::confirmLink)
+    TextButton(onClick = { vm.back() }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.app_action_cancel))
     }
+}
+
+/** One line: the address is plain http, nothing sent to it is encrypted. */
+@Composable
+private fun NotEncrypted() {
+    Text(
+        stringResource(R.string.onboarding_not_encrypted),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.error,
+    )
 }
 
 @Composable
@@ -194,6 +230,7 @@ private fun PairByCode(vm: OnboardingViewModel) {
     val state = vm.state
     Text(stringResource(R.string.onboarding_code_text))
     ServerField(state.serverUrl, vm::setServerUrl, enabled = !state.busy, imeAction = ImeAction.Next)
+    if (isUnencrypted(state.serverUrl)) NotEncrypted()
     OutlinedTextField(
         value = state.code,
         onValueChange = vm::setCode,
@@ -235,6 +272,7 @@ private fun ServerAddress(vm: OnboardingViewModel, signedIn: Boolean) {
         imeAction = ImeAction.Go,
         onGo = vm::continueToSignIn,
     )
+    if (isUnencrypted(state.serverUrl)) NotEncrypted()
     BusyButton(
         stringResource(R.string.app_action_continue),
         enabled = state.canContinue,
@@ -247,6 +285,8 @@ private fun ServerAddress(vm: OnboardingViewModel, signedIn: Boolean) {
 private fun SignIn(vm: OnboardingViewModel) {
     val state = vm.state
     Text(stringResource(R.string.onboarding_sign_in_server, state.serverUrl.trim()))
+    // The password would go in the clear.
+    if (isUnencrypted(state.serverUrl)) NotEncrypted()
     Text(stringResource(R.string.onboarding_tailnet_text))
     FilledTonalButton(
         onClick = vm::signInWithTailscale,

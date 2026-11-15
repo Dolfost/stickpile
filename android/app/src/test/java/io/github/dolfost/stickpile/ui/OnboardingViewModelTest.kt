@@ -6,9 +6,12 @@ import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Message
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingStep
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingViewModel
+import io.github.dolfost.stickpile.ui.onboarding.Replaced
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -90,13 +93,84 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun aScannedLinkPairsAtOnce() = runTest(main.dispatcher) {
+    fun aScannedLinkAsksFirstLikeAnOpenedOne() = runTest(main.dispatcher) {
         library.parsePairingLink = { link }
         library.loginPairing = { _, _ -> alice }
         vm.scanned("stickpile://pair?url=https://s.example&code=7KQ2M9XA4FTR")
         advanceUntilIdle()
+        assertEquals(OnboardingStep.CONFIRM_LINK, vm.state.step)
+        assertEquals(link, vm.state.link)
+        assertNull(vm.state.account)
+        assertFalse(library.calls.any { it.startsWith("loginPairing") })
+
+        vm.confirmLink()
+        advanceUntilIdle()
         assertEquals("loginPairing https://s.example 7KQ2-M9XA-4FTR", library.calls.last())
         assertEquals(alice, vm.state.account)
+    }
+
+    @Test
+    fun theConfirmationNamesTheHostAndWhoItReplaces() = runTest(main.dispatcher) {
+        // An internationalised host arrives as punycode and stays so.
+        val idn = PairingLink(serverUrl = "https://xn--80ak6aa92e.com/stickpile", code = "7KQ2-M9XA-4FTR")
+        library.parsePairingLink = { idn }
+        library.account = { alice }
+        library.serverUrl = "https://old.example:8443"
+        vm.openLink("stickpile://pair?...")
+        advanceUntilIdle()
+        assertEquals("xn--80ak6aa92e.com", vm.state.linkHost)
+        assertEquals(Replaced("alice", "old.example"), vm.state.replaces)
+
+        // Signed out: nothing is replaced.
+        library.account = { null }
+        vm.back()
+        vm.openLink("stickpile://pair?another")
+        advanceUntilIdle()
+        assertEquals(OnboardingStep.CONFIRM_LINK, vm.state.step)
+        assertNull(vm.state.replaces)
+    }
+
+    @Test
+    fun whenTheServerCannotSayWhoItIsTheServerIsNamed() = runTest(main.dispatcher) {
+        library.parsePairingLink = { link }
+        library.account = { throw unreachable() }
+        library.serverUrl = "http://old.example"
+        vm.openLink("stickpile://pair?...")
+        advanceUntilIdle()
+        assertEquals(Replaced(null, "old.example"), vm.state.replaces)
+        assertEquals(listOf(Doing.CHECKING_ACCOUNT), logged)
+    }
+
+    @Test
+    fun thePairButtonWaitsAMomentAfterTheLinkChanged() = runTest(main.dispatcher) {
+        val other = PairingLink(serverUrl = "https://evil.example", code = "AAAA-BBBB-CCCC")
+        library.parsePairingLink = { if ("evil" in it) other else link }
+        library.loginPairing = { _, _ -> alice }
+        vm.openLink("stickpile://pair?url=https://s.example&code=7KQ2M9XA4FTR")
+        runCurrent()
+        assertEquals(link, vm.state.link)
+        assertFalse(vm.state.canConfirm)
+        vm.confirmLink() // too early: ignored
+        advanceTimeBy(OnboardingViewModel.PAIR_DELAY_MS - 1)
+        runCurrent()
+        assertFalse(vm.state.pairReady)
+        advanceTimeBy(2)
+        runCurrent()
+        assertTrue(vm.state.canConfirm)
+
+        // Another link comes in from the background: the button waits again.
+        vm.openLink("stickpile://pair?url=https://evil.example&code=AAAABBBBCCCC")
+        runCurrent()
+        assertEquals(other, vm.state.link)
+        assertFalse(vm.state.canConfirm)
+        vm.confirmLink() // the tap meant for the link before
+        runCurrent()
+        assertFalse(library.calls.any { it.startsWith("loginPairing") })
+        advanceTimeBy(OnboardingViewModel.PAIR_DELAY_MS + 1)
+        runCurrent()
+        vm.confirmLink()
+        advanceUntilIdle()
+        assertEquals("loginPairing https://evil.example AAAA-BBBB-CCCC", library.calls.last())
     }
 
     @Test
@@ -118,11 +192,12 @@ class OnboardingViewModelTest {
         advanceUntilIdle()
         assertEquals(OnboardingStep.CONFIRM_LINK, vm.state.step)
         assertEquals(link, vm.state.link)
-        assertEquals(listOf("parsePairingLink"), library.calls)
+        assertEquals("s.example", vm.state.linkHost)
+        assertEquals(listOf("parsePairingLink", "account"), library.calls)
         // The same link again (a rotation) is not read again.
         vm.openLink("stickpile://pair?url=https://s.example&code=7KQ2M9XA4FTR")
         advanceUntilIdle()
-        assertEquals(listOf("parsePairingLink"), library.calls)
+        assertEquals(listOf("parsePairingLink", "account"), library.calls)
 
         vm.confirmLink()
         advanceUntilIdle()

@@ -1,5 +1,6 @@
 package io.github.dolfost.stickpile.ui.onboarding
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -15,10 +16,12 @@ import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.common.FailureLog
 import io.github.dolfost.stickpile.ui.common.Message
 import io.github.dolfost.stickpile.ui.common.catching
+import io.github.dolfost.stickpile.ui.common.hostOf
 import io.github.dolfost.stickpile.ui.common.messageFor
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -27,7 +30,7 @@ enum class OnboardingStep {
     /** Scan a QR code, or pick one of the other ways. */
     WELCOME,
 
-    /** A pairing link the app was opened with: pair with its server? */
+    /** A pairing link the app was opened with, or a scanned QR code: pair with its server? */
     CONFIRM_LINK,
 
     /** Server address and pairing code, typed. */
@@ -41,13 +44,31 @@ enum class OnboardingStep {
 }
 
 /**
+ * The account a pairing replaces, as the confirmation names it: [host] of
+ * the server this phone uses now, and [username], null when the server
+ * could not say who is signed in (it cannot be reached, say).
+ */
+data class Replaced(val username: String?, val host: String)
+
+/**
  * Everything the onboarding screens show. The fields hold what the user
  * typed; [codeDisplay] is the library's display form of [code] (null
  * while it is not a whole code). [toString] leaves the secrets out.
  */
 data class OnboardingState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
+    /** The link to confirm (CONFIRM_LINK), its server URL as the library normalised it. */
     val link: PairingLink? = null,
+    /** Who pairing with [link] replaces; null when nobody is signed in. */
+    val replaces: Replaced? = null,
+    /**
+     * The confirmation's Pair button takes a tap: only a moment after the
+     * link shown changed, so that a link swapped in from the background
+     * cannot catch a tap meant for the one before.
+     */
+    val pairReady: Boolean = false,
+    /** Reading a link and who is signed in, before the confirmation shows. */
+    val preparing: Boolean = false,
     val serverUrl: String = "",
     val code: String = "",
     val codeDisplay: String? = null,
@@ -65,9 +86,13 @@ data class OnboardingState(
     val account: Account? = null,
 ) {
     val canPair: Boolean get() = !busy && serverUrl.isNotBlank() && codeDisplay != null
+    val canConfirm: Boolean get() = !busy && link != null && pairReady
     val canContinue: Boolean get() = !busy && serverUrl.isNotBlank()
     val canSignIn: Boolean
         get() = !busy && username.isNotBlank() && password.isNotEmpty() && (!needsTotp || totp.isNotBlank())
+
+    /** The host of [link]'s server, which the confirmation shows big; null when it has none. */
+    val linkHost: String? get() = link?.let { hostOf(it.serverUrl) }
 
     override fun toString(): String = "OnboardingState(step=$step, busy=$busy, needsTotp=$needsTotp, error=$error)"
 }
@@ -89,6 +114,8 @@ class OnboardingViewModel(
         private set
 
     private var normalizing: Job? = null
+    private var preparing: Job? = null
+    private var arming: Job? = null
     private var openedLink: String? = null
 
     /** Open the way to pair by a typed code. */
@@ -105,12 +132,12 @@ class OnboardingViewModel(
             OnboardingStep.SIGN_IN -> OnboardingStep.SERVER
             else -> OnboardingStep.WELCOME
         }
-        state = state.copy(
-            step = to,
-            link = if (to == OnboardingStep.WELCOME) null else state.link,
-            error = null,
-            notice = null,
-        )
+        state = if (to == OnboardingStep.WELCOME) {
+            arming?.cancel()
+            state.copy(step = to, link = null, replaces = null, pairReady = false, error = null, notice = null)
+        } else {
+            state.copy(step = to, error = null, notice = null)
+        }
         return true
     }
 
@@ -148,33 +175,23 @@ class OnboardingViewModel(
     fun openLink(text: String) {
         if (text == openedLink) return
         openedLink = text
-        viewModelScope.launch {
-            val link = withContext(io) { library.parsePairingLink(text) }
-            state = if (link == null) {
-                state.copy(step = OnboardingStep.WELCOME, link = null, error = Message(R.string.app_error_not_a_pairing_link))
-            } else {
-                state.copy(step = OnboardingStep.CONFIRM_LINK, link = link, error = null, notice = null)
-            }
-        }
+        askToPair(text, R.string.app_error_not_a_pairing_link)
     }
 
-    /** Pair with the link [openLink] showed. */
+    /** Pair with the link the confirmation shows, once its Pair button is ready. */
     fun confirmLink() {
+        if (!state.canConfirm) return
         val link = state.link ?: return
         pair(link.serverUrl, link.code)
     }
 
-    /** What the QR scanner read; null when the scan was cancelled. */
+    /**
+     * What the QR scanner read; null when the scan was cancelled. A QR code
+     * is a link like any other: the same confirmation asks first.
+     */
     fun scanned(contents: String?) {
         if (contents == null || state.busy) return
-        viewModelScope.launch {
-            val link = withContext(io) { library.parsePairingLink(contents) }
-            if (link == null) {
-                state = state.copy(error = Message(R.string.app_error_not_a_pairing_qr))
-            } else {
-                pair(link.serverUrl, link.code)
-            }
-        }
+        askToPair(contents, R.string.app_error_not_a_pairing_qr)
     }
 
     /** The camera permission was refused: typing the code is the way left. */
@@ -220,6 +237,62 @@ class OnboardingViewModel(
         }
     }
 
+    /**
+     * Read [text] as a pairing link and ask before pairing with it: the
+     * confirmation names the server and the account it replaces, and its
+     * Pair button waits [PAIR_DELAY_MS]. A newer link wins over one still
+     * being read. Not a link: [notALink] on the first screen.
+     */
+    private fun askToPair(text: String, @StringRes notALink: Int) {
+        preparing?.cancel()
+        state = state.copy(preparing = true)
+        preparing = viewModelScope.launch {
+            val link = withContext(io) { library.parsePairingLink(text) }
+            val replaces = if (link != null) signedInNow() else null
+            arming?.cancel()
+            state = if (link == null) {
+                state.copy(
+                    preparing = false,
+                    step = OnboardingStep.WELCOME,
+                    link = null,
+                    replaces = null,
+                    pairReady = false,
+                    error = Message(notALink),
+                    notice = null,
+                )
+            } else {
+                state.copy(
+                    preparing = false,
+                    step = OnboardingStep.CONFIRM_LINK,
+                    link = link,
+                    replaces = replaces,
+                    pairReady = false,
+                    error = null,
+                    notice = null,
+                )
+            }
+            if (link != null) {
+                arming = viewModelScope.launch {
+                    delay(PAIR_DELAY_MS)
+                    state = state.copy(pairReady = true)
+                }
+            }
+        }
+    }
+
+    /**
+     * Who is signed in now, for the confirmation: null when nobody is. When
+     * the server cannot say who, the account is named by its server alone.
+     */
+    private suspend fun signedInNow(): Replaced? {
+        val result = catching { library.account() }
+        result.exceptionOrNull()?.let { log.failed(Doing.CHECKING_ACCOUNT, it) }
+        val account = result.getOrNull()
+        if (result.isSuccess && account == null) return null
+        val url = withContext(io) { library.serverUrl() }.ifEmpty { account?.serverUrl.orEmpty() }
+        return Replaced(account?.username, hostOf(url) ?: url)
+    }
+
     private fun pair(serverUrl: String, code: String) {
         run(Doing.PAIRING, { library.loginPairing(serverUrl, code) }) { account ->
             state = state.copy(account = account, code = "", codeDisplay = null)
@@ -256,5 +329,10 @@ class OnboardingViewModel(
 
     private fun go(step: OnboardingStep) {
         state = state.copy(step = step, error = null, notice = null)
+    }
+
+    companion object {
+        /** How long the confirmation's Pair button waits after the link shown changed. */
+        const val PAIR_DELAY_MS = 1_000L
     }
 }
