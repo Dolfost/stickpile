@@ -47,7 +47,7 @@
 
     <!-- Long press on a sticker. -->
     <string name="ime_menu_like">Like</string>
-    <string name="ime_menu_unlike">Remove like</string>
+    <string name="ime_menu_unlike">Unlike</string>
     <string name="ime_menu_send_sticker">Send as sticker</string>
     <string name="ime_menu_share">Share</string>
     <string name="ime_liked">Liked.</string>

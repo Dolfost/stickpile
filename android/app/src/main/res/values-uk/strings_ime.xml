@@ -31,19 +31,19 @@
     <string name="ime_error_unreachable">Сервер недоступний, а збережених стікерів немає.</string>
     <string name="ime_error_not_found">Цього стікера вже немає.</string>
     <string name="ime_error_rate_limited">Забагато запитів. Спробуйте за хвилину.</string>
-    <string name="ime_error_nothing_fits">Цей стікер сюди не надіслати.</string>
+    <string name="ime_error_nothing_fits">Цей стікер не можна надіслати сюди.</string>
     <string name="ime_error_server">На сервері сталася помилка. Спробуйте пізніше.</string>
     <string name="ime_error_io">Не вдалося прочитати збережені стікери.</string>
     <string name="ime_error_failed">Щось пішло не так.</string>
     <string name="ime_error_no_app">Немає застосунку, щоб поділитися.</string>
 
-    <string name="ime_copied">Скопійовано. Поверніться до своєї клавіатури та вставте.</string>
+    <string name="ime_copied">Скопійовано. Поверніться до своєї клавіатури й вставте його.</string>
 
     <string name="ime_menu_like">Вподобати</string>
-    <string name="ime_menu_unlike">Прибрати вподобання</string>
+    <string name="ime_menu_unlike">Скасувати вподобання</string>
     <string name="ime_menu_send_sticker">Надіслати як стікер</string>
     <string name="ime_menu_share">Поділитися</string>
     <string name="ime_liked">Вподобано.</string>
-    <string name="ime_unliked">Вподобання прибрано.</string>
+    <string name="ime_unliked">Вподобання скасовано.</string>
     <string name="ime_share_title">Поділитися стікером</string>
 </resources>
