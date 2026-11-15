@@ -9,6 +9,12 @@
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Only for the `android` dev shell: a Rust toolchain with the Android
+    # targets (nixpkgs' rustc has the host's standard library only).
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -17,6 +23,7 @@
       nixpkgs,
       crane,
       home-manager,
+      rust-overlay,
       ...
     }:
     let
@@ -147,6 +154,14 @@
             export TMPDIR="$stickpile_target/tmp"
             unset stickpile_target
           '';
+        };
+      }
+      # `nix develop .#android`: the Android app (docs/android.md). The SDK's
+      # tools are x86_64 binaries, so the shell exists for x86_64-linux only.
+      // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
+        android = import ./nix/android-shell.nix {
+          inherit nixpkgs rust-overlay;
+          system = pkgs.stdenv.hostPlatform.system;
         };
       });
     };
