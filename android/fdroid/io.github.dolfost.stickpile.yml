@@ -1,0 +1,141 @@
+# DRAFT of metadata/io.github.dolfost.stickpile.yml for fdroiddata. Nothing
+# has been submitted. See android/fdroid/README.md for the checklist and the
+# submission steps.
+#
+# Sources, all read on 2026-11-15 (short names used in the comments below):
+#   [BMR]  https://f-droid.org/docs/Build_Metadata_Reference/
+#   [QSG]  https://f-droid.org/docs/Submitting_to_F-Droid_Quick_Start_Guide/
+#   [MRT]  https://gitlab.com/fdroid/fdroiddata/-/raw/master/.gitlab/merge_request_templates/Default.md
+#   [TPL]  https://gitlab.com/fdroid/fdroiddata/-/raw/master/templates/build-gradle.yml
+#   [CAT]  https://gitlab.com/fdroid/fdroiddata/-/raw/master/config/categories.yml
+#   [NYM]  https://gitlab.com/fdroid/fdroiddata/-/raw/master/metadata/net.nymtech.nymvpn.yml
+#   [SC]   https://gitlab.com/fdroid/fdroiddata/-/raw/master/metadata/chat.schildi.android.yml
+#   [DC]   https://gitlab.com/fdroid/fdroiddata/-/raw/master/metadata/com.b44t.messenger.yml
+#   [EX]   https://gitlab.com/fdroid/fdroiddata/-/raw/master/metadata/io.element.android.x.yml
+#   [MUL]  https://gitlab.com/fdroid/fdroiddata/-/raw/master/metadata/net.mullvad.mullvadvpn.yml
+#   [BLD]  https://gitlab.com/fdroid/fdroidserver/-/raw/master/fdroidserver/build.py
+#   [SCN]  https://gitlab.com/fdroid/fdroidserver/-/raw/master/fdroidserver/scanner.py
+#   [CU]   https://gitlab.com/fdroid/fdroidserver/-/raw/master/fdroidserver/checkupdates.py
+#   [GW]   https://gitlab.com/fdroid/gradlew-fdroid/-/raw/main/gradlew.py
+#
+# Before submitting: the template says "PLEASE REMOVE ALL COMMENTS BEFORE
+# SUBMITTING TO F-DROID DATA!" [TPL]; `fdroid rewritemeta
+# io.github.dolfost.stickpile` rewrites the file and drops comments [BMR].
+
+# From the list in config/categories.yml [CAT]: "Keyboard & IME" (custom
+# keyboards, input methods), "Gallery" (browse, view and organize images),
+# "Multimedia" (as for org.jellyfin.mobile).
+Categories:
+  - Keyboard & IME
+  - Gallery
+  - Multimedia
+# SPDX id of LICENSE and Cargo.toml's workspace licence; it is in fdroidserver
+# lint.py's APPROVED_LICENSES.
+License: AGPL-3.0-or-later
+# "An AuthorName must be added" [MRT]. Name as in Cargo.toml `authors`.
+# AuthorEmail is optional [BMR]; the owner decides whether to add it.
+AuthorName: Vladyslav Rehan
+# No WebSite: "Don't use the source code url as website" [BMR].
+SourceCode: https://github.com/Dolfost/stickpile
+IssueTracker: https://github.com/Dolfost/stickpile/issues
+# The GitHub releases page, as org.jellyfin.mobile and net.nymtech.nymvpn do.
+Changelog: https://github.com/Dolfost/stickpile/releases
+
+RepoType: git
+Repo: https://github.com/Dolfost/stickpile.git
+# Only when the APKs are reproducible and signed by the owner (README.md,
+# "Reproducible builds"); both lines go together [BMR, AllowedAPKSigningKeys]:
+# Binaries: https://github.com/Dolfost/stickpile/releases/download/v%v/stickpile-%v.apk
+
+Builds:
+    # ASSUMPTION: the app first ships in 0.6.0 (versionCode 6000 =
+    # 0 * 1000000 + 6 * 1000 + 0, the formula in android/app/build.gradle.kts).
+  - versionName: 0.6.0
+    versionCode: 6000
+    # The tag, so the draft is readable and `fdroid build` works. Replace it
+    # with the full hash before submitting (`git rev-parse 'v0.6.0^{commit}'`):
+    # "Note: Don't use branch name or tag name. The full commit hash should be
+    # used." [BMR]; "The `commit` field should be the full hash" [MRT]. Later
+    # builds get the hash from checkupdates, which resolves the tag with
+    # vcs.getref() [CU].
+    commit: v0.6.0
+    # The Gradle module; F-Droid runs Gradle and looks for the APK here
+    # (build/outputs/apk/release/*-release-unsigned.apk) [BLD]. Same layout
+    # as net.mullvad.mullvadvpn (`subdir: android/app`) [MUL].
+    subdir: android/app
+    sudo:
+      - apt-get update
+      # rustup: Debian's package (it puts rustup and the cargo/rustc proxies
+      # in /usr/bin), as current recipes do: `apt-get install -y make gcc
+      # libc-dev rustup` [NYM], `apt-get install make protobuf-compiler
+      # python-is-python3 rustup gcc libc-dev` [SC], `apt-get install -y make
+      # g++ cmake rustup` [DC]. gcc and libc-dev: host C compiler and linker
+      # for `cargo install cargo-ndk` and for the host build of uniffi-bindgen
+      # (its dependencies compile SQLite, libwebp and ring with the cc crate).
+      - apt-get install -y gcc libc-dev rustup
+    # No flavours: F-Droid runs `gradle assembleRelease` [TPL, BLD]. `gradle`
+    # is gradlew-fdroid, which reads distributionUrl from
+    # android/gradle/wrapper/gradle-wrapper.properties (it looks in the
+    # subdir, its parent and grandparent) and checks the Gradle zip against
+    # F-Droid's checksums [GW]. The scanner deletes gradle-wrapper.jar,
+    # gradlew and gradlew.bat without counting an error [SCN].
+    gradle:
+      - yes
+    prebuild:
+      # The dev shell's Rust (nix/android-shell.nix: nixpkgs' rustc, 1.95.0 on
+      # 2026-11-15). Pattern of [NYM] (`rustup default "$RUST_VERSION"`) and
+      # [SC]. Keep in step with the dev shell (MaintainerNotes).
+      - rustup default 1.95.0
+      # The three ABIs of android/app/build.gradle.kts (rustAbis), as
+      # [NYM]: `rustup target add x86_64-linux-android aarch64-linux-android
+      # armv7-linux-androideabi`.
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+    build:
+      # cargo-ndk from source, the version of the dev shell (nixpkgs'
+      # cargo-ndk 4.1.2); [NYM] and [SC] run `cargo install cargo-ndk@4.1.2
+      # --locked` in build. It lands in ~/.cargo/bin, where cargo looks for
+      # subcommands even when that directory is not on PATH (cargo
+      # src/bin/cargo/main.rs, search_directories, tag rust-1.95.0).
+      # Nothing else is built here: Gradle's preBuild runs the cargoNdk and
+      # uniffiBindings tasks of android/app/build.gradle.kts.
+      - cargo install cargo-ndk@4.1.2 --locked
+    # ndkVersion 28.2.13676358 of android/app/build.gradle.kts. "r28c" is the
+    # release name of that revision: [NYM] installs `ndk;r28c` and then uses
+    # /opt/android-sdk/ndk/28.2.13676358; [EX] uses `ndk: r28c`. F-Droid sets
+    # ANDROID_NDK_HOME (read by cargo-ndk) to it [BMR, `ndk:`].
+    ndk: r28c
+
+MaintainerNotes: |-
+  The Rust library (crates/stickpile-android) and its Kotlin bindings are
+  built by Gradle (tasks cargoNdk and uniffiBindings in
+  android/app/build.gradle.kts), so `gradle: yes` builds everything once
+  Rust, its Android targets, cargo-ndk and the NDK are installed.
+
+  Versions to keep in step with upstream:
+  * Rust: nix/android-shell.nix uses nixpkgs' rustc (1.95.0 for 0.6.0).
+  * cargo-ndk: nixpkgs' cargo-ndk (4.1.2 for 0.6.0).
+  * NDK: ndkVersion in android/app/build.gradle.kts (28.2.13676358 = r28c).
+
+  JNA (net.java.dev.jna:jna@aar, LGPL-2.1-or-later or Apache-2.0) comes
+  from Maven Central with its prebuilt libjnidispatch.so, as in
+  net.nymtech.nymvpn (the same 5.19.1@aar).
+
+  Every vX.Y.Z tag of the repository is a release of all components, so
+  every tag is also an Android release.
+
+# Auto-update from tags [QSG, "Autoupdate configuration"]. With
+# `UpdateCheckMode: Tags`, AutoUpdateMode is `Version` "without any pattern.
+# The checked tag is used directly." [BMR]
+AutoUpdateMode: Version
+# Release tags are vX.Y.Z (.github/workflows/release.yml); the regex skips
+# anything else, like `Tags ^v[\d.]+$` in [DC].
+UpdateCheckMode: Tags ^v\d+\.\d+\.\d+$
+# <vercode file>|<regex>|<versionName file, "." = the same>|<regex> [BMR].
+# Paths are relative to the repository root. The regexes find the literals
+#         versionCode = 5002
+#         versionName = "0.5.2"
+# in android/app/build.gradle.kts (each is the first and only match there,
+# checked against e1da062). lint requires a \d group for the version code.
+UpdateCheckData: android/app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|versionName\s*=\s*"([\d.]+)"
+CurrentVersion: 0.6.0
+CurrentVersionCode: 6000
