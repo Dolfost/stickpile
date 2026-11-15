@@ -10,6 +10,7 @@ import io.github.dolfost.stickpile.ui.library.LibraryRequest
 import io.github.dolfost.stickpile.ui.library.LibraryTab
 import io.github.dolfost.stickpile.ui.library.LibraryViewModel
 import io.github.dolfost.stickpile.ui.library.requestFor
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -113,6 +114,42 @@ class LibraryViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf("packs", "packItems p1", "packs"), library.calls)
         assertNull(vm.state.pack)
+    }
+
+    @Test
+    fun aRefinedSearchKeepsTheOldResultsButAnotherPackStartsEmpty() = runTest(main.dispatcher) {
+        val vm = started()
+        val gate = CompletableDeferred<Unit>()
+        library.search = { q ->
+            if (q == "cats") gate.await()
+            ItemList(listOf(item(q)), offline = false)
+        }
+        vm.setQuery("cat")
+        advanceUntilIdle()
+        vm.setQuery("cats")
+        advanceUntilIdle()
+        assertEquals(LibraryContent.Items(listOf(item("cat")), offline = false), vm.state.content)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LibraryContent.Items(listOf(item("cats")), offline = false), vm.state.content)
+
+        vm.setQuery("")
+        vm.selectTab(LibraryTab.PACKS)
+        advanceUntilIdle()
+        val slow = CompletableDeferred<Unit>()
+        library.packItems = { id ->
+            if (id == "p2") slow.await()
+            ItemList(listOf(item(id)), offline = false)
+        }
+        vm.openPack(pack("p1"))
+        advanceUntilIdle()
+        vm.closePack()
+        vm.openPack(pack("p2"))
+        advanceUntilIdle()
+        assertEquals(LibraryContent.Loading, vm.state.content)
+        slow.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LibraryContent.Items(listOf(item("p2")), offline = false), vm.state.content)
     }
 
     @Test

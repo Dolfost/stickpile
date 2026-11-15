@@ -198,9 +198,10 @@ class LibraryViewModel(
     }
 
     private suspend fun load(request: LibraryRequest) {
-        // A new kind of list starts empty; the same kind (a refined search,
-        // a reload) keeps the old one until the new one is there.
-        if (shown?.let { it::class } != request::class) state = state.copy(content = LibraryContent.Loading)
+        // A reload or a refined search keeps the old list until the new
+        // one is there; anything else (another tab or pack) starts empty.
+        val refines = request == shown || (request is LibraryRequest.Search && shown is LibraryRequest.Search)
+        if (!refines) state = state.copy(content = LibraryContent.Loading)
         shown = request
         val result = catching { fetch(request) }
         state = state.copy(
