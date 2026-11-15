@@ -30,6 +30,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -53,12 +54,15 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
 import io.github.dolfost.stickpile.ime.ImeSettings
+import io.github.dolfost.stickpile.ime.PickerHeight
 import io.github.dolfost.stickpile.provider.KeyboardAllowlist
 import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.version
@@ -67,6 +71,7 @@ import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.filterTouchesWhenObscured
 import io.github.dolfost.stickpile.ui.common.messageFor
 import io.github.dolfost.stickpile.ui.common.text
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -339,8 +344,10 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { ImeSettings(context) }
     // The preferences file is read on first use: off the main thread.
-    val loaded by produceState<Triple<Boolean, Boolean, Boolean>?>(null) {
-        value = withContext(Dispatchers.IO) { Triple(settings.searchDraft, settings.deleteDraft, settings.stayOpen) }
+    val loaded by produceState<KeyboardValues?>(null) {
+        value = withContext(Dispatchers.IO) {
+            KeyboardValues(settings.searchDraft, settings.deleteDraft, settings.stayOpen, settings.heightPercent)
+        }
     }
     SectionHeader(stringResource(R.string.settings_keyboard))
     ListItem(
@@ -350,9 +357,25 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
         modifier = Modifier.clickable(onClick = onKeyboardSetup),
     )
     val values = loaded ?: return
-    var searchDraft by remember { mutableStateOf(values.first) }
-    var deleteDraft by remember { mutableStateOf(values.second) }
-    var stayOpen by remember { mutableStateOf(values.third) }
+    var searchDraft by remember { mutableStateOf(values.searchDraft) }
+    var deleteDraft by remember { mutableStateOf(values.deleteDraft) }
+    var stayOpen by remember { mutableStateOf(values.stayOpen) }
+    var height by remember { mutableIntStateOf(values.heightPercent) }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_keyboard_height)) },
+        supportingContent = { Text(stringResource(R.string.settings_keyboard_height_text, PickerHeight.DEFAULT)) },
+        trailingContent = { Text(stringResource(R.string.settings_keyboard_height_value, height)) },
+    )
+    Slider(
+        value = height.toFloat(),
+        onValueChange = { height = PickerHeight.clamp(it.roundToInt()) },
+        onValueChangeFinished = { settings.heightPercent = height },
+        valueRange = PickerHeight.MIN.toFloat()..PickerHeight.MAX.toFloat(),
+        steps = (PickerHeight.MAX - PickerHeight.MIN) / PickerHeight.STEP - 1,
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .semantics { stateDescription = "$height%" },
+    )
     SwitchItem(
         stringResource(R.string.settings_keyboard_search_draft),
         stringResource(R.string.settings_keyboard_search_draft_text),
@@ -378,6 +401,14 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
         settings.stayOpen = it
     }
 }
+
+/** The keyboard's settings, read off the main thread. */
+private data class KeyboardValues(
+    val searchDraft: Boolean,
+    val deleteDraft: Boolean,
+    val stayOpen: Boolean,
+    val heightPercent: Int,
+)
 
 /** A switch with its title and explanation; the whole row toggles it. */
 @Composable

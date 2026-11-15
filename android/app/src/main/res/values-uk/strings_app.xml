@@ -169,6 +169,9 @@
     <string name="settings_keyboard_delete_draft_text">Коли вставлено стікер, знайдений за цим текстом, текст зникає.</string>
     <string name="settings_keyboard_stay_open">Залишатися відкритою</string>
     <string name="settings_keyboard_stay_open_text">Після вставлення стікера залишатися на клавіатурі стікерів, а не перемикатися назад.</string>
+    <string name="settings_keyboard_height">Висота клавіатури</string>
+    <string name="settings_keyboard_height_text">Висота сітки стікерів у відсотках від звичайної (%1$d%%). Діє з наступного відкриття клавіатури.</string>
+    <string name="settings_keyboard_height_value">%1$d%%</string>
     <string name="settings_allowlist">Клавіатури, яким можна читати ваші стікери</string>
     <string name="settings_allowlist_text">Інші клавіатури теж можуть показувати ваші стікери: клавіатура, якій ви дозволите, може шукати у вашій бібліотеці й читати її зображення, як і клавіатура стікерів цього застосунку.</string>
     <string name="settings_allowlist_empty">Жодна інша клавіатура ще не просила доступу.</string>

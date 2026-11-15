@@ -201,6 +201,9 @@
     <string name="settings_keyboard_delete_draft_text">When a sticker found from it goes in, the typed text goes away.</string>
     <string name="settings_keyboard_stay_open">Stay open</string>
     <string name="settings_keyboard_stay_open_text">After a sticker goes in, stay on the sticker keyboard instead of switching back.</string>
+    <string name="settings_keyboard_height">Keyboard height</string>
+    <string name="settings_keyboard_height_text">How tall the sticker grid is, in percent of the usual (%1$d%%). Takes effect the next time the keyboard opens.</string>
+    <string name="settings_keyboard_height_value">%1$d%%</string>
     <string name="settings_allowlist">Keyboards that may read your stickers</string>
     <string name="settings_allowlist_text">Other keyboards can show your stickers too: a keyboard you allow can search your library and read its pictures, as the sticker keyboard of this app does.</string>
     <string name="settings_allowlist_empty">No other keyboard has asked yet.</string>

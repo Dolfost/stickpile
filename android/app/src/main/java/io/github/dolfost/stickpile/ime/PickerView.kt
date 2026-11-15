@@ -178,6 +178,9 @@ internal class PickerView(
     private var resultsFor: String? = null
     private var pack: Pack? = null
     private var keysShown = false
+
+    /** The keyboard height setting, as last read ([start]). */
+    private var heightPercent = settings.heightPercent
     private var loadJob: Job? = null
     private var searchJob: Job? = null
     private var hintsJob: Job? = null
@@ -247,6 +250,11 @@ internal class PickerView(
      */
     fun start(query: String?, restarting: Boolean, likesRead: Job?) {
         whenLikesRead(likesRead)
+        val height = settings.heightPercent
+        if (height != heightPercent) {
+            heightPercent = height
+            applyColumns()
+        }
         if (InputRestart.keepsView(started, restarting, query, draftQuery)) return
         started = true
         draftQuery = query
@@ -667,8 +675,10 @@ internal class PickerView(
         val span = if (keysShown) PickerSearch.typingSpanCount(widthDp, normal) else normal
         if (gridLayout.spanCount != span) gridLayout.spanCount = span
         look.maxLines = TileInfo.maxLines(widthDp / span, context.resources.configuration.fontScale)
-        val bodyPx = if (keysShown) TYPING_ROWS * (widthPx / span) + 2 * gridPaddingPx else bodyHeightPx
-        body.updateLayoutParams { height = bodyPx }
+        val usualPx = if (keysShown) TYPING_ROWS * (widthPx / span) + 2 * gridPaddingPx else bodyHeightPx
+        val screenPx = context.resources.displayMetrics.heightPixels
+        val bodyPx = PickerHeight.scaled(usualPx, heightPercent, screenPx, (MIN_BODY_DP * density).toInt())
+        if (body.layoutParams.height != bodyPx) body.updateLayoutParams { height = bodyPx }
         itemsAdapter.refreshTiles()
     }
 
@@ -718,7 +728,10 @@ internal class PickerView(
     private companion object {
         const val STATUS_MILLIS = 5_000L
 
-        /** Rows of the grid while the keys show. */
+        /** Rows of the grid while the keys show (at 100%). */
         const val TYPING_ROWS = 2
+
+        /** The lowest the grid gets, whatever the setting and the screen. */
+        const val MIN_BODY_DP = 96
     }
 }

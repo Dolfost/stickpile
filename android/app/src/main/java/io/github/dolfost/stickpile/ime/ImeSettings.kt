@@ -31,11 +31,20 @@ class ImeSettings(context: Context) {
         get() = prefs.getString(SEARCH_LAYOUT, null)
         set(value) = prefs.edit { putString(SEARCH_LAYOUT, value) }
 
+    /**
+     * The height of the picker's grid, in percent of the usual
+     * ([PickerHeight]); read each time the picker opens.
+     */
+    var heightPercent: Int
+        get() = PickerHeight.clamp(prefs.getInt(HEIGHT_PERCENT, PickerHeight.DEFAULT))
+        set(value) = prefs.edit { putInt(HEIGHT_PERCENT, PickerHeight.clamp(value)) }
+
     private companion object {
         const val PREFS = "ime_settings"
         const val SEARCH_DRAFT = "search_draft"
         const val DELETE_DRAFT = "delete_draft"
         const val STAY_OPEN = "stay_open"
         const val SEARCH_LAYOUT = "search_layout"
+        const val HEIGHT_PERCENT = "height_percent"
     }
 }
