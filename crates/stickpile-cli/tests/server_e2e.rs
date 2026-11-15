@@ -352,3 +352,32 @@ fn cli_against_the_real_server() {
     );
     assert!(!env.run(&["sets", "list"]).status.success());
 }
+
+#[test]
+fn pairing_code_login_against_the_real_server() {
+    let server = Server::start();
+    let env = Env::new(&server.url());
+    // The code as Settings -> "Add a device" makes it for alice.
+    let created = {
+        let state = server.handle.as_ref().unwrap().state.clone();
+        server.rt.block_on(async {
+            let alice = stickpile_server::db::user_by_username(&state.db, "alice")
+                .await
+                .unwrap()
+                .unwrap();
+            let viewer = stickpile_server::auth::CurrentUser::background(alice);
+            stickpile_server::auth::pairing::create(&state, &viewer).await.unwrap()
+        })
+    };
+    let out = env.ok(&["login", "--code", &created.code, "--token-name", "paired"]);
+    assert!(out.contains("as alice (pairing code)"), "{out}");
+    assert_eq!(env.json(&["whoami"])["username"], "alice");
+    assert_eq!(
+        server.scalar("SELECT COUNT(*) FROM api_tokens WHERE name = 'paired' AND revoked_at IS NULL"),
+        1
+    );
+    // Once only.
+    let out = env.run(&["login", "--code", &created.code]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("invalid or expired pairing code"));
+}

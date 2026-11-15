@@ -326,6 +326,38 @@ fn tailnet_login_needs_no_password() {
 }
 
 #[test]
+fn pairing_code_login_needs_no_password() {
+    let server = MockServer::start();
+    let code = server.state().add_pairing("alice");
+    let env = Env::new(&server.url);
+    let typed = code.to_lowercase();
+    let out = env.ok(&["login", "--code", &typed, "--token-name", "paired-laptop"]);
+    assert!(out.contains("as alice (pairing code)"), "{out}");
+    let token_file = env.path("state/token");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&token_file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(env.json(&["whoami"])["username"], "alice");
+    assert_eq!(server.state().tokens[0].info.name, "paired-laptop");
+    // --json reports the method.
+    let again = server.state().add_pairing("alice");
+    assert_eq!(env.json(&["login", "--code", &again])["method"], "pairing code");
+
+    // A used code is refused with a hint, and the stored token stays.
+    let stored = std::fs::read_to_string(&token_file).unwrap();
+    let out = env.run(&["login", "--code", &code]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("invalid or expired pairing code"), "{err}");
+    assert!(err.contains("Add a device"), "{err}");
+    assert_eq!(std::fs::read_to_string(&token_file).unwrap(), stored);
+}
+
+#[test]
 fn server_override_and_admin_wrappers() {
     let server = MockServer::start();
     server.state().add_user("root", "pw", stickpile_api::Role::Admin);

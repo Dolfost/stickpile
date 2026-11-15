@@ -155,6 +155,21 @@ async fn login(ctx: &Ctx, a: LoginArgs) -> Result<()> {
     let token_name = a.token_name.unwrap_or_else(|| session::token_name("stickpile-cli"));
     let client = ApiClient::from_config(&ctx.config)?;
 
+    if let Some(code) = a.code {
+        let req = PairRequest {
+            code: stickpile_api::pairing::normalize(&code).unwrap_or(code),
+            token_name,
+        };
+        let created = match client.pair(&req).await {
+            // Not "the server rejected the token" (the generic 401 hint).
+            Err(e) if e.status() == Some(401) => {
+                bail!("{e}: make a new code in the web UI (Settings, Add a device); it works once, for five minutes")
+            }
+            other => other?,
+        };
+        return finish_login(ctx, created, "pairing code");
+    }
+
     if a.username.is_none() && a.password_file.is_none() {
         if let Some(created) = session::tailnet_login(&client, &token_name).await? {
             return finish_login(ctx, created, "tailnet identity");

@@ -31,8 +31,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Store an API token: from the tailnet identity (no password, behind
-    /// `tailscale serve`), else from username and password (+TOTP)
+    /// Store an API token: from a pairing code (`--code`, made in the web
+    /// UI under Settings, Add a device), else from the tailnet identity (no
+    /// password, behind `tailscale serve`), else from username and password
+    /// (+TOTP)
     Login(LoginArgs),
     /// Revoke this client's token on the server and delete the token file
     Logout,
@@ -124,6 +126,12 @@ pub struct LoginArgs {
     /// TOTP code (prompted for when the account requires one)
     #[arg(long, value_name = "CODE")]
     pub totp: Option<String>,
+    /// One-time pairing code from the web UI (Settings, Add a device), e.g.
+    /// 7KQ2-M9XA-4FTR: no password needed. It is for the server it was made
+    /// on (use --server if that is not the configured one) and works once,
+    /// for five minutes
+    #[arg(long, value_name = "CODE", conflicts_with_all = ["username", "password_file", "totp"])]
+    pub code: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -614,6 +622,7 @@ mod tests {
                 "--token-name",
                 "laptop",
             ][..],
+            &["login", "--code", "7KQ2-M9XA-4FTR", "--token-name", "laptop"],
             &["logout"],
             &["whoami"],
             &["config", "check", "--file", "x.toml"],
@@ -663,6 +672,11 @@ mod tests {
             "--set required for --scope set"
         );
         assert!(parse(&["gitpack", "add", "u", "--mode", "rw"]).is_err());
+        assert!(
+            parse(&["login", "--code", "7KQ2-M9XA-4FTR", "-u", "alice"]).is_err(),
+            "a pairing code is a login of its own"
+        );
+        assert!(parse(&["login", "--code", "x", "--totp", "123456"]).is_err());
         assert!(parse(&["upload", "cats"]).is_err());
     }
 
