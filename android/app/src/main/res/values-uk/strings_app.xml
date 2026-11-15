@@ -81,4 +81,35 @@
     <string name="keyboard_setup_show_picker">Показати вибір клавіатури</string>
     <string name="keyboard_setup_to_library">До моїх стікерів</string>
     <string name="keyboard_setup_skip">Пропустити поки що</string>
+
+    <string name="library_search">Пошук стікерів</string>
+    <string name="library_search_clear">Очистити пошук</string>
+    <string name="library_sync">Синхронізувати</string>
+    <string name="library_tab_recent">Нещодавні</string>
+    <string name="library_tab_liked">Вподобані</string>
+    <string name="library_tab_packs">Набори</string>
+    <string name="library_tab_most_used">Найчастіші</string>
+    <string name="library_offline">Офлайн: показано те, що збережено на цьому телефоні.</string>
+    <string name="library_empty_search">Нічого не знайдено.</string>
+    <string name="library_empty_recent">Тут з\'являться стікери, які ви надсилаєте з цього телефона.</string>
+    <string name="library_empty_liked">Ще нічого не вподобано. Натисніть і утримуйте стікер, щоб його вподобати.</string>
+    <string name="library_empty_most_used">Ще нічого не використано.</string>
+    <string name="library_empty_packs">Наборів ще немає.</string>
+    <string name="library_empty_pack">Цей набір порожній.</string>
+    <string name="library_all_packs">Усі набори</string>
+    <string name="library_pack_details">від %1$s, %2$s</string>
+    <plurals name="library_items">
+        <item quantity="one">%d елемент</item>
+        <item quantity="few">%d елементи</item>
+        <item quantity="many">%d елементів</item>
+        <item quantity="other">%d елемента</item>
+    </plurals>
+    <string name="library_share">Поділитися</string>
+    <string name="library_like">Вподобати або прибрати вподобання</string>
+    <string name="library_liked">Вподобано: %1$s</string>
+    <string name="library_unliked">Більше не вподобано: %1$s</string>
+    <string name="library_share_title">Поділитися стікером</string>
+    <string name="library_sign_in_again">Увійти знову</string>
+
+    <string name="settings_title">Налаштування</string>
 </resources>

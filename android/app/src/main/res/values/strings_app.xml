@@ -99,4 +99,38 @@
     <string name="keyboard_setup_show_picker">Show the keyboard switcher</string>
     <string name="keyboard_setup_to_library">Go to my stickers</string>
     <string name="keyboard_setup_skip">Skip for now</string>
+
+    <!-- The library screen. -->
+    <string name="library_search">Search stickers</string>
+    <string name="library_search_clear">Clear the search</string>
+    <string name="library_sync">Sync now</string>
+    <string name="library_tab_recent">Recent</string>
+    <string name="library_tab_liked">Liked</string>
+    <string name="library_tab_packs">Packs</string>
+    <string name="library_tab_most_used">Most used</string>
+    <string name="library_offline">Offline: showing what is saved on this phone.</string>
+    <string name="library_empty_search">Nothing found.</string>
+    <string name="library_empty_recent">The stickers you send from this phone show up here.</string>
+    <string name="library_empty_liked">Nothing liked yet. Press and hold a sticker to like it.</string>
+    <string name="library_empty_most_used">Nothing used yet.</string>
+    <string name="library_empty_packs">No packs yet.</string>
+    <string name="library_empty_pack">This pack is empty.</string>
+    <string name="library_all_packs">All packs</string>
+    <!-- A pack in the list: %1$s its owner, %2$s its size (library_items). -->
+    <string name="library_pack_details">by %1$s, %2$s</string>
+    <plurals name="library_items">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <!-- What a tap and a long press on an item do (for accessibility services). -->
+    <string name="library_share">Share</string>
+    <string name="library_like">Like or unlike</string>
+    <!-- %1$s: the item's name. -->
+    <string name="library_liked">Liked %1$s</string>
+    <string name="library_unliked">No longer liked: %1$s</string>
+    <string name="library_share_title">Share a sticker</string>
+    <string name="library_sign_in_again">Sign in again</string>
+
+    <!-- The settings. -->
+    <string name="settings_title">Settings</string>
 </resources>
