@@ -61,6 +61,7 @@ import io.github.dolfost.stickpile.provider.KeyboardAllowlist
 import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.version
 import io.github.dolfost.stickpile.ui.common.Doing
+import io.github.dolfost.stickpile.ui.common.filterTouchesWhenObscured
 import io.github.dolfost.stickpile.ui.common.messageFor
 import io.github.dolfost.stickpile.ui.common.text
 import kotlinx.coroutines.Dispatchers
@@ -382,9 +383,22 @@ private fun AllowlistSection() {
         Unit
     }
 
+    // The package "Allow" was tapped for: asked first, in a dialog.
+    var asking by rememberSaveable { mutableStateOf<String?>(null) }
+
     SectionHeader(stringResource(R.string.settings_allowlist))
     Paragraph(stringResource(R.string.settings_allowlist_text))
     val lists = access ?: return
+    lists.pending.find { it.packageName == asking }?.let { entry ->
+        AllowDialog(
+            entry,
+            onAllow = {
+                asking = null
+                change { approve(entry.packageName) }
+            },
+            onDismiss = { asking = null },
+        )
+    }
     if (lists.approved.isEmpty() && lists.pending.isEmpty()) {
         Paragraph(stringResource(R.string.settings_allowlist_empty))
         return
@@ -422,7 +436,7 @@ private fun AllowlistSection() {
             },
         )
         Actions {
-            Button(onClick = { change { approve(entry.packageName) } }) {
+            Button(onClick = { asking = entry.packageName }) {
                 Text(stringResource(R.string.settings_allowlist_allow))
             }
             TextButton(onClick = { change { dismiss(entry.packageName) } }) {
@@ -430,6 +444,42 @@ private fun AllowlistSection() {
             }
         }
     }
+}
+
+/**
+ * Let [entry] read the stickers? Names the app (label and package) and
+ * what it could read. The dialog drops touches that come through another
+ * app's window drawn over it, so an overlay cannot get it confirmed.
+ */
+@Composable
+private fun AllowDialog(entry: KeyboardEntry, onAllow: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_allowlist_confirm_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column {
+                    Text(entry.title, style = MaterialTheme.typography.titleMedium)
+                    if (entry.label != null) {
+                        Text(
+                            entry.packageName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(stringResource(R.string.settings_allowlist_confirm_text))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onAllow, modifier = Modifier.filterTouchesWhenObscured()) {
+                Text(stringResource(R.string.settings_allowlist_allow))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.app_action_cancel)) }
+        },
+    )
 }
 
 @Composable

@@ -197,6 +197,9 @@
     <string name="settings_allowlist_asked">Asked to read your stickers</string>
     <string name="settings_allowlist_asked_package">Asked to read your stickers (%1$s)</string>
     <string name="settings_allowlist_allow">Allow</string>
+    <!-- The dialog after Allow; it shows the keyboard's name and package name between the two. -->
+    <string name="settings_allowlist_confirm_title">Let this keyboard read your stickers?</string>
+    <string name="settings_allowlist_confirm_text">It will be able to search your stickers, see the ones used recently on this phone and the ones you liked, list your packs and open every picture, whenever it asks, until you revoke it here. Allow only a keyboard you trust.</string>
     <string name="settings_allowlist_dismiss">Dismiss</string>
     <string name="settings_allowlist_revoke">Revoke</string>
     <string name="settings_about">About</string>

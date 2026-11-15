@@ -167,6 +167,8 @@
     <string name="settings_allowlist_asked">Просить доступу до ваших стікерів</string>
     <string name="settings_allowlist_asked_package">Просить доступу до ваших стікерів (%1$s)</string>
     <string name="settings_allowlist_allow">Дозволити</string>
+    <string name="settings_allowlist_confirm_title">Дозволити цій клавіатурі читати ваші стікери?</string>
+    <string name="settings_allowlist_confirm_text">Вона зможе шукати ваші стікери, бачити ті, якими нещодавно користувалися на цьому телефоні, і ті, що ви вподобали, переглядати ваші набори й відкривати будь-яке зображення щоразу, коли попросить, доки ви не відкличете дозвіл тут. Дозволяйте лише клавіатурі, якій довіряєте.</string>
     <string name="settings_allowlist_dismiss">Відхилити</string>
     <string name="settings_allowlist_revoke">Відкликати</string>
     <string name="settings_about">Про застосунок</string>
