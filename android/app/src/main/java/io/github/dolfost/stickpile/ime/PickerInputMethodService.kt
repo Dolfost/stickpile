@@ -83,6 +83,16 @@ class PickerInputMethodService : InputMethodService() {
     /** Never the full-screen extract mode (landscape): there is no text to edit here. */
     override fun onEvaluateFullscreenMode(): Boolean = false
 
+    /**
+     * Shown with a hardware keyboard attached too: the picker has no typing
+     * keys, so a hardware keyboard does not replace it (the framework's
+     * default would hide it then).
+     */
+    override fun onEvaluateInputViewShown(): Boolean {
+        super.onEvaluateInputViewShown()
+        return true
+    }
+
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         library.editorPackage = info.packageName.orEmpty()
