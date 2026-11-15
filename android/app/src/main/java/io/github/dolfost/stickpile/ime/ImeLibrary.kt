@@ -30,10 +30,14 @@ internal class ImeLibrary(private val app: StickpileApp) {
     @Volatile
     var editorPackage: String = ""
 
-    /** Search ranked for the editor's app (the bridge maps its package to a [Target]). */
+    /**
+     * Search ranked for the editor's app (the bridge maps its package to a
+     * [io.github.dolfost.stickpile.rust.Target]; a native call too, so off
+     * the main thread with the rest).
+     */
     suspend fun search(query: String): ItemList {
-        val target = targetForPackage(editorPackage)
-        return call { it.search(query, target, LIMIT) }
+        val editor = editorPackage
+        return call { it.search(query, targetForPackage(editor), LIMIT) }
     }
 
     suspend fun packs(): PackList = call { it.packs() }
