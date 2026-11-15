@@ -205,6 +205,28 @@ impl Inner {
         *self.session.write().unwrap_or_else(|e| e.into_inner()) = session;
     }
 
+    /// Sign out of `old`'s server before going to another one, so that its
+    /// token never reaches the new URL: `Session::logout` (send the unsent
+    /// uses, revoke the token, delete the token file, drop the account's
+    /// cached data), waiting for the old server at most its `timeout_secs`.
+    /// When that fails or the old server does not answer in time, the token
+    /// file is deleted here all the same. Only failing to delete it is an
+    /// error, and then nothing else may change.
+    async fn sign_out_for_new_server(&self, old: &Session) -> Result<(), LibraryError> {
+        let wait = Duration::from_secs(old.config().timeout_secs.max(1));
+        match tokio::time::timeout(wait, old.logout()).await {
+            Ok(Ok(out)) => {
+                if let Err(e) = &out.revoked {
+                    tracing::warn!("leaving the server: the token was deleted but not revoked: {e}");
+                }
+            }
+            Ok(Err(e)) => tracing::warn!("leaving the server: signing out failed ({e}); deleting the token here"),
+            Err(_) => tracing::warn!("leaving the server: it did not answer in {wait:?}; deleting the token here"),
+        }
+        token::delete_token(&self.dirs.token_file)?;
+        Ok(())
+    }
+
     /// The account changed on the same server (a login or logout).
     fn account_changed(&self) {
         *lock(&self.sync) = SyncStatus::new(&self.session());
@@ -471,19 +493,27 @@ impl StickpileLibrary {
     }
 
     /// Use another server: `url` is checked (`http` or `https` with a host;
-    /// spaces and a trailing `/` are dropped), saved as `server_url` in the
-    /// config file and the library reopened for it. The cache belongs to
-    /// one server: going to another drops the cached items, history and
-    /// unsent uses. The stored token stays (it may be the same server under
-    /// another URL). Throws `InvalidInput` (field `server_url`) for a bad
-    /// URL, nothing changed; `Io` when the config cannot be written.
+    /// spaces and a trailing `/` are dropped). The same URL as now changes
+    /// nothing. Another URL signs out first, so the stored token is never
+    /// sent to the new URL: the unsent uses go to the old server and the
+    /// token is revoked there (best effort, waiting at most the configured
+    /// timeout, 5 s by default), and the token file is deleted even when the
+    /// old server cannot be reached. Then `url` is saved as `server_url` in
+    /// the config file and the library reopened for it, signed out
+    /// (`account` returns `None`; sign in again, or pair). The cache belongs
+    /// to one server: the old one's items and history are dropped. Throws
+    /// `InvalidInput` (field `server_url`) for a bad URL, nothing changed;
+    /// `Io` when the token file cannot be deleted (nothing changed) or the
+    /// config cannot be written (signed out, the URL unchanged).
     pub async fn set_server_url(&self, url: String) -> Result<(), LibraryError> {
         self.write(move |inner| async move {
             let url = server_url_from(&url)?;
             let _busy = inner.busy.lock().await;
-            if inner.session().config().server_url.trim_end_matches('/') == url {
+            let old = inner.session();
+            if old.config().server_url.trim_end_matches('/') == url {
                 return Ok(());
             }
+            inner.sign_out_for_new_server(&old).await?;
             inner.dirs.save_server_url(&url)?;
             let session = open_session(inner.dirs.load_config()?).await?;
             inner.replace_session(session);
@@ -567,9 +597,12 @@ impl StickpileLibrary {
 
     /// Sign in with a one-time pairing code made on a signed-in device, for
     /// the server at `server_url` (both from a scanned pairing link, or
-    /// typed). The code is exchanged first; only when that works is
-    /// `server_url` saved (as by `set_server_url`) and the token stored, so a
-    /// wrong code changes nothing. The token is named after the device,
+    /// typed). The code is exchanged first, without the stored token; only
+    /// when that works is `server_url` saved (as by `set_server_url`) and the
+    /// new token stored in place of the old one, so a wrong code changes
+    /// nothing. Pairing with another server than the current one first
+    /// signs out of the current one as `set_server_url` does (its token is
+    /// revoked there, best effort). The token is named after the device,
     /// `Android (<model>)`. Throws `InvalidInput` (field `code` or
     /// `server_url`) for input that cannot be a code or URL, `Unauthorized`
     /// for a wrong, expired or used code, `InvalidInput` (field
@@ -581,6 +614,8 @@ impl StickpileLibrary {
             let _busy = inner.busy.lock().await;
             let mut config = inner.dirs.load_config()?;
             config.server_url = url.clone();
+            // A client of its own, without a token: the stored one belongs to
+            // the current server and never goes to `url`.
             let client = ApiClient::from_config(&config)?;
             let req = PairRequest {
                 code,
@@ -590,6 +625,10 @@ impl StickpileLibrary {
                 .pair(&req)
                 .await
                 .map_err(|e| LibraryError::input(e, "token_name"))?;
+            let old = inner.session();
+            if old.config().server_url.trim_end_matches('/') != url {
+                inner.sign_out_for_new_server(&old).await?;
+            }
             // Stored like `stickpile login` (`session::save_login`): the
             // token, the cache bound to the server (by `Session::open`) and
             // to the account.

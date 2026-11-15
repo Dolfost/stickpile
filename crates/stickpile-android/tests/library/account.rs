@@ -45,7 +45,6 @@ async fn refuses_relative_paths_and_broken_config_files() {
 async fn set_server_url_saves_it_and_reopens() {
     let (server, _) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
-    store_token(&server, dir.path());
     let lib = open(dir.path(), &dead_url());
     assert_eq!(kind(lib.account().await), LibraryErrorKind::Unreachable);
 
@@ -58,8 +57,9 @@ async fn set_server_url_saves_it_and_reopens() {
         text.contains("# written by the test") && text.contains("timeout_secs = 2"),
         "{text}"
     );
-    // Reopened for it: the token works there.
-    let account = lib.account().await.unwrap().expect("signed in");
+    // Reopened for it: signed out there, and a login goes to it.
+    assert_eq!(lib.account().await.unwrap(), None);
+    let account = lib.login_password("alice".into(), "secret".into(), None).await.unwrap();
     assert_eq!(account.server_url, server.url);
 
     // A new library reads it back.
@@ -83,6 +83,134 @@ async fn set_server_url_saves_it_and_reopens() {
     }
     assert_eq!(again.server_url(), server.url);
     assert_eq!(std::fs::read_to_string(config_path(dir.path())).unwrap(), text);
+}
+
+/// Make `server` take `secret` as a token of its alice, so that a request
+/// carrying it would be signed in there.
+fn accept_token(server: &MockServer, secret: &str) {
+    let mut st = server.state();
+    st.issue_token("alice", "copied");
+    st.tokens.last_mut().unwrap().secret = secret.to_string();
+}
+
+/// Requests `server` received whose `METHOD /path` starts with `prefix`.
+fn requests_starting(server: &MockServer, prefix: &str) -> usize {
+    server.state().requests.iter().filter(|r| r.starts_with(prefix)).count()
+}
+
+#[tokio::test]
+async fn a_new_server_url_signs_out_first() {
+    let (old, items) = seeded_server();
+    let new = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    let secret = store_token(&old, dir.path());
+    // Were the old token sent to the new server, alice would be signed in there.
+    accept_token(&new, &secret);
+    let lib = open(dir.path(), &old.url);
+    lib.sync_now().await.unwrap();
+    lib.record_use(items[0].id.clone(), "original".into(), "".into())
+        .unwrap();
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+
+    lib.set_server_url(new.url.clone()).await.unwrap();
+    assert_eq!(lib.server_url(), new.url);
+    assert!(!token_path(dir.path()).exists(), "the token file is gone");
+    assert_eq!(lib.account().await.unwrap(), None, "signed out");
+    // The old server got the unsent use and revoked the token.
+    assert_eq!(requests_starting(&old, "DELETE /api/v1/tokens/"), 1);
+    assert!(old.state().tokens.iter().all(|t| t.info.revoked));
+    assert_eq!(old.state().usage.len(), 1);
+    // The cache no longer holds the old server's data.
+    assert!(lib.recent(10).is_empty());
+    assert_eq!(lib.sync_state().last_sync, None);
+    // A new library is signed out too.
+    let again = StickpileLibrary::new(dirs(dir.path())).unwrap();
+    assert_eq!(again.server_url(), new.url);
+    assert_eq!(again.account().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn leaving_an_unreachable_server_still_deletes_the_token() {
+    let (mut old, _) = seeded_server();
+    let new = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    let secret = store_token(&old, dir.path());
+    accept_token(&new, &secret);
+    let lib = open(dir.path(), &old.url);
+    old.stop();
+
+    lib.set_server_url(new.url.clone()).await.unwrap();
+    assert_eq!(lib.server_url(), new.url);
+    assert!(!token_path(dir.path()).exists());
+    assert_eq!(lib.account().await.unwrap(), None);
+    assert!(
+        old.state().tokens.iter().all(|t| !t.info.revoked),
+        "not revoked: the old server was down"
+    );
+}
+
+#[tokio::test]
+async fn a_hanging_old_server_does_not_hold_the_change_up() {
+    // Connections to it are made (the kernel's backlog) but never answered.
+    let hanging = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let old_url = format!("http://{}", hanging.local_addr().unwrap());
+    let new = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    stickpile_core::token::write_token(&token_path(dir.path()), "spk_old").unwrap();
+    let lib = open(dir.path(), &old_url);
+
+    let started = std::time::Instant::now();
+    lib.set_server_url(new.url.clone()).await.unwrap();
+    // At most the config's timeout (2 s here) for the old server.
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+    assert!(!token_path(dir.path()).exists());
+    assert_eq!(lib.account().await.unwrap(), None);
+    drop(hanging);
+}
+
+#[tokio::test]
+async fn the_same_server_url_keeps_the_session() {
+    let (server, _) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    lib.sync_now().await.unwrap();
+    lib.set_server_url(format!(" {}/", server.url)).await.unwrap();
+    assert!(token_path(dir.path()).exists());
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+    assert_eq!(requests_starting(&server, "DELETE "), 0);
+    assert!(server.state().tokens.iter().all(|t| !t.info.revoked));
+    assert!(lib.sync_state().last_sync.is_some(), "the cache is kept");
+}
+
+#[tokio::test]
+async fn pairing_with_another_server_replaces_the_token() {
+    let (old, _) = seeded_server();
+    let new = MockServer::start();
+    let dir = tempfile::tempdir().unwrap();
+    let secret = store_token(&old, dir.path());
+    let lib = open(dir.path(), &old.url);
+    let code = new.state().add_pairing("alice");
+
+    let account = lib.login_pairing(new.url.clone(), code).await.unwrap();
+    assert_eq!(
+        (account.server_url.as_str(), account.auth),
+        (new.url.as_str(), AuthKind::Token)
+    );
+    // The code went out alone, before any request that could carry a token.
+    assert_eq!(new.state().requests, vec!["POST /api/v1/auth/pair".to_string()]);
+    // The new token replaced the old one, which the old server revoked.
+    let stored = stickpile_core::token::read_token(&token_path(dir.path()))
+        .unwrap()
+        .unwrap();
+    assert_ne!(stored, secret);
+    assert!(new
+        .state()
+        .tokens
+        .iter()
+        .any(|t| t.secret == stored && t.info.name == "Android (phone)"));
+    assert!(old.state().tokens.iter().all(|t| t.info.revoked));
+    assert_eq!(lib.account().await.unwrap().unwrap().auth, AuthKind::Token);
+    assert_eq!(lib.server_url(), new.url);
 }
 
 #[tokio::test]
