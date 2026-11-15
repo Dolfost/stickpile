@@ -51,6 +51,22 @@ SDK, the NDK, cargo-ndk and Rust with the three Android targets. On NixOS the `a
 downloads cannot run, so the shell points Gradle at the SDK's own through
 `GRADLE_OPTS`; nothing machine-specific is committed.
 
+## Permissions
+
+The app's own manifest asks for `INTERNET` (the server you configure) and
+`CAMERA` (scanning the pairing QR code, requested on that screen only).
+WorkManager, which runs the background sync, adds `WAKE_LOCK`,
+`ACCESS_NETWORK_STATE`, `RECEIVE_BOOT_COMPLETED` and `FOREGROUND_SERVICE`
+to the merged manifest, all granted at install time without a prompt; the
+owner chose to keep all four (2026-11-15). AndroidX also declares a
+signature-level permission of the app's own
+(`io.github.dolfost.stickpile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`),
+which no other app can hold. Nothing else.
+
+No backup and no device transfer: `allowBackup` is off and the backup and
+data-extraction rules exclude everything, so the API token never leaves the
+device.
+
 ## Bridge interface
 
 The Kotlin app reaches Rust through one UniFFI object, `Library`, exported
