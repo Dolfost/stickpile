@@ -29,6 +29,11 @@
     <string name="display_tile_small">Малі</string>
     <string name="display_tile_medium">Середні</string>
     <string name="display_tile_large">Великі</string>
+    <string name="display_autoplay">Відтворювати GIF і відео</string>
+    <string name="display_autoplay_text">Вони рухаються в сітках і деталях замість першого кадру. Кожне завантажується під час першого відтворення; з варіантом «Лише Wi-Fi» мобільний інтернет відтворює лише вже завантажені.</string>
+    <string name="display_autoplay_always">Завжди</string>
+    <string name="display_autoplay_wifi">Лише Wi-Fi</string>
+    <string name="display_autoplay_never">Ніколи</string>
 
     <string name="display_never_copied">ще не копіювали</string>
     <plurals name="display_copied">

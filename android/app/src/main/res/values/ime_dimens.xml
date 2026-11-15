@@ -7,6 +7,8 @@
     <dimen name="ime_key_row_height">42dp</dimen>
     <!-- The padding of the grid on each side; PickerView counts it to size the cells. -->
     <dimen name="ime_grid_padding">4dp</dimen>
+    <!-- The picture in the details panel (ime_details.xml). -->
+    <dimen name="ime_details_picture">128dp</dimen>
     <!-- The icons in a tile's stats line. -->
     <dimen name="ime_tile_icon">9dp</dimen>
 </resources>

@@ -35,6 +35,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
@@ -46,11 +48,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.Autoplay
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.Stat
 import io.github.dolfost.stickpile.display.TileField
+import io.github.dolfost.stickpile.motion.LoopingVideoView
+import io.github.dolfost.stickpile.motion.MotionPolicy
+import io.github.dolfost.stickpile.motion.Motions
 import io.github.dolfost.stickpile.rust.Item
+import io.github.dolfost.stickpile.rust.Motion
+import io.github.dolfost.stickpile.rust.MotionKind
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 
 /** The dark band and badges over a thumbnail: light text stays readable on any picture. */
@@ -104,7 +113,7 @@ internal fun ItemGrid(
                     .semantics { contentDescription = item.name },
                 contentAlignment = Alignment.Center,
             ) {
-                Thumbnail(library, item.id)
+                ItemPicture(library, item, display.autoplay, display.tileSize.minDp * 2)
                 TileOverlays(info)
                 if (preparing == item.id) CircularProgressIndicator(Modifier.size(32.dp))
             }
@@ -193,6 +202,73 @@ private val TileField.icon: Int
         else -> R.drawable.ic_copies
     }
 
+/**
+ * The item's picture, fitted: its thumbnail, moving instead for an
+ * animation or a video as [autoplay] lets it ([Motions]), decoded at most
+ * [sideDp] (in pixels, at most [MAX_MOTION_PX]). The still shows until the
+ * moving one is ready, and when it will not play.
+ */
+@Composable
+internal fun ItemPicture(library: StickpileLibraryInterface, item: Item, autoplay: Autoplay, sideDp: Int) {
+    val context = LocalContext.current
+    val maxPx = with(LocalDensity.current) { sideDp.dp.roundToPx() }.coerceIn(1, MAX_MOTION_PX)
+    val source = remember(item.kind, autoplay) { MotionPolicy.source(item.kind, autoplay, Motions.metered(context)) }
+    val motion: Motion? by produceState<Motion?>(null, item.id, source) {
+        value = source?.let { s -> Motions.motion(item.id, s) { id, download -> library.motion(id, download) } }
+    }
+    val m = motion
+    when (m?.kind) {
+        null -> Thumbnail(library, item.id)
+        MotionKind.PICTURE -> MovingPicture(library, item.id, m, maxPx)
+        MotionKind.VIDEO -> {
+            Thumbnail(library, item.id)
+            MovingVideo(item.id, m.path)
+        }
+    }
+}
+
+/** An animated GIF or WebP, looping; the still until it is decoded, and if it is not. */
+@Composable
+private fun MovingPicture(library: StickpileLibraryInterface, itemId: String, motion: Motion, maxPx: Int) {
+    val drawable: Drawable? by produceState(Motions.cachedPicture(motion, maxPx), motion, maxPx) {
+        if (value == null) value = Motions.picture(itemId, motion, maxPx)
+    }
+    val d = drawable
+    if (d == null) {
+        Thumbnail(library, itemId)
+    } else {
+        val painter = remember(d) { DrawablePainter(d) }
+        Image(
+            painter = painter,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().padding(PICTURE_PADDING),
+        )
+    }
+}
+
+/** A video over the still, without sound, looping while it is on screen. */
+@Composable
+private fun MovingVideo(itemId: String, path: String) {
+    AndroidView(
+        factory = { LoopingVideoView(it) },
+        update = { view ->
+            view.listener = object : LoopingVideoView.Listener {
+                override fun failed() = Motions.failed(itemId)
+            }
+            view.play(path)
+        },
+        onReset = { it.play(null) },
+        onRelease = { it.play(null) },
+        modifier = Modifier.fillMaxSize().padding(PICTURE_PADDING),
+    )
+}
+
+/** The longest side a moving picture is decoded at. */
+private const val MAX_MOTION_PX = 768
+
+private val PICTURE_PADDING = 6.dp
+
 /** The item's thumbnail, fitted, once it is loaded (from memory at once when it is there). */
 @Composable
 internal fun Thumbnail(library: StickpileLibraryInterface, itemId: String, modifier: Modifier = Modifier) {
@@ -206,7 +282,7 @@ internal fun Thumbnail(library: StickpileLibraryInterface, itemId: String, modif
             painter = painter,
             contentDescription = null,
             contentScale = ContentScale.Fit,
-            modifier = modifier.fillMaxSize().padding(6.dp),
+            modifier = modifier.fillMaxSize().padding(PICTURE_PADDING),
         )
     }
 }

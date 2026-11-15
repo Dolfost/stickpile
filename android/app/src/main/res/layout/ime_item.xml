@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  One sticker in the picker's grid: its thumbnail in a square cell, and
-  over it what Display shows (ItemsAdapter fills them in): the badges in
-  the top-start corner, the heart of a liked one in the top-end corner,
-  and lines of text on a dark band at the bottom.
+  One sticker in the picker's grid: its thumbnail in a square cell
+  (moving, or a video over it, as MotionBinder makes it), and over it
+  what Display shows (ItemsAdapter fills them in): the badges in the
+  top-start corner, the heart of a liked one in the top-end corner, and
+  lines of text on a dark band at the bottom.
 -->
 <io.github.dolfost.stickpile.ime.SquareFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -20,6 +21,15 @@
         android:importantForAccessibility="no"
         android:padding="2dp"
         android:scaleType="fitCenter" />
+
+    <!-- A video over the still, while it plays (MotionBinder). -->
+    <io.github.dolfost.stickpile.motion.LoopingVideoView
+        android:id="@+id/ime_item_video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_margin="2dp"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
 
     <LinearLayout
         android:layout_width="wrap_content"

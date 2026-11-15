@@ -43,6 +43,19 @@ enum class TileSize(val minDp: Int) {
 }
 
 /**
+ * When the GIFs, animated WebPs and videos move in the grids and the
+ * details, instead of showing the still of their first frame. Playing one
+ * downloads its file the first time.
+ */
+enum class Autoplay {
+    ALWAYS,
+
+    /** Downloads only on a network that is not metered; what is cached plays anywhere. */
+    WIFI,
+    NEVER,
+}
+
+/**
  * What the grids show, shared by the app and the keyboard
  * ([DisplaySettings] keeps it).
  *
@@ -54,6 +67,7 @@ data class Display(
     val showInfo: Boolean = true,
     val fields: Set<TileField> = TileField.entries.toSet(),
     val tileSize: TileSize = TileSize.MEDIUM,
+    val autoplay: Autoplay = Autoplay.ALWAYS,
 ) {
     /** The tiles show [field] now. */
     fun shows(field: TileField): Boolean = showInfo && field in fields

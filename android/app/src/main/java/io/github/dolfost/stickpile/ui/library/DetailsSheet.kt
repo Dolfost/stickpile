@@ -34,13 +34,15 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.Autoplay
 import io.github.dolfost.stickpile.display.ItemLabels
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import kotlinx.coroutines.launch
 
 /**
- * An item's details, from a long press: a larger thumbnail, the name, the
+ * An item's details, from a long press: a larger picture (moving, as
+ * [autoplay] lets it), the name, the
  * pack and its owner, the numbers, and the vibe, emojis, tags and
  * keywords. A tap on a vibe, emoji or tag searches for it ([onSearch]
  * gets the query). Share, Like or Unlike, and Open in browser when the
@@ -51,6 +53,7 @@ import kotlinx.coroutines.launch
 internal fun DetailsSheet(
     details: Details,
     library: StickpileLibraryInterface,
+    autoplay: Autoplay,
     onDismiss: () -> Unit,
     onShare: (Item) -> Unit,
     onLike: (Item) -> Unit,
@@ -77,11 +80,11 @@ internal fun DetailsSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(
                     Modifier
-                        .size(144.dp)
+                        .size(DETAILS_PICTURE_DP.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,
-                ) { Thumbnail(library, item.id) }
+                ) { ItemPicture(library, item, autoplay, DETAILS_PICTURE_DP) }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(item.name, style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -184,3 +187,6 @@ private fun ButtonLabel(icon: Int, text: String) {
     Spacer(Modifier.size(8.dp))
     Text(text)
 }
+
+/** The side of the details' picture. */
+private const val DETAILS_PICTURE_DP = 144

@@ -32,6 +32,11 @@
     <string name="display_tile_small">Small</string>
     <string name="display_tile_medium">Medium</string>
     <string name="display_tile_large">Large</string>
+    <string name="display_autoplay">Play GIFs and videos</string>
+    <string name="display_autoplay_text">They move in the grids and the details instead of showing their first frame. Each is downloaded the first time it plays; on Wi-Fi only, mobile data plays only those already downloaded.</string>
+    <string name="display_autoplay_always">Always</string>
+    <string name="display_autoplay_wifi">Wi-Fi only</string>
+    <string name="display_autoplay_never">Never</string>
 
     <string name="display_never_copied">never copied</string>
     <plurals name="display_copied">

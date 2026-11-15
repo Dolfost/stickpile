@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.motion.Motions
 import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.sync.SyncScheduler
@@ -65,6 +66,7 @@ class MainActivity : ComponentActivity() {
                         // for the last one goes.
                         PreparedFiles.revokeAll()
                         Thumbnails.clear()
+                        Motions.clear()
                     },
                     accountVersion = AccountChanges.version.value,
                 )
@@ -193,5 +195,6 @@ private fun signedOutForNewServer(context: Context) {
     SyncScheduler.cancel(context)
     PreparedFiles.revokeAll()
     Thumbnails.clear()
+    Motions.clear()
     AccountChanges.changed()
 }

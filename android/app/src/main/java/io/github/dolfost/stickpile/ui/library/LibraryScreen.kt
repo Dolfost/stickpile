@@ -205,6 +205,7 @@ fun LibraryScreen(
         DetailsSheet(
             details,
             library,
+            display.autoplay,
             onDismiss = vm::hideDetails,
             onShare = vm::share,
             onLike = vm::toggleLike,

@@ -129,7 +129,8 @@ internal class PickerView(
     private var display: Display = displaySettings.current
     private val look = TileLook(context)
     private val thumbnails = ThumbnailLoader(scope, library, context.resources, largestCellPx())
-    private val itemsAdapter = ItemsAdapter(thumbnails, look, ::onItemClick, ::onItemLongClick)
+    private val motions = MotionBinder(scope, library, context)
+    private val itemsAdapter = ItemsAdapter(thumbnails, motions, look, ::onItemClick, ::onItemLongClick)
     private val packsAdapter = PacksAdapter(::openPack)
     private val chipRows = ChipRows(
         root,
@@ -142,6 +143,7 @@ internal class PickerView(
     private val details = DetailsPanel(
         root.findViewById(R.id.ime_details),
         thumbnails,
+        motions,
         object : DetailsPanel.Listener {
             override fun send(item: Item, sticker: Boolean) {
                 if (busy) return
@@ -230,6 +232,7 @@ internal class PickerView(
         grid.addOnItemTouchListener(emptyTapHidesKeys())
         look.display = display
         look.likedOf = ::likedOf
+        motions.autoplay = display.autoplay
         // Keep clear of the navigation bar where the keyboard's window reaches under it.
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             view.updatePadding(bottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom)
@@ -639,8 +642,16 @@ internal class PickerView(
         val old = display
         display = new
         look.display = new
+        motions.autoplay = new.autoplay
         showSafeMode()
-        if (old.tileSize != new.tileSize) applyColumns() else itemsAdapter.refreshTiles()
+        when {
+            old.autoplay != new.autoplay -> {
+                if (old.tileSize != new.tileSize) applyColumns()
+                itemsAdapter.rebindAll()
+            }
+            old.tileSize != new.tileSize -> applyColumns()
+            else -> itemsAdapter.refreshTiles()
+        }
         if (old.safeMode != new.safeMode && started) reload(top = true)
     }
 
@@ -675,6 +686,7 @@ internal class PickerView(
         val span = if (keysShown) PickerSearch.typingSpanCount(widthDp, normal) else normal
         if (gridLayout.spanCount != span) gridLayout.spanCount = span
         look.maxLines = TileInfo.maxLines(widthDp / span, context.resources.configuration.fontScale)
+        look.cellPx = widthPx / span
         val usualPx = if (keysShown) TYPING_ROWS * (widthPx / span) + 2 * gridPaddingPx else bodyHeightPx
         val screenPx = context.resources.displayMetrics.heightPixels
         val bodyPx = PickerHeight.scaled(usualPx, heightPercent, screenPx, (MIN_BODY_DP * density).toInt())

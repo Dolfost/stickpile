@@ -12,20 +12,22 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.ItemLabels
+import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.rust.Item
 import kotlinx.coroutines.Job
 
 /**
  * A sticker's details over the picker's grid, opened by a long press
- * (`ime_details.xml`): a bigger thumbnail, its name, set and owner, format
- * and size, the numbers, and its vibe, emojis and tags as chips that
- * search for them; and the buttons to send it (as a picture or as a
- * sticker), like or unlike it, share it, or close the panel. It shows all
- * of it, whatever the tiles show.
+ * (`ime_details.xml`): a bigger picture (moving, as [MotionBinder] makes
+ * it), its name, set and owner, format and size, the numbers, and its
+ * vibe, emojis and tags as chips that search for them; and the buttons to
+ * send it (as a picture or as a sticker), like or unlike it, share it, or
+ * close the panel. It shows all of it, whatever the tiles show.
  */
 internal class DetailsPanel(
     private val view: View,
     private val thumbnails: ThumbnailLoader,
+    private val motions: MotionBinder,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -42,12 +44,15 @@ internal class DetailsPanel(
 
     private val context = view.context
     private val image: ImageView = view.findViewById(R.id.ime_details_image)
+    private val video: LoopingVideoView = view.findViewById(R.id.ime_details_video)
+    private val picturePx = context.resources.getDimensionPixelSize(R.dimen.ime_details_picture)
     private val name: TextView = view.findViewById(R.id.ime_details_name)
     private val set: TextView = view.findViewById(R.id.ime_details_set)
     private val facts: TextView = view.findViewById(R.id.ime_details_facts)
     private val chips: ChipGroup = view.findViewById(R.id.ime_details_chips)
     private val like: MaterialButton = view.findViewById(R.id.ime_details_like)
     private var thumbnailJob: Job? = null
+    private var motionJob: Job? = null
 
     /** The item shown; null while the panel is closed. */
     var item: Item? = null
@@ -64,7 +69,9 @@ internal class DetailsPanel(
     fun show(item: Item, liked: Boolean) {
         if (this.item?.id != item.id) {
             thumbnailJob?.cancel()
+            motionJob?.cancel()
             thumbnailJob = thumbnails.bind(item.id, image)
+            motionJob = motions.bind(item, image, video, picturePx, thumbnailJob)
         }
         this.item = item
         name.text = item.name
@@ -86,7 +93,10 @@ internal class DetailsPanel(
         view.isVisible = false
         thumbnailJob?.cancel()
         thumbnailJob = null
+        motionJob?.cancel()
+        motionJob = null
         thumbnails.unbind(image)
+        motions.unbind(video)
         listener.closed(shown)
     }
 

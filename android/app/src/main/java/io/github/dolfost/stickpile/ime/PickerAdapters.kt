@@ -22,6 +22,7 @@ import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.ItemLabels
 import io.github.dolfost.stickpile.display.TileField
+import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.Pack
 import kotlinx.coroutines.Job
@@ -35,6 +36,9 @@ import kotlinx.coroutines.Job
 internal class TileLook(context: Context) {
     var display: Display = Display()
     var maxLines: Int = TileLine.entries.size
+
+    /** The side of a grid cell, in pixels: what a moving picture is decoded at, at most. */
+    var cellPx: Int = DecodeSize.MAX_THUMBNAIL_PX
     var likedOf: (Item) -> Boolean = { it.liked }
 
     private val iconPx = context.resources.getDimensionPixelSize(R.dimen.ime_tile_icon)
@@ -78,6 +82,7 @@ internal class TileLook(context: Context) {
 /** The grid of stickers, with what [look] shows over each. */
 internal class ItemsAdapter(
     private val thumbnails: ThumbnailLoader,
+    private val motions: MotionBinder,
     private val look: TileLook,
     private val onClick: (Item) -> Unit,
     private val onLongClick: (Item) -> Unit,
@@ -85,6 +90,7 @@ internal class ItemsAdapter(
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
         val image: ImageView = view.findViewById(R.id.ime_item_image)
+        val video: LoopingVideoView = view.findViewById(R.id.ime_item_video)
         val badge: TextView = view.findViewById(R.id.ime_item_badge)
         val nsfw: TextView = view.findViewById(R.id.ime_item_nsfw)
         val liked: ImageView = view.findViewById(R.id.ime_item_liked)
@@ -96,6 +102,7 @@ internal class ItemsAdapter(
             TileLine.STATS to view.findViewById(R.id.ime_item_stats),
         )
         var job: Job? = null
+        var motionJob: Job? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -108,6 +115,7 @@ internal class ItemsAdapter(
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = getItem(position)
         holder.job?.cancel()
+        holder.motionJob?.cancel()
         holder.itemView.contentDescription = item.name
         holder.itemView.setOnClickListener { onClick(item) }
         holder.itemView.setOnLongClickListener {
@@ -116,6 +124,13 @@ internal class ItemsAdapter(
         }
         bindInfo(holder, item)
         holder.job = thumbnails.bind(item.id, holder.image)
+        holder.motionJob = motions.bind(
+            item,
+            holder.image,
+            holder.video,
+            DecodeSize.thumbnailPx(look.cellPx),
+            holder.job,
+        )
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
@@ -129,7 +144,15 @@ internal class ItemsAdapter(
     override fun onViewRecycled(holder: Holder) {
         holder.job?.cancel()
         holder.job = null
+        holder.motionJob?.cancel()
+        holder.motionJob = null
         thumbnails.unbind(holder.image)
+        motions.unbind(holder.video)
+    }
+
+    /** Every tile binds again, thumbnail and all (whether GIFs and videos play changed). */
+    fun rebindAll() {
+        notifyItemRangeChanged(0, itemCount)
     }
 
     /** [look] changed: the tiles show it, the thumbnails stay. */

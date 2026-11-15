@@ -5,6 +5,7 @@ import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.LibraryException
+import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchHint
@@ -51,6 +52,9 @@ internal class ImeLibrary(private val app: StickpileApp) {
     suspend fun packItems(packId: String): ItemList = call { it.packItems(packId) }
 
     suspend fun thumbnail(itemId: String): String = call { it.thumbnail(itemId) }
+
+    /** The file to play for a moving item; [download] false: only a cached one. */
+    suspend fun motion(itemId: String, download: Boolean): Motion? = call { it.motion(itemId, download) }
 
     suspend fun prepare(itemId: String, editorPackage: String, mimeTypes: List<String>, sticker: Boolean): Prepared =
         call { it.prepare(itemId, editorPackage, mimeTypes, sticker) }

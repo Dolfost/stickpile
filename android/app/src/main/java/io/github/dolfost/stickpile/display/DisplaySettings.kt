@@ -38,6 +38,8 @@ class DisplaySettings(context: Context) {
 
     fun setTileSize(size: TileSize) = save(current.copy(tileSize = size))
 
+    fun setAutoplay(autoplay: Autoplay) = save(current.copy(autoplay = autoplay))
+
     private fun save(display: Display) {
         mutable.value = display
         prefs.edit {
@@ -45,6 +47,7 @@ class DisplaySettings(context: Context) {
             putBoolean(SHOW_INFO, display.showInfo)
             putStringSet(HIDDEN_FIELDS, (TileField.entries - display.fields).map { it.name }.toSet())
             putString(TILE_SIZE, display.tileSize.name)
+            putString(AUTOPLAY, display.autoplay.name)
         }
     }
 
@@ -56,6 +59,7 @@ class DisplaySettings(context: Context) {
         /** The fields turned off (so that a field added later starts on). */
         const val HIDDEN_FIELDS = "hidden_fields"
         const val TILE_SIZE = "tile_size"
+        const val AUTOPLAY = "autoplay"
 
         fun read(prefs: SharedPreferences): Display {
             val defaults = Display()
@@ -66,6 +70,8 @@ class DisplaySettings(context: Context) {
                 fields = TileField.entries.filter { it.name !in hidden }.toSet(),
                 tileSize = TileSize.entries.firstOrNull { it.name == prefs.getString(TILE_SIZE, null) }
                     ?: defaults.tileSize,
+                autoplay = Autoplay.entries.firstOrNull { it.name == prefs.getString(AUTOPLAY, null) }
+                    ?: defaults.autoplay,
             )
         }
     }

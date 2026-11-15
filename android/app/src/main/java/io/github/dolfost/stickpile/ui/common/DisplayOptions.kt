@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.Autoplay
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.display.TileField
@@ -28,8 +29,9 @@ import io.github.dolfost.stickpile.display.TileSize
 /**
  * What the sticker tiles show, as switches, for the library's sheet and
  * the settings: safe mode when [withSafeMode], all the info at once, each
- * field (dimmed while the info is off), and the tile size. A change is
- * saved in [settings] at once, which the app and the keyboard both follow.
+ * field (dimmed while the info is off), the tile size, and when GIFs and
+ * videos play. A change is saved in [settings] at once, which the app and
+ * the keyboard both follow.
  */
 @Composable
 fun DisplayOptions(display: Display, settings: DisplaySettings, withSafeMode: Boolean = false) {
@@ -64,6 +66,25 @@ fun DisplayOptions(display: Display, settings: DisplaySettings, withSafeMode: Bo
                 onClick = { settings.setTileSize(size) },
                 shape = SegmentedButtonDefaults.itemShape(i, TileSize.entries.size),
                 label = { Text(stringResource(size.label)) },
+            )
+        }
+    }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.display_autoplay)) },
+        supportingContent = { Text(stringResource(R.string.display_autoplay_text)) },
+        colors = Transparent,
+    )
+    SingleChoiceSegmentedButtonRow(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Autoplay.entries.forEachIndexed { i, autoplay ->
+            SegmentedButton(
+                selected = autoplay == display.autoplay,
+                onClick = { settings.setAutoplay(autoplay) },
+                shape = SegmentedButtonDefaults.itemShape(i, Autoplay.entries.size),
+                label = { Text(stringResource(autoplay.label)) },
             )
         }
     }
@@ -110,4 +131,12 @@ val TileSize.label: Int
         TileSize.SMALL -> R.string.display_tile_small
         TileSize.MEDIUM -> R.string.display_tile_medium
         TileSize.LARGE -> R.string.display_tile_large
+    }
+
+@get:StringRes
+val Autoplay.label: Int
+    get() = when (this) {
+        Autoplay.ALWAYS -> R.string.display_autoplay_always
+        Autoplay.WIFI -> R.string.display_autoplay_wifi
+        Autoplay.NEVER -> R.string.display_autoplay_never
     }

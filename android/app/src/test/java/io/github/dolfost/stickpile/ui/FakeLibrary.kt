@@ -7,6 +7,7 @@ import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.MediaFormat
 import io.github.dolfost.stickpile.rust.MediaKind
+import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.PairingLink
@@ -190,6 +191,8 @@ class FakeLibrary : StickpileLibraryInterface {
     }
 
     override suspend fun thumbnail(itemId: String): String = unexpected("thumbnail")
+
+    override suspend fun motion(itemId: String, download: Boolean): Motion? = unexpected("motion")
 
     override suspend fun toggleLike(itemId: String): Boolean {
         calls += "toggleLike $itemId"

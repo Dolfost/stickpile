@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.motion.Motions
 import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.sync.SyncScheduler
@@ -111,6 +112,7 @@ private fun SettingsContent(
             background = StickpileApp.from(appContext).scope,
             onCacheCleared = {
                 Thumbnails.clear()
+                Motions.clear()
                 // The files the tokens pointed to are gone.
                 PreparedFiles.revokeAll()
             },
@@ -118,6 +120,7 @@ private fun SettingsContent(
             onSignedOut = {
                 SyncScheduler.cancel(appContext)
                 Thumbnails.clear()
+                Motions.clear()
                 PreparedFiles.revokeAll()
                 AccountChanges.changed()
             },
