@@ -59,8 +59,11 @@ switched on. Then switch to it from any keyboard with the keyboard switcher
 Using it:
 
 - Type a few words with your usual keyboard, then switch: stickpile searches
-  for what is in the field (one line, at most 60 characters). Or browse the
-  tabs Recent, Liked and Sets; the row of emojis narrows the grid.
+  for what is in the field (one line, at most 60 characters). It reads only
+  plain text fields: not numbers, phone numbers, email addresses, links or
+  passwords, not fields that ask keyboards for no suggestions, and not
+  incognito fields. Or browse the tabs Recent, Liked and Sets; the row of
+  emojis narrows the grid.
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
@@ -83,7 +86,8 @@ it.
 Share a picture or a video from a gallery or any app to "stickpile", pick
 one of your sets, change the name, keywords and emojis if you like, and
 upload. Several files upload one after another with their progress; a file
-that fails says why and can be retried.
+that fails says why and can be retried. Files larger than 1 GB are left
+out.
 
 ## Settings
 
@@ -372,7 +376,12 @@ Two functions in `stickpile-core`, with unit tests:
 
 The input method then tries, in order: `commitContent` with the prepared
 file's provider URI; else an `ACTION_SEND` intent to the editor's package;
-else the URI on the clipboard, saying so.
+else the URI on the clipboard, saying so. When preparing for the field
+fails with `NothingFits` or `Unreachable` (a rendition for sharing may
+still be in the cache), or the field refuses the commit, a rendition for
+sharing is prepared. The draft the item was found by is deleted only after
+the field took the commit. Every hand-off (commit, `ACTION_SEND`,
+clipboard) records a use.
 
 ## App internals
 
@@ -384,14 +393,18 @@ is one process; these pieces are shared by its parts:
   `noBackupFilesDir` (`config.toml`, `cache/`, `token`); `.scope` is a
   `CoroutineScope` for work that must outlive a screen.
 - `provider.KeyboardAllowlist`: the keyboards the user lets read stickers
-  through the provider, and the pending (refused) ones.
+  through the provider, each tied to its signing certificates, and the
+  pending (refused) ones. It reads the package manager: call it off the
+  main thread.
 - `ime.ImeSettings`: the picker keyboard's switches (search the draft,
   delete the draft, stay open).
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout.
 - `provider.PreparedFiles`: `uriFor(context, prepared)` turns a file from
   `StickpileLibrary.prepare` into a `/prepared/<token>/<name>` provider URI,
-  for the input method's `commitContent` and for sharing from the app.
+  for the input method's `commitContent` and for sharing from the app;
+  `revokeAll()` revokes every token at once (sign-out, a change of server
+  or account, clearing the cache).
 
 Packages: `ui` (onboarding, the library screen, settings, licences),
 `ime` (the picker keyboard), `provider` (the content provider below),
@@ -441,6 +454,10 @@ library fails, a query returns an empty cursor whose extras carry `error`
   `prepare`. Readable by any caller that presents a valid token (see below).
   A `query` on it answers the `OpenableColumns` (`_display_name`, `_size`),
   as `FileProvider` does, since receiving apps ask for them.
+- `/thumb/` opens and `prepare` may download: they run at most 4 at a time
+  for all callers together. A call over the limit waits up to 2 s for a
+  slot, then fails (`/thumb/`: `FileNotFoundException`; `prepare`: error
+  `failed`); the keyboard may try again.
 
 ### Calls
 
@@ -452,6 +469,9 @@ library fails, a query returns an empty cursor whose extras carry `error`
   with `error` (one of
   `nothing_fits`, `not_found`, `not_signed_in`, `unreachable`, `failed`).
   The token is 128 random bits, valid for one hour, kept in memory only.
+  At most 512 tokens live at once, and at most 64 made for one other app
+  (by uid); the oldest goes first. All of them are revoked on sign-out, a
+  change of server or account, and when the cache is cleared.
 - `call("used", <item id>, extras)` with extras `variant` (string, from the
   prepared file) and `package`: records the use (for "recent" and the
   server's counts).
@@ -465,15 +485,22 @@ custom permissions have an install-order problem).
 - The provider is exported. Calls from the app's own uid are always allowed.
 - Any other caller is identified by `Binder.getCallingUid()` and its package
   names, and is allowed only when the user approved that package in the
-  app's settings ("Keyboards that may read your stickers"). A refused
-  package is remembered as pending, so that the settings screen can offer
-  it for approval; the refusal is a `SecurityException`.
+  app's settings ("Keyboards that may read your stickers") and it is still
+  signed with the certificates it had when approved (their SHA-256 is
+  stored on approval; a keyboard that rotates its signing key, or another
+  app installed under the name, must be approved again). The refusal is a
+  `SecurityException`. Only input methods (a package with a service in
+  `InputMethodManager.getInputMethodList()`) are remembered as pending, so
+  that the settings screen can offer them for approval; any other app is
+  refused without being listed.
 - `/prepared/<token>/...` is readable by any caller with a valid token: the
   chat app that receives the URI is not on the allowlist and must still
   read the file, so the unguessable token is its capability. URI permission
   grants are not relied on, since on an exported provider they do not
   distinguish callers.
 - Path traversal, unknown paths and writes are rejected; files are opened
-  read-only. The access check comes before routing, so an unknown path from
-  a caller that is not approved is refused like any other.
+  read-only. The access check comes before routing, so an unknown path or
+  a write from a caller that is not approved is refused like any other.
+  `getTypeAnonymous` (asked with the caller's identity cleared) answers
+  nothing.
 - A `/search` ranks for the app named by `package` (`target_for_package`).
