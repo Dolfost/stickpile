@@ -5,6 +5,9 @@
 #   macos      CLI + server for arm64 and x86_64, built by cargo, and the
 #              Stickpile app (crates/stickpile-mac, ad-hoc signed)
 #   windows    CLI, built by cargo (best effort)
+#   android    the Android app as an unsigned release APK, built by Gradle
+#              and cargo-ndk (best effort; sign it before installing, see
+#              docs/android.md, "Release signing")
 #   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
 #              built by Nix and pushed with skopeo
 #   release    GitHub release with every artifact and SHA256SUMS
@@ -197,6 +200,42 @@ jobs:
           name: windows-x86_64
           path: dist/*
 
+  android:
+    name: android (APK, unsigned)
+    # Best effort until the app has been run on devices.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      # The runner image has the Android SDK (platform 37, build tools 36),
+      # JDK 21 and other NDKs; the app pins its NDK (ndkVersion in
+      # android/app/build.gradle.kts) and builds Rust with cargo-ndk.
+      - name: NDK, JDK 21 and cargo-ndk
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >>"$GITHUB_ENV"
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/stickpile-${TAG}-android-unsigned.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: dist/*
+
   container:
     name: container (${{ matrix.arch }})
     strategy:
@@ -257,8 +296,8 @@ jobs:
 
   release:
     name: GitHub release
-    needs: [linux, macos, windows, container-manifest]
-    # macOS and Windows are best effort; Linux and the image are required.
+    needs: [linux, macos, windows, android, container-manifest]
+    # macOS, Windows and Android are best effort; Linux and the image are required.
     if: ${{ !cancelled() && needs.linux.result == 'success' && needs.container-manifest.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:

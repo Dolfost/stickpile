@@ -9,6 +9,9 @@
 #   macos-app    builds the macOS app (crates/stickpile-mac: the Rust driver,
 #                then the Swift app) on a macOS runner, so a change to either
 #                side that breaks the other is caught here.
+#   android-app  builds the Android app (crates/stickpile-android and the
+#                Gradle project in android/: debug APK, JVM unit tests, lint),
+#                for the same reason.
 #
 # Nix builds are cached in the GitHub Actions cache (Magic Nix Cache). Only
 # paths built here are stored; everything from cache.nixos.org is not. GitHub
@@ -141,3 +144,34 @@ jobs:
         with:
           name: stickpile-macos-app
           path: dist/Stickpile.zip
+
+  android-app:
+    name: Android app
+    concurrency:
+      group: ci-android-app-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      # The runner image has the Android SDK (platform 37, build tools 36),
+      # JDK 21 and other NDKs; the app pins its NDK (ndkVersion in
+      # android/app/build.gradle.kts) and builds Rust with cargo-ndk.
+      - name: NDK, JDK 21 and cargo-ndk
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >>"$GITHUB_ENV"
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build and test
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stickpile-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
