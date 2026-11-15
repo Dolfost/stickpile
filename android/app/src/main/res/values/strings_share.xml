@@ -1,3 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Texts of the share target (package share). -->
-<resources />
+<resources>
+    <string name="share_title">Add to stickpile</string>
+    <string name="share_close">Close</string>
+    <string name="share_loading">Reading your sets</string>
+    <string name="share_nothing">Nothing to upload. Share pictures or videos with stickpile.</string>
+
+    <!-- Signed out. -->
+    <string name="share_signed_out">Sign in to stickpile to upload into your sets.</string>
+    <string name="share_open_app">Open stickpile</string>
+
+    <!-- The account owns no set; %1$s is the server's address. -->
+    <string name="share_no_sets">You have no sets of your own yet. Make one in the web app at %1$s, then come back here.</string>
+    <!-- The library lists only sets that hold something. -->
+    <string name="share_no_sets_note">A new set shows up here once it holds at least one picture.</string>
+    <string name="share_check_again">Check again</string>
+    <string name="share_retry">Retry</string>
+
+    <!-- Choosing the set. -->
+    <string name="share_set_label">Set</string>
+    <string name="share_set_choose">Choose a set</string>
+    <plurals name="share_set_items">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <string name="share_offline">Offline: these sets come from the offline cache. Uploading needs the server.</string>
+
+    <!-- One file. -->
+    <string name="share_name_label">Name</string>
+    <string name="share_name_placeholder">Named after the file</string>
+    <string name="share_keywords_label">Keywords</string>
+    <string name="share_keywords_hint">Separated by commas</string>
+    <string name="share_emojis_label">Emojis</string>
+    <string name="share_apply_to_all">Apply to all</string>
+    <string name="share_remove">Leave out</string>
+    <string name="share_video">Video</string>
+    <string name="share_status_copying">Copying</string>
+    <string name="share_status_queued">Waiting</string>
+    <string name="share_status_uploading">Uploading</string>
+    <!-- %1$s is the new item's name. -->
+    <string name="share_status_uploaded">Uploaded as \"%1$s\"</string>
+
+    <!-- Uploading. -->
+    <plurals name="share_upload">
+        <item quantity="one">Upload %d file</item>
+        <item quantity="other">Upload %d files</item>
+    </plurals>
+    <plurals name="share_retry_failed">
+        <item quantity="one">Retry %d failed file</item>
+        <item quantity="other">Retry %d failed files</item>
+    </plurals>
+    <!-- File %1$d of %2$d is being uploaded. -->
+    <string name="share_progress">Uploading %1$d of %2$d</string>
+    <string name="share_stop">Stop</string>
+    <string name="share_stop_title">Stop uploading?</string>
+    <string name="share_stop_text">The file being sent may still arrive. The files after it are not uploaded.</string>
+    <string name="share_keep_uploading">Keep uploading</string>
+    <!-- %1$d files went into the set called %2$s. -->
+    <plurals name="share_summary_done">
+        <item quantity="one">%1$d file uploaded to \"%2$s\".</item>
+        <item quantity="other">%1$d files uploaded to \"%2$s\".</item>
+    </plurals>
+    <string name="share_summary_partial">Uploaded %1$d of %2$d.</string>
+    <string name="share_done">Done</string>
+
+    <!-- Why an upload failed (LibraryException kinds). -->
+    <string name="share_error_not_signed_in">Signed out. Open stickpile, sign in, then retry.</string>
+    <string name="share_error_unauthorized">The server no longer accepts this device. Sign in again in stickpile, then retry.</string>
+    <string name="share_error_unreachable">Could not reach the server. Check the connection, then retry.</string>
+    <string name="share_error_not_found">This set is gone, or no longer yours.</string>
+    <string name="share_error_rate_limited">The server is getting too many requests. Retry in a minute.</string>
+    <string name="share_error_invalid_input">The server refused this file: not a picture or video it takes, too large, or a name, keyword or emoji too long.</string>
+    <!-- %1$d is the HTTP status code. -->
+    <string name="share_error_server">The server failed (HTTP %1$d).</string>
+    <string name="share_error_io">Could not read the copy of this file.</string>
+    <string name="share_error_other">Something went wrong. Retry.</string>
+    <!-- Reading the account or its sets failed for another reason. -->
+    <string name="share_error_setup">Could not read your account and sets.</string>
+
+    <!-- Why a shared file could not be copied. -->
+    <string name="share_unreadable_not_media">Not a picture or a video; left out.</string>
+    <string name="share_unreadable_no_access">The app that shared this file did not let stickpile read it.</string>
+    <string name="share_unreadable_gone">Could not open this file. It may have been moved or deleted.</string>
+    <string name="share_unreadable_failed">Could not copy this file. The storage may be full.</string>
+</resources>

@@ -1,3 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Texts of the share target (package share), in Ukrainian. -->
-<resources />
+<resources>
+    <string name="share_title">Додати в stickpile</string>
+    <string name="share_close">Закрити</string>
+    <string name="share_loading">Читаємо ваші набори</string>
+    <string name="share_nothing">Немає чого завантажувати. Поділіться з stickpile зображеннями або відео.</string>
+
+    <string name="share_signed_out">Увійдіть у stickpile, щоб завантажувати файли у свої набори.</string>
+    <string name="share_open_app">Відкрити stickpile</string>
+
+    <string name="share_no_sets">У вас ще немає власних наборів. Створіть набір у вебзастосунку на %1$s і поверніться сюди.</string>
+    <string name="share_no_sets_note">Новий набір з\'явиться тут, щойно в ньому буде хоча б одне зображення.</string>
+    <string name="share_check_again">Перевірити знову</string>
+    <string name="share_retry">Повторити</string>
+
+    <string name="share_set_label">Набір</string>
+    <string name="share_set_choose">Вибрати набір</string>
+    <plurals name="share_set_items">
+        <item quantity="one">%d елемент</item>
+        <item quantity="few">%d елементи</item>
+        <item quantity="many">%d елементів</item>
+        <item quantity="other">%d елемента</item>
+    </plurals>
+    <string name="share_offline">Немає зв\'язку: ці набори взято з офлайн-кешу. Для завантаження потрібен сервер.</string>
+
+    <string name="share_name_label">Назва</string>
+    <string name="share_name_placeholder">Назва за іменем файлу</string>
+    <string name="share_keywords_label">Ключові слова</string>
+    <string name="share_keywords_hint">Через кому</string>
+    <string name="share_emojis_label">Емодзі</string>
+    <string name="share_apply_to_all">Застосувати до всіх</string>
+    <string name="share_remove">Пропустити</string>
+    <string name="share_video">Відео</string>
+    <string name="share_status_copying">Копіювання</string>
+    <string name="share_status_queued">У черзі</string>
+    <string name="share_status_uploading">Завантаження</string>
+    <string name="share_status_uploaded">Завантажено як \"%1$s\"</string>
+
+    <plurals name="share_upload">
+        <item quantity="one">Завантажити %d файл</item>
+        <item quantity="few">Завантажити %d файли</item>
+        <item quantity="many">Завантажити %d файлів</item>
+        <item quantity="other">Завантажити %d файлу</item>
+    </plurals>
+    <plurals name="share_retry_failed">
+        <item quantity="one">Повторити %d невдалий файл</item>
+        <item quantity="few">Повторити %d невдалі файли</item>
+        <item quantity="many">Повторити %d невдалих файлів</item>
+        <item quantity="other">Повторити %d невдалого файлу</item>
+    </plurals>
+    <string name="share_progress">Завантаження: %1$d з %2$d</string>
+    <string name="share_stop">Зупинити</string>
+    <string name="share_stop_title">Зупинити завантаження?</string>
+    <string name="share_stop_text">Файл, який зараз надсилається, може все одно дійти. Наступні файли не завантажаться.</string>
+    <string name="share_keep_uploading">Продовжити</string>
+    <plurals name="share_summary_done">
+        <item quantity="one">%1$d файл завантажено в набір \"%2$s\".</item>
+        <item quantity="few">%1$d файли завантажено в набір \"%2$s\".</item>
+        <item quantity="many">%1$d файлів завантажено в набір \"%2$s\".</item>
+        <item quantity="other">%1$d файлу завантажено в набір \"%2$s\".</item>
+    </plurals>
+    <string name="share_summary_partial">Завантажено %1$d з %2$d.</string>
+    <string name="share_done">Готово</string>
+
+    <string name="share_error_not_signed_in">Ви вийшли з облікового запису. Відкрийте stickpile, увійдіть і повторіть.</string>
+    <string name="share_error_unauthorized">Сервер більше не приймає цей пристрій. Увійдіть знову в stickpile і повторіть.</string>
+    <string name="share_error_unreachable">Не вдалося з\'єднатися з сервером. Перевірте з\'єднання і повторіть.</string>
+    <string name="share_error_not_found">Цього набору вже немає, або він більше не ваш.</string>
+    <string name="share_error_rate_limited">Сервер отримує забагато запитів. Повторіть за хвилину.</string>
+    <string name="share_error_invalid_input">Сервер не прийняв цей файл: це не зображення чи відео, які він приймає, файл завеликий або назва, ключове слово чи емодзі задовгі.</string>
+    <string name="share_error_server">Помилка на сервері (HTTP %1$d).</string>
+    <string name="share_error_io">Не вдалося прочитати копію цього файлу.</string>
+    <string name="share_error_other">Щось пішло не так. Повторіть.</string>
+    <string name="share_error_setup">Не вдалося прочитати ваш обліковий запис і набори.</string>
+
+    <string name="share_unreadable_not_media">Це не зображення і не відео; файл пропущено.</string>
+    <string name="share_unreadable_no_access">Застосунок, який поділився цим файлом, не дозволив stickpile його прочитати.</string>
+    <string name="share_unreadable_gone">Не вдалося відкрити цей файл. Можливо, його перемістили або видалили.</string>
+    <string name="share_unreadable_failed">Не вдалося скопіювати цей файл. Можливо, у пам\'яті немає місця.</string>
+</resources>
