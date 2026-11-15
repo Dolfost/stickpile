@@ -195,7 +195,10 @@ fn incompatible(template: &str, args: &[(&str, String)]) -> String {
     })
 }
 
-fn format_of_variant(v: &VariantInfo, original: MediaFormat) -> Option<MediaFormat> {
+/// Container format of a stored variant of an item whose original is
+/// `original` (its MIME type is [`MediaFormat::mime`]). Always `Some` for the
+/// current variants.
+pub fn format_of_variant(v: &VariantInfo, original: MediaFormat) -> Option<MediaFormat> {
     match v.variant {
         Variant::Original => Some(original),
         Variant::Thumb | Variant::TgSticker => Some(MediaFormat::Webp),
