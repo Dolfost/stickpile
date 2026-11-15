@@ -3801,6 +3801,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "stickpile-android"
+version = "0.5.2"
+dependencies = [
+ "stickpile-core",
+ "uniffi",
+]
+
+[[package]]
 name = "stickpile-api"
 version = "0.5.2"
 dependencies = [

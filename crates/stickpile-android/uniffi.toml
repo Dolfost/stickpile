@@ -1,0 +1,5 @@
+# Read by uniffi-bindgen when it generates the Kotlin bindings.
+[bindings.kotlin]
+package_name = "io.github.dolfost.stickpile.rust"
+# Android's own cleaner and other Android-specific code in the bindings.
+android = true

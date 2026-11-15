@@ -15,6 +15,7 @@ members = [
     "crates/stickpile-cli",
     "crates/stickpile-desktop",
     "crates/stickpile-mac",
+    "crates/stickpile-android",
     "spike/clipspike",
 ]
 
@@ -109,6 +110,11 @@ x11rb = "0.13"
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# The Android library keeps its symbol table: uniffi-bindgen reads the Kotlin
+# interface from it. The Android Gradle Plugin strips the copy in the APK.
+[profile.release.package.stickpile-android]
+strip = false
 
 [profile.dev.package."*"]
 opt-level = 2

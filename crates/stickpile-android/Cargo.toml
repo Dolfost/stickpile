@@ -1,0 +1,29 @@
+[package]
+name = "stickpile-android"
+description = "stickpile for Android, the Rust side: a library over stickpile-core, behind a UniFFI interface for the Kotlin app in android/"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "stickpile_android"
+# cdylib: libstickpile_android.so, loaded by the app through JNA; lib: the
+# host tests and the bindings generator.
+crate-type = ["cdylib", "lib"]
+
+# Generates the Kotlin side of the interface: see the uniffi tasks in
+# android/app/build.gradle.kts.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+stickpile-core.workspace = true
+uniffi = "0.32"
