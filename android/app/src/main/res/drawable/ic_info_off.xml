@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A struck-out eye: the tiles hide their info. Tinted where it is used. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M2.5,12C5,7.5 8.3,5.5 12,5.5C15.7,5.5 19,7.5 21.5,12C19,16.5 15.7,18.5 12,18.5C8.3,18.5 5,16.5 2.5,12ZM4,4L20,20" />
+</vector>

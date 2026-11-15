@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A question mark in a circle: the search syntax. Tinted where it is used. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3,12a9,9 0,1 0,18 0a9,9 0,1 0,-18 0ZM9.5,9.5C9.5,8 10.6,7 12,7C13.4,7 14.5,8 14.5,9.3C14.5,11 12,11.3 12,13.5" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M11,16.8a1,1 0,1 0,2 0a1,1 0,1 0,-2 0Z" />
+</vector>

@@ -2,6 +2,7 @@ package io.github.dolfost.stickpile
 
 import android.app.Application
 import android.content.Context
+import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import java.io.File
@@ -10,6 +11,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * The application. It owns the one Rust [StickpileLibrary] of the process
@@ -51,8 +53,35 @@ class StickpileApp : Application() {
         },
     )
 
+    /** What the grids show (safe mode, the tiles' information), shared by the app and the keyboard. */
+    val display: DisplaySettings by lazy { DisplaySettings(this) }
+
+    @Volatile
+    private var likesReadAt = 0L
+
+    /**
+     * Read the account's favorites in the background (at most every few
+     * minutes), so that the items' `liked` marks know them: the library
+     * marks items from the favorites it last read. Failures are only
+     * logged; the marks then stay as they were.
+     */
+    fun refreshLikes() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (likesReadAt != 0L && now - likesReadAt < LIKES_EVERY_MS) return
+        likesReadAt = now
+        scope.launch {
+            try {
+                library.favorites(1u)
+            } catch (e: io.github.dolfost.stickpile.rust.LibraryException) {
+                likesReadAt = 0L
+                Log.i(TAG, "favorites not read: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "stickpile"
+        private const val LIKES_EVERY_MS = 5 * 60_000L
 
         /** The application object from any context. */
         fun from(context: Context): StickpileApp = context.applicationContext as StickpileApp

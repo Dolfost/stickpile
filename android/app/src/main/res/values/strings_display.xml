@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Texts shared by the app and the picker keyboard (package display): safe
+  mode, the information on the item tiles, the stats and the search
+  syntax. The names start with display_.
+-->
+<resources>
+    <string name="display_safe_mode">Safe mode</string>
+    <string name="display_safe_mode_text">Hide stickers tagged nsfw</string>
+    <string name="display_safe_on">Safe mode on: stickers tagged nsfw are hidden</string>
+    <string name="display_safe_off">Safe mode off: stickers tagged nsfw are shown</string>
+    <plurals name="display_hidden_by_safe_mode">
+        <item quantity="one">%d sticker hidden by safe mode</item>
+        <item quantity="other">%d stickers hidden by safe mode</item>
+    </plurals>
+    <string name="display_nsfw_badge">NSFW</string>
+
+    <string name="display_info">Sticker info</string>
+    <string name="display_show_info">Show info on the tiles</string>
+    <string name="display_show_info_text">Hide it all at once, or pick below what the tiles show</string>
+    <string name="display_field_badges">Badges: GIF, video, NSFW</string>
+    <string name="display_field_liked">Your likes (a heart)</string>
+    <string name="display_field_name">Name</string>
+    <string name="display_field_emojis">Emojis</string>
+    <string name="display_field_vibe">Vibe</string>
+    <string name="display_field_tags">Tags</string>
+    <string name="display_field_size">Format and resolution</string>
+    <string name="display_field_copies">Times copied</string>
+    <string name="display_field_likes">Likes</string>
+    <string name="display_field_quality">Quality</string>
+    <string name="display_tile_size">Tile size</string>
+    <string name="display_tile_small">Small</string>
+    <string name="display_tile_medium">Medium</string>
+    <string name="display_tile_large">Large</string>
+
+    <string name="display_never_copied">never copied</string>
+    <plurals name="display_copied">
+        <item quantity="one">copied %d time</item>
+        <item quantity="other">copied %d times</item>
+    </plurals>
+    <plurals name="display_likes">
+        <item quantity="one">%d like</item>
+        <item quantity="other">%d likes</item>
+    </plurals>
+    <string name="display_quality">quality %1$d</string>
+    <string name="display_liked_by_you">You liked it</string>
+    <string name="display_pack_by">%1$s by %2$s</string>
+
+    <string name="display_syntax">Search syntax</string>
+    <string name="display_syntax_words">words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven</string>
+    <string name="display_syntax_emoji">has this emoji</string>
+    <string name="display_syntax_vibe">has this vibe</string>
+    <string name="display_syntax_tag">has this tag</string>
+    <string name="display_syntax_set">in this pack (its slug or name)</string>
+    <string name="display_syntax_by">in a pack of this user</string>
+    <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still, animated, video</string>
+    <string name="display_syntax_is">yours, liked by you, public</string>
+    <string name="display_syntax_numbers">quality, likes, copies (&gt; &gt;= &lt; &lt;= =)</string>
+    <string name="display_syntax_sort">relevance, recent, likes, copies, quality</string>
+    <string name="display_syntax_either">either of them</string>
+    <string name="display_syntax_leave_out">leave out</string>
+    <string name="display_syntax_offers">Suggestions</string>
+    <string name="display_syntax_offers_values">the values in use are offered under the field, most used first; tap one to put it in</string>
+    <string name="display_syntax_offers_words">a word offers the tags, vibes and packs that contain it</string>
+    <string name="display_syntax_offers_typos">a typo or a half-typed value searches for the closest one</string>
+</resources>

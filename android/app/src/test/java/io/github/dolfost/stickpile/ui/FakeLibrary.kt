@@ -5,11 +5,13 @@ import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.LibraryException
+import io.github.dolfost.stickpile.rust.MediaFormat
 import io.github.dolfost.stickpile.rust.MediaKind
 import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.PairingLink
 import io.github.dolfost.stickpile.rust.Prepared
+import io.github.dolfost.stickpile.rust.SearchHint
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.rust.Suggestions
 import io.github.dolfost.stickpile.rust.SyncState
@@ -162,6 +164,16 @@ class FakeLibrary : StickpileLibraryInterface {
 
     override fun suggestions(query: String): Suggestions? = unexpected("suggestions")
 
+    /** What [hints] answers; calls are recorded. */
+    var hintsFor: (String) -> List<SearchHint> = { emptyList() }
+
+    override fun hints(query: String): List<SearchHint> {
+        calls += "hints $query"
+        return hintsFor(query)
+    }
+
+    override fun itemUrl(itemId: String): String? = "https://s.example/items/$itemId"
+
     override suspend fun syncIfDue(): SyncState {
         calls += "syncIfDue"
         return syncIfDue.invoke()
@@ -189,20 +201,31 @@ class FakeLibrary : StickpileLibraryInterface {
 
 val alice = Account(username = "alice", displayName = null, serverUrl = "https://s.example", auth = AuthKind.TOKEN, isAdmin = false)
 
-fun item(id: String, name: String = "item $id") = Item(
+fun item(
+    id: String,
+    name: String = "item $id",
+    tags: List<String> = emptyList(),
+    emojis: List<String> = emptyList(),
+    liked: Boolean = false,
+) = Item(
     id = id,
     name = name,
     setId = "set",
     setName = "Set",
-    emojis = emptyList(),
+    owner = "alice",
+    emojis = emojis,
     keywords = emptyList(),
     vibe = null,
-    tags = emptyList(),
+    tags = tags,
     kind = MediaKind.STILL,
+    format = MediaFormat.PNG,
     width = 0u,
     height = 0u,
+    quality = null,
     likes = 0u,
     copies = 0u,
+    nsfw = tags.any { it.trim().equals("nsfw", ignoreCase = true) },
+    liked = liked,
 )
 
 fun pack(id: String) = Pack(id = id, slug = id, name = "Pack $id", owner = "alice", itemCount = 3u, mine = true)

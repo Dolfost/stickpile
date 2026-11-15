@@ -3,6 +3,7 @@ package io.github.dolfost.stickpile.provider
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.LibraryException
+import io.github.dolfost.stickpile.rust.MediaFormat
 import io.github.dolfost.stickpile.rust.MediaKind
 import io.github.dolfost.stickpile.rust.Pack
 import org.junit.Assert.assertArrayEquals
@@ -15,15 +16,20 @@ class ProviderRowsTest {
         name = "grumpy cat",
         setId = "set",
         setName = "Cats",
+        owner = "alice",
         emojis = listOf("😾", "❤️"),
         keywords = listOf("cat"),
         vibe = null,
         tags = emptyList(),
         kind = MediaKind.ANIMATION,
+        format = MediaFormat.GIF,
         width = 512u,
         height = 384u,
+        quality = 80u,
         likes = 3uL,
         copies = 9uL,
+        nsfw = false,
+        liked = false,
     )
 
     @Test

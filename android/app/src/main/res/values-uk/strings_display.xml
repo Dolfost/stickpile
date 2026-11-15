@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_safe_mode">Безпечний режим</string>
+    <string name="display_safe_mode_text">Ховати стікери з тегом nsfw</string>
+    <string name="display_safe_on">Безпечний режим увімкнено: стікери з тегом nsfw сховано</string>
+    <string name="display_safe_off">Безпечний режим вимкнено: стікери з тегом nsfw показано</string>
+    <plurals name="display_hidden_by_safe_mode">
+        <item quantity="one">Безпечний режим сховав %d стікер</item>
+        <item quantity="few">Безпечний режим сховав %d стікери</item>
+        <item quantity="many">Безпечний режим сховав %d стікерів</item>
+        <item quantity="other">Безпечний режим сховав %d стікера</item>
+    </plurals>
+    <string name="display_nsfw_badge">NSFW</string>
+
+    <string name="display_info">Інформація на стікерах</string>
+    <string name="display_show_info">Показувати інформацію на плитках</string>
+    <string name="display_show_info_text">Сховайте все одразу або виберіть нижче, що показують плитки</string>
+    <string name="display_field_badges">Позначки: GIF, відео, NSFW</string>
+    <string name="display_field_liked">Ваші вподобання (серце)</string>
+    <string name="display_field_name">Назва</string>
+    <string name="display_field_emojis">Емодзі</string>
+    <string name="display_field_vibe">Настрій</string>
+    <string name="display_field_tags">Теги</string>
+    <string name="display_field_size">Формат і роздільність</string>
+    <string name="display_field_copies">Скільки разів скопійовано</string>
+    <string name="display_field_likes">Вподобання</string>
+    <string name="display_field_quality">Якість</string>
+    <string name="display_tile_size">Розмір плиток</string>
+    <string name="display_tile_small">Малі</string>
+    <string name="display_tile_medium">Середні</string>
+    <string name="display_tile_large">Великі</string>
+
+    <string name="display_never_copied">ще не копіювали</string>
+    <plurals name="display_copied">
+        <item quantity="one">скопійовано %d раз</item>
+        <item quantity="few">скопійовано %d рази</item>
+        <item quantity="many">скопійовано %d разів</item>
+        <item quantity="other">скопійовано %d раза</item>
+    </plurals>
+    <plurals name="display_likes">
+        <item quantity="one">%d вподобання</item>
+        <item quantity="few">%d вподобання</item>
+        <item quantity="many">%d вподобань</item>
+        <item quantity="other">%d вподобання</item>
+    </plurals>
+    <string name="display_quality">якість %1$d</string>
+    <string name="display_liked_by_you">Ви це вподобали</string>
+    <string name="display_pack_by">%1$s від %2$s</string>
+
+    <string name="display_syntax">Синтаксис пошуку</string>
+    <string name="display_syntax_words">слова й фрази в назві, ключових словах, емодзі, настрої, тегах і наборі; друкарські помилки не заважають</string>
+    <string name="display_syntax_emoji">має це емодзі</string>
+    <string name="display_syntax_vibe">має цей настрій</string>
+    <string name="display_syntax_tag">має цей тег</string>
+    <string name="display_syntax_set">у цьому наборі (його slug або назва)</string>
+    <string name="display_syntax_by">у наборі цього користувача</string>
+    <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)</string>
+    <string name="display_syntax_is">ваші, вподобані вами, публічні</string>
+    <string name="display_syntax_numbers">якість, вподобання, копіювання (&gt; &gt;= &lt; &lt;= =)</string>
+    <string name="display_syntax_sort">relevance (доречність), recent (нові), likes (вподобання), copies (копіювання), quality (якість)</string>
+    <string name="display_syntax_either">будь-який із них</string>
+    <string name="display_syntax_leave_out">виключити</string>
+    <string name="display_syntax_offers">Підказки</string>
+    <string name="display_syntax_offers_values">значення, які вже вживаються, з\'являються під полем, найчастіші першими; торкніться, щоб вставити</string>
+    <string name="display_syntax_offers_words">слово пропонує теги, настрої й набори, що його містять</string>
+    <string name="display_syntax_offers_typos">друкарська помилка чи недописане значення шукає найближче</string>
+</resources>
