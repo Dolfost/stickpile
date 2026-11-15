@@ -38,7 +38,8 @@ final class FakePopup: PopupControl {
             tiles: Tiles(favorites: true, emojis: true, tags: true), help: nil,
             footer: Footer(mode: "INSERT", insert: true, pending: "", target: "Telegram",
                            targetHint: "auto: com.tdesktop.Telegram", sticker: .off, stickerLabel: "sticker: off",
-                           status: "24 results", level: .info),
+                           status: "24 results", level: .info, safe: false, safeLabel: "safe: off",
+                           details: "cat · Cats · GIF 320×240 · copied 12 times · ♥ 3 · quality 87"),
             me: MeView(loading: false, who: nil, detail: "", account: nil, form: nil, tailnetLogin: false,
                        busy: false, message: nil, retry: false, clearSecrets: false),
             settings: SettingsView(error: nil, note: "", path: "", warnings: [], groups: [], saveError: nil)
@@ -194,10 +195,12 @@ final class FakePopup: PopupControl {
             s.tab = .recent; s.title = "Recent"; s.hasField = false; s.query = ""; s.count = "36 items"
             s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false; s.footer.pending = "3"
             s.footer.sticker = .on; s.footer.stickerLabel = "sticker: on"; s.selected = 8
+            s.footer.safe = true; s.footer.safeLabel = "safe: on"
+            s.footer.details = "sad-cat · Cats · WEBP 512×512 · copied 1 time"
         case "packs":
             s.tab = .packs; s.view = .packs; s.title = "Packs"; s.query = ""; s.placeholder = "Filter packs by name"
             s.selected = 1; s.footer.status = ""; s.footer.target = "Discord"; s.footer.targetHint = "default"
-            s.footer.sticker = .unsupported
+            s.footer.sticker = .unsupported; s.footer.details = "Cats · 39 items · by alice"
         case "pack":
             s.tab = .packs; s.title = "Packs / Cats"; s.back = true; s.query = ""
             s.placeholder = "Filter Cats by name, keyword or emoji"; s.selected = 3
@@ -207,13 +210,14 @@ final class FakePopup: PopupControl {
         case "me":
             s.tab = .me; s.view = .me; s.title = "Me"; s.hasField = false; s.query = ""; s.focus = .noField
             s.footer.mode = "NORMAL"; s.footer.insert = false; s.me = meSignedIn(); s.footer.status = ""
+            s.footer.details = ""
         case "login":
             s.tab = .me; s.view = .me; s.title = "Me"; s.hasField = false; s.query = ""; s.focus = .keep
-            s.me = meLogin(); s.footer.status = "Not logged in; log in on the Me tab (6)"; s.footer.level = .warning
+            s.me = meLogin(); s.footer.status = "Not logged in; log in on the Me tab (6)"; s.footer.level = .warning; s.footer.details = ""
         case "settings":
             s.tab = .settings; s.view = .settings; s.title = "Settings"; s.hasField = false; s.query = ""
             s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false; s.settings = settingsView()
-            s.footer.status = "Could not save: server_url must be http or https"; s.footer.level = .error
+            s.footer.status = "Could not save: server_url must be http or https"; s.footer.level = .error; s.footer.details = ""
         case "help":
             s.help = helpSections(); s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false
         case "error":
@@ -389,6 +393,12 @@ final class FakePopup: PopupControl {
         let on = state.footer.sticker != .on
         state.footer.sticker = on ? .on : .off
         state.footer.stickerLabel = on ? "sticker: on" : "sticker: off"
+        render()
+    }
+
+    func toggleSafe() {
+        state.footer.safe.toggle()
+        state.footer.safeLabel = state.footer.safe ? "safe: on" : "safe: off"
         render()
     }
 

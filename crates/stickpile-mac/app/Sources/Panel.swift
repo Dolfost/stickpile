@@ -97,7 +97,7 @@ final class PopupView: NSView {
         tabBar.frame = NSRect(x: 0, y: topInset, width: w, height: 32)
         header.frame = NSRect(x: 0, y: topInset + 34, width: w, height: 42)
         topLine.frame = NSRect(x: 0, y: header.frame.maxY, width: w, height: 1)
-        let footerHeight: CGFloat = 30
+        let footerHeight = FooterBar.height
         footer.frame = NSRect(x: 0, y: h - footerHeight, width: w, height: footerHeight)
         bottomLine.frame = NSRect(x: 0, y: h - footerHeight - 1, width: w, height: 1)
         content.frame = NSRect(x: 0, y: topLine.frame.maxY, width: w, height: max(0, bottomLine.frame.minY - topLine.frame.maxY))

@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
 
-use stickpile_i18n::global::{t, t_dyn, t_template, tf};
+use stickpile_i18n::global::{t, t_dyn, t_template, tf, tp};
 
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
@@ -71,6 +71,17 @@ pub struct ModelConfig {
     pub tiles: Tiles,
     /// See [`DEFAULT_KEY_TIMEOUT_MS`].
     pub key_timeout_ms: u64,
+    /// Start with safe mode on (`ui.safe_mode`): items tagged
+    /// [`NSFW_TAG`] are hidden. `S` changes it and saves the setting.
+    pub safe_mode: bool,
+}
+
+/// The tag safe mode hides (compared case-insensitively).
+pub const NSFW_TAG: &str = "nsfw";
+
+/// The item is tagged [`NSFW_TAG`].
+pub fn is_nsfw(item: &ItemSummary) -> bool {
+    item.tags.iter().any(|t| t.trim().eq_ignore_ascii_case(NSFW_TAG))
 }
 
 /// What the item tiles show next to the thumbnail (`ui.mark_favorites`,
@@ -140,6 +151,7 @@ impl Default for ModelConfig {
             start_mode: Mode::Insert,
             tiles: Tiles::default(),
             key_timeout_ms: DEFAULT_KEY_TIMEOUT_MS,
+            safe_mode: false,
         }
     }
 }
@@ -247,6 +259,9 @@ pub enum Event {
     /// hiding and reopening; only a new model (process restart) goes back to
     /// `prefer_stickers`.
     ToggleSticker,
+    /// `S`, Ctrl+Shift+S or the footer toggle: safe mode on or off (saved
+    /// as `ui.safe_mode`, see [`Command::SaveSafeMode`]).
+    ToggleSafe,
     /// Escape in Insert mode (or with `modal` off): to Normal mode; without
     /// `modal`, out of an opened pack, else hide.
     Escape,
@@ -360,6 +375,10 @@ pub enum Command {
         tile: Tile,
         on: bool,
     },
+    /// Safe mode was switched: save it as `ui.safe_mode`.
+    SaveSafeMode {
+        on: bool,
+    },
     /// Like or unlike; answer with [`Event::FavoriteToggled`].
     ToggleFavorite {
         item_id: String,
@@ -405,6 +424,14 @@ pub enum Status {
     NoResults {
         query: String,
     },
+    /// No results with safe mode on (it may have left some out).
+    NoSafeResults {
+        query: String,
+    },
+    /// Everything the shown list holds is tagged nsfw and safe mode hides it.
+    AllHidden {
+        hidden: usize,
+    },
     NoRecent,
     /// The Recent tab with nothing used yet.
     NothingUsed,
@@ -441,6 +468,11 @@ pub enum Status {
         tile: Tile,
         on: bool,
     },
+    /// Safe mode was switched; `hidden`: items it hides in the shown list.
+    Safe {
+        on: bool,
+        hidden: usize,
+    },
 }
 
 impl Status {
@@ -448,6 +480,8 @@ impl Status {
         match self {
             Status::Idle
             | Status::NoResults { .. }
+            | Status::NoSafeResults { .. }
+            | Status::AllHidden { .. }
             | Status::NoRecent
             | Status::NothingUsed
             | Status::NothingSelected
@@ -457,7 +491,8 @@ impl Status {
             | Status::NoPacks
             | Status::EmptyPack
             | Status::Favorite { .. }
-            | Status::Tile { .. } => Level::Info,
+            | Status::Tile { .. }
+            | Status::Safe { .. } => Level::Info,
             Status::Searching | Status::Copying { .. } | Status::Loading => Level::Busy,
             Status::Offline => Level::Warning,
             Status::Copied { warning, .. } => {
@@ -477,6 +512,12 @@ impl Status {
             Status::Idle => String::new(),
             Status::Searching => t("Searching…").into(),
             Status::NoResults { query } => tf("No matches for “{query}”", &[("query", query)]),
+            Status::NoSafeResults { query } => tf("No matches for “{query}” with safe mode on", &[("query", query)]),
+            Status::AllHidden { hidden } => tp(
+                *hidden as u64,
+                "{n} item hidden by safe mode (tagged nsfw)",
+                "{n} items hidden by safe mode (tagged nsfw)",
+            ),
             Status::NoRecent => t("Nothing used yet — type to search").into(),
             Status::NothingUsed => t("Nothing used yet").into(),
             Status::Offline => t("Offline — showing cached results").into(),
@@ -520,6 +561,13 @@ impl Status {
                 (Tile::Tags, false) => t("Tags hidden"),
             }
             .into(),
+            Status::Safe { on: false, .. } => t("Safe mode off: items tagged nsfw are shown").into(),
+            Status::Safe { on: true, hidden: 0 } => t("Safe mode on: items tagged nsfw are hidden").into(),
+            Status::Safe { on: true, hidden } => tp(
+                *hidden as u64,
+                "Safe mode on: {n} item tagged nsfw is hidden",
+                "Safe mode on: {n} items tagged nsfw are hidden",
+            ),
         }
     }
 
@@ -531,6 +579,8 @@ impl Status {
             Status::Idle
                 | Status::Searching
                 | Status::NoResults { .. }
+                | Status::NoSafeResults { .. }
+                | Status::AllHidden { .. }
                 | Status::NoRecent
                 | Status::NothingUsed
                 | Status::Offline
@@ -569,6 +619,69 @@ pub struct Footer {
     /// Keys of an incomplete Normal-mode command ("3", "g", "12g"), like
     /// vim's showcmd; empty when nothing is pending.
     pub pending: String,
+    /// Safe mode is on: items tagged [`NSFW_TAG`] are hidden.
+    pub safe: bool,
+    /// Items safe mode hides from the shown list (0 with it off).
+    pub hidden: usize,
+    /// The selection's stats, one line: name, set, format and size, copies,
+    /// likes, quality ("cat · Cats · GIF 512×512 · copied 12 times · ♥ 3 ·
+    /// quality 87"); a pack's name, item count and owner on the pack list;
+    /// empty when nothing is selected.
+    pub details: String,
+}
+
+/// The footer's safe mode toggle: "safe: on", "safe: off".
+pub fn safe_label(on: bool) -> &'static str {
+    if on {
+        t("safe: on")
+    } else {
+        t("safe: off")
+    }
+}
+
+/// "GIF", "PNG", "VIDEO": the kind of an item for the stats line.
+fn format_label(item: &ItemSummary) -> &'static str {
+    match (item.kind, item.format) {
+        (MediaKind::Video, _) => "VIDEO",
+        (_, MediaFormat::Png) => "PNG",
+        (_, MediaFormat::Jpeg) => "JPEG",
+        (MediaKind::Animation, MediaFormat::Webp) => "WEBP ANIM",
+        (_, MediaFormat::Webp) => "WEBP",
+        (_, MediaFormat::Gif) => "GIF",
+        (_, MediaFormat::Mp4) => "MP4",
+        (_, MediaFormat::Webm) => "WEBM",
+    }
+}
+
+/// The stats line of an item ([`Footer::details`]).
+pub fn item_details(item: &ItemSummary) -> String {
+    let mut parts = vec![item.name.clone(), item.set_name.clone()];
+    let mut shape = format_label(item).to_string();
+    if item.width > 0 && item.height > 0 {
+        shape.push_str(&format!(" {}×{}", item.width, item.height));
+    }
+    parts.push(shape);
+    parts.push(match item.copies {
+        0 => t("never copied").to_string(),
+        n => tp(n, "copied {n} time", "copied {n} times"),
+    });
+    if item.likes > 0 {
+        parts.push(format!("♥ {}", item.likes));
+    }
+    if let Some(q) = item.quality {
+        parts.push(tf("quality {score}", &[("score", &q)]));
+    }
+    parts.retain(|p| !p.trim().is_empty());
+    parts.join(" · ")
+}
+
+/// The stats line of a pack on the pack list ([`Footer::details`]).
+pub fn pack_details(set: &SetSummary) -> String {
+    let mut parts = vec![set.name.clone(), tp(set.item_count, "{n} item", "{n} items")];
+    if !set.owner_username.is_empty() {
+        parts.push(tf("by {owner}", &[("owner", &set.owner_username)]));
+    }
+    parts.join(" · ")
 }
 
 /// One grid cell.
@@ -847,6 +960,11 @@ pub struct Model {
     liked: HashSet<String>,
     /// What the tiles show: [`ModelConfig::tiles`], changed by `z` keys.
     tiles: Tiles,
+    /// Safe mode: items tagged [`NSFW_TAG`] are left out of every grid and
+    /// of the search ([`ModelConfig::safe_mode`], changed by `S`).
+    safe: bool,
+    /// Items safe mode left out of [`Model::entries`].
+    hidden: usize,
 }
 
 /// The copy currently being prepared.
@@ -874,6 +992,7 @@ fn cancels_pending(event: &Event) -> bool {
             | Event::CycleTarget { .. }
             | Event::SetTarget(_)
             | Event::ToggleSticker
+            | Event::ToggleSafe
             | Event::Escape
             | Event::ShowTab(_)
             | Event::CycleTab { .. }
@@ -925,6 +1044,8 @@ impl Model {
             history,
             liked: HashSet::new(),
             tiles: cfg.tiles,
+            safe: cfg.safe_mode,
+            hidden: 0,
             cfg,
         }
     }
@@ -1058,6 +1179,23 @@ impl Model {
     pub fn tiles(&self) -> Tiles {
         self.tiles
     }
+    /// Safe mode is on: items tagged [`NSFW_TAG`] are hidden.
+    pub fn safe(&self) -> bool {
+        self.safe
+    }
+    /// Items safe mode left out of the shown grid.
+    pub fn hidden(&self) -> usize {
+        self.hidden
+    }
+    /// The selection's stats ([`Footer::details`]).
+    pub fn details(&self) -> String {
+        match self.view() {
+            View::Items => self.selected_entry().map(|e| item_details(&e.item)),
+            View::Packs => self.selected_pack().map(pack_details),
+            View::Page => None,
+        }
+        .unwrap_or_default()
+    }
 
     pub fn sticker_mode(&self) -> StickerMode {
         if !supports_stickers(self.target) {
@@ -1084,6 +1222,9 @@ impl Model {
             offline: self.is_offline(),
             mode: self.cfg.modal.then_some(self.mode),
             pending: self.pending.display(),
+            safe: self.safe,
+            hidden: self.hidden,
+            details: self.details(),
         }
     }
 
@@ -1179,6 +1320,7 @@ impl Model {
             Event::CycleTarget { backwards } => self.cycle_target(backwards),
             Event::SetTarget(t) => self.set_target(t),
             Event::ToggleSticker => self.toggle_sticker(),
+            Event::ToggleSafe => self.toggle_safe(),
             Event::Escape => self.escape(),
             Event::Normal(key) => self.normal_key(key),
             Event::ShowTab(tab) => self.show_tab(tab),
@@ -1308,6 +1450,9 @@ impl Model {
             if on != old.tiles.get(tile) && on != self.tiles.get(tile) {
                 cmds.extend(self.set_tile(tile, on));
             }
+        }
+        if self.cfg.safe_mode != old.safe_mode && self.cfg.safe_mode != self.safe {
+            cmds.extend(self.set_safe(self.cfg.safe_mode));
         }
         if compat {
             self.refresh_compat();
@@ -1565,6 +1710,7 @@ impl Model {
             Cmd::Favorite if items => self.toggle_favorite(),
             Cmd::Target { backwards } => self.cycle_target(backwards),
             Cmd::Sticker => self.toggle_sticker(),
+            Cmd::Safe => self.toggle_safe(),
             Cmd::Browser if items => self.open_in_browser(),
             Cmd::Help => {
                 self.help = !self.help;
@@ -1666,8 +1812,13 @@ impl Model {
         if self.copying.is_none() && self.tab == Tab::Search {
             self.status = Status::Searching;
         }
+        let mut query = self.query.trim().to_string();
+        if self.safe {
+            // The server leaves them out, so the results still fill the list.
+            query.push_str(&format!(" -tag:{NSFW_TAG}"));
+        }
         Command::Search {
-            query: self.query.trim().to_string(),
+            query,
             target: self.target,
             limit: self.cfg.max_results,
             generation: self.generation,
@@ -1792,7 +1943,7 @@ impl Model {
 
     /// What the status says about the shown view when nothing else is to be said.
     fn view_status(&self) -> Status {
-        match self.tab {
+        let base = match self.tab {
             Tab::Search => self.search_status(),
             Tab::Recent if self.recent.is_empty() => Status::NothingUsed,
             Tab::MostUsed => self.most_used.status(t("most used items"), Status::NoMostUsed),
@@ -1810,10 +1961,27 @@ impl Model {
                 ),
             },
             Tab::Recent | Tab::Me | Tab::Settings => Status::Idle,
+        };
+        self.with_safe(base)
+    }
+
+    /// Say that safe mode is why an item grid is empty.
+    fn with_safe(&self, base: Status) -> Status {
+        if !self.safe || self.view() != View::Items {
+            return base;
+        }
+        match base {
+            Status::NoResults { query } => Status::NoSafeResults { query },
+            Status::Idle if self.entries.is_empty() && self.hidden > 0 => Status::AllHidden { hidden: self.hidden },
+            other => other,
         }
     }
 
     fn search_status(&self) -> Status {
+        self.with_safe(self.search_base_status())
+    }
+
+    fn search_base_status(&self) -> Status {
         if self.query.trim().is_empty() {
             return if self.recent.is_empty() {
                 Status::NoRecent
@@ -1912,6 +2080,11 @@ impl Model {
             },
             Tab::Me | Tab::Settings => Vec::new(),
         };
+        let before = self.entries.len();
+        if self.safe {
+            self.entries.retain(|e| !is_nsfw(&e.item));
+        }
+        self.hidden = before - self.entries.len();
         for e in &mut self.entries {
             e.liked = self.liked.contains(&e.item.id);
         }
@@ -2005,6 +2178,38 @@ impl Model {
         self.sticker = !self.sticker;
         self.refresh_compat();
         Vec::new()
+    }
+
+    /// Switch safe mode: the shown grid is filtered again, and a search
+    /// runs again at once, since the server filtered the results too.
+    fn set_safe(&mut self, on: bool) -> Vec<Command> {
+        self.safe = on;
+        let mut cmds = Vec::new();
+        if self.view() == View::Items {
+            self.rebuild(Sel::Keep);
+            cmds.extend(self.thumbnails());
+        } else {
+            self.hidden = 0;
+        }
+        if !self.query.trim().is_empty() {
+            self.generation += 1;
+            cmds.push(self.search_command(0));
+        }
+        cmds
+    }
+
+    /// `S`, Ctrl+Shift+S, the footer toggle.
+    fn toggle_safe(&mut self) -> Vec<Command> {
+        let on = !self.safe;
+        let mut cmds = self.set_safe(on);
+        cmds.push(Command::SaveSafeMode { on });
+        if self.copying.is_none() {
+            self.status = Status::Safe {
+                on,
+                hidden: self.hidden,
+            };
+        }
+        cmds
     }
 
     fn goto(&mut self, i: usize) {
@@ -3294,3 +3499,6 @@ mod modal_tests;
 
 #[cfg(test)]
 mod tiles_tests;
+
+#[cfg(test)]
+mod safe_tests;

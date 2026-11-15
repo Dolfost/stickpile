@@ -180,10 +180,11 @@ either way. Any other `start_tab` or `start_mode` value is an error.
 mark_favorites = true # a heart on the items you liked
 show_emojis = true    # an item's emojis on its tile
 show_tags = true      # an item's tags on its tile
+safe_mode = false     # hide the items tagged nsfw
 ```
 
 `zf`, `ze` and `zt` in Normal mode turn them on and off and save the
-change like the Settings tab does.
+change like the Settings tab does; `S` does the same for safe mode.
 
 ### Copy-time image adjustments
 
@@ -216,7 +217,7 @@ The popup's Settings tab edits these keys:
 
 | Group | Keys |
 |---|---|
-| Popup | `ui.language`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Popup | `ui.language`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.safe_mode`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 

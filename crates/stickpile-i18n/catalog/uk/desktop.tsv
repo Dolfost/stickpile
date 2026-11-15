@@ -227,3 +227,21 @@ Redo	Повторити
 Cut	Вирізати
 Paste	Вставити
 Select All	Вибрати все
+safe mode: hide or show items tagged nsfw	безпечний режим: сховати чи показати стікери з тегом nsfw
+safe mode	безпечний режим
+Safe mode	Безпечний режим
+Hide items tagged nsfw (S in Normal mode).	Ховати стікери з тегом nsfw (S у звичайному режимі).
+Safe mode: hide items tagged nsfw (S, Ctrl+Shift+S)	Безпечний режим: ховати стікери з тегом nsfw (S, Ctrl+Shift+S)
+Safe mode off: items tagged nsfw are shown	Безпечний режим вимкнено: стікери з тегом nsfw показано
+Safe mode on: items tagged nsfw are hidden	Безпечний режим увімкнено: стікери з тегом nsfw сховано
+Safe mode on: {n} item tagged nsfw is hidden|Safe mode on: {n} items tagged nsfw are hidden	Безпечний режим увімкнено: сховано {n} стікер з тегом nsfw|Безпечний режим увімкнено: сховано {n} стікери з тегом nsfw|Безпечний режим увімкнено: сховано {n} стікерів з тегом nsfw
+safe: on	безпечний: увімк.
+safe: off	безпечний: вимк.
+never copied	ще не копіювали
+copied {n} time|copied {n} times	скопійовано {n} раз|скопійовано {n} рази|скопійовано {n} разів
+quality {score}	якість {score}
+S	S
+Ctrl+Shift+S	Ctrl+Shift+S
+Safe mode: hide items tagged nsfw (S, Cmd+Shift+S)	Безпечний режим: ховати стікери з тегом nsfw (S, Cmd+Shift+S)
+No matches for “{query}” with safe mode on	Нічого не знайдено за “{query}” у безпечному режимі
+{n} item hidden by safe mode (tagged nsfw)|{n} items hidden by safe mode (tagged nsfw)	Безпечний режим сховав {n} стікер (з тегом nsfw)|Безпечний режим сховав {n} стікери (з тегом nsfw)|Безпечний режим сховав {n} стікерів (з тегом nsfw)

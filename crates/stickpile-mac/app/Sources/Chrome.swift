@@ -1,7 +1,7 @@
 import AppKit
 
 /// A flat button drawn as text: the tabs, the help button, the footer's
-/// target and sticker toggle.
+/// target and its sticker and safe mode toggles.
 final class TextButton: NSView {
     var number = "" { didSet { if oldValue != number { changed() } } }
     var text = "" { didSet { if oldValue != text { changed() } } }
@@ -9,7 +9,7 @@ final class TextButton: NSView {
     var current = false { didSet { if oldValue != current { changed() } } }
     var font = NSFont.systemFont(ofSize: 13)
     var currentFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    var color = NSColor.labelColor
+    var color = NSColor.labelColor { didSet { if oldValue != color { needsDisplay = true } } }
     var padding: CGFloat = 9
     var action: (() -> Void)?
     private var hovered = false
@@ -254,13 +254,21 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
     @objc private func fieldAction() { report() }
 }
 
-/// Mode, pending keys, target, sticker toggle, status.
+/// The selection's stats on top; under them mode, pending keys, target,
+/// sticker and safe mode toggles, status.
 final class FooterBar: NSView {
+    /// The row under the stats line.
+    static let rowHeight: CGFloat = 30
+    /// The whole bar.
+    static let height: CGFloat = 48
+
+    private let details = label("", size: 11, color: .secondaryLabelColor)
     private let mode = ModeLabel()
     private let pending = label("", size: 12, weight: .bold)
     let target = TextButton()
     private let hint = label("", size: 11, color: .secondaryLabelColor)
     let sticker = TextButton()
+    let safe = TextButton()
     private let spinner = NSProgressIndicator()
     private let status = label("", size: 11, color: .secondaryLabelColor)
     private var footer: Footer?
@@ -274,15 +282,18 @@ final class FooterBar: NSView {
         target.currentFont = target.font
         target.padding = 5
 
-        sticker.font = .systemFont(ofSize: 11)
-        sticker.currentFont = .systemFont(ofSize: 11, weight: .medium)
-        sticker.padding = 6
+        for toggle in [sticker, safe] {
+            toggle.font = .systemFont(ofSize: 11)
+            toggle.currentFont = .systemFont(ofSize: 11, weight: .medium)
+            toggle.padding = 6
+        }
+        details.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
         status.alignment = .right
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
-        [mode, pending, target, hint, sticker, spinner, status].forEach(addSubview)
+        [details, mode, pending, target, hint, sticker, safe, spinner, status].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -290,6 +301,7 @@ final class FooterBar: NSView {
     func relabel() {
         target.toolTip = tr("Target app: click for the next one")
         sticker.toolTip = tr("Send as sticker")
+        safe.toolTip = tr("Safe mode: hide items tagged nsfw (S, Cmd+Shift+S)")
     }
 
     func update(_ f: Footer) {
@@ -302,9 +314,14 @@ final class FooterBar: NSView {
         pending.setShown(!f.pending.isEmpty)
         target.text = f.target
         hint.setText(f.targetHint)
-        sticker.setShown(f.sticker != .unsupported)
+        // Shown for every target; dimmed where it has no sticker route.
         sticker.text = f.stickerLabel
         sticker.current = f.sticker == .on
+        sticker.color = f.sticker == .unsupported ? .tertiaryLabelColor : .labelColor
+        safe.text = f.safeLabel
+        safe.current = f.safe
+        details.setText(f.details)
+        details.toolTip = f.details.isEmpty ? nil : f.details
         status.setText(f.status)
         status.toolTip = f.status.isEmpty ? nil : f.status
         switch f.level {
@@ -318,11 +335,13 @@ final class FooterBar: NSView {
 
     override func layout() {
         super.layout()
-        let h = bounds.height
+        let row = FooterBar.rowHeight
+        let top = bounds.height - row
+        details.frame = NSRect(x: 12, y: max(2, top - 15), width: max(0, bounds.width - 24), height: 15)
         var x: CGFloat = 10
         func place(_ v: NSView, _ w: CGFloat, _ height: CGFloat) {
             guard !v.isHidden else { return }
-            v.frame = NSRect(x: x, y: floor((h - height) / 2), width: w, height: height)
+            v.frame = NSRect(x: x, y: top + floor((row - height) / 2), width: w, height: height)
             x += w + 8
         }
         place(mode, mode.fittingWidth, 17)
@@ -331,12 +350,14 @@ final class FooterBar: NSView {
         x -= 4
         place(hint, min(hint.textWidth, max(0, bounds.width * 0.3)), 15)
         place(sticker, sticker.fittingWidth, 22)
+        x -= 6
+        place(safe, safe.fittingWidth, 22)
         let right = bounds.width - 10
         let spinnerWidth: CGFloat = spinner.isHidden || footer?.level != .busy ? 0 : 16
-        spinner.frame = NSRect(x: right - spinnerWidth, y: (h - 16) / 2, width: 16, height: 16)
+        spinner.frame = NSRect(x: right - spinnerWidth, y: top + (row - 16) / 2, width: 16, height: 16)
         let sx = x + 4
-        status.frame = NSRect(x: sx, y: (h - 15) / 2, width: max(0, right - spinnerWidth - (spinnerWidth > 0 ? 6 : 0) - sx),
-                              height: 15)
+        status.frame = NSRect(x: sx, y: top + (row - 15) / 2,
+                              width: max(0, right - spinnerWidth - (spinnerWidth > 0 ? 6 : 0) - sx), height: 15)
     }
 }
 

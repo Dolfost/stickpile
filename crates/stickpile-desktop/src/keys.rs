@@ -193,6 +193,7 @@ fn insert_key(k: &KeyPress<'_>) -> Option<Event> {
     match ctrl_letter(k)? {
         't' => Some(Event::CycleTarget { backwards: m.shift }),
         's' if !m.shift => Some(Event::ToggleSticker),
+        's' => Some(Event::ToggleSafe),
         'd' if !m.shift => Some(Event::ToggleFavorite),
         _ => None,
     }
@@ -215,6 +216,7 @@ fn normal_key(k: &KeyPress<'_>) -> Event {
         return match ctrl_letter(k) {
             Some('t') => Event::CycleTarget { backwards: m.shift },
             Some('s') if !m.shift => Event::ToggleSticker,
+            Some('s') => Event::ToggleSafe,
             Some(c @ ('d' | 'u')) if !m.shift => key(NormalKey::Ctrl(c)),
             _ => key(NormalKey::Other),
         };
@@ -321,7 +323,7 @@ mod tests {
         assert_eq!(key("t", CTRL), Some(Event::CycleTarget { backwards: false }));
         assert_eq!(key("T", CTRL_SHIFT), Some(Event::CycleTarget { backwards: true }));
         assert_eq!(key("s", CTRL), Some(Event::ToggleSticker));
-        assert_eq!(key("S", CTRL_SHIFT), None);
+        assert_eq!(key("S", CTRL_SHIFT), Some(Event::ToggleSafe));
         assert_eq!(key("d", CTRL), Some(Event::ToggleFavorite));
         assert_eq!(key("D", CTRL_SHIFT), None);
         assert_eq!(key("t", NONE), None, "plain t is typed into the query");
@@ -452,6 +454,8 @@ mod tests {
         assert_eq!(normal("t", CTRL), Some(Event::CycleTarget { backwards: false }));
         assert_eq!(normal("T", CTRL_SHIFT), Some(Event::CycleTarget { backwards: true }));
         assert_eq!(normal("s", CTRL), Some(Event::ToggleSticker));
+        assert_eq!(normal("S", CTRL_SHIFT), Some(Event::ToggleSafe));
+        assert_eq!(normal("S", SHIFT), nk(NormalKey::Char('S')));
     }
 
     #[test]

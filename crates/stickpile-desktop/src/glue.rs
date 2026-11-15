@@ -24,7 +24,8 @@ pub const MAX_COLUMNS: u32 = 64;
 /// Height a pack list cell adds under the cover: its name and item count.
 pub const PACK_LABELS_PX: u32 = 40;
 /// Tab row, header (title and text field) and footer heights plus outer margins.
-const CHROME_HEIGHT_PX: u32 = 40 + 46 + 26;
+/// Tab bar, header, footer (the stats line and the row under it).
+const CHROME_HEIGHT_PX: u32 = 40 + 46 + 44;
 const CHROME_WIDTH_PX: u32 = 24;
 /// The tab row needs this much (seven numbered tabs and the help button);
 /// narrower grids get wider cells instead.
@@ -52,9 +53,13 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
             emojis: cfg.ui.show_emojis,
             tags: cfg.ui.show_tags,
         },
+        safe_mode: cfg.ui.safe_mode,
         ..ModelConfig::default()
     }
 }
+
+/// The config key safe mode (`S`) is saved to.
+pub const SAFE_MODE_KEY: &str = "ui.safe_mode";
 
 /// The config key a `z` key's change is saved to.
 pub fn tile_key(tile: Tile) -> &'static str {
@@ -231,7 +236,9 @@ mod tests {
         cfg.ui.start_tab = "most_used".into();
         cfg.ui.start_mode = StartMode::Insert;
         cfg.ui.show_tags = false;
+        cfg.ui.safe_mode = true;
         let m = model_config(&cfg);
+        assert!(m.safe_mode);
         assert!(!m.modal);
         assert_eq!(m.start_tab, Some(Tab::MostUsed));
         assert_eq!(m.start_mode, Mode::Insert);
@@ -303,7 +310,7 @@ mod tests {
     #[test]
     fn window_size_follows_grid() {
         let mut cfg = ClientConfig::default(); // 6 columns, 128 px
-        assert_eq!(window_size(&cfg), (6 * 144 + 24, 4 * 144 + 112));
+        assert_eq!(window_size(&cfg), (6 * 144 + 24, 4 * 144 + 130));
         assert_eq!(pack_rows(&cfg), 3);
         cfg.ui.columns = 3;
         assert_eq!(window_size(&cfg).0, MIN_WIDTH_PX as i32, "the tabs still fit");

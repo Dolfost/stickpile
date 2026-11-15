@@ -262,6 +262,10 @@ in
             show_tags = setting types.bool true ''
               An item's tags on its tile (`zt` in Normal mode).
             '';
+            safe_mode = setting types.bool false ''
+              Safe mode: the popup hides items tagged `nsfw` (`S` in Normal
+              mode switches it).
+            '';
             language =
               setting
                 (types.enum [

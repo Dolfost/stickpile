@@ -84,6 +84,9 @@ pub struct UiConfig {
     pub show_emojis: bool,
     /// An item's tags on its tile.
     pub show_tags: bool,
+    /// Safe mode: the popup hides items tagged `nsfw` (`S` in Normal mode
+    /// switches it and saves this).
+    pub safe_mode: bool,
     /// The popup's language: `auto` (the account's language when it has
     /// one, else the system's), or one of [`LANGUAGES`]. Choosing one in
     /// the popup also sets the account's, so the web UI follows.
@@ -145,6 +148,7 @@ impl Default for UiConfig {
             mark_favorites: true,
             show_emojis: true,
             show_tags: true,
+            safe_mode: false,
             language: "auto".into(),
         }
     }
@@ -498,13 +502,14 @@ mod tests {
     fn ui_and_copy_keys() {
         let c = ClientConfig::from_toml(
             "[ui]\nmodal = false\nstart_tab = \"most_used\"\nstart_mode = \"insert\"\nmark_favorites = false\n\
-             show_emojis = false\nshow_tags = false\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
+             show_emojis = false\nshow_tags = false\nsafe_mode = true\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
         )
         .unwrap();
         assert!(!c.ui.modal);
         assert_eq!(c.ui.start_tab, "most_used");
         assert_eq!(c.ui.start_mode, StartMode::Insert);
         assert!(!c.ui.mark_favorites && !c.ui.show_emojis && !c.ui.show_tags);
+        assert!(c.ui.safe_mode);
         assert_eq!(c.copy.square, SquarePad::White);
         assert_eq!(c.copy.background, Background::White);
         let d = ClientConfig::default();
@@ -512,6 +517,7 @@ mod tests {
         assert_eq!(d.ui.start_tab, "last");
         assert_eq!(d.ui.start_mode, StartMode::Normal);
         assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags);
+        assert!(!d.ui.safe_mode);
         assert_eq!(d.ui.language, "auto");
         for l in LANGUAGES {
             let c = ClientConfig::from_toml(&format!("[ui]\nlanguage = {l:?}")).unwrap();

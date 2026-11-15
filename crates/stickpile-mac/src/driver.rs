@@ -22,7 +22,7 @@ use stickpile_desktop::{glue, pages, sync};
 use stickpile_i18n::global::{t, tf, tp};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::{FocusBackend, WindowInfo};
-use stickpile_quick::model::{self, Command, Event, Model, OpenInfo, StickerMode, Tile};
+use stickpile_quick::model::{self, Command, Event, Model, OpenInfo, StickerMode};
 use stickpile_quick::{Mode, Tab, View, HELP};
 
 use crate::bridge::*;
@@ -450,6 +450,10 @@ impl Driver {
         self.dispatch(Event::ToggleSticker);
     }
 
+    pub fn toggle_safe(&self) {
+        self.dispatch(Event::ToggleSafe);
+    }
+
     pub fn cycle_target(&self) {
         self.dispatch(Event::CycleTarget { backwards: false });
     }
@@ -560,8 +564,9 @@ impl Driver {
 
     /// A `z` key showed or hid something on the tiles: save it like the
     /// Settings tab would, unless `config.toml` sets that key.
-    fn save_tile(&self, tile: Tile, on: bool) {
-        let key = glue::tile_key(tile);
+    /// Save a `z` key's or `S`'s change as its setting, unless the setting
+    /// is locked by a read-only `config.toml`.
+    fn save_bool(&self, key: &str, on: bool) {
         let config_path = self.lock().config_path.clone();
         let layered = match config_file::load_layered(&config_path) {
             Ok(l) => l,
@@ -634,7 +639,8 @@ impl Driver {
             Command::LoadThumbnails { items } => self.load_thumbnails(items),
             Command::LoadPackCovers { packs } => self.load_covers(packs),
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
-            Command::SaveTile { tile, on } => self.save_tile(tile, on),
+            Command::SaveTile { tile, on } => self.save_bool(glue::tile_key(tile), on),
+            Command::SaveSafeMode { on } => self.save_bool(glue::SAFE_MODE_KEY, on),
             Command::SaveHistory(history) => {
                 let path = self.lock().history_path.clone();
                 self.rt.spawn_blocking(move || {
@@ -752,7 +758,7 @@ impl Driver {
                 StickerMode::Off => StickerState::Off,
                 StickerMode::Unsupported => StickerState::Unsupported,
             },
-            sticker_label: if f.sticker == StickerMode::On {
+            sticker_label: if m.sticker() {
                 t("sticker: on")
             } else {
                 t("sticker: off")
@@ -765,6 +771,9 @@ impl Driver {
                 model::Level::Warning => Level::Warning,
                 model::Level::Error => Level::Error,
             },
+            safe: f.safe,
+            safe_label: model::safe_label(f.safe).to_string(),
+            details: f.details,
         };
         let focus = match m.mode() {
             _ if !m.is_visible() => FocusWish::Keep,

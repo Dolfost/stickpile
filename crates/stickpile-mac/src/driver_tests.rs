@@ -79,6 +79,11 @@ fn png(path: &Path, rgb: [u8; 3]) {
 
 impl Harness {
     fn new() -> Harness {
+        Harness::with(&[])
+    }
+
+    /// With `extra` images among the loose files.
+    fn with(extra: &[&str]) -> Harness {
         let serial = serial();
         let dir = tempfile::tempdir().unwrap();
         let media = dir.path().join("media");
@@ -86,6 +91,9 @@ impl Harness {
         png(&media.join("happy dog.png"), [200, 120, 0]);
         png(&media.join("cats/cat party.png"), [0, 120, 200]);
         png(&media.join("cats/cat nap.png"), [90, 90, 90]);
+        for name in extra {
+            png(&media.join(name), [10, 10, 10]);
+        }
         let config = dir.path().join("config.toml");
         std::fs::write(
             &config,
@@ -264,6 +272,48 @@ fn tabs_pages_and_settings() {
     let help = h.last().help.expect("help shown");
     assert!(help.iter().flat_map(|s| &s.keys).any(|k| k.keys.contains("Cmd+")));
     assert!(!help.iter().flat_map(|s| &s.keys).any(|k| k.keys.contains("Ctrl+")));
+}
+
+#[test]
+fn safe_mode_hides_nsfw_items_and_is_saved() {
+    let h = Harness::with(&["dog nsfw.png"]);
+    h.driver.open(None, Some(TabId::Search));
+    h.driver.query_changed("dog".into());
+    h.pump_until("both dogs", |s| s.entries.len() == 2);
+    let f = h.last().footer;
+    assert!(!f.safe);
+    assert_eq!(f.safe_label, "safe: off");
+    assert_eq!(f.sticker_label, "sticker: off", "shown for every target");
+    assert!(
+        f.details.contains(" · Demo directory · PNG 64×48 · never copied"),
+        "{}",
+        f.details
+    );
+
+    h.driver.toggle_safe();
+    h.pump_until("the search again, without nsfw", |s| s.entries.len() == 1);
+    assert_eq!(h.ui.seen.lock().unwrap().entries[0].name, "happy dog");
+    let f = h.last().footer;
+    assert!(f.safe);
+    assert_eq!(f.safe_label, "safe: on");
+    let text = std::fs::read_to_string(&h.config).unwrap();
+    assert!(text.contains("safe_mode = true"), "{text}");
+
+    // S in Normal mode: back off.
+    assert!(h.key(53, "\u{1b}"));
+    assert!(h.driver.key(KeyInput {
+        key_code: 1,
+        characters: "S".into(),
+        latin: None,
+        command: false,
+        control: false,
+        option: false,
+        shift: true,
+    }));
+    h.pump_until("both dogs again", |s| s.entries.len() == 2);
+    assert!(!h.last().footer.safe);
+    let text = std::fs::read_to_string(&h.config).unwrap();
+    assert!(text.contains("safe_mode = false"), "{text}");
 }
 
 #[test]

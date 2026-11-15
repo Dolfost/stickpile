@@ -130,11 +130,22 @@ pub struct Footer {
     pub target: String,
     /// How it was chosen: "auto: org.telegram.desktop", "default", "chosen".
     pub target_hint: String,
+    /// [`StickerState::Unsupported`]: the toggle is still shown, dimmed (the
+    /// preference holds for the next target).
     pub sticker: StickerState,
-    /// "sticker: on" / "sticker: off", translated.
+    /// "sticker: on" / "sticker: off", translated: the preference, also
+    /// where the target has no sticker route.
     pub sticker_label: String,
     pub status: String,
     pub level: Level,
+    /// Safe mode is on: items tagged nsfw are hidden.
+    pub safe: bool,
+    /// "safe: on" / "safe: off", translated.
+    pub safe_label: String,
+    /// The selection's stats, one line above the footer row ("cat · Cats ·
+    /// GIF 512×512 · copied 12 times · ♥ 3 · quality 87"); empty when
+    /// nothing is selected.
+    pub details: String,
 }
 
 /// One cell of the item grid.
@@ -573,6 +584,11 @@ impl Popup {
     /// A click on the footer's sticker toggle.
     pub fn toggle_sticker(&self) {
         self.driver.toggle_sticker();
+    }
+
+    /// A click on the footer's safe mode toggle (as `S`).
+    pub fn toggle_safe(&self) {
+        self.driver.toggle_safe();
     }
 
     /// A click on the footer's target app: the next one.

@@ -81,6 +81,8 @@ pub(crate) enum Cmd {
     },
     /// `s`
     Sticker,
+    /// `S`: safe mode, which hides the items tagged `nsfw`.
+    Safe,
     /// `gx`
     Browser,
     /// `?`
@@ -266,6 +268,7 @@ fn single(key: NormalKey) -> Option<Cmd> {
         NormalKey::Char('t') => Cmd::Target { backwards: false },
         NormalKey::Char('T') => Cmd::Target { backwards: true },
         NormalKey::Char('s') => Cmd::Sticker,
+        NormalKey::Char('S') => Cmd::Safe,
         NormalKey::Char('?') => Cmd::Help,
         NormalKey::Char('q') => Cmd::Quit,
         NormalKey::Char('-') | NormalKey::Backspace => Cmd::Back,
@@ -299,6 +302,7 @@ pub const HELP: &[HelpSection] = &[
             ("gx", "open the item in the browser"),
             ("t / T", "next / previous target app"),
             ("s", "toggle sticker mode"),
+            ("S", "safe mode: hide or show items tagged nsfw"),
             ("zf / ze / zt", "favorite marks / emojis / tags on the tiles"),
             ("/", "new search"),
             ("i, a", "edit the query"),
@@ -328,6 +332,7 @@ pub const HELP: &[HelpSection] = &[
             ("arrows, Page Up / Down, Home / End", "move"),
             ("Enter / Shift+Enter", "copy / copy with sticker mode flipped"),
             ("Ctrl+T / Ctrl+S / Ctrl+D", "target app / sticker mode / favorite"),
+            ("Ctrl+Shift+S", "safe mode"),
             ("Esc", "Normal mode"),
         ],
     },
@@ -381,10 +386,11 @@ mod tests {
             [Cmd::Target { backwards: false }, Cmd::Target { backwards: true }]
         );
         assert_eq!(
-            run("fs?q-o$0"),
+            run("fsS?q-o$0"),
             [
                 Cmd::Favorite,
                 Cmd::Sticker,
+                Cmd::Safe,
                 Cmd::Help,
                 Cmd::Quit,
                 Cmd::Back,

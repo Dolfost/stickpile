@@ -61,8 +61,11 @@ reads the same config and token.
 ## Keys
 
 The Linux popup's keys ([desktop.md](desktop.md#keys)), with Cmd for Ctrl:
-Cmd+T cycles the target app, Cmd+S flips sticker mode, Cmd+D likes the item,
-and Cmd+1..7 switch tabs (Alt+1..7 on Linux). Control works as Ctrl too. The
+Cmd+T cycles the target app, Cmd+S flips sticker mode, Cmd+Shift+S (or `S`
+in Normal mode) flips safe mode, which hides the items tagged `nsfw`,
+Cmd+D likes the item, and Cmd+1..7 switch tabs (Alt+1..7 on Linux). The
+footer shows the selected item's stats (pack, format, size, copies,
+likes, quality) above the mode, the target and the toggles. Control works as Ctrl too. The
 vim keys of Normal mode work with a Cyrillic layout active.
 
 ## Target detection

@@ -170,10 +170,14 @@ Me, with the login form.
 From top to bottom the window has the tab row (click a tab, or press its
 number; `?` opens the key help), a header with the title ("Packs / Cats"
 inside a pack, with a back arrow), the text field on Search and Packs
-(an item count on the other grids), the grid or page, and the footer: the
-mode (INSERT / NORMAL), keys of a command still being typed, the target
-app, the sticker toggle and the status. Every tab fetches its list again
-each time it is shown, so it is never older than the last look.
+(an item count on the other grids), the grid or page, and the footer. Its
+first line has the selected item's stats: name, pack, format and size, how
+often it was copied, likes and quality ("cat · Cats · GIF 320×240 · copied
+12 times · ♥ 3 · quality 87"; on the pack list a pack's name, item count
+and owner). Under it: the mode (INSERT / NORMAL), keys of a command still
+being typed, the target app, the sticker and safe mode toggles and the
+status. Every tab fetches its list again each time it is shown, so it is
+never older than the last look.
 
 The grid fills the window: `ui.columns` sets how many thumbnails a row has
 at the default window size, and a wider or narrower window shows more or
@@ -184,6 +188,15 @@ on and off, and the Settings tab has a switch for each
 (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`). The heart marks
 the items the Favorites tab lists (fetched each time the popup opens) and
 the ones you like or unlike since.
+
+**Safe mode.** `S` in Normal mode (Ctrl+Shift+S in any mode, or a click on
+"safe" in the footer) hides every item tagged `nsfw`: on every tab, inside
+packs, and in search, where the query gets `-tag:nsfw` so the results
+still fill the grid. Pressing it again shows them. The footer says
+"safe: on" while it is on, and the status how many items it hid. The choice
+is saved as `ui.safe_mode`, so it holds after a restart (unless a read-only
+`config.toml` sets it). Tag the items in the web UI (Tags field: `nsfw`).
+Pack covers on the pack list are not filtered.
 
 ## Keys
 
@@ -230,6 +243,7 @@ popup.
 | gx | open the selected item in the browser |
 | t / T | next / previous target app |
 | s | toggle sticker mode |
+| S | safe mode: hide or show the items tagged `nsfw` (saved like a setting) |
 | zf / ze / zt | show or hide the favorite hearts / emojis / tags on the tiles (saved like a setting) |
 | / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
 | i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
@@ -266,6 +280,7 @@ closes it), and `i` edits the row's text or number field. Editing a field
 | F1 | show or hide the key help |
 | Ctrl+T / Ctrl+Shift+T | next / previous target app |
 | Ctrl+S | toggle sticker mode; kept until stickpile-desktop restarts (the footer toggle does the same) |
+| Ctrl+Shift+S | safe mode on / off (as `S`) |
 
 In a text field on Me or Settings only Escape, the tab keys and F1 are
 taken by the popup; every other key goes to the field.
@@ -286,9 +301,10 @@ for Telegram stickers and when an app ignores pasted file references).
 The search syntax of the server works in
 the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`.
 
-The footer shows the target app and how it was chosen (`auto: <window
-class>`, `default`, `chosen`), the sticker toggle (only for apps with
-stickers; clicking it is Ctrl+S), and the status: searching, offline,
+The footer shows the selected item's stats (see above), the target app and
+how it was chosen (`auto: <window class>`, `default`, `chosen`), the
+sticker toggle (dimmed for apps without stickers; clicking it is Ctrl+S),
+the safe mode toggle (clicking it is `S`), and the status: searching, offline,
 "Copied cat for Telegram", warnings such as "Discord limit is 10 MiB", or
 errors. A ⚠ on a cell means the item cannot be sent to the current target
 as is (the tooltip says why); copying still uses the best available
@@ -429,6 +445,7 @@ start_mode = "normal" # normal | insert: the mode the popup opens in
 mark_favorites = true # a heart on the items you liked (zf)
 show_emojis = true   # an item's emojis on its tile (ze)
 show_tags = true     # an item's tags on its tile (zt)
+safe_mode = false    # hide items tagged nsfw (S)
 language = "auto"    # auto | en | uk: the popup's language (docs/languages.md)
 
 [copy]

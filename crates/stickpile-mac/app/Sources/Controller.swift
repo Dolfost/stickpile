@@ -14,6 +14,7 @@ protocol PopupControl: AnyObject {
     func showTab(tab: TabId)
     func toggleHelp()
     func toggleSticker()
+    func toggleSafe()
     func cycleTarget()
     func packBack()
     func textFocus(focused: Bool)
@@ -93,6 +94,7 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         v.header.onQuery = { [weak self] text in self?.send { $0.queryChanged(text: text) } }
         v.footer.target.action = { [weak self] in self?.send { $0.cycleTarget() } }
         v.footer.sticker.action = { [weak self] in self?.send { $0.toggleSticker() } }
+        v.footer.safe.action = { [weak self] in self?.send { $0.toggleSafe() } }
         for grid in [v.itemsGrid, v.packsGrid] {
             grid.collection.onSelect = { [weak self] i in self?.send { $0.select(index: UInt32(i)) } }
             grid.collection.onActivate = { [weak self] i in self?.send { $0.activate(index: UInt32(i)) } }

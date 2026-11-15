@@ -1,7 +1,9 @@
 //! `--demo DIR`: a backend that serves the media files of one directory, so
 //! the popup, the clipboard offers and drag-and-drop can be exercised without
 //! a server (and before `stickpile-core` is complete). Search is a plain
-//! substring match over file names; offers follow the same `clipboard`
+//! substring match over file names (`-word` and `-tag:x` exclude); a file
+//! with the word `nsfw` in its name is tagged `nsfw`, for safe mode. Offers
+//! follow the same `clipboard`
 //! config as the real client. Each subdirectory is a pack (a directory from
 //! `stickpile backup` works), the loose files are one more; favorites and
 //! most used start from a fixed choice, and the account is a demo user that
@@ -108,6 +110,17 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
             size_bytes: size,
         });
     }
+    let keywords: Vec<String> = stem
+        .split(['-', '_', ' ', '.'])
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    let tags = keywords
+        .iter()
+        .find(|k| *k == stickpile_quick::model::NSFW_TAG)
+        .cloned()
+        .into_iter()
+        .collect();
     ItemSummary {
         id: file_name.clone(),
         set_id: LOOSE_PACK.into(),
@@ -115,14 +128,10 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
         set_name: "Demo directory".into(),
         owner_username: DEMO_USER.into(),
         name: stem.clone(),
-        keywords: stem
-            .split(['-', '_', ' ', '.'])
-            .filter(|s| !s.is_empty())
-            .map(str::to_lowercase)
-            .collect(),
+        keywords,
         emojis: vec![],
         vibe: None,
-        tags: vec![],
+        tags,
         kind: kind_of(format),
         format,
         width,
@@ -275,7 +284,15 @@ impl DemoBackend {
             .iter()
             .filter(|i| {
                 let hay = format!("{} {}", i.summary.name.to_lowercase(), i.summary.keywords.join(" "));
-                words.iter().all(|w| hay.contains(w.as_str()))
+                words
+                    .iter()
+                    .all(|w| match w.strip_prefix('-').filter(|n| !n.is_empty()) {
+                        Some(not) => match not.strip_prefix("tag:") {
+                            Some(tag) => !i.summary.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)),
+                            None => !hay.contains(not),
+                        },
+                        None => hay.contains(w.as_str()),
+                    })
             })
             .take(limit)
             .map(|i| SearchHit {
@@ -661,6 +678,20 @@ mod tests {
         assert_eq!(ids("party dance"), ["dance_party.gif"]);
         assert!(ids("zebra").is_empty());
         assert_eq!(b.search_now("", 2).len(), 2);
+        assert_eq!(ids("-cat -sticker -clip"), ["dance_party.gif"]);
+        assert_eq!(ids("party -tag:nsfw"), ["dance_party.gif"]);
+    }
+
+    #[test]
+    fn nsfw_in_a_name_is_a_tag() {
+        let (d, _) = fixture();
+        std::fs::write(d.path().join("party-nsfw.png"), encoded(16, 16, ImageFormat::Png)).unwrap();
+        let b = DemoBackend::scan(d.path(), &config(d.path())).unwrap();
+        assert_eq!(b.find("party-nsfw.png").unwrap().summary.tags, ["nsfw"]);
+        assert!(b.find("dance_party.gif").unwrap().summary.tags.is_empty());
+        let ids = |q| b.search_now(q, 10).into_iter().map(|h| h.item.id).collect::<Vec<_>>();
+        assert_eq!(ids("party"), ["dance_party.gif", "party-nsfw.png"]);
+        assert_eq!(ids("party -tag:NSFW"), ["dance_party.gif"]);
     }
 
     #[test]

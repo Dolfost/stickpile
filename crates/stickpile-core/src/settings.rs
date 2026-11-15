@@ -198,6 +198,14 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             b(true),
         ),
         spec(
+            "ui.safe_mode",
+            "Popup",
+            "Safe mode",
+            "Hide items tagged nsfw (S in Normal mode).",
+            Bool,
+            b(false),
+        ),
+        spec(
             "ui.recent_count",
             "Popup",
             "Recent items",

@@ -25,7 +25,7 @@ use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::FocusEnv;
-use stickpile_quick::model::{self, Command, Event, Level, Model, OpenInfo, StickerMode, Tile};
+use stickpile_quick::model::{self, safe_label, Command, Event, Level, Model, OpenInfo, StickerMode};
 use stickpile_quick::{Mode, Tab, View};
 
 use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
@@ -62,6 +62,7 @@ gridview.stickpile-grid > child:selected:hover { background-color: alpha(@accent
 label.stickpile-heart { color: #ff5470; }
 .stickpile-footer { padding: 4px 10px; }
 .stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
+.stickpile-details { font-feature-settings: "tnum"; }
 .stickpile-tabs { padding: 6px 8px 0 8px; }
 .stickpile-tabs button.stickpile-tab { min-height: 26px; padding: 2px 9px; font-weight: normal; }
 .stickpile-tab-number { font-size: 0.8em; font-feature-settings: "tnum"; opacity: 0.55; }
@@ -135,7 +136,12 @@ struct Widgets {
     /// Footer sticker-mode toggle; clicking it is Ctrl+S.
     sticker: gtk::ToggleButton,
     sticker_label: gtk::Label,
+    /// Footer safe-mode toggle; clicking it is `S`.
+    safe: gtk::ToggleButton,
+    safe_label: gtk::Label,
     status: gtk::Label,
+    /// The selection's stats, above the footer row.
+    details: gtk::Label,
 }
 
 pub struct Shell {
@@ -487,8 +493,9 @@ impl Shell {
     /// A `z` key showed or hid something on the tiles: save it like the
     /// Settings tab would. A key `config.toml` sets stays as it is there;
     /// the change then lasts until the popup restarts.
-    fn save_tile(self: &Rc<Self>, tile: Tile, on: bool) {
-        let key = glue::tile_key(tile);
+    /// Save a `z` key's or `S`'s change as its setting, unless the
+    /// setting is locked by a read-only `config.toml`.
+    fn save_bool(self: &Rc<Self>, key: &str, on: bool) {
         let layered = match config_file::load_layered(&self.config_path) {
             Ok(l) => l,
             Err(e) => {
@@ -560,7 +567,8 @@ impl Shell {
             Command::LoadThumbnails { items } => self.load_thumbnails(items),
             Command::LoadPackCovers { packs } => self.load_covers(packs),
             Command::Copy { item, target, sticker } => self.copy(*item, target, sticker),
-            Command::SaveTile { tile, on } => self.save_tile(tile, on),
+            Command::SaveTile { tile, on } => self.save_bool(glue::tile_key(tile), on),
+            Command::SaveSafeMode { on } => self.save_bool(glue::SAFE_MODE_KEY, on),
             Command::SaveHistory(history) => {
                 let path = self.history_path.clone();
                 runtime().spawn_blocking(move || {
@@ -745,17 +753,21 @@ impl Shell {
         w.pending.set_visible(!f.pending.is_empty());
         w.target.set_label(&f.target);
         w.target_hint.set_label(&f.target_hint);
-        match f.sticker {
-            StickerMode::Unsupported => w.sticker.set_visible(false),
-            mode => {
-                let on = mode == StickerMode::On;
-                w.sticker.set_visible(true);
-                w.sticker.set_active(on);
-                let label = if on { t("sticker: on") } else { t("sticker: off") };
-                w.sticker_label.set_label(label);
-                set_class(&w.sticker_label, "accent", on);
-            }
-        }
+        // Shown even where the target has no sticker route (dimmed): the
+        // preference holds for the next target.
+        let on = m.sticker();
+        w.sticker.set_active(on);
+        w.sticker_label
+            .set_label(if on { t("sticker: on") } else { t("sticker: off") });
+        set_class(&w.sticker_label, "accent", on && f.sticker == StickerMode::On);
+        set_class(&w.sticker_label, "dim-label", f.sticker == StickerMode::Unsupported);
+        w.safe.set_active(f.safe);
+        w.safe_label.set_label(safe_label(f.safe));
+        set_class(&w.safe_label, "accent", f.safe);
+        w.details.set_label(&f.details);
+        w.details
+            .set_tooltip_text((!f.details.is_empty()).then_some(f.details.as_str()));
+        // Kept when empty, so the grid above does not change height.
         w.status.set_label(&f.status);
         set_class(&w.status, "error", f.level == Level::Error);
         set_class(&w.status, "warning", f.level == Level::Warning);
@@ -1334,6 +1346,13 @@ impl Shell {
                 this.dispatch(Event::ToggleSticker);
             }
         });
+        // Same as `S`.
+        let this = self.clone();
+        w.safe.connect_toggled(move |_| {
+            if !this.rendering.get() {
+                this.dispatch(Event::ToggleSafe);
+            }
+        });
 
         for grid in [&w.grid, &w.pack_grid] {
             let this = self.clone();
@@ -1698,23 +1717,47 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     sticker.add_css_class("flat");
     sticker.add_css_class("stickpile-sticker");
     sticker.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+S")]);
+    let safe_label = gtk::Label::new(None);
+    safe_label.add_css_class("caption");
+    let safe = gtk::ToggleButton::builder()
+        .child(&safe_label)
+        .can_focus(false)
+        .valign(gtk::Align::Center)
+        .build();
+    safe.add_css_class("flat");
+    safe.add_css_class("stickpile-sticker");
+    safe.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+Shift+S")]);
     let status = gtk::Label::builder()
         .hexpand(true)
         .xalign(1.0)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .build();
     status.add_css_class("caption");
-    let footer = gtk::Box::builder()
+    let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(8)
         .build();
+    row.append(&mode);
+    row.append(&pending);
+    row.append(&target);
+    row.append(&target_hint);
+    row.append(&sticker);
+    row.append(&safe);
+    row.append(&status);
+    let details = gtk::Label::builder()
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    details.add_css_class("caption");
+    details.add_css_class("dim-label");
+    details.add_css_class("stickpile-details");
+    let footer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(2)
+        .build();
     footer.add_css_class("stickpile-footer");
-    footer.append(&mode);
-    footer.append(&pending);
-    footer.append(&target);
-    footer.append(&target_hint);
-    footer.append(&sticker);
-    footer.append(&status);
+    footer.append(&details);
+    footer.append(&row);
 
     let main = adw::ToolbarView::new();
     main.add_top_bar(&top);
@@ -1760,7 +1803,10 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         target_hint,
         sticker,
         sticker_label,
+        safe,
+        safe_label,
         status,
+        details,
     };
     relabel_widgets(&w);
     w
@@ -1776,5 +1822,9 @@ fn relabel_widgets(w: &Widgets) {
     w.sticker.set_tooltip_text(Some(t("Send as sticker (Ctrl+S)")));
     w.sticker
         .update_property(&[gtk::accessible::Property::Label(t("Send as sticker"))]);
+    w.safe
+        .set_tooltip_text(Some(t("Safe mode: hide items tagged nsfw (S, Ctrl+Shift+S)")));
+    w.safe
+        .update_property(&[gtk::accessible::Property::Label(t("Safe mode"))]);
     w.error.set_title(t("stickpile cannot start"));
 }
