@@ -59,6 +59,7 @@ class PickerInputMethodService : InputMethodService() {
 
     private var picker: PickerView? = null
     private var insertJob: Job? = null
+    private var shareJob: Job? = null
 
     /** The draft searched for in this field, until it is deleted. */
     private var draft: Draft? = null
@@ -92,8 +93,10 @@ class PickerInputMethodService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
-        // The connection the insert would use is going away.
+        // The connection the insert would use is going away, and a share
+        // still being prepared would open its chooser over another app.
         insertJob?.cancel()
+        shareJob?.cancel()
         picker?.stop()
         super.onFinishInputView(finishingInput)
     }
@@ -133,9 +136,11 @@ class PickerInputMethodService : InputMethodService() {
         }
     }
 
+    /** The chooser with a file for sharing; a newer share replaces one still being prepared. */
     private fun shareItem(item: Item) {
         val editorPackage = currentInputEditorInfo?.packageName.orEmpty()
-        scope.launch {
+        shareJob?.cancel()
+        shareJob = scope.launch {
             val prepared = try {
                 library.prepare(item.id, editorPackage, InsertFlow.SHARE_TYPES, sticker = false)
             } catch (e: LibraryException) {
