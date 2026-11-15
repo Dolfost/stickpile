@@ -1,0 +1,218 @@
+package io.github.dolfost.stickpile.ui
+
+import io.github.dolfost.stickpile.rust.Account
+import io.github.dolfost.stickpile.rust.AuthKind
+import io.github.dolfost.stickpile.rust.Item
+import io.github.dolfost.stickpile.rust.ItemList
+import io.github.dolfost.stickpile.rust.LibraryException
+import io.github.dolfost.stickpile.rust.MediaKind
+import io.github.dolfost.stickpile.rust.Pack
+import io.github.dolfost.stickpile.rust.PackList
+import io.github.dolfost.stickpile.rust.PairingLink
+import io.github.dolfost.stickpile.rust.Prepared
+import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
+import io.github.dolfost.stickpile.rust.Suggestions
+import io.github.dolfost.stickpile.rust.SyncState
+import io.github.dolfost.stickpile.rust.Target
+import io.github.dolfost.stickpile.rust.UploadFile
+
+/**
+ * A [StickpileLibraryInterface] for the view model tests: every call is
+ * recorded in [calls] (secrets included: test data only) and answered by
+ * the matching handler, which a test replaces. A handler left alone
+ * fails the test when it is called, except for the harmless reads.
+ */
+class FakeLibrary : StickpileLibraryInterface {
+    val calls = mutableListOf<String>()
+
+    var account: suspend () -> Account? = { null }
+    var setServerUrl: suspend (String) -> Unit = { }
+    var loginTailnet: suspend () -> Account? = { unexpected("loginTailnet") }
+    var loginPassword: suspend (String, String, String?) -> Account = { _, _, _ -> unexpected("loginPassword") }
+    var loginPairing: suspend (String, String) -> Account = { _, _ -> unexpected("loginPairing") }
+    var logout: suspend () -> Unit = { }
+    var search: suspend (String) -> ItemList = { ItemList(emptyList(), false) }
+    var recent: (UInt) -> List<Item> = { emptyList() }
+    var favorites: suspend () -> ItemList = { ItemList(emptyList(), false) }
+    var mostUsed: suspend () -> ItemList = { ItemList(emptyList(), false) }
+    var packs: suspend () -> PackList = { PackList(emptyList(), false) }
+    var packItems: suspend (String) -> ItemList = { ItemList(emptyList(), false) }
+    var prepare: suspend (String) -> Prepared = { unexpected("prepare") }
+    var toggleLike: suspend (String) -> Boolean = { unexpected("toggleLike") }
+    var parsePairingLink: (String) -> PairingLink? = { null }
+    var normalizePairingCode: (String) -> String? = { null }
+    var syncNow: suspend () -> SyncState = { syncState }
+    var syncIfDue: suspend () -> SyncState = { syncState }
+    var syncState = SyncState(lastSync = null, lastError = null, pendingUsage = 0u, due = false)
+    var pendingUsage: UInt = 0u
+    var cacheBytes: () -> ULong = { 0u }
+    var clearCache: () -> ULong = { 0u }
+    var serverUrl = "http://localhost:8080"
+
+    private fun unexpected(name: String): Nothing = throw AssertionError("unexpected call: $name")
+
+    override suspend fun account(): Account? {
+        calls += "account"
+        return account.invoke()
+    }
+
+    override fun cacheBytes(): ULong {
+        calls += "cacheBytes"
+        return cacheBytes.invoke()
+    }
+
+    override fun clearCache(): ULong {
+        calls += "clearCache"
+        return clearCache.invoke()
+    }
+
+    override suspend fun favorites(limit: UInt): ItemList {
+        calls += "favorites"
+        return favorites.invoke()
+    }
+
+    override suspend fun loginPairing(serverUrl: String, code: String): Account {
+        calls += "loginPairing $serverUrl $code"
+        return loginPairing.invoke(serverUrl, code)
+    }
+
+    override suspend fun loginPassword(username: String, password: String, totp: String?): Account {
+        calls += "loginPassword $username $password $totp"
+        return loginPassword.invoke(username, password, totp)
+    }
+
+    override suspend fun loginTailnet(): Account? {
+        calls += "loginTailnet"
+        return loginTailnet.invoke()
+    }
+
+    override suspend fun logout() {
+        calls += "logout"
+        logout.invoke()
+    }
+
+    override suspend fun mostUsed(limit: UInt): ItemList {
+        calls += "mostUsed"
+        return mostUsed.invoke()
+    }
+
+    override fun normalizePairingCode(input: String): String? {
+        calls += "normalizePairingCode $input"
+        return normalizePairingCode.invoke(input)
+    }
+
+    override suspend fun packItems(packId: String): ItemList {
+        calls += "packItems $packId"
+        return packItems.invoke(packId)
+    }
+
+    override suspend fun packs(): PackList {
+        calls += "packs"
+        return packs.invoke()
+    }
+
+    override fun parsePairingLink(text: String): PairingLink? {
+        calls += "parsePairingLink"
+        return parsePairingLink.invoke(text)
+    }
+
+    override fun pendingUsage(): UInt {
+        calls += "pendingUsage"
+        return pendingUsage
+    }
+
+    override suspend fun prepare(
+        itemId: String,
+        editorPackage: String,
+        acceptedMimeTypes: List<String>,
+        sticker: Boolean,
+    ): Prepared {
+        calls += "prepare $itemId '$editorPackage' $acceptedMimeTypes $sticker"
+        return prepare.invoke(itemId)
+    }
+
+    override fun recent(limit: UInt): List<Item> {
+        calls += "recent"
+        return recent.invoke(limit)
+    }
+
+    override fun recordUse(itemId: String, variant: String, editorPackage: String) {
+        unexpected("recordUse")
+    }
+
+    override suspend fun search(query: String, target: Target, limit: UInt): ItemList {
+        calls += "search $query $target"
+        return search.invoke(query)
+    }
+
+    override fun serverUrl(): String {
+        calls += "serverUrl"
+        return serverUrl
+    }
+
+    override suspend fun setServerUrl(url: String) {
+        calls += "setServerUrl $url"
+        setServerUrl.invoke(url)
+    }
+
+    override fun suggestions(query: String): Suggestions? = unexpected("suggestions")
+
+    override suspend fun syncIfDue(): SyncState {
+        calls += "syncIfDue"
+        return syncIfDue.invoke()
+    }
+
+    override suspend fun syncNow(): SyncState {
+        calls += "syncNow"
+        return syncNow.invoke()
+    }
+
+    override fun syncState(): SyncState {
+        calls += "syncState"
+        return syncState
+    }
+
+    override suspend fun thumbnail(itemId: String): String = unexpected("thumbnail")
+
+    override suspend fun toggleLike(itemId: String): Boolean {
+        calls += "toggleLike $itemId"
+        return toggleLike.invoke(itemId)
+    }
+
+    override suspend fun upload(setId: String, file: UploadFile): Item = unexpected("upload")
+}
+
+val alice = Account(username = "alice", displayName = null, serverUrl = "https://s.example", auth = AuthKind.TOKEN, isAdmin = false)
+
+fun item(id: String, name: String = "item $id") = Item(
+    id = id,
+    name = name,
+    setId = "set",
+    setName = "Set",
+    emojis = emptyList(),
+    keywords = emptyList(),
+    vibe = null,
+    tags = emptyList(),
+    kind = MediaKind.STILL,
+    width = 0u,
+    height = 0u,
+    likes = 0u,
+    copies = 0u,
+)
+
+fun pack(id: String) = Pack(id = id, slug = id, name = "Pack $id", owner = "alice", itemCount = 3u, mine = true)
+
+fun prepared(name: String = "cat.png") = Prepared(
+    path = "/data/cache/$name",
+    mimeType = "image/png",
+    displayName = name,
+    target = Target.GENERIC,
+    variant = "original",
+    sticker = false,
+)
+
+fun unauthorized() = LibraryException.Unauthorized("401")
+
+fun unreachable() = LibraryException.Unreachable("offline")
+
+fun invalid(field: String) = LibraryException.InvalidInput(field, "bad $field")

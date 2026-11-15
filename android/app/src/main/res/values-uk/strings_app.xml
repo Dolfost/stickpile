@@ -1,3 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Texts of the app's screens (package ui), in Ukrainian. -->
-<resources />
+<!-- Texts of the app's screens (package ui), in Ukrainian (values/strings_app.xml). -->
+<resources>
+    <string name="app_action_back">Назад</string>
+    <string name="app_action_cancel">Скасувати</string>
+    <string name="app_action_continue">Далі</string>
+    <string name="app_action_done">Готово</string>
+    <string name="app_action_retry">Спробувати ще раз</string>
+
+    <string name="app_error_not_signed_in">Ви не ввійшли.</string>
+    <string name="app_error_unauthorized">Сервер більше не приймає вхід із цього телефона. Увійдіть знову.</string>
+    <string name="app_error_pairing_code_refused">Код неправильний, прострочений або вже використаний. Створіть новий на вебсторінці свого сервера (Налаштування, Додати пристрій).</string>
+    <string name="app_error_wrong_password">Неправильне ім\'я користувача або пароль.</string>
+    <string name="app_error_wrong_password_or_code">Неправильне ім\'я користувача, пароль або код двофакторної автентифікації.</string>
+    <string name="app_error_unreachable">Не вдається з\'єднатися із сервером. Перевірте адресу та підключення до мережі.</string>
+    <string name="app_error_unreachable_nothing_saved">Не вдається з\'єднатися із сервером, а на цьому телефоні цього ще не збережено.</string>
+    <string name="app_error_unreachable_not_saved">Не вдається з\'єднатися із сервером, а цей файл ще не збережено на телефоні.</string>
+    <string name="app_error_not_found">Не знайдено. Можливо, його видалили на сервері.</string>
+    <string name="app_error_rate_limited">Забагато спроб. Зачекайте хвилину й спробуйте ще раз.</string>
+    <string name="app_error_nothing_fits">Для цього елемента немає версії, якою можна поділитися.</string>
+    <string name="app_error_invalid_server_url">Це не адреса сервера. Вона починається з https:// або http://, наприклад https://stickers.example.org.</string>
+    <string name="app_error_invalid_pairing_code">Це не код підключення пристрою. Він складається з 12 літер і цифр, наприклад 7KQ2-M9XA-4FTR.</string>
+    <string name="app_error_totp_needed">Введіть код із застосунку автентифікації.</string>
+    <string name="app_error_login_refused">Сервер не прийняв це ім\'я користувача або пароль.</string>
+    <string name="app_error_token_name_refused">Сервер не прийняв назву цього телефона.</string>
+    <string name="app_error_config_file">Не вдається прочитати файл налаштувань застосунку. Очищення сховища застосунку в системних налаштуваннях скидає його.</string>
+    <string name="app_error_invalid_input">Сервер не прийняв цей запит.</string>
+    <string name="app_error_server">Сервер відповів помилкою (%1$d).</string>
+    <string name="app_error_storage">Не вдається прочитати або записати дані застосунку на цьому телефоні.</string>
+    <string name="app_error_other">Щось пішло не так.</string>
+    <string name="app_error_not_a_pairing_link">Це посилання не для підключення пристрою до stickpile.</string>
+    <string name="app_error_not_a_pairing_qr">Цей QR-код не для підключення пристрою до stickpile. Відскануйте код із розділу Налаштування, Додати пристрій, на вебсторінці свого сервера.</string>
+
+    <string name="app_broken_title">Не вдається відкрити вашу бібліотеку</string>
+</resources>

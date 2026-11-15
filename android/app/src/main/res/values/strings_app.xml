@@ -1,3 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Texts of the app's screens (package ui). -->
-<resources />
+<!--
+  Texts of the app's screens (package ui): onboarding, the keyboard
+  walk-through, the library, the settings and the licences. The names
+  start with app_, main_, onboarding_, keyboard_setup_, library_,
+  settings_ or licence(s)_.
+-->
+<resources>
+    <!-- Buttons used on several screens. -->
+    <string name="app_action_back">Back</string>
+    <string name="app_action_cancel">Cancel</string>
+    <string name="app_action_continue">Continue</string>
+    <string name="app_action_done">Done</string>
+    <string name="app_action_retry">Try again</string>
+
+    <!-- Errors, one per kind the library reports (ui.common.Failures). -->
+    <string name="app_error_not_signed_in">You are not signed in.</string>
+    <string name="app_error_unauthorized">The server no longer accepts the sign-in of this phone. Sign in again.</string>
+    <string name="app_error_pairing_code_refused">This code is wrong, has expired or was used already. Make a new one on the web page of your server (Settings, Add a device).</string>
+    <string name="app_error_wrong_password">Wrong username or password.</string>
+    <string name="app_error_wrong_password_or_code">Wrong username, password or two-factor code.</string>
+    <string name="app_error_unreachable">Cannot reach the server. Check the address and your connection.</string>
+    <string name="app_error_unreachable_nothing_saved">Cannot reach the server, and none of this is saved on this phone yet.</string>
+    <string name="app_error_unreachable_not_saved">Cannot reach the server, and this file is not saved on this phone yet.</string>
+    <string name="app_error_not_found">Not found. It may have been deleted on the server.</string>
+    <string name="app_error_rate_limited">Too many attempts. Wait a minute and try again.</string>
+    <string name="app_error_nothing_fits">There is no version of this item to share.</string>
+    <string name="app_error_invalid_server_url">That is not a server address. It starts with https:// or http://, like https://stickers.example.org.</string>
+    <string name="app_error_invalid_pairing_code">That is not a pairing code. It has 12 letters and digits, like 7KQ2-M9XA-4FTR.</string>
+    <string name="app_error_totp_needed">Enter the code from your authenticator app.</string>
+    <string name="app_error_login_refused">The server did not accept this username or password.</string>
+    <string name="app_error_token_name_refused">The server did not accept the name of this phone.</string>
+    <string name="app_error_config_file">The settings file of the app cannot be read. Clearing the storage of the app in the system settings resets it.</string>
+    <string name="app_error_invalid_input">The server did not accept this request.</string>
+    <!-- %1$d: the HTTP status, such as 500. -->
+    <string name="app_error_server">The server answered with an error (%1$d).</string>
+    <string name="app_error_storage">Cannot read or write the data of the app on this phone.</string>
+    <string name="app_error_other">Something went wrong.</string>
+    <string name="app_error_not_a_pairing_link">This link is not a stickpile pairing link.</string>
+    <string name="app_error_not_a_pairing_qr">This QR code is not a stickpile pairing code. Scan the one under Settings, Add a device, on the web page of your server.</string>
+
+    <!-- The library cannot be opened (its config is unreadable): a screen of its own. -->
+    <string name="app_broken_title">Cannot open your library</string>
+</resources>
