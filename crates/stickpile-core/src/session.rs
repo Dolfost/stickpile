@@ -294,16 +294,20 @@ impl Session {
         self.materialise(item, info).await.map(|(_, file)| file)
     }
 
+    /// The file [`Session::fetch_variant`] gives for `variant` if it is in
+    /// the cache already; nothing is downloaded. `None` also when the item
+    /// has no such rendition.
+    pub fn cached_variant(&self, item: &ItemSummary, variant: Variant) -> Result<Option<PathBuf>> {
+        match item.variants.iter().find(|v| v.variant == variant) {
+            Some(info) => self.cache.lookup_file(&clip_rel(item, info), Some(info.size_bytes)),
+            None => Ok(None),
+        }
+    }
+
     /// The cache file of a rendition (`clip/<media>.<variant>/<name>.<ext>`)
     /// and its path relative to the cache, downloaded unless cached.
     async fn materialise(&self, item: &ItemSummary, variant: &VariantInfo) -> Result<(String, PathBuf)> {
-        let ext = variant_extension(item, variant.variant);
-        let rel = format!(
-            "clip/{}.{}/{}.{ext}",
-            safe_component(&item.media_id),
-            variant.variant.as_str(),
-            clip_file_stem(&item.name, &item.id)
-        );
+        let rel = clip_rel(item, variant);
         let file = match self.cache.lookup_file(&rel, Some(variant.size_bytes))? {
             Some(p) => p,
             None => {
@@ -755,6 +759,18 @@ fn variant_mime(item: &ItemSummary, v: &VariantInfo) -> String {
         Variant::DiscordGif => "image/gif".into(),
         Variant::Mp4 => "video/mp4".into(),
     }
+}
+
+/// Where a rendition is kept in the cache, relative to it:
+/// `clip/<media>.<variant>/<name>.<ext>`.
+fn clip_rel(item: &ItemSummary, variant: &VariantInfo) -> String {
+    format!(
+        "clip/{}.{}/{}.{}",
+        safe_component(&item.media_id),
+        variant.variant.as_str(),
+        clip_file_stem(&item.name, &item.id),
+        variant_extension(item, variant.variant)
+    )
 }
 
 /// File name stem for the clipboard file: the item name (shown by Telegram

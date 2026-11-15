@@ -238,9 +238,23 @@ async fn fetch_variant_materialises_the_given_rendition() {
         .add_variant(&items[0].id, Variant::TgSticker, "image/webp", webp_bytes(32, 32, 1));
     let mut item = items[0].clone();
     item.variants = server.state().items[0].item.media.variants.clone();
+    assert_eq!(
+        session.cached_variant(&item, Variant::TgSticker).unwrap(),
+        None,
+        "not fetched yet"
+    );
 
     // The sticker rendition, though prepare_copy would pick the original here.
     let sticker = session.fetch_variant(&item, Variant::TgSticker).await.unwrap();
+    assert_eq!(
+        session.cached_variant(&item, Variant::TgSticker).unwrap().as_ref(),
+        Some(&sticker)
+    );
+    assert_eq!(
+        session.cached_variant(&item, Variant::Mp4).unwrap(),
+        None,
+        "no such rendition"
+    );
     assert_eq!(sticker.file_name().unwrap(), "grumpy cat.webp");
     assert!(sticker.starts_with(dir.path().join("cache/clip")));
     assert_eq!(std::fs::read(&sticker).unwrap(), webp_bytes(32, 32, 1));
