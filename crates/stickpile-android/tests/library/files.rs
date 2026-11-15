@@ -1,0 +1,215 @@
+//! Thumbnails and `prepare`.
+
+use std::path::Path;
+
+use stickpile_android::{LibraryErrorKind, Prepared, Target};
+use stickpile_api::Variant;
+
+use super::*;
+
+fn mimes(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| s.to_string()).collect()
+}
+
+#[tokio::test]
+async fn thumbnails_are_cached_and_work_offline() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+
+    // Not shown before: the item is looked up on the server.
+    let path = lib.thumbnail(items[0].id.clone()).await.unwrap();
+    assert!(Path::new(&path).starts_with(dir.path().join("cache")));
+    image::load_from_memory(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(lib.thumbnail(items[0].id.clone()).await.unwrap(), path);
+    assert_eq!(
+        requests(&server, &format!("GET /api/v1/items/{}/file/thumb", items[0].id)),
+        1
+    );
+    assert_eq!(kind(lib.thumbnail("nope".into()).await), LibraryErrorKind::NotFound);
+
+    lib.sync_now().await.unwrap();
+    server.stop();
+    assert_eq!(lib.thumbnail(items[0].id.clone()).await.unwrap(), path);
+    // A new library knows the item from the cache only.
+    let again = open(dir.path(), &server.url);
+    assert_eq!(again.thumbnail(items[0].id.clone()).await.unwrap(), path);
+    assert_eq!(
+        kind(again.thumbnail(items[1].id.clone()).await),
+        LibraryErrorKind::Unreachable,
+        "not cached"
+    );
+
+    server.restart();
+    let out = tempfile::tempdir().unwrap();
+    let lib = open(out.path(), &server.url);
+    assert_eq!(
+        kind(lib.thumbnail(items[0].id.clone()).await),
+        LibraryErrorKind::NotSignedIn
+    );
+}
+
+#[tokio::test]
+async fn prepare_picks_per_target_and_accepted_types() {
+    let (server, items) = seeded_server();
+    server
+        .state()
+        .add_variant(&items[0].id, Variant::TgSticker, "image/webp", webp_bytes(32, 32, 1));
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+
+    // A PNG still into Discord's field that takes PNGs: the original.
+    let p = lib
+        .prepare(
+            items[0].id.clone(),
+            "com.discord".into(),
+            mimes(&["image/png", "image/gif"]),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Prepared {
+            path: p.path.clone(),
+            ..p.clone()
+        },
+        Prepared {
+            path: p.path.clone(),
+            mime_type: "image/png".into(),
+            display_name: "grumpy cat.png".into(),
+            target: Target::Discord,
+            variant: "original".into(),
+            sticker: false,
+        }
+    );
+    assert!(Path::new(&p.path).starts_with(dir.path().join("cache")));
+    assert!(p.path.ends_with("/grumpy cat.png"), "{}", p.path);
+    assert_eq!(std::fs::read(&p.path).unwrap(), png_bytes(20, 20, 1));
+
+    // Telegram with the sticker flag: the sticker rendition.
+    let s = lib
+        .prepare(
+            items[0].id.clone(),
+            "org.telegram.messenger".into(),
+            mimes(&["image/webp", "image/png"]),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (s.variant.as_str(), s.mime_type.as_str(), s.sticker),
+        ("tg_sticker", "image/webp", true)
+    );
+    assert_eq!(
+        (s.target, s.display_name.as_str()),
+        (Target::Telegram, "grumpy cat.webp")
+    );
+    assert_eq!(std::fs::read(&s.path).unwrap(), webp_bytes(32, 32, 1));
+    // The same with a field that takes no WebP: the original, not a sticker.
+    let s = lib
+        .prepare(
+            items[0].id.clone(),
+            "org.telegram.messenger".into(),
+            mimes(&["image/png"]),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!((s.variant.as_str(), s.sticker), ("original", false));
+    // The sticker flag means nothing for Discord.
+    let d = lib
+        .prepare(items[0].id.clone(), "com.discord".into(), mimes(&["image/*"]), true)
+        .await
+        .unwrap();
+    assert_eq!((d.variant.as_str(), d.sticker), ("original", false));
+
+    // An animated GIF into any image field of an unknown app.
+    let g = lib
+        .prepare(
+            items[1].id.clone(),
+            "org.example.chat".into(),
+            mimes(&["image/*"]),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!((g.mime_type.as_str(), g.target), ("image/gif", Target::Generic));
+    assert!(g.path.ends_with("/naahh.gif"), "{}", g.path);
+
+    // Nothing the field takes.
+    let none = lib
+        .prepare(items[0].id.clone(), "com.discord".into(), mimes(&["image/gif"]), false)
+        .await;
+    assert_eq!(kind(none), LibraryErrorKind::NothingFits);
+    let none = lib
+        .prepare(items[2].id.clone(), "com.whatsapp".into(), mimes(&["image/png"]), false)
+        .await;
+    assert_eq!(
+        kind(none),
+        LibraryErrorKind::NothingFits,
+        "a WebP with no PNG rendition"
+    );
+    let none = lib
+        .prepare(items[0].id.clone(), "com.discord".into(), vec![], false)
+        .await;
+    assert_eq!(
+        kind(none),
+        LibraryErrorKind::NothingFits,
+        "a field that takes no content"
+    );
+    // ... but WhatsApp's field that lists WebP gets the WebP.
+    let w = lib
+        .prepare(
+            items[2].id.clone(),
+            "com.whatsapp".into(),
+            mimes(&["image/webp"]),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!((w.mime_type.as_str(), w.target), ("image/webp", Target::Whatsapp));
+
+    assert_eq!(
+        kind(lib.prepare("nope".into(), "".into(), mimes(&["*/*"]), false).await),
+        LibraryErrorKind::NotFound
+    );
+}
+
+#[tokio::test]
+async fn prepare_works_offline_once_cached() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    lib.sync_now().await.unwrap();
+    let first = lib
+        .prepare(items[1].id.clone(), "com.discord".into(), mimes(&["image/gif"]), false)
+        .await
+        .unwrap();
+
+    server.stop();
+    let again = lib
+        .prepare(items[1].id.clone(), "com.discord".into(), mimes(&["image/gif"]), false)
+        .await
+        .unwrap();
+    assert_eq!(again, first);
+    // A new library, the item from the cache.
+    let fresh = open(dir.path(), &server.url);
+    let cached = fresh
+        .prepare(items[1].id.clone(), "com.discord".into(), mimes(&["image/gif"]), false)
+        .await
+        .unwrap();
+    assert_eq!(cached, first);
+    // Not cached.
+    let missing = fresh
+        .prepare(items[0].id.clone(), "com.discord".into(), mimes(&["image/png"]), false)
+        .await;
+    assert_eq!(kind(missing), LibraryErrorKind::Unreachable);
+
+    server.restart();
+    let out = tempfile::tempdir().unwrap();
+    let lib = open(out.path(), &server.url);
+    let signed_out = lib
+        .prepare(items[0].id.clone(), "com.discord".into(), mimes(&["image/png"]), false)
+        .await;
+    assert_eq!(kind(signed_out), LibraryErrorKind::NotSignedIn);
+}
