@@ -126,7 +126,9 @@
     <string name="settings_account_server">Сервер</string>
     <string name="settings_account_how">Вхід</string>
     <string name="settings_account_how_token">З токеном цього телефона</string>
-    <string name="settings_account_how_tailnet">Через Tailscale, без токена</string>
+    <string name="settings_account_tailnet">Ви ввійшли через Tailscale</string>
+    <string name="settings_account_tailnet_text">Телефон входить за своєю ідентичністю в tailnet, без токена, тож виходити тут нема з чого. Щоб користуватися іншим сервером чи обліковим записом, змініть сервер.</string>
+    <string name="settings_change_server">Змінити сервер</string>
     <string name="settings_account_signed_out">Ви не ввійшли.</string>
     <string name="settings_sign_in">Увійти</string>
     <string name="settings_sign_out">Вийти</string>

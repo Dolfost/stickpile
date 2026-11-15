@@ -13,13 +13,22 @@ class LaunchRequestTest {
 
     @Test
     fun aLinkIsOpened() {
-        assertEquals(LaunchRequest.OpenLink(link), launchRequest(link, flags = 0))
-        assertEquals(LaunchRequest.OpenLink(link), launchRequest(link, flags = Intent.FLAG_ACTIVITY_NEW_TASK))
-        assertNull(launchRequest(null, flags = 0))
+        assertEquals(LaunchRequest.OpenLink(link), launchRequest(link, signInElsewhere = false, flags = 0))
+        assertEquals(
+            LaunchRequest.OpenLink(link),
+            launchRequest(link, signInElsewhere = false, flags = Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     @Test
     fun theFirstIntentAgainFromRecentsAsksForNothing() {
-        assertNull(launchRequest(link, flags = Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY))
+        assertNull(launchRequest(link, signInElsewhere = false, flags = Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY))
+        assertNull(launchRequest(null, signInElsewhere = true, flags = Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY))
+    }
+
+    @Test
+    fun theSettingsAskToSignInElsewhere() {
+        assertEquals(LaunchRequest.SignInElsewhere, launchRequest(null, signInElsewhere = true, flags = 0))
+        assertNull(launchRequest(null, signInElsewhere = false, flags = 0))
     }
 }

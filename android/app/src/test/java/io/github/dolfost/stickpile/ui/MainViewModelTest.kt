@@ -210,6 +210,21 @@ class MainViewModelTest {
     }
 
     @Test
+    fun signingInElsewhereOpensOnboardingWithAWayBack() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val vm = model()
+        // From the settings, while the launcher starts.
+        vm.signInElsewhere()
+        vm.start()
+        advanceUntilIdle()
+        assertEquals(MainRoute.Onboarding(canCancel = true), vm.route)
+        vm.onOnboardingCancelled()
+        assertEquals(MainRoute.Library, vm.route)
+        vm.signInElsewhere()
+        assertEquals(MainRoute.Onboarding(canCancel = true), vm.route)
+    }
+
+    @Test
     fun anUnknownAccountOffersARetryOrANewSignIn() = runTest(main.dispatcher) {
         library.account = { throw LibraryException.Server(500u, "d") }
         val vm = model()

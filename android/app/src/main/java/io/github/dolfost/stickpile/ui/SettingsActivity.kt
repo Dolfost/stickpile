@@ -55,6 +55,7 @@ class SettingsActivity : ComponentActivity() {
                         onFinish = ::finish,
                         onSignIn = { restartMain() },
                         onSignedOut = { restartMain() },
+                        onSignInElsewhere = { restartMain(signInElsewhere = true) },
                     )
                 }
             }
@@ -64,16 +65,16 @@ class SettingsActivity : ComponentActivity() {
 
 /**
  * The launcher afresh, in a new task: it asks again who is signed in, and
- * no screen of the account before stays behind. This screen goes.
- * Nothing when this screen is going already: the launcher notices a
- * sign-out by itself (AccountChanges).
+ * no screen of the account before stays behind; [signInElsewhere] takes
+ * it to onboarding. This screen goes. Nothing when this screen is going
+ * already: the launcher notices a sign-out by itself (AccountChanges).
  */
-private fun ComponentActivity.restartMain() {
+private fun ComponentActivity.restartMain(signInElsewhere: Boolean = false) {
     if (isFinishing || isDestroyed) return
-    startActivity(
-        Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
-    )
+    val intent = Intent(this, MainActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+    if (signInElsewhere) intent.putExtra(MainActivity.EXTRA_SIGN_IN_ELSEWHERE, true)
+    startActivity(intent)
     finish()
 }
 
@@ -81,7 +82,12 @@ private fun ComponentActivity.restartMain() {
 private enum class SettingsPage { MAIN, KEYBOARD_SETUP, LICENCES }
 
 @Composable
-private fun SettingsContent(onFinish: () -> Unit, onSignIn: () -> Unit, onSignedOut: () -> Unit) {
+private fun SettingsContent(
+    onFinish: () -> Unit,
+    onSignIn: () -> Unit,
+    onSignedOut: () -> Unit,
+    onSignInElsewhere: () -> Unit,
+) {
     val context = LocalContext.current
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     val opened by produceState<Result<StickpileLibrary>?>(null, attempt) {
@@ -123,6 +129,7 @@ private fun SettingsContent(onFinish: () -> Unit, onSignIn: () -> Unit, onSigned
             onBack = onFinish,
             onSignIn = onSignIn,
             onSignedOut = onSignedOut,
+            onSignInElsewhere = onSignInElsewhere,
             onKeyboardSetup = { page = SettingsPage.KEYBOARD_SETUP },
             onLicences = { page = SettingsPage.LICENCES },
         )

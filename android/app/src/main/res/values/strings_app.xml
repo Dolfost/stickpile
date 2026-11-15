@@ -154,7 +154,9 @@
     <string name="settings_account_server">Server</string>
     <string name="settings_account_how">Signed in</string>
     <string name="settings_account_how_token">With a token of this phone</string>
-    <string name="settings_account_how_tailnet">Through Tailscale, without a token</string>
+    <string name="settings_account_tailnet">Signed in through Tailscale</string>
+    <string name="settings_account_tailnet_text">The tailnet identity of this phone signs it in, without a token, so there is nothing to sign out of here. To use another server or account, change the server.</string>
+    <string name="settings_change_server">Change the server</string>
     <string name="settings_account_signed_out">Not signed in.</string>
     <string name="settings_sign_in">Sign in</string>
     <string name="settings_sign_out">Sign out</string>

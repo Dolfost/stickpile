@@ -48,7 +48,8 @@ import kotlinx.coroutines.launch
 /**
  * The launcher: onboarding when nobody is signed in, else the library.
  * Opened with a pairing link as its data (`stickpile://pair?...`), it goes
- * to pairing with that link.
+ * to pairing with that link; with [EXTRA_SIGN_IN_ELSEWHERE] (from the
+ * settings), to onboarding with a way back.
  */
 class MainActivity : ComponentActivity() {
 
@@ -100,14 +101,27 @@ class MainActivity : ComponentActivity() {
      * intent relaunched from Recents asks for nothing ([launchRequest]).
      */
     private fun consume(intent: Intent) {
-        when (val request = launchRequest(intent.dataString, intent.flags)) {
+        // Another app's extras may not unparcel: then there is no such extra.
+        val elsewhere = catching { intent.getBooleanExtra(EXTRA_SIGN_IN_ELSEWHERE, false) }.getOrDefault(false)
+        when (val request = launchRequest(intent.dataString, elsewhere, intent.flags)) {
             is LaunchRequest.OpenLink -> vm.openLink(request.link)
+            LaunchRequest.SignInElsewhere -> vm.signInElsewhere()
             null -> Unit
         }
-        if (intent.data != null) setIntent(Intent(intent).apply { data = null })
+        if (intent.data != null || elsewhere) {
+            setIntent(
+                Intent(intent).apply {
+                    data = null
+                    removeExtra(EXTRA_SIGN_IN_ELSEWHERE)
+                },
+            )
+        }
     }
 
     companion object {
+        /** Boolean extra: go to onboarding to sign in on another server or as someone else. */
+        const val EXTRA_SIGN_IN_ELSEWHERE = "io.github.dolfost.stickpile.SIGN_IN_ELSEWHERE"
+
         /**
          * Signed in: make sure the background sync is scheduled, and sync
          * now if one is due. A failure goes to the log and the sync state.

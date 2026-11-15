@@ -79,6 +79,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSignIn: () -> Unit,
     onSignedOut: () -> Unit,
+    onSignInElsewhere: () -> Unit,
     onKeyboardSetup: () -> Unit,
     onLicences: () -> Unit,
 ) {
@@ -124,7 +125,7 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState()),
         ) {
-            AccountSection(vm, onSignIn)
+            AccountSection(vm, onSignIn, onSignInElsewhere)
             HorizontalDivider()
             SyncSection(vm)
             HorizontalDivider()
@@ -179,8 +180,13 @@ private fun BusyLabel(text: String, busy: Boolean) {
     Text(text)
 }
 
+/**
+ * Who is signed in, and how. A token signs out; a tailnet identity cannot
+ * (the server knows the phone by its tailnet address, there is no token
+ * to revoke), so it is offered to change the server instead.
+ */
 @Composable
-private fun AccountSection(vm: SettingsViewModel, onSignIn: () -> Unit) {
+private fun AccountSection(vm: SettingsViewModel, onSignIn: () -> Unit, onSignInElsewhere: () -> Unit) {
     val state = vm.state
     var confirm by rememberSaveable { mutableStateOf(false) }
     SectionHeader(stringResource(R.string.settings_account))
@@ -198,22 +204,28 @@ private fun AccountSection(vm: SettingsViewModel, onSignIn: () -> Unit) {
                 headlineContent = { Text(stringResource(R.string.settings_account_server)) },
                 supportingContent = { Text(account.serverUrl) },
             )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_account_how)) },
-                supportingContent = {
-                    Text(
-                        stringResource(
-                            when (account.auth) {
-                                AuthKind.TOKEN -> R.string.settings_account_how_token
-                                AuthKind.TAILNET -> R.string.settings_account_how_tailnet
-                            },
-                        ),
+            when (account.auth) {
+                AuthKind.TOKEN -> {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.settings_account_how)) },
+                        supportingContent = { Text(stringResource(R.string.settings_account_how_token)) },
                     )
-                },
-            )
-            Actions {
-                OutlinedButton(onClick = { confirm = true }, enabled = !state.signingOut) {
-                    BusyLabel(stringResource(R.string.settings_sign_out), state.signingOut)
+                    Actions {
+                        OutlinedButton(onClick = { confirm = true }, enabled = !state.signingOut) {
+                            BusyLabel(stringResource(R.string.settings_sign_out), state.signingOut)
+                        }
+                    }
+                }
+                AuthKind.TAILNET -> {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.settings_account_tailnet)) },
+                        supportingContent = { Text(stringResource(R.string.settings_account_tailnet_text)) },
+                    )
+                    Actions {
+                        OutlinedButton(onClick = onSignInElsewhere) {
+                            Text(stringResource(R.string.settings_change_server))
+                        }
+                    }
                 }
             }
         }

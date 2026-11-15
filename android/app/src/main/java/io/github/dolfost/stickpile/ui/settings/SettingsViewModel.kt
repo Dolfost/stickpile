@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.dolfost.stickpile.rust.Account
+import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.rust.SyncState
 import io.github.dolfost.stickpile.ui.common.Doing
@@ -40,7 +41,14 @@ data class SettingsState(
     val signingOut: Boolean = false,
     /** Signed out: the screen goes back to onboarding. */
     val signedOut: Boolean = false,
-)
+) {
+    /**
+     * Signed in with a token, which signing out revokes. An account signed
+     * in by its tailnet identity has none: the server knows the phone by
+     * its tailnet address, and signing out would change nothing.
+     */
+    val canSignOut: Boolean get() = account?.auth == AuthKind.TOKEN
+}
 
 /** What the settings screen does once. */
 sealed interface SettingsEvent {
@@ -142,10 +150,11 @@ class SettingsViewModel(
      * Sign out (the screen asked first); then [onSignedOut] (the background
      * sync stops, ...). Both run in [background], on the main thread: leaving
      * the screen half-way does not stop them, and the screen hears of the
-     * end only if it is still there.
+     * end only if it is still there. Only an account with a token signs out
+     * ([SettingsState.canSignOut]).
      */
     fun signOut() {
-        if (state.signingOut) return
+        if (state.signingOut || !state.canSignOut) return
         state = state.copy(signingOut = true)
         background.launch(Dispatchers.Main.immediate) {
             catching { library.logout() }.fold(

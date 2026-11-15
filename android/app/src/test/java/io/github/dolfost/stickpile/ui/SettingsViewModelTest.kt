@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.SyncState
@@ -144,6 +145,20 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         assertTrue("logout" in library.calls)
         assertEquals(1, signedOut)
+    }
+
+    @Test
+    fun anAccountOfTheTailnetCannotSignOut() = runTest(main.dispatcher) {
+        library.account = { alice.copy(auth = AuthKind.TAILNET) }
+        vm.state // create it
+        advanceUntilIdle()
+        assertEquals(AuthKind.TAILNET, vm.state.account?.auth)
+        assertFalse(vm.state.canSignOut)
+        vm.signOut()
+        advanceUntilIdle()
+        assertFalse("logout" in library.calls)
+        assertEquals(0, signedOut)
+        assertFalse(vm.state.signingOut)
     }
 
     @Test

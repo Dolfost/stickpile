@@ -29,7 +29,8 @@ sealed interface MainRoute {
 
     /**
      * Pairing or signing in. [link] is a pairing link the app was opened
-     * with; [canCancel] when someone is signed in already (a link came in).
+     * with; [canCancel] when someone is signed in already (a link came in,
+     * or the settings asked to sign in elsewhere).
      */
     data class Onboarding(val link: String? = null, val canCancel: Boolean = false) : MainRoute
 
@@ -104,6 +105,7 @@ class MainViewModel(
     /** Who is signed in as far as this knows; null when nobody or not known. */
     private var account: Account? = null
     private var pendingLink: String? = null
+    private var pendingElsewhere = false
     private var started = false
     private var checking: Job? = null
     private var seenAccountVersion = accountVersion
@@ -136,8 +138,9 @@ class MainViewModel(
             var next = routeAfterAccountCheck(result)
             if (next == MainRoute.Library) signedIn(lib)
             val link = pendingLink
-            if (link != null) {
+            if (link != null || pendingElsewhere) {
                 pendingLink = null
+                pendingElsewhere = false
                 next = MainRoute.Onboarding(link, canCancel = next == MainRoute.Library)
             }
             route = next
@@ -168,6 +171,22 @@ class MainViewModel(
             is MainRoute.Onboarding -> route = MainRoute.Onboarding(link, now.canCancel)
             is MainRoute.Broken, is MainRoute.AccountUnknown -> {
                 pendingLink = link
+                check()
+            }
+        }
+    }
+
+    /**
+     * The settings asked to sign in on another server or as someone else
+     * (an account signed in by its tailnet identity cannot sign out).
+     */
+    fun signInElsewhere() {
+        when (route) {
+            MainRoute.Starting -> pendingElsewhere = true
+            MainRoute.Library, MainRoute.KeyboardSetup -> route = MainRoute.Onboarding(canCancel = true)
+            is MainRoute.Onboarding -> Unit
+            is MainRoute.Broken, is MainRoute.AccountUnknown -> {
+                pendingElsewhere = true
                 check()
             }
         }
