@@ -103,11 +103,14 @@ data class OnboardingState(
  * a password. The library decides everything (what a code or link is,
  * which server, what failed); this keeps what the user typed and which
  * screen is up. The non-suspend library calls run on [io].
+ * [onServerChanged] runs when saving another server address signed this
+ * phone out of the old server.
  */
 class OnboardingViewModel(
     private val library: StickpileLibraryInterface,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val log: FailureLog = FailureLog.android,
+    private val onServerChanged: () -> Unit = {},
 ) : ViewModel() {
 
     var state: OnboardingState by mutableStateOf(OnboardingState())
@@ -205,11 +208,20 @@ class OnboardingViewModel(
         pair(state.serverUrl, state.code)
     }
 
-    /** Save the typed address, then offer the ways to sign in there. */
+    /**
+     * Save the typed address, then offer the ways to sign in there. Another
+     * server than before signs out of the old one ([onServerChanged]).
+     */
     fun continueToSignIn() {
         if (!state.canContinue) return
         val url = state.serverUrl
-        run(Doing.SETTING_SERVER, { library.setServerUrl(url) }) {
+        val save: suspend () -> Boolean = {
+            val before = withContext(io) { library.serverUrl() }
+            library.setServerUrl(url)
+            withContext(io) { library.serverUrl() } != before
+        }
+        run(Doing.SETTING_SERVER, save) { changed ->
+            if (changed) onServerChanged()
             state = state.copy(step = OnboardingStep.SIGN_IN, needsTotp = false, totp = "")
         }
     }

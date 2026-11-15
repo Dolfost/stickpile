@@ -28,7 +28,15 @@ class OnboardingViewModelTest {
 
     private val library = FakeLibrary()
     private val logged = mutableListOf<Doing>()
-    private val vm by lazy { OnboardingViewModel(library, io = main.dispatcher, log = { doing, _ -> logged += doing }) }
+    private var serverChanges = 0
+    private val vm by lazy {
+        OnboardingViewModel(
+            library,
+            io = main.dispatcher,
+            log = { doing, _ -> logged += doing },
+            onServerChanged = { serverChanges++ },
+        )
+    }
 
     private val link = PairingLink(serverUrl = "https://s.example", code = "7KQ2-M9XA-4FTR")
 
@@ -225,15 +233,30 @@ class OnboardingViewModelTest {
 
     @Test
     fun theServerAddressIsSavedBeforeSigningIn() = runTest(main.dispatcher) {
+        library.serverUrl = "https://s.example"
         vm.showServer()
         assertFalse(vm.state.canContinue)
         vm.setServerUrl("https://s.example")
         vm.continueToSignIn()
         advanceUntilIdle()
-        assertEquals(listOf("setServerUrl https://s.example"), library.calls)
+        assertTrue("setServerUrl https://s.example" in library.calls)
         assertEquals(OnboardingStep.SIGN_IN, vm.state.step)
+        // The same server: nobody was signed out.
+        assertEquals(0, serverChanges)
         assertTrue(vm.back())
         assertEquals(OnboardingStep.SERVER, vm.state.step)
+    }
+
+    @Test
+    fun anotherServerSignsOutOfTheOldOne() = runTest(main.dispatcher) {
+        library.serverUrl = "https://old.example"
+        library.setServerUrl = { library.serverUrl = it }
+        vm.showServer()
+        vm.setServerUrl("https://s.example")
+        vm.continueToSignIn()
+        advanceUntilIdle()
+        assertEquals(OnboardingStep.SIGN_IN, vm.state.step)
+        assertEquals(1, serverChanges)
     }
 
     @Test

@@ -195,7 +195,7 @@ class MainViewModelTest {
         advanceUntilIdle()
         vm.openLink("link")
         library.calls.clear()
-        // Signed out elsewhere while onboarding was up.
+        // Onboarding saved another server address, which signed out.
         library.account = { null }
         vm.onAccountChanges(1)
         advanceUntilIdle()

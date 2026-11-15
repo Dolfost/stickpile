@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -139,7 +140,10 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
         )
         is MainRoute.Onboarding -> {
             if (library == null) return Loading()
-            val onboarding = viewModel(key = "onboarding-${vm.session}") { OnboardingViewModel(library) }
+            val appContext = LocalContext.current.applicationContext
+            val onboarding = viewModel(key = "onboarding-${vm.session}") {
+                OnboardingViewModel(library, onServerChanged = { signedOutForNewServer(appContext) })
+            }
             OnboardingScreen(
                 vm = onboarding,
                 link = route.link,
@@ -160,4 +164,16 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * Saving another server address during onboarding signed out of the old
+ * server: the background sync stops, what was handed out for the old
+ * account goes, and leaving onboarding asks again who is signed in.
+ */
+private fun signedOutForNewServer(context: Context) {
+    SyncScheduler.cancel(context)
+    PreparedFiles.revokeAll()
+    Thumbnails.clear()
+    AccountChanges.changed()
 }
