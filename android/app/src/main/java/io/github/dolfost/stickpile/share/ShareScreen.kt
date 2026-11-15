@@ -193,7 +193,8 @@ private fun FileList(state: ShareState, setup: Setup.Ready, model: ShareViewMode
                 file = file,
                 preview = model.previews[file.id],
                 several = several,
-                idle = !batch.running && !batch.copying,
+                running = batch.running,
+                copying = batch.copying,
                 model = model,
             )
         }
@@ -252,7 +253,14 @@ private fun ItemCount(set: Pack) {
 }
 
 @Composable
-private fun FileCard(file: SharedFile, preview: ImageBitmap?, several: Boolean, idle: Boolean, model: ShareViewModel) {
+private fun FileCard(
+    file: SharedFile,
+    preview: ImageBitmap?,
+    several: Boolean,
+    running: Boolean,
+    copying: Boolean,
+    model: ShareViewModel,
+) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -267,7 +275,7 @@ private fun FileCard(file: SharedFile, preview: ImageBitmap?, several: Boolean, 
                     )
                     Status(file)
                 }
-                val removable = idle && file.status !is FileStatus.Uploaded
+                val removable = !running && file.status !is FileStatus.Uploaded
                 if (removable) {
                     IconButton(onClick = { model.remove(file.id) }) {
                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.share_remove))
@@ -281,7 +289,6 @@ private fun FileCard(file: SharedFile, preview: ImageBitmap?, several: Boolean, 
                     label = { Text(stringResource(R.string.share_name_label)) },
                     placeholder = { Text(stringResource(R.string.share_name_placeholder)) },
                     singleLine = true,
-                    enabled = idle,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -290,23 +297,21 @@ private fun FileCard(file: SharedFile, preview: ImageBitmap?, several: Boolean, 
                     label = { Text(stringResource(R.string.share_keywords_label)) },
                     supportingText = { Text(stringResource(R.string.share_keywords_hint)) },
                     singleLine = true,
-                    enabled = idle,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (several) ApplyToAll(enabled = idle) { model.keywordsToAll(file.id) }
+                if (several) ApplyToAll { model.keywordsToAll(file.id) }
                 OutlinedTextField(
                     value = file.emojis,
                     onValueChange = { model.editEmojis(file.id, it) },
                     label = { Text(stringResource(R.string.share_emojis_label)) },
                     singleLine = true,
-                    enabled = idle,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (several) ApplyToAll(enabled = idle) { model.emojisToAll(file.id) }
+                if (several) ApplyToAll { model.emojisToAll(file.id) }
             }
             if (file.status is FileStatus.Failed) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { model.upload(listOf(file.id)) }, enabled = idle) {
+                    TextButton(onClick = { model.upload(listOf(file.id)) }, enabled = !running && !copying) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.share_retry))
@@ -318,9 +323,9 @@ private fun FileCard(file: SharedFile, preview: ImageBitmap?, several: Boolean, 
 }
 
 @Composable
-private fun ApplyToAll(enabled: Boolean, onClick: () -> Unit) {
+private fun ApplyToAll(onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        TextButton(onClick = onClick, enabled = enabled) { Text(stringResource(R.string.share_apply_to_all)) }
+        TextButton(onClick = onClick) { Text(stringResource(R.string.share_apply_to_all)) }
     }
 }
 
