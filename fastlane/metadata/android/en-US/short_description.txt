@@ -1,0 +1,1 @@
+Self-hosted sticker and meme library with a keyboard for any chat app

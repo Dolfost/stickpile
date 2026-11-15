@@ -1,0 +1,15 @@
+stickpile is a sticker and meme library that you host yourself. Your stickers, GIFs and short videos live on your own stickpile server, and this app puts them into any chat on your phone.
+
+You need a stickpile server to use the app. The server is free software from the same project: you run it on your own computer or home server and enter its address in the app. There is no public server, and you do not sign up anywhere else.
+
+What the app does:
+
+* A picker keyboard. Switch to it from your usual keyboard, search, and tap a sticker: it goes straight into the message you are writing, and your usual keyboard comes back. If a text field does not take pictures, the app hands the file to the chat app through "Share", or copies it to the clipboard.
+* The right file for each app. The server keeps several versions of every sticker (still image, WebP sticker, GIF, video), and the keyboard inserts one that the text field accepts.
+* Search as you type, plus your recent stickers, favourites and packs.
+* Share to upload. Share a picture from your gallery or any other app to stickpile, and it is added to one of your sets.
+* An offline cache. When your server cannot be reached, search still works on the copy of your library on the phone, and stickers you have sent before can be sent again.
+
+Privacy: the app connects only to the server you enter. It has no ads, no analytics and no crash reporting. Your server records which stickers you use, to show your recent and most used ones.
+
+Server, documentation and source code: https://github.com/Dolfost/stickpile
