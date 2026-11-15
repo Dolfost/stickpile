@@ -94,6 +94,21 @@ class ManifestTest {
     }
 
     @Test
+    fun pairingLinksOpenTheLauncher() {
+        val main = component("activity", ".ui.MainActivity")
+        val view = main.children("intent-filter").single { filter ->
+            filter.children("action").any { it.android("name") == "android.intent.action.VIEW" }
+        }
+        assertEquals(
+            setOf("android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"),
+            view.children("category").map { it.android("name") }.toSet(),
+        )
+        val data = view.children("data").single()
+        assertEquals("stickpile" to "pair", data.android("scheme") to data.android("host"))
+        assertEquals("singleTop", main.android("launchMode"))
+    }
+
+    @Test
     fun everyComponentHasItsClass() {
         val types: Map<String, Class<*>> = mapOf(
             "activity" to Activity::class.java,
@@ -104,7 +119,8 @@ class ManifestTest {
         val named: List<Pair<String, Class<*>>> =
             listOf(application.android("name") to Application::class.java) +
                 types.flatMap { (tag, type) -> application.children(tag).map { it.android("name") to type } }
-        assertEquals(6, named.size)
+        // The app's six, and the QR scanner's activity (its orientation overridden).
+        assertEquals(7, named.size)
         named.forEach { (name, type) ->
             val cls = Class.forName(qualified(name), false, javaClass.classLoader)
             assertTrue("$name is not a ${type.simpleName}", type.isAssignableFrom(cls))

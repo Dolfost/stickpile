@@ -4,7 +4,8 @@
   entries to the merged manifest: WorkManager's services, receivers and
   startup provider, and zxing-android-embedded's CaptureActivity.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The server the user configured. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -30,16 +31,33 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Stickpile">
 
-        <!-- Onboarding, then the library. -->
+        <!--
+          Onboarding, then the library. A stickpile://pair link (the QR code
+          of the web UI's "Add a device", opened by any camera or browser)
+          goes to pairing, which asks before it signs in.
+        -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="stickpile" android:host="pair" />
+            </intent-filter>
         </activity>
+
+        <!-- The QR scanner (zxing-android-embedded) in any orientation, not only landscape. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="android:screenOrientation" />
 
         <!--
           The app's settings, and the input method's settings activity
