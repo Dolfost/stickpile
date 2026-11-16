@@ -349,7 +349,7 @@ pub const HELP: &[HelpSection] = &[
     HelpSection {
         title: "Insert mode",
         keys: &[
-            ("typing", "search, filter packs"),
+            ("typing", "search; on Packs filter the list or search the pack"),
             ("Tab / Shift+Tab", "put in the next / previous offered value"),
             ("arrows, Page Up / Down, Home / End", "move"),
             ("Enter / Shift+Enter", "copy / copy with sticker mode flipped"),
@@ -384,12 +384,17 @@ pub const SYNTAX: &[HelpSection] = &[
             ("tag:reaction", "has this tag"),
             ("set:cats", "in this pack (its slug or name)"),
             ("by:alice", "in a pack of this user"),
+            ("v: t: s: b:", "short for vibe: tag: set: by:"),
             ("type:gif", "gif, png, webp, jpeg, mp4, webm, still, animated, video"),
             ("is:mine, is:liked, is:public", "yours, liked by you, public"),
             ("q>70, likes>=2, copies<5", "quality, likes, copies (> >= < <= =)"),
             ("sort:likes", "relevance, recent, likes, copies, quality"),
             ("tag:a tag:b", "either of them"),
             ("-tag:nsfw, -word", "leave out"),
+            (
+                "Packs / Cats",
+                "inside a pack the field searches its items, with all of this",
+            ),
         ],
     },
     HelpSection {

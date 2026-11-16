@@ -92,7 +92,7 @@ go to a tab	перейти до вкладки
 next / previous tab	наступна / попередня вкладка
 open the pack	відкрити набір
 back to the pack list	назад до списку наборів
-search, filter packs	пошук, фільтр наборів
+search; on Packs filter the list or search the pack	пошук; у Наборах фільтр списку або пошук у наборі
 copy / copy with sticker mode flipped	копіювати / копіювати з перемкнутим режимом стікерів
 target app / sticker mode / favorite	застосунок-адресат / режим стікерів / вибране
 move between rows	переміщення між рядками
@@ -162,9 +162,11 @@ Milliseconds between the window getting the focus back and the key press.	Міл
 Paste wait	Очікування вставлення
 Longest wait in milliseconds for the window to get the focus back; after it, nothing is pressed.	Найдовше очікування в мілісекундах, поки вікно знову отримає фокус; після нього нічого не натискається.
 # The window
-Search, or try e:😂 set:cats type:gif vibe:tired	Шукайте, наприклад e:😂 set:cats type:gif vibe:tired
+Search, or try e:😂 v:tired t:reaction type:gif	Шукайте, наприклад e:😂 v:tired t:reaction type:gif
 Filter packs by name	Фільтр наборів за назвою
-Filter {pack} by name, keyword or emoji	Фільтр {pack} за назвою, ключовим словом або емодзі
+Search in {pack}, or try v:tired t:reaction type:gif	Шукайте в {pack}, наприклад v:tired t:reaction type:gif
+Search syntax (F2)	Синтаксис пошуку (F2)
+Syntax	Синтаксис
 sticker: on	стікер: увімк.
 sticker: off	стікер: вимк.
 Send as sticker (Ctrl+S)	Надіслати як стікер (Ctrl+S)
@@ -286,6 +288,8 @@ set:cats	set:cats
 in this pack (its slug or name)	у цьому наборі (його slug або назва)
 by:alice	by:alice
 in a pack of this user	у наборі цього користувача
+v: t: s: b:	v: t: s: b:
+short for vibe: tag: set: by:	скорочено vibe: tag: set: by:
 type:gif	type:gif
 gif, png, webp, jpeg, mp4, webm, still, animated, video	gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)
 is:mine, is:liked, is:public	is:mine, is:liked, is:public
@@ -298,6 +302,8 @@ tag:a tag:b	tag:a tag:b
 either of them	будь-який із них
 -tag:nsfw, -word	-tag:nsfw, -word
 leave out	виключити
+Packs / Cats	Набори / Cats
+inside a pack the field searches its items, with all of this	у наборі поле шукає серед його стікерів з усім цим
 vibe: tag: set: by:	vibe: tag: set: by:
 the values in use are offered under the field, most used first	значення, що вже використовуються, з'являються під полем, найуживаніші першими
 vibe:sarcstic	vibe:sarcstic

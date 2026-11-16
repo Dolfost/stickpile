@@ -75,6 +75,7 @@ label.stickpile-heart { color: #ff5470; }
 .stickpile-tabs button.stickpile-version { min-height: 0; padding: 2px 6px; font-size: 0.8em; font-weight: normal; font-feature-settings: "tnum"; opacity: 0.55; }
 .stickpile-tabs button.stickpile-version:hover { opacity: 1; }
 .stickpile-header { padding: 6px 8px; min-height: 34px; }
+.stickpile-header button.stickpile-syntax { min-height: 0; padding: 2px 8px; font-size: 0.9em; font-weight: normal; }
 .stickpile-suggest { padding: 0 8px 4px 8px; }
 .stickpile-suggest button { min-height: 0; padding: 1px 7px; font-weight: normal; }
 .stickpile-suggest button.stickpile-chosen { background-color: alpha(@accent_bg_color, 0.2); color: @accent_color; font-weight: bold; }
@@ -129,6 +130,8 @@ struct Widgets {
     back: gtk::Button,
     title: gtk::Label,
     entry: gtk::SearchEntry,
+    /// Next to the entry where it searches: shows the search syntax (F2).
+    syntax: gtk::Button,
     count: gtk::Label,
     /// items, packs, me, settings
     content: gtk::Stack,
@@ -750,12 +753,9 @@ impl Shell {
         w.back.set_visible(tab == Tab::Packs && m.open_pack().is_some());
         let field = tab.has_text_field();
         w.entry.set_visible(field);
+        w.syntax.set_visible(m.searches());
         w.title.set_hexpand(!field);
-        let placeholder = match (tab, m.open_pack()) {
-            (Tab::Packs, Some(p)) => tf("Filter {pack} by name, keyword or emoji", &[("pack", &p.name)]),
-            (Tab::Packs, None) => t("Filter packs by name").to_string(),
-            _ => t("Search, or try e:😂 set:cats type:gif vibe:tired").to_string(),
-        };
+        let placeholder = m.placeholder();
         if w.entry.placeholder_text().as_deref() != Some(placeholder.as_str()) {
             w.entry.set_placeholder_text(Some(&placeholder));
         }
@@ -1431,6 +1431,8 @@ impl Shell {
         let this = self.clone();
         w.tabs.help.connect_clicked(move |_| this.dispatch(Event::ToggleHelp));
         let this = self.clone();
+        w.syntax.connect_clicked(move |_| this.dispatch(Event::ToggleSyntax));
+        let this = self.clone();
         w.tabs
             .version
             .connect_clicked(move |_| this.open_uri(stickpile_quick::PROJECT_URL));
@@ -1802,6 +1804,14 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         .build();
     title.add_css_class("heading");
     let entry = gtk::SearchEntry::builder().hexpand(true).build();
+    // Not focusable, like the tabs: the entry keeps the focus.
+    let syntax = gtk::Button::builder()
+        .can_focus(false)
+        .valign(gtk::Align::Center)
+        .build();
+    syntax.add_css_class("flat");
+    syntax.add_css_class("stickpile-syntax");
+    syntax.update_property(&[gtk::accessible::Property::KeyShortcuts("F2")]);
     let count = gtk::Label::builder().xalign(1.0).build();
     count.add_css_class("dim-label");
     count.add_css_class("caption");
@@ -1810,6 +1820,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     header.append(&back);
     header.append(&title);
     header.append(&entry);
+    header.append(&syntax);
     header.append(&count);
     let suggest_box = gtk::Box::builder().spacing(4).build();
     suggest_box.add_css_class("stickpile-suggest");
@@ -1939,6 +1950,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         back,
         title,
         entry,
+        syntax,
         count,
         content,
         help,
@@ -1970,6 +1982,10 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
 /// the help and the pages have their own).
 fn relabel_widgets(w: &Widgets) {
     w.back.set_tooltip_text(Some(t("Back to the packs (-, Backspace)")));
+    w.syntax.set_label(t("Syntax"));
+    w.syntax.set_tooltip_text(Some(t("Search syntax (F2)")));
+    w.syntax
+        .update_property(&[gtk::accessible::Property::Label(t("Search syntax"))]);
     w.target.set_tooltip_text(Some(t(
         "Target app — Ctrl+T / Ctrl+Shift+T to change\nCtrl+S: sticker mode · Shift+Enter: copy with sticker mode flipped",
     )));

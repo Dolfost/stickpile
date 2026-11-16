@@ -621,6 +621,14 @@ impl Popup {
         self.driver.toggle_help();
     }
 
+    /// A click on the syntax button next to the search field (as F2): show
+    /// or hide the search syntax. The field searches, and the button
+    /// shows, on Search and inside an opened pack (`has_field` and the tab
+    /// is Search or `back` is set).
+    pub fn toggle_syntax(&self) {
+        self.driver.toggle_syntax();
+    }
+
     /// A click on the footer's sticker toggle.
     pub fn toggle_sticker(&self) {
         self.driver.toggle_sticker();

@@ -354,6 +354,42 @@ fn tabs_pages_and_settings() {
     assert!(!help.iter().flat_map(|s| &s.keys).any(|k| k.keys.contains("Ctrl+")));
 }
 
+/// The syntax button (as F2) and the whole search syntax inside a pack.
+#[test]
+fn syntax_button_and_the_search_inside_a_pack() {
+    let h = Harness::new();
+    h.driver.open(None, Some(TabId::Search));
+    assert!(h.last().placeholder.contains("v:tired"), "{}", h.last().placeholder);
+    h.driver.toggle_syntax();
+    let help = h.last().help.expect("the syntax shown");
+    assert!(help.iter().flat_map(|s| &s.keys).any(|k| k.keys == "v: t: s: b:"));
+    h.driver.toggle_syntax();
+    assert!(h.last().help.is_none());
+
+    h.driver.show_tab(TabId::Packs);
+    h.pump_until("packs", |s| s.packs.len() == 2);
+    let cats =
+        h.ui.seen
+            .lock()
+            .unwrap()
+            .packs
+            .iter()
+            .position(|p| p.name == "cats")
+            .unwrap();
+    h.driver.activate(cats as u32);
+    h.pump_until("the pack's items", |s| s.entries.len() == 2);
+    let v = h.last();
+    assert!(v.back && v.has_field);
+    assert!(v.placeholder.starts_with("Search in cats"), "{}", v.placeholder);
+    h.driver.query_changed("-nap s:cats".into());
+    h.pump_until("one cat", |s| s.entries.len() == 1);
+    assert_eq!(h.ui.seen.lock().unwrap().entries[0].name, "cat party");
+    h.driver.query_changed("b:nobody".into());
+    h.pump_until("none", |s| s.entries.is_empty());
+    h.driver.query_changed(String::new());
+    h.pump_until("the pack again", |s| s.entries.len() == 2);
+}
+
 #[test]
 fn safe_mode_hides_nsfw_items_and_is_saved() {
     let h = Harness::with(&["dog nsfw.png"]);

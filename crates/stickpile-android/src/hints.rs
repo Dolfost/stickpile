@@ -188,6 +188,7 @@ pub(crate) mod tests {
                 tags: vec!["reaction".into(), "nsfw".into(), "cat".into()],
                 sets: vec!["cats".into(), "reactions".into()],
                 owners: vec!["alice".into()],
+                me: None,
             },
             emojis: vec!["😂".into(), "🐱".into(), "❤️".into()],
         }

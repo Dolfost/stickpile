@@ -330,12 +330,17 @@ impl Backend for CoreBackend {
 
     fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary> {
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || match self.session.offline_index() {
-                Ok(index) => Vocabulary::from_items(index.items()),
-                Err(e) => {
-                    tracing::debug!("no suggestions from the cache: {e}");
-                    Vocabulary::default()
-                }
+            tokio::task::spawn_blocking(move || {
+                let mut vocab = match self.session.offline_index() {
+                    Ok(index) => Vocabulary::from_items(index.items()),
+                    Err(e) => {
+                        tracing::debug!("no suggestions from the cache: {e}");
+                        Vocabulary::default()
+                    }
+                };
+                // Who `is:mine` is inside an opened pack.
+                vocab.me = self.session.cache().me().ok().flatten().map(|u| u.username);
+                vocab
             })
             .await
             .unwrap_or_default()

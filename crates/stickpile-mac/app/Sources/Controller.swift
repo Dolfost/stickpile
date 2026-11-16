@@ -13,6 +13,7 @@ protocol PopupControl: AnyObject {
     func activate(index: UInt32)
     func showTab(tab: TabId)
     func toggleHelp()
+    func toggleSyntax()
     func toggleSticker()
     func toggleSafe()
     func acceptSuggestion(index: UInt32)
@@ -93,6 +94,7 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         v.tabBar.onHelp = { [weak self] in self?.send { $0.toggleHelp() } }
         v.tabBar.onVersion = { if let url = URL(string: projectUrl()) { NSWorkspace.shared.open(url) } }
         v.header.onBack = { [weak self] in self?.send { $0.packBack() } }
+        v.header.onSyntax = { [weak self] in self?.send { $0.toggleSyntax() } }
         v.header.onQuery = { [weak self] text in self?.send { $0.queryChanged(text: text) } }
         v.footer.target.action = { [weak self] in self?.send { $0.cycleTarget() } }
         v.footer.sticker.action = { [weak self] in self?.send { $0.toggleSticker() } }

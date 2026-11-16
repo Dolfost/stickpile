@@ -8,6 +8,7 @@
 //! * [`focus`]: focused-window detection (Hyprland IPC, Sway IPC, X11).
 //! * [`history`]: per-window "last used here" ordering of recent items.
 //! * [`suggest`]: the values offered while a `key:` filter is typed.
+//! * [`within`]: the search syntax over the items of an opened pack.
 
 pub mod focus;
 pub mod history;
@@ -15,6 +16,7 @@ pub mod model;
 pub mod suggest;
 pub mod tabs;
 pub mod vim;
+pub mod within;
 
 pub use focus::{FocusBackend, WindowInfo};
 pub use model::{Command, Event, Model, ModelConfig, Nav, OpenInfo, Results};

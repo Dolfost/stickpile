@@ -163,19 +163,23 @@ final class QueryField: NSSearchField {
     override var mouseDownCanMoveWindow: Bool { false }
 }
 
-/// Back button, title, text field, item count.
+/// Back button, title, text field, syntax button, item count.
 final class HeaderBar: NSView, NSSearchFieldDelegate {
     let back: NSButton
     let title = label("", size: 13, weight: .semibold)
     let field = QueryField()
+    /// Next to the field where it searches (Search, an opened pack): the search syntax, as F2.
+    let syntax = TextButton()
     let count = label("", size: 11, color: .secondaryLabelColor)
     var onBack: (() -> Void)?
+    var onSyntax: (() -> Void)?
     /// The user edited the text.
     var onQuery: ((String) -> Void)?
     /// Not user input: set while the text is changed by a render.
     var updating = false
     private var hasField = true
     private var showBack = false
+    private var showSyntax = false
     private var lastQuery = ""
 
     override var isFlipped: Bool { true }
@@ -193,8 +197,12 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
         field.focusRingType = .default
         field.controlSize = .large
         field.font = .systemFont(ofSize: 14)
+        syntax.font = .systemFont(ofSize: 12)
+        syntax.color = .secondaryLabelColor
+        syntax.padding = 7
+        syntax.action = { [weak self] in self?.onSyntax?() }
         count.alignment = .right
-        [back, title, field, count].forEach(addSubview)
+        [back, title, field, syntax, count].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -203,6 +211,8 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
 
     func relabel() {
         back.toolTip = tr("Back to the packs (-, Backspace)")
+        syntax.text = tr("Syntax")
+        syntax.toolTip = tr("Search syntax (F2)")
     }
 
     func update(_ s: ViewState) {
@@ -224,6 +234,9 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
         lastQuery = s.query
         back.setShown(s.back)
         field.setShown(s.hasField)
+        // The field searches on Search and inside an opened pack, not on the pack list.
+        showSyntax = s.hasField && (s.tab == .search || s.back)
+        syntax.setShown(showSyntax)
         // With a field the title only names an opened pack.
         title.setShown(!s.hasField || s.back)
         count.setShown(!s.hasField && !s.count.isEmpty)
@@ -245,8 +258,14 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
                 title.frame = NSRect(x: x, y: (h - 18) / 2, width: w, height: 18)
                 x += w + 8
             }
+            var fieldRight = right
+            if showSyntax {
+                let sw = syntax.fittingWidth
+                syntax.frame = NSRect(x: right - sw, y: (h - 26) / 2, width: sw, height: 26)
+                fieldRight = right - sw - 6
+            }
             let fh = field.intrinsicContentSize.height
-            field.frame = NSRect(x: x, y: floor((h - fh) / 2), width: right - x, height: fh)
+            field.frame = NSRect(x: x, y: floor((h - fh) / 2), width: max(0, fieldRight - x), height: fh)
         } else {
             let cw = count.isHidden ? 0 : count.textWidth
             count.frame = NSRect(x: right - cw, y: (h - 16) / 2, width: cw, height: 16)

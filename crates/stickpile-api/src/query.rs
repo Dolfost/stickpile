@@ -520,7 +520,11 @@ mod tests {
         assert_eq!(short.emojis.any, vec!["😂"]);
         assert!(short.text.is_empty());
         assert_eq!(Query::parse("user:alice"), Query::parse("b:alice"), "user: stays");
-        assert_eq!(Query::parse("V:Tired T:NSFW"), Query::parse("vibe:tired tag:nsfw"), "any case");
+        assert_eq!(
+            Query::parse("V:Tired T:NSFW"),
+            Query::parse("vibe:tired tag:nsfw"),
+            "any case"
+        );
     }
 
     #[test]
@@ -543,10 +547,7 @@ mod tests {
     #[test]
     fn short_keys_normalise_to_the_long_ones() {
         let q = Query::parse(r#"cat v:tired -t:nsfw s:"my cats" b:alice e:😂"#);
-        assert_eq!(
-            q.to_string(),
-            r#"cat e:😂 set:"my cats" vibe:tired -tag:nsfw by:alice"#
-        );
+        assert_eq!(q.to_string(), r#"cat e:😂 set:"my cats" vibe:tired -tag:nsfw by:alice"#);
         assert_eq!(Query::parse(&q.to_string()), q);
     }
 

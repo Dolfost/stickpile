@@ -565,7 +565,12 @@ impl Backend for DemoBackend {
     }
 
     fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary> {
-        Box::pin(async move { Vocabulary::from_items(self.items.iter().map(|i| &i.summary)) })
+        Box::pin(async move {
+            Vocabulary {
+                me: Some(DEMO_USER.into()),
+                ..Vocabulary::from_items(self.items.iter().map(|i| &i.summary))
+            }
+        })
     }
 
     fn thumbnail(self: Arc<Self>, item: ItemSummary) -> BoxFut<Result<PathBuf, String>> {

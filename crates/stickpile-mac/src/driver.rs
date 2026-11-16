@@ -452,6 +452,10 @@ impl Driver {
         self.dispatch(Event::ToggleHelp);
     }
 
+    pub fn toggle_syntax(&self) {
+        self.dispatch(Event::ToggleSyntax);
+    }
+
     pub fn toggle_sticker(&self) {
         self.dispatch(Event::ToggleSticker);
     }
@@ -716,11 +720,7 @@ impl Driver {
         let tab = m.tab();
         let view = m.view();
         let field = tab.has_text_field();
-        let placeholder = match (tab, m.open_pack()) {
-            (Tab::Packs, Some(p)) => tf("Filter {pack} by name, keyword or emoji", &[("pack", &p.name)]),
-            (Tab::Packs, None) => t("Filter packs by name").to_string(),
-            _ => t("Search, or try e:😂 set:cats type:gif vibe:tired").to_string(),
-        };
+        let placeholder = m.placeholder();
         let count = match view {
             View::Items => pages::item_count(m.entries().len() as u64),
             View::Packs => tp(m.packs().len() as u64, "{n} pack", "{n} packs"),

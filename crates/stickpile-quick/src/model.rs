@@ -24,6 +24,7 @@
 use std::collections::HashSet;
 
 use stickpile_api::profiles::{self, ItemShape};
+use stickpile_api::query::{Is, Query};
 use stickpile_api::{ItemSummary, MediaFormat, MediaKind, SearchHit, SetSummary, TargetApp};
 
 use stickpile_i18n::global::{t, t_dyn, t_template, tf, tp};
@@ -33,6 +34,7 @@ use crate::history::WindowHistory;
 use crate::suggest::{resolve, suggest, Suggestions, Vocabulary};
 use crate::tabs::{Mode, PageKey, Tab, View};
 use crate::vim::{Cmd, Fed, NormalKey, Pending};
+use crate::within::Within;
 
 /// Default delay between the last keystroke and the search request.
 pub const DEFAULT_DEBOUNCE_MS: u64 = 120;
@@ -253,9 +255,10 @@ pub enum Event {
     Hide,
     /// The window was hidden or closed by something else (WM close button).
     Hidden,
-    /// The text of the text field changed: the search query on Search, the
-    /// pack filter on Packs (the pack name filter, or the item filter inside
-    /// an opened pack). Ignored on the other tabs.
+    /// The text of the text field changed: the search query on Search; on
+    /// Packs the pack name filter, or inside an opened pack the search in
+    /// its items (the whole search syntax, see [`crate::within`]). Ignored
+    /// on the other tabs.
     QueryChanged(String),
     Results {
         generation: u64,
@@ -841,20 +844,15 @@ pub fn incompatibility(item: &ItemSummary, target: TargetApp, sticker: bool) -> 
     profiles::choose_variant(target, &shape, sticker).err().map(|e| e.0)
 }
 
-/// Lowercase words of a filter; every one must match.
+/// Lowercase words of the pack list's filter; every one must match.
 fn filter_terms(filter: &str) -> Vec<String> {
     filter.split_whitespace().map(str::to_lowercase).collect()
 }
 
-/// Client-side filter inside an opened pack: name, keywords, emojis, tags.
-fn item_matches(item: &ItemSummary, terms: &[String]) -> bool {
-    terms.iter().all(|t| {
-        std::iter::once(&item.name)
-            .chain(&item.keywords)
-            .chain(&item.emojis)
-            .chain(&item.tags)
-            .any(|field| field.to_lowercase().contains(t.as_str()))
-    })
+/// The query asks for the viewer's likes (`is:liked`, `-is:liked`).
+fn asks_for_likes(query: &str) -> bool {
+    let q = Query::parse(query);
+    q.is.any.contains(&Is::Liked) || q.is.none.contains(&Is::Liked)
 }
 
 fn pack_matches(set: &SetSummary, terms: &[String]) -> bool {
@@ -951,7 +949,7 @@ impl<T> Listing<T> {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 struct Packs {
     sets: Listing<SetSummary>,
     /// Pack name filter of the list.
@@ -963,12 +961,59 @@ struct Packs {
     list_selection: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct OpenPack {
     set: SetSummary,
     items: Listing<ItemSummary>,
-    /// Item filter inside the pack.
+    /// The search inside the pack (the text field).
     filter: String,
+    /// `items` indexed for `filter`.
+    within: Within,
+    /// What the field suggests: the values of the pack's items first,
+    /// then the others the viewer's items use.
+    vocab: Vocabulary,
+}
+
+impl OpenPack {
+    fn new(set: SetSummary, items: Listing<ItemSummary>, vocab: &Vocabulary) -> OpenPack {
+        let mut open = OpenPack {
+            set,
+            items,
+            filter: String::new(),
+            within: Within::default(),
+            vocab: Vocabulary::default(),
+        };
+        open.index(vocab);
+        open
+    }
+
+    /// The items changed: index them again.
+    fn index(&mut self, vocab: &Vocabulary) {
+        self.within = Within::new(&self.items.items, Some(self.set.visibility), None);
+        self.suggest_from(vocab);
+    }
+
+    /// The items or the viewer's vocabulary changed.
+    fn suggest_from(&mut self, vocab: &Vocabulary) {
+        self.vocab = Vocabulary::from_items(&self.items.items).then(vocab);
+    }
+
+    /// The items the search inside the pack shows, with the fields their
+    /// words matched: all of them in pack order while nothing is typed.
+    fn found(&self, liked: &HashSet<String>) -> Vec<(&ItemSummary, Vec<String>)> {
+        let items = &self.items.items;
+        let filter = self.filter.trim();
+        if filter.is_empty() {
+            return items.iter().map(|i| (i, Vec::new())).collect();
+        }
+        // A half-typed or misspelled filter value: its best match, as the search does.
+        let query = resolve(filter, &self.vocab).0;
+        self.within
+            .search(&query, self.vocab.me.as_deref(), liked)
+            .into_iter()
+            .filter_map(|f| Some((items.get(f.index)?, f.matched)))
+            .collect()
+    }
 }
 
 /// Which entry to select after the grid was rebuilt.
@@ -1171,11 +1216,9 @@ impl Model {
         self.help
     }
     /// The values offered under the search field, when a `key:` filter is
-    /// being typed on the Search tab.
+    /// being typed on the Search tab or inside an opened pack.
     pub fn suggestions(&self) -> Option<SuggestionLine> {
-        if self.tab != Tab::Search {
-            return None;
-        }
+        let (text, vocab) = self.search_field()?;
         if let Some(c) = &self.completion {
             return Some(SuggestionLine {
                 key: c.line.key.clone(),
@@ -1183,12 +1226,38 @@ impl Model {
                 chosen: Some(c.index),
             });
         }
-        let s = suggest(&self.query, &self.vocab)?;
+        let s = suggest(text, vocab)?;
         Some(SuggestionLine {
             chosen: s.chosen(),
             key: s.key,
             words: s.words,
         })
+    }
+    /// The text field that searches on this tab, with the values it
+    /// suggests: the query on Search, the search inside an opened pack.
+    fn search_field(&self) -> Option<(&str, &Vocabulary)> {
+        match (self.tab, &self.packs.open) {
+            (Tab::Search, _) => Some((&self.query, &self.vocab)),
+            (Tab::Packs, Some(open)) => Some((&open.filter, &open.vocab)),
+            _ => None,
+        }
+    }
+    /// The text field takes the search syntax here (on Search and inside
+    /// an opened pack, not on the pack list): the shell shows a button
+    /// for the syntax help ([`HelpPage::Syntax`]) next to it.
+    pub fn searches(&self) -> bool {
+        self.search_field().is_some()
+    }
+    /// What the empty text field says: what typing in it does here.
+    pub fn placeholder(&self) -> String {
+        match (self.tab, &self.packs.open) {
+            (Tab::Packs, Some(open)) => tf(
+                "Search in {pack}, or try v:tired t:reaction type:gif",
+                &[("pack", &open.set.name)],
+            ),
+            (Tab::Packs, None) => t("Filter packs by name").to_string(),
+            _ => t("Search, or try e:😂 v:tired t:reaction type:gif").to_string(),
+        }
     }
     /// Text of the text field on this tab: the search query, the pack
     /// filter, or the item filter of the opened pack; empty elsewhere.
@@ -1374,6 +1443,10 @@ impl Model {
                     let liked: HashSet<String> = self.favorites.items.iter().map(|i| i.id.clone()).collect();
                     if liked != self.liked {
                         self.liked = liked;
+                        if !shown && self.searching_pack() {
+                            // An `is:liked` inside the pack finds others now.
+                            return self.list_answered(true);
+                        }
                         if self.tiles.favorites && !shown && self.view() == View::Items {
                             self.rebuild(Sel::Keep);
                         }
@@ -1391,7 +1464,13 @@ impl Model {
                 outcome,
             } => {
                 let fresh = match &mut self.packs.open {
-                    Some(open) if open.set.id == set_id => open.items.accept(generation, outcome),
+                    Some(open) if open.set.id == set_id => {
+                        let fresh = open.items.accept(generation, outcome);
+                        if fresh {
+                            open.index(&self.vocab);
+                        }
+                        fresh
+                    }
                     _ => false,
                 };
                 self.list_answered(fresh && self.tab == Tab::Packs)
@@ -1459,13 +1538,21 @@ impl Model {
                     return Vec::new();
                 }
                 self.vocab = vocab;
+                let mut cmds = Vec::new();
+                if let Some(open) = &mut self.packs.open {
+                    open.suggest_from(&self.vocab);
+                    // The search inside the pack, with its filters resolved now.
+                    if self.visible && self.searching_pack() && self.completion.is_none() {
+                        cmds.extend(self.list_answered(true));
+                    }
+                }
                 // A search typed before the values were known goes out again,
                 // with its filters resolved now.
                 if self.visible && !self.query.trim().is_empty() && self.completion.is_none() {
                     self.generation += 1;
-                    return vec![self.search_command(0)];
+                    cmds.push(self.search_command(0));
                 }
-                Vec::new()
+                cmds
             }
             Event::ToggleFavorite => self.toggle_favorite(),
             Event::FavoriteToggled { item_id, outcome } => self.favorite_toggled(&item_id, outcome),
@@ -1657,6 +1744,8 @@ impl Model {
         self.memory[self.tab.index()] = self.selected_id();
         self.tab = tab;
         self.pending.clear();
+        // Tab completion belongs to the field it was in.
+        self.completion = None;
         // A switch never starts typing: Normal stays Normal, and Insert
         // stays only where there is a text field to type in.
         if self.cfg.modal && !tab.has_text_field() {
@@ -2038,11 +2127,27 @@ impl Model {
             return Vec::new();
         }
         *filter = q;
+        self.completion = None;
+        self.searched_pack()
+    }
+
+    /// The text field on Packs changed: show what it finds.
+    fn searched_pack(&mut self) -> Vec<Command> {
         self.rebuild(Sel::First);
         if self.copying.is_none() {
             self.status = self.view_status();
         }
-        self.thumbnails()
+        let mut cmds = self.thumbnails();
+        // `is:liked` needs the likes, which only the favorites tell.
+        if self.searching_pack() && !self.favorites.loaded && asks_for_likes(self.query()) {
+            cmds.extend(self.load_favorites());
+        }
+        cmds
+    }
+
+    /// An opened pack is shown and something is typed in its field.
+    fn searching_pack(&self) -> bool {
+        self.tab == Tab::Packs && self.packs.open.as_ref().is_some_and(|o| !o.filter.trim().is_empty())
     }
 
     fn open_pack_at(&mut self, index: usize) -> Vec<Command> {
@@ -2060,11 +2165,8 @@ impl Model {
                 set_id: set.id.clone(),
                 generation,
             });
-        self.packs.open = Some(OpenPack {
-            set,
-            items,
-            filter: String::new(),
-        });
+        self.packs.open = Some(OpenPack::new(set, items, &self.vocab));
+        self.completion = None;
         self.rebuild(Sel::First);
         if self.copying.is_none() {
             self.status = self.view_status();
@@ -2078,6 +2180,7 @@ impl Model {
         if self.tab != Tab::Packs || self.packs.open.take().is_none() {
             return Vec::new();
         }
+        self.completion = None;
         let selection = self.packs.list_selection.take();
         self.rebuild(Sel::Id(selection));
         if self.copying.is_none() {
@@ -2212,15 +2315,11 @@ impl Model {
             Tab::MostUsed => self.most_used.items.iter().map(local).collect(),
             Tab::Favorites => self.favorites.items.iter().map(local).collect(),
             Tab::Packs => match &self.packs.open {
-                Some(open) => {
-                    let terms = filter_terms(&open.filter);
-                    open.items
-                        .items
-                        .iter()
-                        .filter(|i| item_matches(i, &terms))
-                        .map(local)
-                        .collect()
-                }
+                Some(open) => open
+                    .found(&self.liked)
+                    .into_iter()
+                    .map(|(item, matched)| Entry { matched, ..local(item) })
+                    .collect(),
                 None => Vec::new(),
             },
             Tab::Me | Tab::Settings => Vec::new(),
@@ -2535,9 +2634,10 @@ impl Model {
     /// chosen one, then the next ones (`backwards`: the previous ones).
     /// `None` when there is nothing to complete (Tab switches tabs).
     fn complete(&mut self, backwards: bool) -> Option<Vec<Command>> {
-        if self.tab != Tab::Search || self.mode != Mode::Insert || !self.visible {
+        if self.mode != Mode::Insert || !self.visible {
             return None;
         }
+        self.search_field()?;
         let (line, index) = match self.completion.take() {
             Some(c) => {
                 let n = c.line.words.len();
@@ -2549,7 +2649,8 @@ impl Model {
                 (c.line, i)
             }
             None => {
-                let s = suggest(&self.query, &self.vocab)?;
+                let (text, vocab) = self.search_field()?;
+                let s = suggest(text, vocab)?;
                 let n = s.words.len();
                 let i = match s.chosen() {
                     // Nothing typed yet: the first value, or the last backwards.
@@ -2568,21 +2669,19 @@ impl Model {
                 (s, i)
             }
         };
-        self.query.truncate(line.start);
-        self.query.push_str(&line.words[index]);
+        let (start, word) = (line.start, line.words[index].clone());
         self.completion = Some(Completion { line, index });
-        self.generation += 1;
-        Some(vec![self.search_command(0)])
+        Some(self.edit_field(start, &word))
     }
 
     /// A click on an offered value: put it in and finish the filter.
     fn accept_suggestion(&mut self, index: usize) -> Vec<Command> {
-        if self.tab != Tab::Search {
+        if self.search_field().is_none() {
             return Vec::new();
         }
         let (start, word) = match self.completion.take() {
             Some(c) => (c.line.start, c.line.words.get(index).cloned()),
-            None => match suggest(&self.query, &self.vocab) {
+            None => match self.search_field().and_then(|(text, vocab)| suggest(text, vocab)) {
                 Some(s) => (s.start, s.words.get(index).cloned()),
                 None => return Vec::new(),
             },
@@ -2590,9 +2689,19 @@ impl Model {
         let Some(word) = word else {
             return Vec::new();
         };
+        self.edit_field(start, &format!("{word} "))
+    }
+
+    /// Put `text` in the searching field ([`Model::search_field`]) in
+    /// place of what follows byte `start`, and search with it.
+    fn edit_field(&mut self, start: usize, text: &str) -> Vec<Command> {
+        if let (Tab::Packs, Some(open)) = (self.tab, &mut self.packs.open) {
+            open.filter.truncate(start);
+            open.filter.push_str(text);
+            return self.searched_pack();
+        }
         self.query.truncate(start);
-        self.query.push_str(&word);
-        self.query.push(' ');
+        self.query.push_str(text);
         self.generation += 1;
         vec![self.search_command(0)]
     }
@@ -3717,6 +3826,8 @@ mod modal_tests;
 #[cfg(test)]
 mod tiles_tests;
 
+#[cfg(test)]
+mod pack_search_tests;
 #[cfg(test)]
 mod safe_tests;
 #[cfg(test)]

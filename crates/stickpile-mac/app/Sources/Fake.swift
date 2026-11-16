@@ -404,6 +404,11 @@ final class FakePopup: PopupControl {
         render()
     }
 
+    /// The fake has one help page: the syntax button shows it too.
+    func toggleSyntax() {
+        toggleHelp()
+    }
+
     func toggleSticker() {
         guard state.footer.sticker != .unsupported else { return }
         let on = state.footer.sticker != .on

@@ -8,9 +8,13 @@
 //! The search itself goes out with every such value [`resolve`]d to its
 //! best suggestion, so a half-typed or misspelled filter still finds the
 //! stickers.
+//!
+//! The one-letter keys work as the long ones (`v:sar` as `vibe:sar`, see
+//! `stickpile_api::query::Key`); the key stays as typed.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use stickpile_api::query::Key;
 use stickpile_api::ItemSummary;
 
 /// Values offered in the line at most.
@@ -33,6 +37,10 @@ pub struct Vocabulary {
     /// Pack slugs, and the names that are one word.
     pub sets: Vec<String>,
     pub owners: Vec<String>,
+    /// The viewer's username, as far as the cache knows it: what `is:mine`
+    /// means where the client searches by itself (inside an opened pack,
+    /// see [`crate::within`]). `None`: `is:mine` finds nothing there.
+    pub me: Option<String>,
 }
 
 impl Vocabulary {
@@ -77,11 +85,32 @@ impl Vocabulary {
             tags: tags.ranked(),
             sets: sets.ranked(),
             owners: owners.ranked(),
+            me: None,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.vibes.is_empty() && self.tags.is_empty() && self.sets.is_empty() && self.owners.is_empty()
+    }
+
+    /// These values first, then those of `more` not among them (each list
+    /// in its order); the viewer of `more` when this one names none.
+    pub fn then(&self, more: &Vocabulary) -> Vocabulary {
+        fn join(first: &[String], more: &[String]) -> Vec<String> {
+            let seen: HashSet<&str> = first.iter().map(String::as_str).collect();
+            first
+                .iter()
+                .chain(more.iter().filter(|w| !seen.contains(w.as_str())))
+                .cloned()
+                .collect()
+        }
+        Vocabulary {
+            vibes: join(&self.vibes, &more.vibes),
+            tags: join(&self.tags, &more.tags),
+            sets: join(&self.sets, &more.sets),
+            owners: join(&self.owners, &more.owners),
+            me: self.me.clone().or_else(|| more.me.clone()),
+        }
     }
 }
 
@@ -98,17 +127,19 @@ pub enum Field {
 }
 
 impl Field {
-    /// The field of a `key` as the query syntax spells it.
+    /// The field of a `key` as the query syntax spells it, its one-letter
+    /// form included (`v` is `vibe`); `None` for `e:` (no list of emojis
+    /// here) and for anything that is no key.
     pub fn of(key: &str) -> Option<Field> {
-        Some(match key.to_ascii_lowercase().as_str() {
-            "vibe" => Field::Vibe,
-            "tag" => Field::Tag,
-            "set" => Field::Set,
-            "by" | "user" => Field::Owner,
-            "type" => Field::Type,
-            "is" => Field::Is,
-            "sort" => Field::Sort,
-            _ => return None,
+        Some(match Key::parse(key)? {
+            Key::Vibe => Field::Vibe,
+            Key::Tag => Field::Tag,
+            Key::Set => Field::Set,
+            Key::By => Field::Owner,
+            Key::Type => Field::Type,
+            Key::Is => Field::Is,
+            Key::Sort => Field::Sort,
+            Key::Emoji => return None,
         })
     }
 
@@ -339,6 +370,7 @@ mod tests {
             tags: ["reaction", "nsfw", "cat"].map(String::from).to_vec(),
             sets: ["cats", "work-memes"].map(String::from).to_vec(),
             owners: ["alice", "bob"].map(String::from).to_vec(),
+            me: None,
         }
     }
 
@@ -389,6 +421,60 @@ mod tests {
         assert_eq!(words("is:li"), ["liked", "public"]);
         assert_eq!(words("sort:cop"), ["copies"]);
         assert_eq!(words("Vibe:ha"), ["happy"], "keys in any case");
+    }
+
+    #[test]
+    fn short_keys_offer_what_the_long_ones_do() {
+        for (short, long) in [
+            ("v:sar", "vibe:sar"),
+            ("t:ns", "tag:ns"),
+            ("s:wor", "set:wor"),
+            ("b:al", "by:al"),
+            ("v:", "vibe:"),
+            ("-t:", "-tag:"),
+        ] {
+            assert_eq!(words(short), words(long), "{short}");
+            assert!(!words(short).is_empty(), "{short}");
+        }
+        let s = suggest("cat v:sar", &vocab()).unwrap();
+        assert_eq!(s.key, "v:", "the key as typed");
+        assert_eq!(s.typed, "sar");
+        assert_eq!(s.start, "cat v:".len());
+        assert_eq!(s.words[0], "sarcastic");
+        assert_eq!(suggest("-T:ns", &vocab()).unwrap().key, "-T:");
+        assert!(suggest("e:x", &vocab()).is_none(), "e: is the emoji key: no list");
+    }
+
+    #[test]
+    fn resolve_short_keys() {
+        let v = vocab();
+        assert_eq!(resolve("cat v:sarcstic", &v).0, "cat v:sarcastic");
+        assert_eq!(
+            resolve("v:sar -t:nsf s:wor b:al", &v).0,
+            "v:sarcastic -t:nsfw s:work-memes b:alice"
+        );
+        assert_eq!(resolve("cat v: t:", &v).0, "cat", "empty filters are left out");
+        assert_eq!(resolve("v:sad", &v), ("v:sad".into(), vec![]), "a known value stays");
+    }
+
+    #[test]
+    fn then_puts_the_first_values_first() {
+        let pack = Vocabulary {
+            vibes: vec!["tired".into(), "new".into()],
+            tags: vec![],
+            sets: vec!["cats".into()],
+            owners: vec![],
+            me: None,
+        };
+        let all = Vocabulary {
+            me: Some("alice".into()),
+            ..vocab()
+        };
+        let both = pack.then(&all);
+        assert_eq!(both.vibes, ["tired", "new", "sad", "sarcastic", "happy", "angry"]);
+        assert_eq!(both.tags, all.tags);
+        assert_eq!(both.sets, ["cats", "work-memes"]);
+        assert_eq!(both.me.as_deref(), Some("alice"));
     }
 
     #[test]
