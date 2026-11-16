@@ -344,6 +344,104 @@ async fn pack_items_online_offline_and_unknown() {
     assert_eq!(kind(lib.pack_items(cats).await), LibraryErrorKind::NotSignedIn);
 }
 
+/// The ids `pack_search` finds in `pack` for `query`, and whether the
+/// cache answered.
+async fn in_pack(lib: &StickpileLibrary, pack: &str, query: &str) -> (Vec<String>, bool) {
+    let list = lib.pack_search(pack.into(), query.into()).await.unwrap();
+    (ids(&list.items), list.offline)
+}
+
+/// The search inside an open pack (the app's Packs tab, the keyboard's
+/// Sets): the whole syntax over the pack's items, here and not on the
+/// server, online and from the cache.
+#[tokio::test]
+async fn pack_search_online_offline_and_unknown() {
+    let (mut server, items) = seeded_server();
+    {
+        let mut st = server.state();
+        for (item, vibe, tags) in [
+            (0, "angry", ["reaction"]),
+            (1, "tired", ["nsfw"]),
+            (2, "tired", ["reaction"]),
+        ] {
+            let m = st.items.iter_mut().find(|m| m.item.id == items[item].id).unwrap();
+            m.item.vibe = Some(vibe.into());
+            m.item.tags = tags.map(String::from).to_vec();
+        }
+    }
+    let (grumpy, naahh, sleepy) = (items[0].id.clone(), items[1].id.clone(), items[2].id.clone());
+    let cats = items[0].set_id.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+
+    let all = vec![grumpy.clone(), naahh.clone(), sleepy.clone()];
+    assert_eq!(in_pack(&lib, &cats, "").await, (all.clone(), false), "blank: the pack");
+    assert_eq!(in_pack(&lib, &cats, "  ").await.0, all);
+    assert_eq!(
+        in_pack(&lib, &cats, "vibe:tired").await,
+        (vec![naahh.clone(), sleepy.clone()], false)
+    );
+    assert_eq!(in_pack(&lib, &cats, "v:tired").await.0, [naahh.clone(), sleepy.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "v:tired -t:nsfw").await.0, [sleepy.clone()]);
+    assert_eq!(
+        in_pack(&lib, &cats, "t:reaction").await.0,
+        [grumpy.clone(), sleepy.clone()]
+    );
+    assert_eq!(in_pack(&lib, &cats, "type:gif").await.0, [naahh.clone()]);
+    assert_eq!(
+        in_pack(&lib, &cats, "v:tir").await.0,
+        [naahh.clone(), sleepy.clone()],
+        "half typed"
+    );
+    assert_eq!(in_pack(&lib, &cats, "grumpy").await.0, [grumpy.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "grumpy type:gif").await.0, Vec::<String>::new());
+    assert!(
+        in_pack(&lib, &cats, "dog").await.0.is_empty(),
+        "other packs' items stay out"
+    );
+    assert_eq!(in_pack(&lib, &cats, "set:cats").await.0, all);
+    let searched = server
+        .state()
+        .requests
+        .iter()
+        .filter(|r| r.starts_with("GET /api/v1/search"))
+        .count();
+    assert_eq!(searched, 0, "the pack is searched here");
+
+    // The pack's visibility once listed; the account and its likes once synced and read.
+    lib.packs().await.unwrap();
+    assert_eq!(in_pack(&lib, &cats, "is:public").await.0, all);
+    lib.sync_now().await.unwrap();
+    assert_eq!(in_pack(&lib, &cats, "is:mine").await.0, all);
+    assert!(lib.toggle_like(sleepy.clone()).await.unwrap());
+    lib.favorites(10).await.unwrap();
+    assert_eq!(in_pack(&lib, &cats, "is:liked").await.0, [sleepy.clone()]);
+
+    // Offline: the cached items of the pack.
+    server.stop();
+    assert_eq!(
+        in_pack(&lib, &cats, "v:tired -t:nsfw").await,
+        (vec![sleepy.clone()], true)
+    );
+    assert_eq!(
+        in_pack(&lib, &cats, "is:mine -is:liked").await,
+        (vec![grumpy, naahh], true)
+    );
+    assert_eq!(in_pack(&lib, &cats, "").await, (all, true));
+    assert_eq!(
+        kind(lib.pack_search("nope".into(), "cat".into()).await),
+        LibraryErrorKind::Unreachable
+    );
+
+    server.restart();
+    let out = tempfile::tempdir().unwrap();
+    let lib = open(out.path(), &server.url);
+    assert_eq!(
+        kind(lib.pack_search(cats, "cat".into()).await),
+        LibraryErrorKind::NotSignedIn
+    );
+}
+
 /// What the tiles show: the owner, the format, the nsfw tag, the
 /// account's likes once the favorites were read, and the item's page.
 #[tokio::test]
@@ -396,7 +494,8 @@ async fn hints_come_from_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let lib = signed_in(&server, dir.path());
     let keys = lib.hints(String::new());
-    assert_eq!(keys[0].label, "tag:");
+    assert_eq!(keys[0].label, "tag: (t:)");
+    assert_eq!(keys[0].query, "tag:");
     assert!(keys.iter().all(|h| h.kind == HintKind::Key));
 
     lib.sync_now().await.unwrap();

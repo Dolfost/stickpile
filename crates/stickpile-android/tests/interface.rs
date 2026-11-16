@@ -43,6 +43,7 @@ const CONTRACT: &[&str] = &[
     "async fn StickpileLibrary.most_used(limit: u32) -> ItemList throws LibraryError",
     "async fn StickpileLibrary.packs() -> PackList throws LibraryError",
     "async fn StickpileLibrary.pack_items(pack_id: String) -> ItemList throws LibraryError",
+    "async fn StickpileLibrary.pack_search(pack_id: String, query: String) -> ItemList throws LibraryError",
     "fn StickpileLibrary.suggestions(query: String) -> Suggestions?",
     "fn StickpileLibrary.hints(query: String) -> List<SearchHint>",
     "fn StickpileLibrary.item_url(item_id: String) -> String?",

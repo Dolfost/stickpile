@@ -332,6 +332,9 @@ object StickpileLibrary
   async fn most_used(limit: u32) throws -> ItemList
   async fn packs() throws -> PackList
   async fn pack_items(pack_id: String) throws -> ItemList
+  async fn pack_search(pack_id: String, query: String) throws -> ItemList
+                                                       // the search syntax over one pack's items,
+                                                       // searched here (no server search)
   async fn own_packs() throws -> PackList               // the user's own, empty ones included (upload targets)
   fn suggestions(query: String) -> Suggestions?        // stickpile_quick::suggest
   fn hints(query: String) -> List<SearchHint>          // the offers under a search field, each with
@@ -480,9 +483,27 @@ Behaviour the signatures do not show:
   account or server change; the policy starts from it, so a restarted app
   does not sync at once.
 - **Search** resolves a half-typed `key:value` filter to its best
-  suggestion, as the desktop popup does. Reads (search, account, favorites,
-  most used, packs, pack items) stop when the calling coroutine is
-  cancelled; writes and file fetches run to their end.
+  suggestion, as the desktop popup does. The one-letter keys `v:`, `t:`,
+  `s:`, `b:` (and `e:`) are `vibe:`, `tag:`, `set:`, `by:` (and
+  `emoji:`). Reads (search, account, favorites, most used, packs, pack
+  items, pack search) stop when the calling coroutine is cancelled;
+  writes and file fetches run to their end.
+- **Pack search.** `pack_search(pack_id, query)` reads the pack's items as
+  `pack_items` does (online the server's pack, offline the cached items
+  with `offline = true`; the same errors) and searches them in the
+  library with the whole syntax (`stickpile_quick::within`, see
+  [search.md](search.md#inside-a-pack)): `vibe:tired`, `t:x`,
+  `type:gif`, `-tag:nsfw`, `q>70`, `sort:`, words with typos forgiven.
+  Words come best first, filters alone keep the pack's order; a word
+  also finds the items with it anywhere in the name, a keyword, an emoji
+  or a tag. A half-typed filter value searches for its best suggestion,
+  the pack's own values first. `is:liked` follows the saved favorites (as
+  `Item.liked`), `is:mine` the cached account, `is:public` the pack as
+  `packs` or `own_packs` listed it (a pack not listed yet: the
+  account's own items count as private). The pack's name is not searched
+  as a word; `set:` matches it. A blank query gives the whole pack. No
+  request goes to the server's search, so image similarity and vibe
+  synonyms are left out.
 - **Hints.** `hints(query)` is what a phone offers under a search field
   instead of the desktop's Tab completion; each hint carries the whole
   query it makes. While a `key:value` filter is typed: its values, ranked
@@ -492,9 +513,12 @@ Behaviour the signatures do not show:
   it as filters (`rea` offers `tag:reaction`), those starting with it
   first, then the filter keys the word starts. With nothing typed, or a
   space at the end: the keys `tag:`, `vibe:`, `e:`, `set:`, `by:`,
-  `type:`, `is:`, `sort:`. A leading `-` stays on what is offered; inside
-  an unfinished phrase nothing is. The words come from the offline cache,
-  so they follow the last sync.
+  `type:`, `is:`, `sort:`; a key's label shows its one-letter form
+  (`tag: (t:)`, `vibe: (v:)`, `set: (s:)`, `by: (b:)`), its `query` is the
+  long key. A short key being typed (`v:sar`) offers what the long one
+  does, and the key stays as typed. A leading `-` stays on what is
+  offered; inside an unfinished phrase nothing is. The words come from
+  the offline cache, so they follow the last sync.
 - **Item marks.** `nsfw` is the desktop's safe-mode test: a tag `nsfw` in
   any case. `liked` comes from the favorites the library last read (and
   the likes toggled since): false for every item until `favorites` was

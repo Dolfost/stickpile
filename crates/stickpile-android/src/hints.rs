@@ -10,9 +10,13 @@
 //!   it (`tag:reaction`, `vibe:really`, `set:reactions`), and the filter
 //!   keys it starts (`t` offers `tag:` and `type:`).
 //! - After a space, or with nothing typed, the filter keys.
+//!
+//! A key offered shows its one-letter form too (`tag: (t:)`); the short
+//! keys work as the long ones (`v:sar` offers what `vibe:sar` does).
 
 use std::collections::HashMap;
 
+use stickpile_api::query::Key;
 use stickpile_api::ItemSummary;
 use stickpile_quick::suggest::{self, Vocabulary};
 
@@ -124,12 +128,22 @@ fn keys(before: &str, typed: &str) -> Vec<SearchHint> {
     KEYS.iter()
         .filter(|k| k.starts_with(&typed))
         .map(|k| SearchHint {
-            label: (*k).to_string(),
+            label: key_label(k),
             query: format!("{before}{k}"),
             chosen: false,
             kind: HintKind::Key,
         })
         .collect()
+}
+
+/// A key as offered: with its one-letter form when it has another
+/// (`tag: (t:)`, `e:`, `type:`).
+fn key_label(key: &str) -> String {
+    let name = key.trim_end_matches(':');
+    match Key::parse(name).and_then(Key::short) {
+        Some(short) if short != name => format!("{key} ({short}:)"),
+        _ => key.to_string(),
+    }
 }
 
 /// The emojis for `e:<typed>`: all of them while none is typed, else those
@@ -205,11 +219,39 @@ pub(crate) mod tests {
     #[test]
     fn nothing_typed_offers_the_keys() {
         let h = hints("", &words());
-        assert_eq!(labels(&h), KEYS.to_vec());
+        assert_eq!(
+            labels(&h),
+            vec![
+                "tag: (t:)",
+                "vibe: (v:)",
+                "e:",
+                "set: (s:)",
+                "by: (b:)",
+                "type:",
+                "is:",
+                "sort:"
+            ],
+            "with their one-letter forms"
+        );
         assert!(h.iter().all(|h| h.kind == HintKind::Key));
-        assert_eq!(query_of(&h, "tag:"), "tag:");
+        assert_eq!(query_of(&h, "tag: (t:)"), "tag:");
         let h = hints("grumpy ", &words());
-        assert_eq!(query_of(&h, "vibe:"), "grumpy vibe:");
+        assert_eq!(query_of(&h, "vibe: (v:)"), "grumpy vibe:");
+        assert_eq!(query_of(&h, "e:"), "grumpy e:");
+    }
+
+    #[test]
+    fn short_keys_offer_what_the_long_ones_do() {
+        let h = hints("cat v:sar", &words());
+        assert_eq!(labels(&h), vec!["sarcastic"]);
+        assert_eq!(h[0].query, "cat v:sarcastic ", "the key stays as typed");
+        assert!(h[0].chosen);
+        let h = hints("-t:", &words());
+        assert_eq!(labels(&h), vec!["reaction", "nsfw", "cat"]);
+        assert_eq!(query_of(&h, "nsfw"), "-t:nsfw ");
+        assert_eq!(labels(&hints("s:ca", &words())), vec!["cats"]);
+        assert_eq!(hints("b:al", &words())[0].query, "b:alice ");
+        assert_eq!(labels(&hints("T:re", &words())), labels(&hints("tag:re", &words())));
     }
 
     #[test]
@@ -268,13 +310,13 @@ pub(crate) mod tests {
     #[test]
     fn a_word_offers_the_keys_it_starts() {
         let h = hints("t", &words());
-        assert_eq!(labels(&h), vec!["tag:", "type:"]);
+        assert_eq!(labels(&h), vec!["tag: (t:)", "type:"]);
         assert_eq!(query_of(&h, "type:"), "type:");
         let h = hints("cat -ta", &words());
-        assert_eq!(labels(&h), vec!["-tag:"]);
+        assert_eq!(labels(&h), vec!["-tag: (t:)"]);
         assert_eq!(h[0].query, "cat -tag:");
         let h = hints("vibe", &words());
-        assert_eq!(labels(&h), vec!["vibe:"], "the key itself, without its colon");
+        assert_eq!(labels(&h), vec!["vibe: (v:)"], "the key itself, without its colon");
         let h = hints("sa", &words());
         assert_eq!(labels(&h), vec!["vibe:sarcastic"], "sa- starts no key");
     }

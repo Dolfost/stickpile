@@ -13,7 +13,8 @@ use stickpile_api::{
 };
 use stickpile_core::session::{save_login, tailnet_login};
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
-use stickpile_quick::suggest;
+use stickpile_quick::suggest::{self, Vocabulary};
+use stickpile_quick::within::Within;
 
 use crate::hints::{self, Words};
 use crate::motion;
@@ -463,6 +464,27 @@ impl Inner {
         };
         *slot = Some((generation, vocabulary.clone()));
         vocabulary
+    }
+
+    /// `items`, the pack `pack_id`'s, that `query` finds
+    /// ([`StickpileLibrary::pack_search`]); reads the cache.
+    fn search_pack(&self, session: &Session, pack_id: &str, query: &str, items: Vec<ItemSummary>) -> Vec<ItemSummary> {
+        if query.is_empty() {
+            return items;
+        }
+        let words = Vocabulary::from_items(&items).then(&self.vocabulary(session).vocab);
+        let query = suggest::resolve(query, &words).0;
+        let visibility = lock(&self.packs_seen).get(pack_id).map(|s| s.visibility);
+        let me = match session.cache().me() {
+            Ok(user) => user.map(|u| u.username),
+            Err(e) => {
+                tracing::debug!("who is mine: {e}");
+                None
+            }
+        };
+        let within = Within::new(&items, visibility, me.as_deref());
+        let found = within.search(&query, me.as_deref(), &Self::liked_ids(session));
+        found.into_iter().filter_map(|f| items.get(f.index).cloned()).collect()
     }
 
     fn favorites_key(session: &Session) -> Option<String> {
@@ -1003,6 +1025,30 @@ impl StickpileLibrary {
         .await
     }
 
+    /// The items of one pack that `query` finds, with the whole search
+    /// syntax of `search` (`vibe:tired`, `t:x`, `type:gif`, `-tag:nsfw`,
+    /// `is:liked`, `q>70`, `sort:`, words): words best first, filters
+    /// alone in pack order. The pack's items are read as `pack_items`
+    /// reads them (offline: the cached ones, `offline = true`; the same
+    /// errors) and searched here, not by the server
+    /// (`stickpile_quick::within`). A half-typed filter value searches for
+    /// its best suggestion, the pack's values first. A blank query gives
+    /// the whole pack, as `pack_items`.
+    pub async fn pack_search(&self, pack_id: String, query: String) -> Result<ItemList, LibraryError> {
+        self.read(move |inner| async move {
+            let (generation, session) = inner.current();
+            let listing = session.pack_items(&pack_id).await?;
+            let offline = listing.offline;
+            let (inner2, session2) = (inner.clone(), session.clone());
+            let items = tokio::task::spawn_blocking(move || {
+                inner2.search_pack(&session2, &pack_id, query.trim(), listing.items)
+            })
+            .await?;
+            Ok(inner.list(generation, &session, items, offline))
+        })
+        .await
+    }
+
     /// The values to offer while a `key:value` filter is typed at the end of
     /// `query` (`vibe:sar`, `-tag:`, `set:ca`): the vibes, tags, packs and
     /// owners of the cached items, and the fixed words of `type:`, `is:` and
@@ -1024,8 +1070,10 @@ impl StickpileLibrary {
     ///   filters (`tag:reaction`), those starting with it first, then the
     ///   filter keys the word starts (`t`: `tag:`, `type:`);
     /// - nothing, or a space at the end: the filter keys `tag:`, `vibe:`,
-    ///   `e:`, `set:`, `by:`, `type:`, `is:`, `sort:`.
+    ///   `e:`, `set:`, `by:`, `type:`, `is:`, `sort:`, labelled with their
+    ///   one-letter forms (`tag: (t:)`).
     ///
+    /// The one-letter keys work as the long ones (`v:sar` as `vibe:sar`).
     /// A leading `-` (leave out) stays on what is offered. Inside an
     /// unfinished phrase (an odd number of `"`) nothing is offered. At most
     /// 12 offers.

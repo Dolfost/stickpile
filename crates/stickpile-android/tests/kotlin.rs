@@ -37,6 +37,7 @@ const METHODS: &[&str] = &[
     "suspend fun `mostUsed`(`limit`: kotlin.UInt): ItemList",
     "suspend fun `packs`(): PackList",
     "suspend fun `packItems`(`packId`: kotlin.String): ItemList",
+    "suspend fun `packSearch`(`packId`: kotlin.String, `query`: kotlin.String): ItemList",
     "fun `suggestions`(`query`: kotlin.String): Suggestions?",
     "fun `hints`(`query`: kotlin.String): List<SearchHint>",
     "fun `itemUrl`(`itemId`: kotlin.String): kotlin.String?",
