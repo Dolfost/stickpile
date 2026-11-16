@@ -69,7 +69,8 @@ results, the clients run on the provisional defaults in
       new address signs out of the old server first).
 - [ ] A stickpile panel in a fork of Unexpected Keyboard (separate
       repository), over the provider contract.
-- [ ] WhatsApp sticker packs from the app (WhatsApp's sticker provider).
+- [x] WhatsApp sticker packs from the app (WhatsApp's sticker provider),
+      built by the server ([docs/whatsapp.md](docs/whatsapp.md)).
 
 ### macOS (phase 7)
 

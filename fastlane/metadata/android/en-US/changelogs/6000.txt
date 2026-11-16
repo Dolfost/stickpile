@@ -1,1 +1,1 @@
-First release of the Android app: a picker keyboard that inserts stickers from your stickpile server into any chat, sharing pictures to upload them into a set, search with recent stickers and favourites, and an offline cache.
+First release of the Android app: a sticker keyboard with search (v: t: s: b: shortcuts, search inside a pack), GIFs and videos that play, stickers per row and keyboard height in settings; sharing pictures to upload them into a set; Add to WhatsApp for a pack; an offline cache that answers at once when the server is away.
