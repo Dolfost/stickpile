@@ -21,6 +21,8 @@ pub struct Config {
     pub media: MediaConfig,
     pub ai: AiConfig,
     pub telegram: TelegramConfig,
+    pub discord: DiscordConfig,
+    pub signal: SignalConfig,
     pub git: GitConfig,
 }
 
@@ -272,6 +274,65 @@ impl Default for TelegramConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
+pub struct DiscordConfig {
+    /// Discord import and publishing (docs/discord.md). Needs
+    /// `bot_token_file`.
+    pub enabled: bool,
+    /// The bot's token.
+    pub bot_token_file: Option<PathBuf>,
+    /// REST API base URL (override for tests).
+    pub api_url: String,
+    /// Image CDN, where imports download stickers and emoji (tests).
+    pub cdn_url: String,
+    /// Media proxy that serves GIF stickers (tests).
+    pub media_url: String,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        DiscordConfig {
+            enabled: false,
+            bot_token_file: None,
+            api_url: "https://discord.com/api/v10".into(),
+            cdn_url: "https://cdn.discordapp.com".into(),
+            media_url: "https://media.discordapp.net".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SignalConfig {
+    /// Signal pack import from links (docs/signal.md); with
+    /// `credentials_file` also publishing. The Signal-ready zip needs
+    /// neither.
+    pub enabled: bool,
+    /// JSON credentials of a dedicated Signal account (or linked device)
+    /// that uploads packs.
+    pub credentials_file: Option<PathBuf>,
+    /// Chat service base URL, which issues upload forms (override for tests).
+    pub service_url: String,
+    /// CDN base URL, where pack files are read and uploaded (tests).
+    pub cdn_url: String,
+    /// Also trust the public web PKI for these hosts, not only Signal's own
+    /// root certificate (in case Signal moves a host to a public CA).
+    pub trust_public_roots: bool,
+}
+
+impl Default for SignalConfig {
+    fn default() -> Self {
+        SignalConfig {
+            enabled: false,
+            credentials_file: None,
+            service_url: "https://chat.signal.org".into(),
+            cdn_url: "https://cdn.signal.org".into(),
+            trust_public_roots: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
 pub struct GitConfig {
     pub enabled: bool,
     pub pull_interval_minutes: u32,
@@ -386,6 +447,20 @@ impl Config {
         if self.telegram.enabled && self.telegram.bot_token_file.is_none() {
             return bad("telegram.enabled requires telegram.bot_token_file".into());
         }
+        if self.discord.enabled && self.discord.bot_token_file.is_none() {
+            return bad("discord.enabled requires discord.bot_token_file".into());
+        }
+        for (key, url) in [
+            ("discord.api_url", &self.discord.api_url),
+            ("discord.cdn_url", &self.discord.cdn_url),
+            ("discord.media_url", &self.discord.media_url),
+            ("signal.service_url", &self.signal.service_url),
+            ("signal.cdn_url", &self.signal.cdn_url),
+        ] {
+            if !(url.starts_with("https://") || url.starts_with("http://")) {
+                return bad(format!("{key} must be an absolute http(s) URL, got {url:?}"));
+            }
+        }
         for s in &self.git.allowed_schemes {
             if !matches!(s.as_str(), "https" | "http" | "ssh" | "file") {
                 return bad(format!("git.allowed_schemes: unknown scheme {s:?}"));
@@ -447,6 +522,11 @@ mod tests {
         assert!(Config::from_toml("[server]\npublic_url = \"example.com\"").is_err());
         assert!(Config::from_toml("[server]\ndata_dir = \"relative\"").is_err());
         assert!(Config::from_toml("[telegram]\nenabled = true").is_err());
+        assert!(Config::from_toml("[discord]\nenabled = true").is_err());
+        assert!(Config::from_toml("[discord]\napi_url = \"discord.com\"").is_err());
+        assert!(Config::from_toml("[signal]\ncdn_url = \"\"").is_err());
+        // Signal imports need no account: enabled alone is fine.
+        assert!(Config::from_toml("[signal]\nenabled = true").is_ok());
         assert!(Config::from_toml("[auth]\ninitial_admin_username = \"a\"").is_err());
         assert!(Config::from_toml("[git]\nallowed_schemes = [\"ftp\"]").is_err());
     }

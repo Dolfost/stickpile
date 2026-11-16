@@ -4,8 +4,9 @@
 //! [`MAX_ATTEMPTS`]; [`JobError::Fatal`] fails immediately.
 //!
 //! Adding a job kind: add a handler and a match arm in [`dispatch`]. Git,
-//! Telegram and WhatsApp job bodies live next to their services
-//! ([`crate::service::gitpack`], [`crate::service::telegram`],
+//! Telegram, Discord, Signal and WhatsApp job bodies live next to their
+//! services ([`crate::service::gitpack`], [`crate::service::telegram`],
+//! [`crate::service::discord`], [`crate::service::signal`],
 //! [`crate::service::whatsapp`]). Publish jobs of the platforms in
 //! [`crate::service::publish`] also record their outcome on the set.
 
@@ -240,6 +241,10 @@ pub async fn dispatch(state: &AppState, job: &JobRow) -> JobResult {
         Some(JobKind::TelegramImport) => crate::service::telegram::import_job(state, job).await,
         Some(JobKind::TelegramExport) => crate::service::telegram::export_job(state, job).await,
         Some(JobKind::WhatsappExport) => crate::service::whatsapp::build_job(state, job).await,
+        Some(JobKind::DiscordImport) => crate::service::discord::import_job(state, job).await,
+        Some(JobKind::DiscordExport) => crate::service::discord::export_job(state, job).await,
+        Some(JobKind::SignalImport) => crate::service::signal::import_job(state, job).await,
+        Some(JobKind::SignalExport) => crate::service::signal::export_job(state, job).await,
         None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
     }
 }
@@ -255,6 +260,7 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
                 .execute(db)
                 .await?;
             note_publish(db, job, JobStatus::Done, result.as_ref(), None).await;
+            scrub(db, job).await;
         }
         Err(JobError::Retry(msg)) if job.attempts < MAX_ATTEMPTS => {
             let backoff = BASE_BACKOFF_SECS << (job.attempts - 1).clamp(0, 10);
@@ -275,9 +281,30 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
                 .execute(db)
                 .await?;
             note_publish(db, job, JobStatus::Failed, None, Some(&e.to_string())).await;
+            scrub(db, job).await;
         }
     }
     Ok(())
+}
+
+/// A finished job no longer needs the secrets in its payload: a Signal
+/// import's pack link holds the pack's key
+/// ([`crate::service::signal::scrubbed_payload`]).
+async fn scrub(db: &SqlitePool, job: &JobRow) {
+    if job.kind() != Some(JobKind::SignalImport) {
+        return;
+    }
+    let Some(clean) = crate::service::signal::scrubbed_payload(&job.payload()) else {
+        return;
+    };
+    if let Err(e) = sqlx::query("UPDATE jobs SET payload = ? WHERE id = ?")
+        .bind(clean.to_string())
+        .bind(&job.id)
+        .execute(db)
+        .await
+    {
+        tracing::error!(job = %job.id, "removing the link from a finished job: {e}");
+    }
 }
 
 /// A finished publish job updates the set's publish state

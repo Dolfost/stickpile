@@ -20,6 +20,7 @@ use std::time::Duration;
 pub use stickpile_api::{MediaFormat, MediaKind, QualityComponent, QualityReport, Variant};
 
 pub mod hash;
+pub mod pack;
 pub mod quality;
 pub mod signature;
 pub mod whatsapp;

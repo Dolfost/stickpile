@@ -56,7 +56,7 @@ pub fn square(frame: &RgbaImage) -> RgbaImage {
     pad_square(frame, SIDE)
 }
 
-fn pad_square(frame: &RgbaImage, side: u32) -> RgbaImage {
+pub(crate) fn pad_square(frame: &RgbaImage, side: u32) -> RgbaImage {
     let (w, h) = fit_exact(frame.width().max(1), frame.height().max(1), side);
     let (w, h) = (w.clamp(1, side), h.clamp(1, side));
     if (w, h) == (side, side) && frame.dimensions() == (side, side) {

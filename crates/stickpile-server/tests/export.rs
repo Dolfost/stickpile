@@ -391,9 +391,11 @@ async fn publish_queues_one_job_per_platform_through_the_registry() {
     }
     let url = routes::path(routes::SET_PUBLISH, &[&set.id]);
 
-    // Not published yet.
+    // Not published yet. Every platform the server knows is listed, the
+    // ones it is not set up for as such.
     let list = publications(srv, &alice, &set.id).await;
-    assert_eq!(list.len(), 1);
+    let known: Vec<(&str, bool)> = list.iter().map(|p| (p.platform.as_str(), p.configured)).collect();
+    assert_eq!(known, [("telegram", true), ("discord", false), ("signal", false)]);
     assert_eq!(list[0].platform, "telegram");
     assert_eq!(list[0].name, "Telegram");
     assert!(list[0].configured);
@@ -520,8 +522,8 @@ async fn publishing_to_an_unconfigured_platform_is_refused() {
         .expect(400);
     assert!(r.text().contains("not configured"), "{}", r.text());
     let list = publications(&srv, &alice, &set.id).await;
-    assert_eq!(list.len(), 1);
-    assert!(!list[0].configured);
+    assert_eq!(list.len(), 3);
+    assert!(list.iter().all(|p| !p.configured));
     // Someone else's private set: 404 as everywhere.
     let bob = srv.user("bob").await;
     srv.get(&bob, &routes::path(routes::SET_PUBLISH, &[&set.id]))
@@ -694,4 +696,157 @@ async fn export_page_downloads_for_readers_publishing_for_the_owner() {
     let html = ab.get(&format!("/sets/{}", set.id)).await.text();
     assert!(html.contains(&format!("href=\"{page}\"")));
     assert!(html.contains(&format!("href=\"{page}#publish\"")));
+}
+
+// ---------------------------------------------------------------------------
+// Several platforms at once
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn publish_to_telegram_discord_and_signal_at_once() {
+    use integrations_support::{mock_discord, mock_signal};
+    use reqwest::StatusCode;
+    use web_common::{assert_page, location, Browser};
+
+    let (tg_url, tg) = mock_bot::start().await;
+    let (dc_api, dc_cdn, dc_media, dc) = mock_discord::start().await;
+    let (sg_service, sg_cdn, sg) = mock_signal::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tg_token = dir.path().join("tg");
+    std::fs::write(&tg_token, mock_bot::TOKEN).unwrap();
+    let dc_token = dir.path().join("dc");
+    std::fs::write(&dc_token, mock_discord::TOKEN).unwrap();
+    let sg_creds = dir.path().join("sg.json");
+    std::fs::write(
+        &sg_creds,
+        json!({"aci": mock_signal::ACI, "device_id": mock_signal::DEVICE, "password": mock_signal::PASSWORD})
+            .to_string(),
+    )
+    .unwrap();
+    let srv = TestServer::with_config(|c| {
+        c.telegram.enabled = true;
+        c.telegram.bot_token_file = Some(tg_token);
+        c.telegram.api_url = tg_url;
+        c.discord.enabled = true;
+        c.discord.bot_token_file = Some(dc_token);
+        c.discord.api_url = dc_api;
+        c.discord.cdn_url = dc_cdn;
+        c.discord.media_url = dc_media;
+        c.signal.enabled = true;
+        c.signal.credentials_file = Some(sg_creds);
+        c.signal.service_url = sg_service;
+        c.signal.cdn_url = sg_cdn;
+    })
+    .await;
+    let alice = srv.user("alice").await;
+    srv.patch(&alice, routes::ME, json!({"telegram_user_id": 555}))
+        .await
+        .expect(200);
+    let set = srv.create_set(&alice, "all-cats", Visibility::Private).await;
+    for i in 1..=3 {
+        srv.upload_one(&alice, &set.id, &format!("cat {i}.png"), png(i)).await;
+    }
+    let url = routes::path(routes::SET_PUBLISH, &[&set.id]);
+
+    // One bad option fails the whole request: nothing is queued.
+    let r = srv
+        .post(&alice, &url, json!({"platforms": ["telegram", "discord", "signal"]}))
+        .await
+        .expect(400);
+    assert!(r.text().contains("guild_id is required"), "{}", r.text());
+    let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind LIKE '%_export'")
+        .fetch_one(&srv.state.db)
+        .await
+        .unwrap();
+    assert_eq!(queued, 0);
+
+    let jobs: PublishJobs = srv
+        .post(
+            &alice,
+            &url,
+            json!({
+                "platforms": ["telegram", "discord", "signal"],
+                "options": {"discord": {"guild_id": mock_discord::GUILD, "kind": "emojis"}},
+            }),
+        )
+        .await
+        .expect(200)
+        .json();
+    let kinds: Vec<JobKind> = jobs.jobs.iter().map(|j| j.kind).collect();
+    assert_eq!(
+        kinds,
+        [JobKind::TelegramExport, JobKind::DiscordExport, JobKind::SignalExport]
+    );
+    assert!(jobs.jobs.iter().all(|j| j.subject.as_deref() == Some(set.id.as_str())));
+    sqlx::query("DELETE FROM jobs WHERE kind = 'variants'")
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    run_jobs_now(&srv).await;
+    for j in &jobs.jobs {
+        let done = job(&srv, &alice, &j.id).await;
+        assert_eq!(done.status, JobStatus::Done, "{done:?}");
+    }
+    assert_eq!(
+        tg.lock().unwrap().packs[&format!("all_cats_by_{BOT}")].stickers.len(),
+        3
+    );
+    assert_eq!(dc.lock().unwrap().emojis.len(), 3);
+    assert_eq!(sg.lock().unwrap().forms.len(), 1);
+    let list = publications(&srv, &alice, &set.id).await;
+    assert!(
+        list.iter().all(|p| p.configured && p.published_at.is_some()),
+        "{list:?}"
+    );
+    assert!(list[2]
+        .url
+        .as_deref()
+        .unwrap()
+        .starts_with("https://signal.art/addstickers/#"));
+
+    // The export page: a row each, Discord's choices and last server
+    // prefilled, Signal's note about new links, results per platform.
+    let b = Browser::login(&srv, &alice).await;
+    let page = format!("/sets/{}/export", set.id);
+    let r = b.get(&page).await;
+    assert_page(&r);
+    let html = r.text();
+    for platform in ["telegram", "discord", "signal"] {
+        assert!(html.contains(&format!("name=\"platform.{platform}\"")), "{platform}");
+    }
+    assert!(html.contains(&format!("value=\"{}\"", mock_discord::GUILD)), "{html}");
+    assert!(html.contains("<option value=\"emojis\" selected>"), "{html}");
+    assert!(html.contains("every publish uploads a new pack with a new link"));
+    assert!(html.contains("3 emoji: 3 added, 0 removed, 0 left out"), "{html}");
+    assert!(html.contains("3 stickers in a new pack, 0 left out"), "{html}");
+    assert!(html.contains("Cat Lounge"));
+    // The form publishes the ticked rows with their options, in one go.
+    let r = b
+        .post_form(
+            &format!("{page}/publish"),
+            &[
+                ("platform.discord", "on"),
+                ("discord.guild_id", mock_discord::GUILD),
+                ("discord.kind", "stickers"),
+                ("platform.signal", "on"),
+            ],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let back = location(&r);
+    let ids: Vec<String> = back
+        .split("jobs=")
+        .nth(1)
+        .unwrap()
+        .split('#')
+        .next()
+        .unwrap()
+        .split(',')
+        .map(str::to_string)
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(job(&srv, &alice, &ids[0]).await.kind, JobKind::DiscordExport);
+    run_jobs_now(&srv).await;
+    assert_eq!(dc.lock().unwrap().stickers.len(), 3, "stickers this time");
+    assert_eq!(sg.lock().unwrap().forms.len(), 2, "a second Signal pack");
 }

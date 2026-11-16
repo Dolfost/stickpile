@@ -95,6 +95,10 @@ fn job_kind_label(k: &str) -> String {
         "telegram_import" => t("telegram import").to_string(),
         "telegram_export" => t("telegram export").to_string(),
         "whatsapp_export" => t("whatsapp packs").to_string(),
+        "discord_import" => t("discord import").to_string(),
+        "discord_export" => t("discord export").to_string(),
+        "signal_import" => t("signal import").to_string(),
+        "signal_export" => t("signal export").to_string(),
         other => other.replace('_', " "),
     }
 }

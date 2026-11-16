@@ -1,13 +1,15 @@
 //! The export page of a set, `/sets/{id}/export` (docs/web.md "Export and
 //! publish"):
 //!
-//! * Download: the set as ZIP, TAR or TAR.GZ (the API's export routes), for
-//!   anyone who can read the set.
+//! * Download: the set as ZIP, TAR or TAR.GZ (the API's export routes), and
+//!   the Signal-ready zip, for anyone who can read the set.
 //! * WhatsApp: build the set's `.wastickers` packs and download them, also
 //!   for anyone who can read the set.
 //! * Publish: one row per platform the server is configured for, with
-//!   where the set is published, when, the last result and the platform's
-//!   options; tick several and publish them with one button. The owner only.
+//!   where the set is published, when, the last result (with what was
+//!   left out or changed) and the platform's options, prefilled with what
+//!   the set was published with last; tick several and publish them with
+//!   one button. The owner only.
 //!
 //! The forms post and redirect back here; background jobs are shown with
 //! the job fragment, which polls itself with htmx (without JavaScript the
@@ -31,7 +33,8 @@ use super::layout::{self, Nav};
 use super::Ctx;
 use crate::error::AppResult;
 use crate::i18n::{t, t_dyn, tf};
-use crate::service::{publish, sets, ui, whatsapp};
+use crate::service::publish::PublicationRow;
+use crate::service::{publish, sets, signal, ui, whatsapp};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -57,6 +60,8 @@ struct View<'a> {
     whatsapp: WhatsappStatus,
     /// `None` for anyone but the owner.
     publications: Option<Vec<Publication>>,
+    /// The owner's stored publish state, by platform (option defaults).
+    stored: HashMap<String, PublicationRow>,
     jobs: Vec<Job>,
     error: Option<String>,
     form: &'a HashMap<String, String>,
@@ -83,9 +88,11 @@ pub async fn page(
         }
     }
     let empty = HashMap::new();
+    let (publications, stored) = owner_publications(&state, &ctx, &set).await?;
     let view = View {
         whatsapp: whatsapp::status(&state, &ctx.user, &set.id).await?,
-        publications: owner_publications(&state, &ctx, &set).await?,
+        publications,
+        stored,
         jobs,
         error: None,
         form: &empty,
@@ -93,11 +100,18 @@ pub async fn page(
     Ok(render(&state, &ctx, &set, view))
 }
 
-async fn owner_publications(state: &AppState, ctx: &Ctx, set: &Set) -> AppResult<Option<Vec<Publication>>> {
+async fn owner_publications(
+    state: &AppState,
+    ctx: &Ctx,
+    set: &Set,
+) -> AppResult<(Option<Vec<Publication>>, HashMap<String, PublicationRow>)> {
     if set.owner_id != ctx.id() {
-        return Ok(None);
+        return Ok((None, HashMap::new()));
     }
-    Ok(Some(publish::list(state, &ctx.user, &set.id).await?))
+    Ok((
+        Some(publish::list(state, &ctx.user, &set.id).await?),
+        publish::stored_all(&state.db, &set.id).await?,
+    ))
 }
 
 fn render(state: &AppState, ctx: &Ctx, set: &Set, view: View<'_>) -> Markup {
@@ -108,7 +122,7 @@ fn render(state: &AppState, ctx: &Ctx, set: &Set, view: View<'_>) -> Markup {
     let body = html! {
         p.crumbs { a href=(set_url(&set.id)) { "← " (set.name) } }
         h1 { (tf("Export {name}", &[("name", &set.name)])) }
-        (downloads(set))
+        (downloads(state, set))
         (whatsapp_section(state, ctx, set, &view.whatsapp))
         @if let Some(publications) = &view.publications {
             (publish_section(state, ctx, set, publications, &view))
@@ -117,7 +131,7 @@ fn render(state: &AppState, ctx: &Ctx, set: &Set, view: View<'_>) -> Markup {
     layout::page_with_head(Some(&ctx.user), t("Export"), Nav::Sets, head, body)
 }
 
-fn downloads(set: &Set) -> Markup {
+fn downloads(state: &AppState, set: &Set) -> Markup {
     let link = |route: &str| r::path(route, &[&set.id]);
     html! {
         section #download aria-labelledby="download-head" {
@@ -134,6 +148,21 @@ fn downloads(set: &Set) -> Markup {
             }
             p.muted.small {
                 (t("RAR is not offered: making RAR archives needs the proprietary rar program. Everything that opens RAR opens ZIP too."))
+            }
+            @if set.item_count > 0 {
+                h3 #signal-zip { (t("Signal-ready zip")) }
+                p {
+                    (t("Every item as a 512x512 Signal sticker, numbered in order, with emoji.txt and a manifest.json for signal-cli. In Signal Desktop: File, Create/upload sticker pack, then drag the images in and pick the emoji emoji.txt lists."))
+                    @if !signal::configured(state) {
+                        " " (t("This server does not publish to Signal itself, so this is the way to make a Signal pack."))
+                    }
+                }
+                p.actions {
+                    a.button href=(signal::zip_url(&set.id)) download { (t("Signal-ready zip")) " (.zip)" }
+                }
+                p.muted.small {
+                    (t("Made when you download it, which takes a while for a large set; items that cannot become Signal stickers are listed in left-out.txt."))
+                }
             }
         }
     }
@@ -226,7 +255,7 @@ fn publish_section(state: &AppState, ctx: &Ctx, set: &Set, publications: &[Publi
                         } }
                         tbody {
                             @for p in &configured {
-                                (publication_row(state, ctx, p, view.form, only_one, &back))
+                                (publication_row(state, ctx, p, view, only_one, &back))
                             }
                         }
                     }
@@ -242,15 +271,44 @@ fn publish_section(state: &AppState, ctx: &Ctx, set: &Set, publications: &[Publi
     }
 }
 
+/// What was left out of, or changed for, the last publish (the job
+/// result's `skipped` and `notes`), each with the reason.
+fn result_details(result: &Value) -> Markup {
+    let list = |key: &str| result.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
+    let skipped = list("skipped");
+    let notes = list("notes");
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    html! {
+        @if !notes.is_empty() {
+            details {
+                summary { (plural(notes.len() as u64, "sticker was changed to fit", "stickers were changed to fit")) }
+                ul { @for n in &notes { li { (text(n, "name")) ": " (t_dyn(&text(n, "note"))) } } }
+            }
+        }
+        @if !skipped.is_empty() {
+            details {
+                summary { (plural(skipped.len() as u64, "item was left out", "items were left out")) }
+                ul { @for s in &skipped { li { (text(s, "name")) ": " (t_dyn(&text(s, "reason"))) } } }
+            }
+        }
+    }
+}
+
 fn publication_row(
     state: &AppState,
     ctx: &Ctx,
     p: &Publication,
-    form: &HashMap<String, String>,
+    view: &View<'_>,
     only_one: bool,
     back: &str,
 ) -> Markup {
+    let form = view.form;
     let platform = publish::platform(&p.platform);
+    let defaults: HashMap<&str, String> = platform
+        .map(|pl| pl.option_values(view.stored.get(&p.platform)))
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let check = format!("platform.{}", p.platform);
     let checked = if form.is_empty() {
         only_one || p.target.is_some()
@@ -280,6 +338,7 @@ fn publication_row(
                     (opt_time(Some(ts)))
                     @if let (Some(result), Some(pl)) = (&p.last_result, platform) {
                         br; span.small { (pl.summary(result)) }
+                        (result_details(result))
                     }
                 } @else {
                     (opt_time(None))
@@ -298,11 +357,24 @@ fn publication_row(
                         @let name = format!("{}.{}", p.platform, o.key);
                         @let field_id = format!("opt-{}-{}", p.platform, o.key);
                         @let hint_id = format!("{field_id}-hint");
+                        @let value = if form.is_empty() {
+                            defaults.get(o.key).map(String::as_str).unwrap_or("")
+                        } else {
+                            form.get(&name).map(String::as_str).unwrap_or("")
+                        };
                         div.field-row {
                             label for=(field_id) { (o.label) }
-                            input #(field_id) type="text" name=(name) maxlength=(o.max_chars)
-                                value=(form.get(&name).map(String::as_str).unwrap_or(""))
-                                aria-describedby=[o.hint.is_some().then_some(hint_id.as_str())] spellcheck="false";
+                            @if o.choices.is_empty() {
+                                input #(field_id) type="text" name=(name) maxlength=(o.max_chars)
+                                    value=(value)
+                                    aria-describedby=[o.hint.is_some().then_some(hint_id.as_str())] spellcheck="false";
+                            } @else {
+                                select #(field_id) name=(name) aria-describedby=[o.hint.is_some().then_some(hint_id.as_str())] {
+                                    @for (i, (v, label)) in o.choices.iter().enumerate() {
+                                        option value=(v) selected[*v == value || (i == 0 && value.is_empty())] { (label) }
+                                    }
+                                }
+                            }
                             @if let Some(h) = o.hint { p.hint #(hint_id) { (h) } }
                         }
                     }
@@ -356,9 +428,11 @@ pub async fn publish_submit(
         }
         Err(e) if e.status.is_client_error() && e.code != "not_found" && e.code != "forbidden" => {
             let set = sets::detail(&state, &ctx.user, &id).await?.set;
+            let (publications, stored) = owner_publications(&state, &ctx, &set).await?;
             let view = View {
                 whatsapp: whatsapp::status(&state, &ctx.user, &set.id).await?,
-                publications: owner_publications(&state, &ctx, &set).await?,
+                publications,
+                stored,
                 jobs: Vec::new(),
                 error: Some(t_dyn(&e.message)),
                 form: &form,

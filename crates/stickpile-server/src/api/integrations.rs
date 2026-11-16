@@ -1,7 +1,8 @@
-//! Git-pack, Telegram, publishing and WhatsApp endpoints (docs/git-packs.md,
-//! docs/telegram.md, docs/whatsapp.md). The work runs as background jobs;
-//! these handlers validate, enqueue and return the job. The git webhook is
-//! the only unauthenticated route here.
+//! Git-pack, Telegram, Discord, Signal, publishing and WhatsApp endpoints
+//! (docs/git-packs.md, docs/telegram.md, docs/discord.md, docs/signal.md,
+//! docs/whatsapp.md). The work runs as background jobs; these handlers
+//! validate, enqueue and return the job (the Signal-ready zip is made on
+//! request). The git webhook is the only unauthenticated route here.
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -10,15 +11,15 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use stickpile_api::routes as r;
 use stickpile_api::{
-    ApiError, CreateGitPack, GitPackCreated, Job, Publication, PublishJobs, PublishRequest, TelegramExport,
-    TelegramImport, WhatsappStatus,
+    ApiError, CreateGitPack, DiscordImport, GitPackCreated, Job, Publication, PublishJobs, PublishRequest,
+    SignalImport, TelegramExport, TelegramImport, WhatsappStatus,
 };
 use tower::ServiceExt;
 
 use super::disposition;
 use crate::auth::{ClientIp, CurrentUser};
 use crate::error::{AppError, AppResult};
-use crate::service::{gitpack, publish, telegram, whatsapp};
+use crate::service::{discord, gitpack, publish, signal, telegram, whatsapp};
 use crate::state::AppState;
 
 /// Largest webhook payload read (the route's default body limit is 2 MiB).
@@ -103,6 +104,56 @@ pub async fn telegram_import(
     Json(req): Json<TelegramImport>,
 ) -> AppResult<Json<Job>> {
     Ok(Json(telegram::import(&state, &user, req).await?))
+}
+
+/// Import a Discord server's stickers and/or emoji into a new set, as a job.
+#[utoipa::path(post, path = r::DISCORD_IMPORT, tag = "integrations", request_body = DiscordImport,
+    responses((status = 200, body = Job),
+              (status = 400, description = "bad server id or slug, or neither stickers nor emojis", body = ApiError),
+              (status = 404, description = "Discord disabled", body = ApiError),
+              (status = 409, description = "slug taken", body = ApiError), (status = 429, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn discord_import(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(req): Json<DiscordImport>,
+) -> AppResult<Json<Job>> {
+    Ok(Json(discord::import(&state, &user, req).await?))
+}
+
+/// Import a Signal sticker pack from its link into a new set, as a job.
+/// The link (it holds the pack's key) is used for the import only.
+#[utoipa::path(post, path = r::SIGNAL_IMPORT, tag = "integrations", request_body = SignalImport,
+    responses((status = 200, body = Job),
+              (status = 400, description = "not a Signal sticker pack link, or a bad slug", body = ApiError),
+              (status = 404, description = "Signal disabled", body = ApiError),
+              (status = 409, description = "slug taken", body = ApiError), (status = 429, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn signal_import(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(req): Json<SignalImport>,
+) -> AppResult<Json<Job>> {
+    Ok(Json(signal::import(&state, &user, req).await?))
+}
+
+/// The set as a Signal-ready zip: 512x512 stickers numbered in order,
+/// `emoji.txt`, `manifest.json` (signal-cli) and `README.txt`, for
+/// uploading by hand. Anyone who can read the set; works without Signal
+/// configured. Made on the first request after a change (counts as an
+/// upload for rate limiting), then reused.
+#[utoipa::path(get, path = r::SET_SIGNAL_ZIP, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, content_type = "application/zip", description = "zip archive"),
+              (status = 400, description = "no item can become a Signal sticker", body = ApiError),
+              (status = 404, body = ApiError), (status = 429, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn signal_zip(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    let (name, bytes) = signal::ready_zip(&state, &user, &id).await?;
+    Ok(super::sets::attachment(bytes, "application/zip", &name))
 }
 
 /// Where the set is published, one entry per platform the server knows

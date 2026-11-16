@@ -1,9 +1,11 @@
 //! Shared helpers of the `integrations_*` tests: local git repositories, an
-//! HMAC for webhook signatures, and a compact in-process mock of the
-//! Telegram Bot API.
+//! HMAC for webhook signatures, a compact in-process mock of the
+//! Telegram Bot API, and copies of the Discord and Signal crates' mocks.
 #![allow(dead_code)]
 
 pub mod mock_bot;
+pub mod mock_discord;
+pub mod mock_signal;
 
 use std::fs;
 use std::path::{Path, PathBuf};

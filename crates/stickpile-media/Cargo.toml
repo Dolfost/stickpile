@@ -26,5 +26,8 @@ tracing.workspace = true
 # Raw PNG decode/encode (palette, bit depth and tRNS kept as-is); same
 # version the image crate already pulls in.
 png = "0.18"
+# NeuQuant palettes for APNG and GIF stickers (Discord, Signal); the version
+# the gif and image crates already pull in.
+color_quant = "1.1"
 
 [dev-dependencies]

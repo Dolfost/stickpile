@@ -107,6 +107,20 @@ let
     }
     {
       path = [
+        "discord"
+        "bot_token_file"
+      ];
+      name = "discord-bot-token";
+    }
+    {
+      path = [
+        "signal"
+        "credentials_file"
+      ];
+      name = "signal-credentials";
+    }
+    {
+      path = [
         "git"
         "ssh_key_file"
       ];
@@ -399,6 +413,42 @@ in
             '';
           };
 
+          discord = section "Discord import and publishing through a bot (docs/discord.md)." {
+            enabled = opt types.bool false ''
+              Enable Discord import and publishing (stickers or emoji of a
+              server the bot is in). Needs `bot_token_file`.
+            '';
+            bot_token_file = secretOpt "/run/secrets/stickpile-discord-bot-token" ''
+              Bot token. The bot needs the Create Expressions permission in
+              each server it publishes to.
+            '';
+            api_url = opt types.str "https://discord.com/api/v10" "REST API base URL (override for tests).";
+            cdn_url = opt types.str "https://cdn.discordapp.com" "Image CDN imports download from (tests).";
+            media_url = opt types.str "https://media.discordapp.net" "Media proxy serving GIF stickers (tests).";
+          };
+
+          signal = section "Signal sticker packs (docs/signal.md)." {
+            enabled = opt types.bool false ''
+              Enable Signal pack import from links; with `credentials_file`
+              also publishing. The Signal-ready zip download needs neither.
+            '';
+            credentials_file = secretOpt "/run/secrets/stickpile-signal-credentials.json" ''
+              JSON credentials of a dedicated Signal account or linked device
+              (`aci`, `device_id`, `password`; or a signal-cli account file)
+              that uploads packs.
+            '';
+            service_url = opt types.str "https://chat.signal.org" ''
+              Chat service base URL, which issues upload forms (override for
+              tests).
+            '';
+            cdn_url = opt types.str "https://cdn.signal.org" "CDN base URL for pack files (tests).";
+            trust_public_roots = opt types.bool false ''
+              Also trust the public web PKI for the Signal hosts, not only
+              Signal's own root certificate (in case Signal moves a host to a
+              public CA).
+            '';
+          };
+
           git = section "Git packs: sets bound to a remote repository." {
             enabled = opt types.bool true "Allow binding sets to git repositories.";
             pull_interval_minutes = opt u32 60 "Re-pull interval.";
@@ -442,6 +492,10 @@ in
       {
         assertion = !s.telegram.enabled || s.telegram.bot_token_file != null;
         message = "services.stickpile.settings.telegram.enabled requires telegram.bot_token_file.";
+      }
+      {
+        assertion = !s.discord.enabled || s.discord.bot_token_file != null;
+        message = "services.stickpile.settings.discord.enabled requires discord.bot_token_file.";
       }
     ];
 

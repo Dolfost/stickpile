@@ -106,7 +106,9 @@ pub fn profile(target: TargetApp) -> TargetProfile {
             animation_formats: vec![Gif],
             video_formats: vec![Mp4],
             sticker: None,
-            notes: "Sticker packs must be created in Signal itself.".into(),
+            notes: "Sticker packs are made from sets: the server uploads them with a Signal account, or offers \
+                    a Signal-ready zip for Signal Desktop's sticker creator."
+                .into(),
         },
         TargetApp::Whatsapp => TargetProfile {
             target,

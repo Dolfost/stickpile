@@ -1,10 +1,11 @@
 //! Publishing a set to chat platforms, one or several at once
 //! (docs/web.md "Export and publish", docs/api.md "Publishing").
 //!
-//! Every platform is a [`Platform`] listed in [`PLATFORMS`]. Telegram is
-//! the first; Discord and Signal are added the same way: implement the
-//! trait, add the value to [`PLATFORMS`], add the job kind and its arm in
-//! [`crate::jobs::dispatch`]. A platform provides:
+//! Every platform is a [`Platform`] listed in [`PLATFORMS`]: Telegram
+//! (here), Discord ([`crate::service::discord`]) and Signal
+//! ([`crate::service::signal`]). A new one is added the same way: implement
+//! the trait, add the value to [`PLATFORMS`], add the job kind and its arm
+//! in [`crate::jobs::dispatch`]. A platform provides:
 //!
 //! * its id (the API's name for it), its display name and whether this
 //!   server is configured for it;
@@ -17,9 +18,9 @@
 //!   reads its own binding (`sets.telegram_pack`); other platforms keep
 //!   theirs in `set_publications` (migration 0012) with [`bind`] and
 //!   [`stored`];
-//! * the options it takes ([`Platform::options`], text fields on the
-//!   export page) and a one-line summary of a job result
-//!   ([`Platform::summary`]).
+//! * the options it takes ([`Platform::options`], text fields or choices
+//!   on the export page, prefilled by [`Platform::option_values`]) and a
+//!   one-line summary of a job result ([`Platform::summary`]).
 //!
 //! When a job of a platform's kind finishes, the job queue calls
 //! [`record_job`], which stores the outcome in `set_publications`: when the
@@ -44,13 +45,15 @@ use crate::error::{AppError, AppResult};
 use crate::i18n::{t, tf};
 use crate::ids::now;
 use crate::jobs::{self, JobRow, JOB_COLUMNS};
+use crate::service::discord::DiscordPlatform;
+use crate::service::signal::SignalPlatform;
 use crate::service::telegram;
 use crate::state::AppState;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// One option a platform takes: a text field on the export page and a key
-/// of the platform's object in [`PublishRequest::options`].
+/// One option a platform takes: a field on the export page and a key of
+/// the platform's object in [`PublishRequest::options`].
 #[derive(Debug, Clone)]
 pub struct PlatformOption {
     pub key: &'static str,
@@ -58,6 +61,8 @@ pub struct PlatformOption {
     pub label: &'static str,
     pub hint: Option<&'static str>,
     pub max_chars: usize,
+    /// (value, label) of a choice; empty for a text field.
+    pub choices: Vec<(&'static str, &'static str)>,
 }
 
 /// A row of `set_publications`.
@@ -121,6 +126,12 @@ pub trait Platform: Send + Sync {
         let _ = (state, user);
         None
     }
+    /// Values to prefill the options with on the export page (key, value),
+    /// e.g. what the set was last published with.
+    fn option_values(&self, row: Option<&PublicationRow>) -> Vec<(&'static str, String)> {
+        let _ = row;
+        Vec::new()
+    }
 }
 
 /// Telegram: a sticker pack the bot owns (docs/telegram.md).
@@ -150,12 +161,14 @@ impl Platform for TelegramPlatform {
                 label: t("Pack short name (optional)"),
                 hint: Some(t("Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug.")),
                 max_chars: 64,
+                choices: Vec::new(),
             },
             PlatformOption {
                 key: "title",
                 label: t("Pack title (optional)"),
                 hint: None,
                 max_chars: 64,
+                choices: Vec::new(),
             },
         ]
     }
@@ -211,8 +224,7 @@ impl Platform for TelegramPlatform {
 }
 
 /// Every platform the server knows, in the order pages list them.
-/// Discord and Signal go here once implemented.
-pub static PLATFORMS: &[&dyn Platform] = &[&TelegramPlatform];
+pub static PLATFORMS: &[&dyn Platform] = &[&TelegramPlatform, &DiscordPlatform, &SignalPlatform];
 
 pub fn platform(id: &str) -> Option<&'static dyn Platform> {
     PLATFORMS.iter().copied().find(|p| p.id() == id)
@@ -436,6 +448,8 @@ mod tests {
             assert_eq!(for_job(a.job_kind()).map(|p| p.id()), Some(a.id()));
         }
         assert!(platform("telegram").is_some());
+        assert!(platform("discord").is_some());
+        assert!(platform("signal").is_some());
         assert!(platform("myspace").is_none());
         assert!(for_job(JobKind::Variants).is_none());
     }

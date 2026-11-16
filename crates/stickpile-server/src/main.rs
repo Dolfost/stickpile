@@ -109,6 +109,31 @@ fn config_warnings(cfg: &stickpile_server::Config) -> Vec<String> {
             out.push(format!("{w} (the Telegram integration stays off)"));
         }
     }
+    if cfg.discord.enabled {
+        if let Some(p) = cfg.discord.bot_token_file.as_deref() {
+            // The crate's errors name the file, never the token.
+            if let Err(e) = stickpile_discord::BotToken::from_file(p) {
+                out.push(format!(
+                    "discord.bot_token_file: {e} (the Discord integration stays off)"
+                ));
+            }
+        }
+    }
+    if cfg.signal.enabled {
+        match cfg.signal.credentials_file.as_deref() {
+            // The crate's errors name the file, never the password.
+            Some(p) => {
+                if let Err(e) = stickpile_signal::Credentials::from_file(p) {
+                    out.push(format!("{e} (publishing to Signal stays off; pack import works)"));
+                }
+            }
+            None => out.push(
+                "signal.enabled = true without signal.credentials_file: packs can be imported, \
+                 not published (the Signal-ready zip works either way)"
+                    .into(),
+            ),
+        }
+    }
     if cfg.git.enabled {
         if let Some(w) = cfg
             .git

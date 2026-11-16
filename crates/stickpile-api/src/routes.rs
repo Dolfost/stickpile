@@ -79,6 +79,14 @@ pub const GIT_WEBHOOK: &str = "/api/v1/hooks/git/{id}";
 pub const SET_TELEGRAM_EXPORT: &str = "/api/v1/sets/{id}/telegram/export";
 /// POST [`crate::model::TelegramImport`] -> [`crate::model::Job`]
 pub const TELEGRAM_IMPORT: &str = "/api/v1/telegram/import";
+/// POST [`crate::model::DiscordImport`] -> [`crate::model::Job`]
+pub const DISCORD_IMPORT: &str = "/api/v1/discord/import";
+/// POST [`crate::model::SignalImport`] -> [`crate::model::Job`]
+pub const SIGNAL_IMPORT: &str = "/api/v1/signal/import";
+/// GET -> `application/zip`: the set as a Signal-ready folder (512x512
+/// stickers, `emoji.txt`, a `manifest.json` for signal-cli) to upload by
+/// hand (anyone who can read the set).
+pub const SET_SIGNAL_ZIP: &str = "/api/v1/sets/{id}/signal.zip";
 /// GET -> `Vec<`[`crate::model::Publication`]`>`: where the set is published,
 /// per platform the server knows (owner). POST
 /// [`crate::model::PublishRequest`] -> [`crate::model::PublishJobs`]: one

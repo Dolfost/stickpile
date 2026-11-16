@@ -78,7 +78,8 @@ pub enum Command {
         output: Option<PathBuf>,
     },
     /// Publish a set to one or several platforms at once (--to
-    /// telegram,...), or show where it is published (without --to)
+    /// telegram,discord,signal), or show where it is published (without
+    /// --to)
     Publish(PublishArgs),
     /// Search your library (falls back to the offline cache)
     Search(SearchArgs),
@@ -332,12 +333,13 @@ pub enum ExportFormat {
 pub struct PublishArgs {
     /// Set id or own slug
     pub set: String,
-    /// Platforms to publish to, comma-separated (e.g. telegram); without
-    /// it, show where the set is published
+    /// Platforms to publish to, comma-separated (telegram, discord,
+    /// signal); without it, show where the set is published
     #[arg(long, value_delimiter = ',', value_name = "PLATFORMS")]
     pub to: Vec<String>,
-    /// An option of one platform as PLATFORM.KEY=VALUE, e.g.
-    /// telegram.pack_name=cats or telegram.title=Cats (repeatable)
+    /// An option of one platform as PLATFORM.KEY=VALUE (repeatable):
+    /// telegram.pack_name, telegram.title, discord.guild_id (the server id;
+    /// required the first time), discord.kind (stickers or emojis)
     #[arg(long = "option", short = 'O', value_name = "PLATFORM.KEY=VALUE", value_parser = parse_platform_option, requires = "to")]
     pub options: Vec<(String, String, String)>,
     /// Wait for the jobs to finish
@@ -762,6 +764,26 @@ mod tests {
         let Command::Publish(a) = cli.command else { panic!() };
         assert_eq!(a.to, ["telegram", "discord"]);
         assert_eq!(a.options, [("telegram".into(), "title".into(), "A = B".into())]);
+        let cli = parse(&[
+            "publish",
+            "cats",
+            "--to",
+            "discord,signal",
+            "-O",
+            "discord.guild_id=100000000000000001",
+            "-O",
+            "discord.kind=emojis",
+        ])
+        .unwrap();
+        let Command::Publish(a) = cli.command else { panic!() };
+        assert_eq!(a.to, ["discord", "signal"]);
+        assert_eq!(
+            a.options,
+            [
+                ("discord".into(), "guild_id".into(), "100000000000000001".into()),
+                ("discord".into(), "kind".into(), "emojis".into()),
+            ]
+        );
         let cli = parse(&["export", "cats", "--format", "tgz", "-o", "x"]).unwrap();
         assert!(matches!(
             cli.command,

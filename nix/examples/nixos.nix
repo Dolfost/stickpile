@@ -66,6 +66,14 @@
         api_url = "https://api.telegram.org";
         default_owner_user_id = 123456789;
       };
+      discord = {
+        enabled = true;
+        bot_token_file = "/run/secrets/stickpile-discord-bot-token";
+      };
+      signal = {
+        enabled = true;
+        credentials_file = "/run/secrets/stickpile-signal-credentials.json";
+      };
       git = {
         enabled = true;
         pull_interval_minutes = 60;

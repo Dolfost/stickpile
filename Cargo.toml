@@ -41,6 +41,8 @@ stickpile-setfmt = { path = "crates/stickpile-setfmt" }
 stickpile-media = { path = "crates/stickpile-media" }
 stickpile-ai = { path = "crates/stickpile-ai", default-features = false }
 stickpile-telegram = { path = "crates/stickpile-telegram" }
+stickpile-discord = { path = "crates/stickpile-discord" }
+stickpile-signal = { path = "crates/stickpile-signal" }
 stickpile-gitpack = { path = "crates/stickpile-gitpack" }
 stickpile-core = { path = "crates/stickpile-core", default-features = false }
 stickpile-quick = { path = "crates/stickpile-quick" }
@@ -125,4 +127,10 @@ strip = true
 strip = false
 
 [profile.dev.package."*"]
+opt-level = 2
+
+# Pixel loops (sticker palettes, frame diffs, resizing generic over the
+# image type) are compiled in this crate: unoptimised they take tens of
+# seconds per animated Signal sticker in tests and debug servers.
+[profile.dev.package.stickpile-media]
 opt-level = 2

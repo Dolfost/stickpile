@@ -110,7 +110,7 @@ async fn fingerprint(state: &AppState, set: &SetRow, publisher: &str, rows: &[It
     Ok(hex::encode(h.finalize()))
 }
 
-async fn publisher(state: &AppState, set: &SetRow) -> AppResult<Option<String>> {
+pub(crate) async fn publisher(state: &AppState, set: &SetRow) -> AppResult<Option<String>> {
     Ok(db::user_by_id(&state.db, &set.owner_id).await?.map(|u| {
         let name = u.display_name.trim();
         if name.is_empty() {
@@ -250,7 +250,7 @@ struct Made {
     note: Option<String>,
 }
 
-fn probe_of(r: &ItemFull) -> stickpile_media::Probe {
+pub(crate) fn probe_of(r: &ItemFull) -> stickpile_media::Probe {
     stickpile_media::Probe {
         format: r.format(),
         kind: r.kind(),
@@ -347,7 +347,11 @@ async fn render(state: &AppState, r: &ItemFull, abs: PathBuf) -> Result<Rendered
 
 /// The tray icon of the first pack: the set's cover image or chosen cover
 /// item, if it has one.
-async fn cover_frame(state: &AppState, set: &SetRow, rows: &[ItemFull]) -> Result<Option<image::RgbaImage>, JobError> {
+pub(crate) async fn cover_frame(
+    state: &AppState,
+    set: &SetRow,
+    rows: &[ItemFull],
+) -> Result<Option<image::RgbaImage>, JobError> {
     let path = if let Some(media_id) = &set.cover_media_id {
         cover::variant_row(&state.db, media_id, Variant::Original)
             .await?

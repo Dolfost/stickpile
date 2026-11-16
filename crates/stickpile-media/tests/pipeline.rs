@@ -1091,3 +1091,73 @@ fn whatsapp_still_is_padded_and_not_animated() {
     assert_eq!(back.get_pixel(256, 5)[3], 0, "padded above");
     assert_eq!(back.get_pixel(256, 506)[3], 0, "padded below");
 }
+
+/// Discord's and Signal's sticker renditions (`pack`): APNG and GIF from an
+/// animated WebP, an MP4 (cut) and a WebM with alpha. The platforms' own
+/// checks run in the server's tests (stickpile-discord, stickpile-signal).
+#[test]
+fn pack_stickers_from_animations_and_videos() {
+    use stickpile_media::pack::{self, AnimationFormat, PackTarget, StillFormat};
+    let e = env();
+    let dir = tempfile::tempdir().unwrap();
+    let apng = PackTarget {
+        side: 512,
+        max_bytes: 300 * 1024,
+        max_animation_ms: 3000,
+        still: StillFormat::Webp,
+        animation: AnimationFormat::Apng,
+    };
+    let gif = PackTarget {
+        side: 128,
+        max_bytes: 256 * 1024,
+        max_animation_ms: 10_000,
+        still: StillFormat::Png,
+        animation: AnimationFormat::Gif,
+    };
+    for (name, bytes, long) in [
+        ("anim.webp", animated_webp(64, 64, 6), false),
+        ("clip.mp4", mp4_fixture(dir.path(), 4), true),
+        ("alpha.webm", webm_fixture(dir.path(), true), false),
+    ] {
+        let ing = ingest(&bytes, &opts(), &e.tools).unwrap();
+        let path = dir.path().join(format!("orig-{name}"));
+        std::fs::write(&path, &ing.original).unwrap();
+
+        let s = pack::sticker(&path, &ing.probe, &e.tools, &apng).unwrap().unwrap();
+        assert!(s.animated && s.frames > 1, "{name}: {s:?}");
+        assert!(s.bytes.len() as u64 <= apng.max_bytes, "{name}: {}", s.bytes.len());
+        assert!(s.duration_ms <= 3000, "{name}: {}", s.duration_ms);
+        assert_eq!(s.cut, long, "{name}");
+        let dec = image::codecs::png::PngDecoder::new(Cursor::new(&s.bytes)).unwrap();
+        assert!(dec.is_apng().unwrap(), "{name}");
+        let frames: Vec<image::Frame> = dec.apng().unwrap().into_frames().collect::<Result<_, _>>().unwrap();
+        assert_eq!(frames.len() as u32, s.frames, "{name}");
+        let (w, h) = frames[0].buffer().dimensions();
+        assert_eq!((w, h), (s.side, s.side), "{name}");
+        let total: u32 = frames
+            .iter()
+            .map(|f| {
+                let (n, d) = f.delay().numer_denom_ms();
+                n / d
+            })
+            .sum();
+        assert_eq!(u64::from(total), s.duration_ms, "{name}");
+
+        let g = pack::sticker(&path, &ing.probe, &e.tools, &gif).unwrap().unwrap();
+        assert!(g.animated && !g.cut, "{name}: {g:?}");
+        assert!(g.bytes.starts_with(b"GIF89a"), "{name}");
+        assert!(g.bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "{name}: loops");
+        let dec = image::codecs::gif::GifDecoder::new(Cursor::new(&g.bytes)).unwrap();
+        let frames: Vec<image::Frame> = dec.into_frames().collect::<Result<_, _>>().unwrap();
+        assert!(frames.len() > 1, "{name}");
+        assert_eq!(frames[0].buffer().dimensions(), (g.side, g.side), "{name}");
+    }
+    // The WebM's transparent left half stays transparent.
+    let ing = ingest(&webm_fixture(dir.path(), true), &opts(), &e.tools).unwrap();
+    let path = dir.path().join("alpha-again.webm");
+    std::fs::write(&path, &ing.original).unwrap();
+    let s = pack::sticker(&path, &ing.probe, &e.tools, &apng).unwrap().unwrap();
+    let first = image::load_from_memory(&s.bytes).unwrap().to_rgba8();
+    assert_eq!(first.get_pixel(s.side / 6, s.side / 2)[3], 0);
+    assert_eq!(first.get_pixel(s.side * 5 / 6, s.side / 2)[3], 255);
+}

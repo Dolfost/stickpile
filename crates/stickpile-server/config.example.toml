@@ -57,6 +57,25 @@ bot_token_file = "/run/secrets/stickpile-telegram-bot-token"
 api_url = "https://api.telegram.org"
 default_owner_user_id = 123456789
 
+# Discord import and publishing through a bot (docs/discord.md). The bot
+# needs the Create Expressions permission in each server.
+[discord]
+enabled = true
+bot_token_file = "/run/secrets/stickpile-discord-bot-token"
+api_url = "https://discord.com/api/v10"
+cdn_url = "https://cdn.discordapp.com"
+media_url = "https://media.discordapp.net"
+
+# Signal pack import from links; with credentials_file (a dedicated Signal
+# account, docs/signal.md) also publishing. The Signal-ready zip needs
+# neither.
+[signal]
+enabled = true
+credentials_file = "/run/secrets/stickpile-signal-credentials.json"
+service_url = "https://chat.signal.org"
+cdn_url = "https://cdn.signal.org"
+trust_public_roots = false
+
 [git]
 enabled = true
 pull_interval_minutes = 60

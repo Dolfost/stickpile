@@ -181,6 +181,14 @@ pub enum JobKind {
     TelegramExport,
     /// Build the WhatsApp sticker packs (`.wastickers`) of a set for download.
     WhatsappExport,
+    /// Import a Discord server's stickers and/or emoji into a new set.
+    DiscordImport,
+    /// Publish a set to a Discord server as stickers or emoji.
+    DiscordExport,
+    /// Import a Signal sticker pack from its link into a new set.
+    SignalImport,
+    /// Upload a set as a new Signal sticker pack.
+    SignalExport,
 }
 
 /// Chat apps clients can target. `Generic` = browser chats and anything unknown.
@@ -862,6 +870,60 @@ pub struct TelegramExport {
     pub title: Option<String>,
 }
 
+/// `POST /api/v1/discord/import`: a Discord server's stickers and/or emoji
+/// into a new set of the caller.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DiscordImport {
+    /// The server ("guild") id, a number like `100000000000000001`.
+    pub guild_id: String,
+    /// Import the server's stickers (default true).
+    #[serde(default = "yes")]
+    pub stickers: bool,
+    /// Import the server's emoji (default false).
+    #[serde(default)]
+    pub emojis: bool,
+    /// Slug for the new set; default derived from the server's name.
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub visibility: Visibility,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// `options.discord` of a [`PublishRequest`]: where and as what to publish
+/// a set on Discord. Both are strings, as the export page and the CLI send
+/// them.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DiscordExport {
+    /// The server ("guild") id; default the one this set was published to
+    /// last. Required the first time.
+    #[serde(default, alias = "guild")]
+    pub guild_id: Option<String>,
+    /// `stickers` (default) or `emojis`.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// `POST /api/v1/signal/import`: a Signal sticker pack into a new set of
+/// the caller.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SignalImport {
+    /// `https://signal.art/addstickers/#pack_id=...&pack_key=...` or
+    /// `sgnl://addstickers/?pack_id=...&pack_key=...`. The key in it opens
+    /// the pack: the server uses it for the import only and does not keep
+    /// it.
+    pub link: String,
+    /// Slug for the new set; default derived from the pack's title.
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub visibility: Visibility,
+}
+
 // ---------------------------------------------------------------------------
 // Publishing to several platforms, WhatsApp packs
 // ---------------------------------------------------------------------------
@@ -870,12 +932,13 @@ pub struct TelegramExport {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PublishRequest {
-    /// Platform ids ([`Publication::platform`]), e.g. `["telegram"]`.
-    /// Unknown or unconfigured ones fail the whole request (400).
+    /// Platform ids ([`Publication::platform`]): `telegram`, `discord`,
+    /// `signal`. Unknown or unconfigured ones fail the whole request (400).
     pub platforms: Vec<String>,
     /// Options per platform id, e.g. `{"telegram": {"pack_name": "cats",
-    /// "title": "Cats"}}` (Telegram's are [`TelegramExport`]). A platform
-    /// without an entry uses its defaults.
+    /// "title": "Cats"}, "discord": {"guild_id": "1000", "kind": "emojis"}}`
+    /// (Telegram's are [`TelegramExport`], Discord's [`DiscordExport`];
+    /// Signal takes none). A platform without an entry uses its defaults.
     #[serde(default)]
     pub options: std::collections::BTreeMap<String, serde_json::Value>,
 }

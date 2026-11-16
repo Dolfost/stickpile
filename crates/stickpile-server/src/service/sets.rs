@@ -49,6 +49,48 @@ pub fn validate_slug(slug: &str) -> AppResult<()> {
     }
 }
 
+/// A slug an import request asked for: valid and free for `owner_id`
+/// (409 otherwise); `None` when none was given.
+pub async fn requested_slug(db: &SqlitePool, owner_id: &str, slug: Option<&str>) -> AppResult<Option<String>> {
+    let Some(slug) = slug.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    validate_slug(slug)?;
+    let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM sets WHERE owner_id = ? AND slug = ?")
+        .bind(owner_id)
+        .bind(slug)
+        .fetch_optional(db)
+        .await?;
+    if taken.is_some() {
+        return Err(AppError::conflict(format!("you already have a set with slug {slug:?}")));
+    }
+    Ok(Some(slug.to_string()))
+}
+
+/// `base`, else `base-2`, `base-3`, ...: the first valid slug `owner_id`
+/// has no set with (imports that name a set after what they import).
+pub async fn free_slug(db: &SqlitePool, owner_id: &str, base: &str) -> AppResult<String> {
+    let base: String = base.chars().take(56).collect();
+    let base = base.trim_matches('-');
+    let base = if validate_slug(base).is_ok() { base } else { "set" };
+    for n in 1..1000u32 {
+        let slug = if n == 1 {
+            base.to_string()
+        } else {
+            format!("{base}-{n}")
+        };
+        let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM sets WHERE owner_id = ? AND slug = ?")
+            .bind(owner_id)
+            .bind(&slug)
+            .fetch_optional(db)
+            .await?;
+        if taken.is_none() {
+            return Ok(slug);
+        }
+    }
+    Err(AppError::conflict(format!("no free slug like {base:?}")))
+}
+
 pub fn validate_name(name: &str) -> AppResult<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 200 || name.chars().any(char::is_control) {

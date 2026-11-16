@@ -168,7 +168,7 @@ pub(crate) fn square_png(frame: &RgbaImage, side: u32) -> Result<Vec<u8>, MediaE
     Ok(out)
 }
 
-fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, MediaError> {
+pub(crate) fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, MediaError> {
     let mut out = Vec::new();
     let enc = image::codecs::png::PngEncoder::new_with_quality(
         &mut out,

@@ -1,0 +1,61 @@
+# Ukrainian: web-platforms. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+
+# Discord: publishing (service/discord.rs), import (web/integrations.rs).
+Discord server id	Ідентифікатор сервера Discord
+In Discord: Settings, Advanced, Developer Mode on; then right-click the server and Copy Server ID. Empty: the server used last time.	У Discord: Налаштування, Розширені, увімкніть Режим розробника; потім клацніть сервер правою кнопкою й виберіть Копіювати ID сервера. Порожнє поле: сервер, використаний минулого разу.
+In Discord: Settings, Advanced, Developer Mode on; then right-click the server and Copy Server ID.	У Discord: Налаштування, Розширені, увімкніть Режим розробника; потім клацніть сервер правою кнопкою й виберіть Копіювати ID сервера.
+Publish as	Опублікувати як
+Stickers	Стікери
+Emoji	Емодзі
+The bot must be a member of the server with the Create Expressions permission. Only what stickpile created there is changed.	Бот має бути учасником сервера з дозволом Create Expressions. Змінюється лише те, що там створив stickpile.
+choose stickers, emojis or both to import	виберіть для імпорту стікери, емодзі або те й інше
+guild_id is required the first time: the id of the Discord server to publish to	guild_id потрібен для першої публікації: ідентифікатор сервера Discord, на якому публікувати
+guild_id must be a Discord server id (a number like 100000000000000001) or a discord.com/channels/ link	guild_id має бути ідентифікатором сервера Discord (числом на кшталт 100000000000000001) або посиланням discord.com/channels/
+kind must be stickers or emojis	kind має бути stickers або emojis
+{exported} emoji: {added} added, {removed} removed, {skipped} left out	Емодзі: {exported}; додано {added}, вилучено {removed}, пропущено {skipped}
+another stickpile user publishes this kind (stickers or emoji) to that Discord server; choose another server or the other kind	інший користувач stickpile публікує цей вид (стікери чи емодзі) на тому сервері Discord; виберіть інший сервер або інший вид
+the Discord integration is disabled on this server (discord.enabled or the bot token is missing)	інтеграцію з Discord вимкнено на цьому сервері (бракує discord.enabled або токена бота)
+Discord import	Імпорт із Discord
+Discord export	Експорт у Discord
+discord import	імпорт із discord
+discord export	експорт у discord
+Import from Discord	Імпортувати з Discord
+Import the stickers or emoji of a Discord server	Імпортувати стікери чи емодзі сервера Discord
+A Discord server's stickers and/or emoji become a new set, with their names, emoji and tags. The bot must be a member of the server.	Стікери та/або емодзі сервера Discord стануть новим набором зі своїми назвами, емодзі й тегами. Бот має бути учасником сервера.
+Stickers and emoji the bot made there stay linked to the new set, so publishing it back to the same server keeps them.	Стікери й емодзі, які там створив бот, лишаються пов'язаними з новим набором, тож публікація набору на той самий сервер їх збереже.
+What to import	Що імпортувати
+the same file as an earlier sticker or emoji	той самий файл, що й у попереднього стікера чи емодзі
+
+# Renditions for Discord and Signal (service/renditions.rs), shown with the
+# last publish.
+does not fit the 512 KB limit of Discord stickers	не вміщується в обмеження Discord 512 КБ для стікерів
+does not fit the 512 KB limit of Discord stickers, even smaller and at 5 frames per second	не вміщується в обмеження Discord 512 КБ для стікерів навіть у меншому розмірі й за 5 кадрів на секунду
+does not fit the 256 KB limit of Discord emoji	не вміщується в обмеження Discord 256 КБ для емодзі
+does not fit the 256 KB limit of Discord emoji, even smaller and at 5 frames per second	не вміщується в обмеження Discord 256 КБ для емодзі навіть у меншому розмірі й за 5 кадрів на секунду
+does not fit the 300 KB limit of Signal stickers	не вміщується в обмеження Signal 300 КБ для стікерів
+does not fit the 300 KB limit of Signal stickers, even smaller and at 5 frames per second	не вміщується в обмеження Signal 300 КБ для стікерів навіть у меншому розмірі й за 5 кадрів на секунду
+cut to the first 3 seconds	обрізано до перших 3 секунд
+cut to the first 5 seconds	обрізано до перших 5 секунд
+a Signal pack holds at most 200 stickers	набір Signal вміщує щонайбільше 200 стікерів
+
+# Signal: publishing and the Signal-ready zip (service/signal.rs,
+# web/export.rs), import (web/integrations.rs).
+Signal packs cannot be changed: every publish uploads a new pack with a new link. People who added an older pack keep its stickers.	Набори Signal не можна змінити: кожна публікація завантажує новий набір із новим посиланням. Хто додав старіший набір, зберігає його стікери.
+link must be a Signal sticker pack link: https://signal.art/addstickers/#pack_id=...&pack_key=... or sgnl://addstickers/?pack_id=...&pack_key=...	link має бути посиланням на набір стікерів Signal: https://signal.art/addstickers/#pack_id=...&pack_key=... або sgnl://addstickers/?pack_id=...&pack_key=...
+no item of this set can become a Signal sticker	жоден стікер цього набору не підходить для Signal
+options.signal: Signal takes no options	options.signal: Signal не має параметрів
+{exported} stickers in a new pack, {skipped} left out	Стікерів у новому наборі: {exported}; пропущено {skipped}
+the Signal integration is disabled on this server (signal.enabled)	інтеграцію з Signal вимкнено на цьому сервері (signal.enabled)
+Signal import	Імпорт із Signal
+Signal export	Експорт у Signal
+signal import	імпорт із signal
+signal export	експорт у signal
+Import a Signal pack	Імпортувати набір із Signal
+Import a Signal sticker pack	Імпортувати набір стікерів із Signal
+Pack link	Посилання на набір
+The pack becomes a new set; each sticker keeps its emoji, and the pack's cover becomes the set's cover. Animated stickers keep only their first frame.	Набір із Signal стане новим набором; кожен стікер збереже свій емодзі, а обкладинка набору стане обкладинкою. Анімовані стікери збережуть лише перший кадр.
+The link holds the key that opens the pack. The server uses it for this import only and does not keep it.	Посилання містить ключ, який відкриває набір. Сервер використовує його лише для цього імпорту й не зберігає.
+Signal-ready zip	Zip для Signal
+Every item as a 512x512 Signal sticker, numbered in order, with emoji.txt and a manifest.json for signal-cli. In Signal Desktop: File, Create/upload sticker pack, then drag the images in and pick the emoji emoji.txt lists.	Усі стікери як стікери Signal 512x512, пронумеровані по порядку, з emoji.txt і manifest.json для signal-cli. У Signal Desktop: File, Create/upload sticker pack, потім перетягніть зображення й виберіть емодзі, указані в emoji.txt.
+This server does not publish to Signal itself, so this is the way to make a Signal pack.	Цей сервер сам не публікує в Signal, тож так можна створити набір для Signal.
+Made when you download it, which takes a while for a large set; items that cannot become Signal stickers are listed in left-out.txt.	Створюється під час звантаження, для великого набору це триває довше; стікери, які не підходять для Signal, перелічено в left-out.txt.

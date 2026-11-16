@@ -4060,6 +4060,7 @@ dependencies = [
 name = "stickpile-media"
 version = "0.5.2"
 dependencies = [
+ "color_quant",
  "gif 0.13.3",
  "hex",
  "image",
@@ -4131,11 +4132,13 @@ dependencies = [
  "sqlx",
  "stickpile-ai",
  "stickpile-api",
+ "stickpile-discord",
  "stickpile-gitpack",
  "stickpile-i18n",
  "stickpile-media",
  "stickpile-search",
  "stickpile-setfmt",
+ "stickpile-signal",
  "stickpile-telegram",
  "subtle",
  "tar",

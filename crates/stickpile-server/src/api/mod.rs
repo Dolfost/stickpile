@@ -66,6 +66,9 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
         .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))
         .route(r::TELEGRAM_IMPORT, post(integrations::telegram_import))
+        .route(r::DISCORD_IMPORT, post(integrations::discord_import))
+        .route(r::SIGNAL_IMPORT, post(integrations::signal_import))
+        .route(r::SET_SIGNAL_ZIP, get(integrations::signal_zip))
         .route(
             r::SET_PUBLISH,
             get(integrations::publications).post(integrations::publish_set),
