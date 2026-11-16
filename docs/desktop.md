@@ -214,7 +214,8 @@ While a filter is typed in the search field (`vibe:`, `tag:`, `-tag:`,
 `b:`), a line under the field offers its
 values: the vibes, tags, packs and owners of the items you can see (from
 the offline cache), most used first, and the fixed words of `type:`, `is:`
-and `sort:`. Inside a pack the pack's own values come first. They match what is typed so far: its start first, then
+and `sort:`. Inside a pack the pack's own values come first. They match
+what is typed so far: its start first, then
 anywhere in the value, then with a typo or two forgiven, so `vibe:sarcstic`
 and `vibe:sacr` still offer `sarcastic`. The line pushes the grid down
 instead of covering it, and goes away with the space after the value.

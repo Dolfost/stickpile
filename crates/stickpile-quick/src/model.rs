@@ -1260,7 +1260,7 @@ impl Model {
         }
     }
     /// Text of the text field on this tab: the search query, the pack
-    /// filter, or the item filter of the opened pack; empty elsewhere.
+    /// filter, or the search inside the opened pack; empty elsewhere.
     pub fn query(&self) -> &str {
         match (self.tab, &self.packs.open) {
             (Tab::Search, _) => &self.query,
