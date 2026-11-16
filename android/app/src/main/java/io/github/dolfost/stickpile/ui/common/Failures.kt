@@ -54,6 +54,9 @@ enum class Doing {
 
     /** A password sign-in with the two-factor code the server asked for. */
     PASSWORD_AND_CODE_LOGIN,
+
+    /** Making a pack ready for WhatsApp (the texts of its own kinds: `whatsapp.WhatsAppViewModel`). */
+    WHATSAPP,
 }
 
 /** A text to show: a string resource and its format arguments. */

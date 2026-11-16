@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Add to WhatsApp" (package whatsapp), in Ukrainian (values/strings_whatsapp.xml). -->
+<resources>
+    <string name="whatsapp_add">Додати у WhatsApp</string>
+    <string name="whatsapp_building">Сервер готує стікери для WhatsApp. Набір з анімаціями може зайняти кілька хвилин.</string>
+    <string name="whatsapp_downloading">Завантаження набору %1$d з %2$d</string>
+    <string name="whatsapp_offline">Не вдається з\'єднатися із сервером: це набори для WhatsApp, зроблені раніше.</string>
+    <plurals name="whatsapp_parts">
+        <item quantity="one">У набір WhatsApp входить щонайбільше 30 стікерів, тож цей набір розділено на %d набір. Додайте кожен.</item>
+        <item quantity="few">У набір WhatsApp входить щонайбільше 30 стікерів, тож цей набір розділено на %d набори. Додайте кожен.</item>
+        <item quantity="many">У набір WhatsApp входить щонайбільше 30 стікерів, тож цей набір розділено на %d наборів. Додайте кожен.</item>
+        <item quantity="other">У набір WhatsApp входить щонайбільше 30 стікерів, тож цей набір розділено на %d набору. Додайте кожен.</item>
+    </plurals>
+    <plurals name="whatsapp_skipped">
+        <item quantity="one">%d елемент не вдалося перетворити на стікер WhatsApp, його пропущено.</item>
+        <item quantity="few">%d елементи не вдалося перетворити на стікери WhatsApp, їх пропущено.</item>
+        <item quantity="many">%d елементів не вдалося перетворити на стікери WhatsApp, їх пропущено.</item>
+        <item quantity="other">%d елемента не вдалося перетворити на стікери WhatsApp, їх пропущено.</item>
+    </plurals>
+    <plurals name="whatsapp_stickers">
+        <item quantity="one">%d стікер</item>
+        <item quantity="few">%d стікери</item>
+        <item quantity="many">%d стікерів</item>
+        <item quantity="other">%d стікера</item>
+    </plurals>
+    <string name="whatsapp_animated">%1$s, анімовані</string>
+    <string name="whatsapp_add_part">Додати</string>
+    <string name="whatsapp_status_adding">Очікування WhatsApp</string>
+    <string name="whatsapp_status_added">Додано у WhatsApp</string>
+    <string name="whatsapp_status_already_added">Уже є у WhatsApp</string>
+    <string name="whatsapp_status_cancelled">Не додано</string>
+    <string name="whatsapp_status_refused">WhatsApp не прийняв цей набір</string>
+    <string name="whatsapp_not_installed">На цьому телефоні не встановлено WhatsApp.</string>
+
+    <string name="whatsapp_error_pack_gone">Цього набору вже немає на сервері.</string>
+    <string name="whatsapp_error_server_too_old">Цей сервер ще не вміє робити стікери для WhatsApp: на ньому старіша версія stickpile.</string>
+    <string name="whatsapp_error_too_small">У наборі WhatsApp має бути щонайменше 3 стікери, а в цьому наборі менше елементів, з яких можна зробити стікери WhatsApp.</string>
+    <string name="whatsapp_error_offline">Не вдається з\'єднатися із сервером, а для WhatsApp на цьому телефоні цей набір ще не робили.</string>
+    <string name="whatsapp_error_failed">Не вдалося зробити стікери для WhatsApp.</string>
+</resources>
