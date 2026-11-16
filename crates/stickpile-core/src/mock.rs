@@ -10,7 +10,9 @@
 //! few admin routes. The export page's routes answer with placeholders:
 //! ZIP and TAR.GZ downloads are fixed bytes (a valid empty ZIP, a gzip
 //! header), publishing knows one configured platform (`telegram`) and a
-//! WhatsApp build finishes at once with one pack of the set's items. Test hooks: a controllable
+//! WhatsApp build finishes at once (or after two polls of its job, see
+//! [`MockState::whatsapp_queued`]) with real `.wastickers` ZIPs of the set's
+//! item thumbnails, at most 30 per pack ([`stored_zip`]). Test hooks: a controllable
 //! clock, page size, artificial delays and forced failures, and a request log.
 //!
 //! The server runs on its own thread and tokio runtime, so it works from both
@@ -115,6 +117,17 @@ pub struct MockState {
     pub requests: Vec<String>,
     /// Set id -> its WhatsApp build (made when it is requested).
     pub whatsapp: HashMap<String, WhatsappBuild>,
+    /// Set id -> the `.wastickers` files of its WhatsApp build, pack 1
+    /// first: stored ZIPs as the server writes them (`title.txt`,
+    /// `author.txt`, `cover.png`, `01.webp`, ...). A test may replace them.
+    pub whatsapp_packs: HashMap<String, Vec<Vec<u8>>>,
+    /// Answer `POST /sets/{id}/whatsapp` with a queued job, as a busy
+    /// server does: the job (its result already known) is done after two
+    /// polls of `GET /jobs/{id}`.
+    pub whatsapp_queued: bool,
+    /// Answer the four WhatsApp routes with 404, as a server older than
+    /// them does.
+    pub whatsapp_unsupported: bool,
 }
 
 impl Default for MockState {
@@ -142,6 +155,9 @@ impl Default for MockState {
             tailnet_user: None,
             requests: Vec::new(),
             whatsapp: HashMap::new(),
+            whatsapp_packs: HashMap::new(),
+            whatsapp_queued: false,
+            whatsapp_unsupported: false,
         }
     }
 }
@@ -1121,6 +1137,78 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
 /// An empty ZIP archive: only the end of central directory record.
 pub const EMPTY_ZIP: &[u8] = b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
+/// A ZIP of `entries` in this order, stored (not compressed), with the
+/// fixed time 1980-01-01 and mode 0644, as the server writes `.wastickers`
+/// files. Names go in as given, `/` and `..` included, so that tests can
+/// make hostile archives too.
+pub fn stored_zip<'a>(entries: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> Vec<u8> {
+    const LOCAL: usize = 0x0403_4b50;
+    const CENTRAL: usize = 0x0201_4b50;
+    fn u16le(out: &mut Vec<u8>, v: usize) {
+        out.extend_from_slice(&u16::try_from(v).expect("fits a ZIP field").to_le_bytes());
+    }
+    fn u32le(out: &mut Vec<u8>, v: usize) {
+        out.extend_from_slice(&u32::try_from(v).expect("fits a ZIP field").to_le_bytes());
+    }
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    let mut count = 0;
+    for (name, data) in entries {
+        let offset = out.len();
+        let crc = crc32(data) as usize;
+        for (record, sig) in [(&mut out, LOCAL), (&mut central, CENTRAL)] {
+            u32le(record, sig);
+            if sig == CENTRAL {
+                u16le(record, 0x0314); // made by: Unix, ZIP 2.0
+            }
+            u16le(record, 20); // needed: ZIP 2.0
+            u16le(record, 0x0800); // flags: the name is UTF-8
+            u16le(record, 0); // stored
+            u16le(record, 0); // time 00:00
+            u16le(record, 0x21); // date 1980-01-01
+            u32le(record, crc);
+            u32le(record, data.len());
+            u32le(record, data.len());
+            u16le(record, name.len());
+            u16le(record, 0); // extra field
+            if sig == CENTRAL {
+                u16le(record, 0); // comment
+                u16le(record, 0); // disk
+                u16le(record, 0); // internal attributes
+                u32le(record, 0o100_644 << 16); // a regular file, 0644
+                u32le(record, offset);
+            }
+            record.extend_from_slice(name.as_bytes());
+        }
+        out.extend_from_slice(data);
+        count += 1;
+    }
+    let central_offset = out.len();
+    let central_size = central.len();
+    out.extend_from_slice(&central);
+    u32le(&mut out, 0x0605_4b50);
+    u16le(&mut out, 0); // this disk
+    u16le(&mut out, 0); // the central directory's disk
+    u16le(&mut out, count);
+    u16le(&mut out, count);
+    u32le(&mut out, central_size);
+    u32le(&mut out, central_offset);
+    u16le(&mut out, 0); // comment
+    out
+}
+
+/// CRC-32 (IEEE), as ZIP wants it.
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &b in data {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+        }
+    }
+    !crc
+}
+
 fn download(mime: &'static str, name: &str, bytes: Vec<u8>) -> Response {
     let disposition = format!("attachment; filename=\"{name}\"");
     (
@@ -1238,96 +1326,207 @@ async fn whatsapp_status(
     AxPath(id): AxPath<String>,
 ) -> HResult<Json<WhatsappStatus>> {
     let st = lock(&s);
+    if st.whatsapp_unsupported {
+        return Err(not_found());
+    }
     let u = auth(&st, &h)?;
     if !st.can_read(&u, &id) {
         return Err(not_found());
     }
     let build = st.whatsapp.get(&id).cloned();
+    // The server compares a fingerprint of the set; the mock its version,
+    // which every added or removed item changes.
+    let version = st.set(&id).map(|s| s.version);
+    // A build still queued or running (`whatsapp_queued`) is not current yet.
+    let job = st
+        .jobs
+        .iter()
+        .rev()
+        .find(|j| {
+            j.kind == JobKind::WhatsappExport
+                && j.subject.as_deref() == Some(id.as_str())
+                && matches!(j.status, JobStatus::Queued | JobStatus::Running)
+        })
+        .cloned();
     Ok(Json(WhatsappStatus {
-        current: build.is_some(),
+        current: job.is_none() && build.as_ref().is_some_and(|b| Some(b.set_version) == version),
         build,
-        job: None,
+        job: job.map(|j| Job { result: None, ..j }),
     }))
 }
 
+/// The tray icon of a mock WhatsApp pack: 96 x 96, PNG.
+fn whatsapp_tray() -> Vec<u8> {
+    let mut out = Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(96, 96, image::Rgba([255, 128, 0, 255]))
+        .write_to(&mut out, image::ImageFormat::Png)
+        .expect("encode tray");
+    out.into_inner()
+}
+
+/// Sizes of the packs `n` stickers are split into: as few packs of at
+/// most 30 as possible, as even as possible (31 make 16 + 15), as on the
+/// server.
+fn whatsapp_split(n: usize) -> Vec<usize> {
+    let packs = n.div_ceil(30).max(1);
+    (0..packs).map(|k| n / packs + usize::from(k < n % packs)).collect()
+}
+
+/// `contents.json` of the mock's `whatsapp.zip`: a placeholder.
+const WHATSAPP_CONTENTS: &[u8] = b"{\"sticker_packs\": []}";
+
+/// A WhatsApp build of the set: one pack per 30 items at most, each item's
+/// thumbnail as its sticker (a WebP; the mock does not make 512 x 512
+/// renditions), its emoji or the server's default. Fails like the server
+/// for fewer than 3 items.
 async fn whatsapp_build(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Json<Job>> {
     let mut st = lock(&s);
+    if st.whatsapp_unsupported {
+        return Err(not_found());
+    }
     let u = auth(&st, &h)?;
     if !st.can_read(&u, &id) {
         return Err(not_found());
     }
     let set = st.set(&id).expect("set").clone();
-    let mut items: Vec<&MockItem> = st.items.iter().filter(|i| i.item.set_id == id).collect();
-    items.sort_by_key(|i| i.item.position);
-    let stickers: Vec<WhatsappSticker> = items
-        .iter()
-        .take(30)
-        .enumerate()
-        .map(|(k, i)| WhatsappSticker {
-            item_id: i.item.id.clone(),
-            name: i.item.name.clone(),
-            file: format!("{:02}.webp", k + 1),
-            emojis: if i.item.emojis.is_empty() {
-                vec!["\u{1f642}".into()]
-            } else {
-                i.item.emojis.iter().take(3).cloned().collect()
-            },
-            animated: false,
-            size_bytes: 0,
-            note: None,
-        })
-        .collect();
-    if stickers.len() < 3 {
-        let mut job = st.new_job(JobKind::WhatsappExport, Some(id.clone()));
-        job.status = JobStatus::Failed;
-        job.error = Some("nothing to export: a WhatsApp pack needs at least 3 stickers".into());
-        if let Some(j) = st.jobs.iter_mut().find(|j| j.id == job.id) {
-            *j = job.clone();
-        }
-        return Ok(Json(job));
-    }
     let now = st.clock;
-    let build = WhatsappBuild {
-        built_at: now,
-        set_version: set.version,
-        file: format!("{}-whatsapp.zip", set.slug),
-        url: r::path(r::SET_WHATSAPP_ZIP, &[&id]),
-        size_bytes: EMPTY_ZIP.len() as u64,
-        packs: vec![WhatsappPack {
-            number: 1,
-            identifier: set.slug.clone(),
-            title: set.name.clone(),
-            publisher: set.owner_username.clone(),
-            animated: false,
-            file: format!("{}.wastickers", set.slug),
-            url: r::path(r::SET_WHATSAPP_PACK, &[&id, "1"]),
-            tray_file: "cover.png".into(),
-            image_data_version: "1".into(),
-            size_bytes: EMPTY_ZIP.len() as u64,
-            stickers,
-        }],
-        skipped: Vec::new(),
-    };
-    let result = serde_json::to_value(&build).ok();
-    st.whatsapp.insert(id.clone(), build);
+    let reused = st.whatsapp.get(&id).is_some_and(|b| b.set_version == set.version);
+    if !reused {
+        let mut items: Vec<&MockItem> = st.items.iter().filter(|i| i.item.set_id == id).collect();
+        items.sort_by_key(|i| i.item.position);
+        if items.len() < 3 {
+            let mut job = st.new_job(JobKind::WhatsappExport, Some(id.clone()));
+            job.status = JobStatus::Failed;
+            job.error = Some("nothing to export: a WhatsApp pack needs at least 3 stickers".into());
+            if let Some(j) = st.jobs.iter_mut().find(|j| j.id == job.id) {
+                *j = job.clone();
+            }
+            return Ok(Json(job));
+        }
+        let tray = whatsapp_tray();
+        let sizes = whatsapp_split(items.len());
+        let count = sizes.len();
+        let mut packs = Vec::new();
+        let mut datas = Vec::new();
+        let mut rest = items.as_slice();
+        for (k, size) in sizes.into_iter().enumerate() {
+            let (group, tail) = rest.split_at(size);
+            rest = tail;
+            let number = k as u32 + 1;
+            let (identifier, title, file) = if count == 1 {
+                (set.slug.clone(), set.name.clone(), format!("{}.wastickers", set.slug))
+            } else {
+                (
+                    format!("{}-{number}", set.slug),
+                    format!("{} ({number}/{count})", set.name),
+                    format!("{}-{number}.wastickers", set.slug),
+                )
+            };
+            let mut version = sha2::Sha256::new();
+            version.update(&tray);
+            let mut entries: Vec<(String, Vec<u8>)> = vec![
+                ("title.txt".into(), title.clone().into_bytes()),
+                ("author.txt".into(), set.owner_username.clone().into_bytes()),
+                ("cover.png".into(), tray.clone()),
+            ];
+            let mut stickers = Vec::new();
+            for (j, i) in group.iter().enumerate() {
+                let name = format!("{:02}.webp", j + 1);
+                let bytes = i.files[&Variant::Thumb].clone();
+                let emojis: Vec<String> = if i.item.emojis.is_empty() {
+                    vec!["\u{1f642}".into()]
+                } else {
+                    i.item.emojis.iter().take(3).cloned().collect()
+                };
+                version.update(&bytes);
+                version.update(emojis.join(" ").as_bytes());
+                stickers.push(WhatsappSticker {
+                    item_id: i.item.id.clone(),
+                    name: i.item.name.clone(),
+                    file: name.clone(),
+                    emojis,
+                    animated: false,
+                    size_bytes: bytes.len() as u64,
+                    note: None,
+                });
+                entries.push((name, bytes));
+            }
+            let zip = stored_zip(entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())));
+            packs.push(WhatsappPack {
+                number,
+                identifier,
+                title,
+                publisher: set.owner_username.clone(),
+                animated: false,
+                file,
+                url: r::path(r::SET_WHATSAPP_PACK, &[&id, &number.to_string()]),
+                tray_file: "cover.png".into(),
+                image_data_version: hex::encode(&version.finalize()[..8]),
+                size_bytes: zip.len() as u64,
+                stickers,
+            });
+            datas.push(zip);
+        }
+        let whole = whatsapp_zip_bytes(&packs, &datas);
+        let build = WhatsappBuild {
+            built_at: now,
+            set_version: set.version,
+            file: format!("{}-whatsapp.zip", set.slug),
+            url: r::path(r::SET_WHATSAPP_ZIP, &[&id]),
+            size_bytes: whole.len() as u64,
+            packs,
+            skipped: Vec::new(),
+        };
+        st.whatsapp.insert(id.clone(), build);
+        st.whatsapp_packs.insert(id.clone(), datas);
+    }
+    let mut result = serde_json::to_value(&st.whatsapp[&id]).unwrap_or_default();
+    result["set_id"] = serde_json::json!(id);
+    result["reused"] = serde_json::json!(reused);
+    let queued = st.whatsapp_queued;
     let mut job = st.new_job(JobKind::WhatsappExport, Some(id));
-    job.status = JobStatus::Done;
-    job.finished_at = Some(now);
-    job.result = result;
+    if !queued {
+        job.status = JobStatus::Done;
+        job.finished_at = Some(now);
+    }
+    job.result = Some(result);
     if let Some(j) = st.jobs.iter_mut().find(|j| j.id == job.id) {
         *j = job.clone();
+    }
+    if queued {
+        // The server has no result for a job that has not run.
+        job.result = None;
     }
     Ok(Json(job))
 }
 
+/// The download of a whole build: `contents.json` and every pack's file.
+fn whatsapp_zip_bytes(packs: &[WhatsappPack], datas: &[Vec<u8>]) -> Vec<u8> {
+    let entries = std::iter::once(("contents.json", WHATSAPP_CONTENTS)).chain(
+        packs
+            .iter()
+            .map(|p| p.file.as_str())
+            .zip(datas.iter().map(Vec::as_slice)),
+    );
+    stored_zip(entries)
+}
+
 async fn whatsapp_zip(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Response> {
     let st = lock(&s);
+    if st.whatsapp_unsupported {
+        return Err(not_found());
+    }
     let u = auth(&st, &h)?;
     if !st.can_read(&u, &id) {
         return Err(not_found());
     }
     let build = st.whatsapp.get(&id).ok_or_else(not_found)?;
-    Ok(download("application/zip", &build.file, EMPTY_ZIP.to_vec()))
+    let datas = st.whatsapp_packs.get(&id).cloned().unwrap_or_default();
+    Ok(download(
+        "application/zip",
+        &build.file,
+        whatsapp_zip_bytes(&build.packs, &datas),
+    ))
 }
 
 async fn whatsapp_pack(
@@ -1336,6 +1535,9 @@ async fn whatsapp_pack(
     AxPath((id, n)): AxPath<(String, String)>,
 ) -> HResult<Response> {
     let st = lock(&s);
+    if st.whatsapp_unsupported {
+        return Err(not_found());
+    }
     let u = auth(&st, &h)?;
     if !st.can_read(&u, &id) {
         return Err(not_found());
@@ -1346,7 +1548,13 @@ async fn whatsapp_pack(
         .iter()
         .find(|p| p.number.to_string() == n)
         .ok_or_else(not_found)?;
-    Ok(download("application/octet-stream", &pack.file, EMPTY_ZIP.to_vec()))
+    let bytes = st
+        .whatsapp_packs
+        .get(&id)
+        .and_then(|packs| packs.get(pack.number as usize - 1))
+        .cloned()
+        .unwrap_or_else(|| EMPTY_ZIP.to_vec());
+    Ok(download("application/octet-stream", &pack.file, bytes))
 }
 
 async fn cover_file(
