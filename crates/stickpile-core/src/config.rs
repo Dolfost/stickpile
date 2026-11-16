@@ -34,6 +34,7 @@ pub struct ClientConfig {
     pub ui: UiConfig,
     pub copy: CopyConfig,
     pub focus: FocusConfig,
+    pub paste: PasteConfig,
     pub clipboard: ClipboardConfig,
 }
 
@@ -50,6 +51,7 @@ impl Default for ClientConfig {
             ui: UiConfig::default(),
             copy: CopyConfig::default(),
             focus: FocusConfig::default(),
+            paste: PasteConfig::default(),
             clipboard: ClipboardConfig::default(),
         }
     }
@@ -259,6 +261,188 @@ pub struct FocusRule {
     pub target: TargetApp,
 }
 
+/// Pressing the paste shortcut after a pick: once the popup has hidden and
+/// the window it was opened over has the keyboard focus again, the desktop
+/// popup presses the shortcut there (Hyprland, Sway, X11), and the macOS
+/// app presses Cmd+V. Never in another window.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct PasteConfig {
+    /// Paste automatically after a pick.
+    pub auto: bool,
+    /// Longest wait (ms) for the window to get the focus back; after it,
+    /// nothing is pressed.
+    pub wait_ms: u32,
+    /// Pause (ms) between the window getting the focus back and the key press.
+    pub delay_ms: u32,
+    /// Shortcut ([`Shortcut`] syntax) for windows no rule matches.
+    pub shortcut: String,
+    /// First match wins; matched case-insensitively against the window
+    /// class / app id only (titles are free text: a chat called "Kitty"
+    /// must not get the terminal shortcut). Not used on macOS (Cmd+V).
+    pub rules: Vec<PasteRule>,
+}
+
+/// Longest `paste.wait_ms`.
+pub const PASTE_WAIT_MAX_MS: u32 = 5000;
+/// Longest `paste.delay_ms`.
+pub const PASTE_DELAY_MAX_MS: u32 = 1000;
+
+impl Default for PasteConfig {
+    fn default() -> Self {
+        PasteConfig {
+            auto: true,
+            wait_ms: 1000,
+            delay_ms: 50,
+            shortcut: "ctrl+v".into(),
+            rules: vec![PasteRule {
+                contains: [
+                    "kitty",
+                    "foot",
+                    "alacritty",
+                    "wezterm",
+                    "ghostty",
+                    "konsole",
+                    "terminal",
+                    "org.gnome.console",
+                    "kgx",
+                    "ptyxis",
+                    "xterm",
+                    "rxvt",
+                    "terminator",
+                    "tilix",
+                    "terminology",
+                    "blackbox",
+                    "st-256color",
+                    "contour",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+                shortcut: "ctrl+shift+v".into(),
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PasteRule {
+    /// Substrings of the window class; any match selects `shortcut`.
+    pub contains: Vec<String>,
+    /// [`Shortcut`] syntax, or `none` to never paste into those windows.
+    pub shortcut: String,
+}
+
+impl PasteConfig {
+    /// The shortcut for a window class (`paste.rules`, else `paste.shortcut`);
+    /// `None` when it is `none`. The config is validated, so the text parses.
+    pub fn shortcut_for(&self, class: &str) -> Option<Shortcut> {
+        let class = class.to_lowercase();
+        let text = self
+            .rules
+            .iter()
+            .find(|r| r.contains.iter().any(|s| class.contains(&s.to_lowercase())))
+            .map_or(&self.shortcut, |r| &r.shortcut);
+        Shortcut::parse(text).ok().flatten()
+    }
+}
+
+/// A key the paste shortcut can press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutKey {
+    /// `a`..=`z`, lower case.
+    Letter(char),
+    /// `0`..=`9`.
+    Digit(char),
+    Insert,
+}
+
+/// A key combination: modifiers and one key joined with `+`, case and
+/// spaces ignored: `ctrl+v`, `Ctrl+Shift+V`, `shift+insert`. Modifiers are
+/// `ctrl` (`control`), `shift`, `alt` and `super`; the key is a letter, a
+/// digit or `insert`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shortcut {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub super_key: bool,
+    pub key: ShortcutKey,
+}
+
+impl Shortcut {
+    /// `Ok(None)` for `none` (no paste).
+    pub fn parse(text: &str) -> Result<Option<Shortcut>, String> {
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        let err = |why: &str| {
+            Err(format!(
+                "{text:?}: {why} (write it like ctrl+v, ctrl+shift+v or shift+insert)"
+            ))
+        };
+        let parts: Vec<String> = text.split('+').map(|p| p.trim().to_ascii_lowercase()).collect();
+        let Some((key, mods)) = parts.split_last() else {
+            return err("empty");
+        };
+        let mut s = Shortcut {
+            ctrl: false,
+            shift: false,
+            alt: false,
+            super_key: false,
+            key: ShortcutKey::Insert,
+        };
+        for m in mods {
+            let flag = match m.as_str() {
+                "ctrl" | "control" => &mut s.ctrl,
+                "shift" => &mut s.shift,
+                "alt" => &mut s.alt,
+                "super" => &mut s.super_key,
+                "" => return err("an empty part"),
+                _ => return err("unknown modifier"),
+            };
+            if *flag {
+                return err("a modifier twice");
+            }
+            *flag = true;
+        }
+        let mut chars = key.chars();
+        s.key = match (chars.next(), chars.next()) {
+            (Some(c), None) if c.is_ascii_lowercase() => ShortcutKey::Letter(c),
+            (Some(c), None) if c.is_ascii_digit() => ShortcutKey::Digit(c),
+            _ if key == "insert" => ShortcutKey::Insert,
+            (None, _) => return err("no key"),
+            _ => return err("the key must be a letter, a digit or insert"),
+        };
+        if mods.is_empty() && s.key != ShortcutKey::Insert {
+            return err("a letter or a digit alone would type it");
+        }
+        Ok(Some(s))
+    }
+}
+
+impl std::fmt::Display for Shortcut {
+    /// `Ctrl+Shift+V`
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (on, name) in [
+            (self.ctrl, "Ctrl+"),
+            (self.shift, "Shift+"),
+            (self.alt, "Alt+"),
+            (self.super_key, "Super+"),
+        ] {
+            if on {
+                f.write_str(name)?;
+            }
+        }
+        match self.key {
+            ShortcutKey::Letter(c) | ShortcutKey::Digit(c) => write!(f, "{}", c.to_ascii_uppercase()),
+            ShortcutKey::Insert => f.write_str("Insert"),
+        }
+    }
+}
+
 /// Paste hint offered next to the file reference: the copied file is a
 /// sticker, so an app that has stickers should send it as one, not as a
 /// photo or a file (docs/clipboard.md, section 5). Apps that do not know
@@ -414,6 +598,16 @@ impl ClientConfig {
                 START_TABS.join(", "),
                 self.ui.start_tab
             )));
+        }
+        if self.paste.wait_ms > PASTE_WAIT_MAX_MS || self.paste.delay_ms > PASTE_DELAY_MAX_MS {
+            return Err(ConfigError::Invalid(format!(
+                "paste.wait_ms must be at most {PASTE_WAIT_MAX_MS} and paste.delay_ms at most {PASTE_DELAY_MAX_MS}"
+            )));
+        }
+        let shortcuts = std::iter::once(("paste.shortcut", &self.paste.shortcut))
+            .chain(self.paste.rules.iter().map(|r| ("paste.rules", &r.shortcut)));
+        for (key, text) in shortcuts {
+            Shortcut::parse(text).map_err(|e| ConfigError::Invalid(format!("{key}: {e}")))?;
         }
         let known = [
             "image/png",
@@ -576,6 +770,95 @@ mod tests {
             .to_string();
         assert!(e.contains("background"), "{e}");
         assert!(ClientConfig::from_toml("[copy]\nsqaure = \"off\"").is_err());
+    }
+
+    #[test]
+    fn paste_defaults_and_keys() {
+        let d = ClientConfig::default().paste;
+        assert!(d.auto, "on by default");
+        assert_eq!((d.wait_ms, d.delay_ms), (1000, 50));
+        assert_eq!(d.shortcut, "ctrl+v");
+        let c = ClientConfig::from_toml(
+            "[paste]\nauto = false\nwait_ms = 300\ndelay_ms = 0\nshortcut = \"shift+insert\"\n\
+             [[paste.rules]]\ncontains = [\"vesktop\"]\nshortcut = \"none\"\n",
+        )
+        .unwrap();
+        assert!(!c.paste.auto);
+        assert_eq!((c.paste.wait_ms, c.paste.delay_ms), (300, 0));
+        assert_eq!(c.paste.rules.len(), 1, "rules replace the default list");
+        assert!(ClientConfig::from_toml("[paste]\nshortcut = \"ctrl+\"").is_err());
+        assert!(ClientConfig::from_toml("[paste]\nwait_ms = 5001").is_err());
+        assert!(ClientConfig::from_toml("[paste]\ndelay_ms = 1001").is_err());
+        assert!(ClientConfig::from_toml("[paste]\nwiat_ms = 1").is_err());
+        let e = ClientConfig::from_toml("[[paste.rules]]\ncontains = [\"x\"]\nshortcut = \"hyper+v\"")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("paste.rules") && e.contains("unknown modifier"), "{e}");
+    }
+
+    #[test]
+    fn paste_shortcut_per_window_class() {
+        let p = ClientConfig::default().paste;
+        let shown = |class: &str| p.shortcut_for(class).map(|s| s.to_string());
+        assert_eq!(shown("com.ayugram.desktop").as_deref(), Some("Ctrl+V"));
+        assert_eq!(shown("vesktop").as_deref(), Some("Ctrl+V"));
+        assert_eq!(shown("firefox").as_deref(), Some("Ctrl+V"));
+        for terminal in [
+            "kitty",
+            "foot",
+            "footclient",
+            "Alacritty",
+            "org.wezfurlong.wezterm",
+            "com.mitchellh.ghostty",
+            "org.gnome.Terminal",
+            "gnome-terminal-server",
+            "org.gnome.Console",
+            "kgx",
+            "org.gnome.Ptyxis",
+            "org.kde.konsole",
+            "XTerm",
+            "URxvt",
+            "xfce4-terminal",
+            "com.gexperts.Tilix",
+        ] {
+            assert_eq!(shown(terminal).as_deref(), Some("Ctrl+Shift+V"), "{terminal}");
+        }
+        let c = ClientConfig::from_toml(
+            "[paste]\nshortcut = \"shift+insert\"\n[[paste.rules]]\ncontains = [\"Vesktop\"]\nshortcut = \"none\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.paste.shortcut_for("vesktop"), None, "none: no paste");
+        assert_eq!(c.paste.shortcut_for("kitty").unwrap().to_string(), "Shift+Insert");
+    }
+
+    #[test]
+    fn shortcut_syntax() {
+        let p = |s: &str| Shortcut::parse(s).map(|o| o.map(|s| s.to_string()));
+        assert_eq!(p("ctrl+v").unwrap().as_deref(), Some("Ctrl+V"));
+        assert_eq!(p(" Control + Shift + V ").unwrap().as_deref(), Some("Ctrl+Shift+V"));
+        assert_eq!(p("super+alt+1").unwrap().as_deref(), Some("Alt+Super+1"));
+        assert_eq!(p("SHIFT+Insert").unwrap().as_deref(), Some("Shift+Insert"));
+        assert_eq!(p("insert").unwrap().as_deref(), Some("Insert"));
+        assert_eq!(p("None").unwrap(), None);
+        let v = Shortcut::parse("ctrl+v").unwrap().unwrap();
+        assert!(v.ctrl && !v.shift && !v.alt && !v.super_key);
+        assert_eq!(v.key, ShortcutKey::Letter('v'));
+        for bad in [
+            "",
+            "v",
+            "1",
+            "+",
+            "ctrl+",
+            "+v",
+            "ctrl+ctrl+v",
+            "hyper+v",
+            "ctrl+vv",
+            "ctrl+f1",
+            "ctrl+\u{e4}",
+            "ctrl+;",
+        ] {
+            assert!(Shortcut::parse(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

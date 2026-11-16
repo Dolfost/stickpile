@@ -1,7 +1,9 @@
 # Linux desktop client (`stickpile-desktop`)
 
 A keyboard-first quick-search popup: press a shortcut in any chat app, type,
-press Enter, paste. GTK4 + libadwaita, resident in the background.
+press Enter, and the popup pastes the item into the chat
+([paste after a pick](#paste-after-a-pick); on Hyprland, Sway and X11).
+GTK4 + libadwaita, resident in the background.
 
 ## Install and run
 
@@ -74,7 +76,9 @@ So the client is a single resident process:
   That is how the global shortcut toggles the popup, on every compositor.
 - When Enter is pressed, the item is prepared (variant chosen and
   downloaded into the cache) and put on the clipboard *while the popup
-  still has focus*, then the popup hides. The process keeps owning the
+  still has focus*, then the popup hides and, once the chat window has
+  the focus back, presses the paste shortcut there
+  ([below](#paste-after-a-pick)). The process keeps owning the
   clipboard until something else is copied.
 - If the popup loses focus before the download finishes (you clicked
   elsewhere), the copy is refused with "the popup lost focus … press Enter
@@ -336,7 +340,8 @@ the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`.
 The footer shows the selected item's stats (see above), the target app and
 how it was chosen (`auto: <window class>`, `default`, `chosen`), the
 sticker toggle (dimmed for apps without stickers; clicking it is Ctrl+S),
-the safe mode toggle (clicking it is `S`), and the status: searching, offline,
+the safe mode toggle (clicking it is `S`), "paste: by hand" where the
+session cannot [paste for you](#paste-after-a-pick), and the status: searching, offline,
 "Copied cat for Telegram", warnings such as "Discord limit is 10 MiB", or
 errors. A ⚠ on a cell means the item cannot be sent to the current target
 as is (the tooltip says why); copying still uses the best available
@@ -411,6 +416,80 @@ used items, and the ones last used in the focused window class come
 first: AyuGram opens on what you send in Telegram, Vesktop on what you send
 in Discord. This is stored in `$XDG_CACHE_HOME/stickpile/desktop-window-history.json`
 (delete it to reset).
+
+## Paste after a pick
+
+After a pick (Enter, `y`, a click) the item is copied and the popup hides.
+With `paste.auto` on, which is the default, the popup then pastes it too:
+it waits until the window it was opened over has the keyboard focus again
+(at most `paste.wait_ms`, 1 s), pauses `paste.delay_ms` (50 ms), checks the
+focus once more and presses the paste shortcut in that window. If another
+window has the focus by then (you clicked elsewhere, or the compositor
+gave the focus to the window under the mouse), nothing is pressed: the
+popup never pastes into a different window. The item stays on the
+clipboard either way, so Ctrl+V by hand still works.
+
+To know which window to wait for, it needs the same window identity as
+[target detection](#target-detection), so it works in the same sessions:
+
+| Session | How the shortcut is pressed |
+|---|---|
+| Hyprland | the `send_shortcut` dispatcher over Hyprland's IPC socket, aimed at the window's address; Lua (0.55+) and hyprlang configs |
+| Sway | a virtual keyboard (`zwp_virtual_keyboard_v1`) with a small keymap of its own, so the real keyboard's layout does not matter |
+| X11 | XTest; the window manager must set `_NET_ACTIVE_WINDOW` (most do) |
+| GNOME, KDE Wayland, other compositors | not at all: the popup only copies, and the footer says "paste: by hand" |
+
+Other wlroots compositors (river, labwc, Wayfire) have the virtual
+keyboard but no way for the popup to read the focused window, so they
+count as "other" here.
+
+Nothing is pasted when the popup stays open after a copy
+(`ui.hide_on_copy = false`), for drag and drop, or when no window had the
+focus when the popup opened. Copies from `stickpile copy` never paste.
+
+**The shortcut.** Ctrl+V, and Ctrl+Shift+V in terminals (kitty, foot,
+Alacritty, WezTerm, Ghostty, Konsole, GNOME Terminal and Console, Ptyxis,
+xterm, urxvt, Terminator, Tilix and others). `paste.rules` picks it by the
+window class; unlike `focus.rules` the title is not looked at, since a
+chat called "Kitty" must not get the terminal shortcut:
+
+```toml
+[paste]
+auto = true            # paste after a pick
+wait_ms = 1000         # longest wait for the window to get the focus back (0..5000)
+delay_ms = 50          # pause before the key press (0..1000)
+shortcut = "ctrl+v"    # for windows no rule matches
+
+# First match wins: substrings of the window class, case-insensitive.
+# Setting rules replaces the default list, which is:
+[[paste.rules]]
+contains = ["kitty", "foot", "alacritty", "wezterm", "ghostty", "konsole", "terminal",
+            "org.gnome.console", "kgx", "ptyxis", "xterm", "rxvt", "terminator", "tilix",
+            "terminology", "blackbox", "st-256color", "contour"]
+shortcut = "ctrl+shift+v"
+```
+
+A shortcut is modifiers (`ctrl`, `shift`, `alt`, `super`) and one key (a
+letter, a digit or `insert`) joined with `+`: `ctrl+v`, `ctrl+shift+v`,
+`shift+insert`. `none` means no paste: a rule with `shortcut = "none"`
+turns pasting off for those apps only.
+
+Keyboard layouts: on Sway the virtual keyboard brings its own keymap, so
+the key is a V whatever layout is active. On Hyprland the key is looked up
+in the active layout and, when that has none (a Cyrillic layout is
+active), sent by its keycode on a US keyboard. On X11 the key that has it
+in the first layout is used.
+
+**Turning it off.** Settings tab, Copying, "Paste after a pick", or
+`paste.auto = false` in `config.toml`. The Settings tab also edits the
+shortcut, the delay and the wait; `paste.rules` stays in `config.toml`.
+
+**Status (2026-11-16).** Observed in a headless Sway 1.12 (foot got
+Ctrl+Shift+V and pasted the copied file's path after a pick in the demo
+popup; a GTK 4 entry got Ctrl+V) and in an X11 session (Xvfb with i3, a GTK
+4 entry got Ctrl+V through XTest). Hyprland is checked against a fake IPC
+socket only, with requests read from Hyprland 0.55's source; it has not
+been run against a real Hyprland yet.
 
 ## Me
 
@@ -495,8 +574,8 @@ videos are left alone.
 
 The [Settings tab](#settings) edits these keys and the everyday ones from
 the top of the file (server URL, timeout, cache size, default target,
-sticker preference, focus detection). Clipboard offer lists and focus
-rules stay in `config.toml`. The layering rules are in
+sticker preference, focus detection, [pasting](#paste-after-a-pick)).
+Clipboard offer lists, focus rules and paste rules stay in `config.toml`. The layering rules are in
 [configuration.md](configuration.md#settings-saved-from-the-popup).
 
 ## Offline behaviour
@@ -547,6 +626,15 @@ the running instance ignores `--demo`.
 - **Wrong target app.** Check the window class with `hyprctl -j
   activewindow` and add a `[[focus.rules]]` entry. Ctrl+T overrides it for
   one popup session.
+- **Nothing is pasted after a pick.** Check the footer: "paste: by hand"
+  means this session cannot paste (GNOME, KDE Wayland). Otherwise run with
+  `RUST_LOG=stickpile_desktop=debug`: the log says "pasted with ...", or
+  why not ("did not get the focus back", "not pasting: ..."). If your
+  compositor focuses another window when the popup closes, nothing is
+  pasted by design; raise `paste.wait_ms` if the focus comes back slowly.
+- **The wrong shortcut is pressed** (a terminal that wants Ctrl+Shift+V,
+  an app that wants Shift+Insert). Add a `[[paste.rules]]` entry for its
+  window class (`hyprctl -j activewindow`).
 - **Paste inserts a file path or nothing.** The app ignores the offered
   types: see `docs/clipboard.md` and adjust `[clipboard.targets.<app>]`,
   or drag the item from the popup instead.

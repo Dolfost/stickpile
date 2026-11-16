@@ -11,6 +11,8 @@ use stickpile_quick::history::WindowHistory;
 use stickpile_quick::model::{ModelConfig, OpenInfo, Tile, Tiles, DEFAULT_DEBOUNCE_MS};
 use stickpile_quick::{Mode, Tab};
 
+use crate::paste::{self, PasteTarget};
+
 /// GApplication id: D-Bus name, Wayland app id / X11 class of the popup.
 pub const APP_ID: &str = "io.github.dolfost.Stickpile";
 
@@ -119,13 +121,36 @@ pub fn open_info(cfg: &ClientConfig, detected: Result<Option<WindowInfo>, FocusE
     }
 }
 
-/// Detect the focused window (if `focus.detect`) with the given environment
-/// (the invoking process's, forwarded by GApplication).
-pub fn capture_focus(cfg: &ClientConfig, env: &FocusEnv) -> OpenInfo {
-    if !cfg.focus.detect {
-        return OpenInfo::default();
+/// What the popup learns about the focused window when it opens.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Captured {
+    /// For the model: the window and its target app (`focus.detect`).
+    pub open: OpenInfo,
+    /// The window to paste into after a pick (`paste.auto`).
+    pub paste: Option<PasteTarget>,
+}
+
+/// Detect the focused window once, if `focus.detect` or `paste.auto` needs
+/// it, with the given environment (the invoking process's, forwarded by
+/// GApplication).
+pub fn capture(cfg: &ClientConfig, env: &FocusEnv) -> Captured {
+    if !cfg.focus.detect && !cfg.paste.auto {
+        return Captured::default();
     }
-    open_info(cfg, focus::detect_with(env))
+    let detected = focus::detect_with(env);
+    let window = detected.as_ref().ok().cloned().flatten();
+    Captured {
+        open: if cfg.focus.detect {
+            open_info(cfg, detected)
+        } else {
+            OpenInfo::default()
+        },
+        paste: if cfg.paste.auto {
+            paste::target(window, env, APP_ID)
+        } else {
+            None
+        },
+    }
 }
 
 pub fn history_path(cfg: &ClientConfig) -> PathBuf {
@@ -214,6 +239,7 @@ mod tests {
             class: class.into(),
             title: title.into(),
             backend: FocusBackend::Hyprland,
+            id: Some("0x1".into()),
         }
     }
 
@@ -370,14 +396,73 @@ mod tests {
     fn detection_can_be_disabled() {
         let mut cfg = ClientConfig::default();
         cfg.focus.detect = false;
+        cfg.paste.auto = false;
         let env = FocusEnv {
             hyprland_instance_signature: Some("x".into()),
             ..FocusEnv::default()
         };
-        assert_eq!(capture_focus(&cfg, &env), OpenInfo::default());
+        assert_eq!(capture(&cfg, &env), Captured::default());
         // Enabled, but no compositor IPC in this environment.
         cfg.focus.detect = true;
-        assert_eq!(capture_focus(&cfg, &FocusEnv::default()), OpenInfo::default());
+        cfg.paste.auto = true;
+        assert_eq!(capture(&cfg, &FocusEnv::default()), Captured::default());
+    }
+
+    /// A fake Hyprland socket in `dir` that answers `j/activewindow` once.
+    fn hyprland_once(dir: &Path, reply: &'static str) -> (FocusEnv, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let sock = dir.join("hypr/sig");
+        std::fs::create_dir_all(&sock).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(sock.join(".socket.sock")).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 64];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"j/activewindow");
+            conn.write_all(reply.as_bytes()).unwrap();
+        });
+        let env = FocusEnv {
+            xdg_runtime_dir: Some(dir.to_path_buf()),
+            hyprland_instance_signature: Some("sig".into()),
+            ..FocusEnv::default()
+        };
+        (env, server)
+    }
+
+    #[test]
+    fn one_detection_serves_the_target_and_the_paste() {
+        const VESKTOP: &str = r#"{"address":"0xabc","class":"vesktop","title":"general"}"#;
+        let capture_with = |cfg: &ClientConfig, reply: &'static str| {
+            let dir = tempfile::tempdir().unwrap();
+            let (env, server) = hyprland_once(dir.path(), reply);
+            let c = capture(cfg, &env);
+            server.join().unwrap();
+            (c, env)
+        };
+        let (c, env) = capture_with(&ClientConfig::default(), VESKTOP);
+        assert_eq!(c.open.detected, Some(TargetApp::Discord));
+        let paste = c.paste.unwrap();
+        assert_eq!(paste.window.id.as_deref(), Some("0xabc"));
+        assert_eq!(paste.env, env);
+
+        // Detection off: the window is still read for pasting, but the
+        // target stays the default.
+        let mut cfg = ClientConfig::default();
+        cfg.focus.detect = false;
+        let (c, _) = capture_with(&cfg, VESKTOP);
+        assert_eq!(c.open, OpenInfo::default());
+        assert!(c.paste.is_some());
+
+        // Paste off: no window kept for it.
+        let mut cfg = ClientConfig::default();
+        cfg.paste.auto = false;
+        let (c, _) = capture_with(&cfg, VESKTOP);
+        assert!(c.open.window.is_some() && c.paste.is_none());
+
+        // The popup had the focus itself: nothing to paste into.
+        let own = r#"{"address":"0x1","class":"io.github.dolfost.Stickpile","title":"stickpile"}"#;
+        let (c, _) = capture_with(&ClientConfig::default(), own);
+        assert_eq!(c, Captured::default());
     }
 
     #[test]

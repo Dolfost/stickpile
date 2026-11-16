@@ -49,6 +49,25 @@
           }
         ];
       };
+      paste = {
+        auto = true;
+        wait_ms = 800;
+        delay_ms = 30;
+        shortcut = "ctrl+v";
+        rules = [
+          {
+            contains = [
+              "kitty"
+              "foot"
+            ];
+            shortcut = "ctrl+shift+v";
+          }
+          {
+            contains = [ "vesktop" ];
+            shortcut = "none";
+          }
+        ];
+      };
       clipboard = {
         default = {
           still = [

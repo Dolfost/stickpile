@@ -33,6 +33,7 @@ use stickpile_quick::{Mode, Tab, View};
 use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
 use crate::demo::DemoBackend;
 use crate::keys::{self, KeyPress, Mods};
+use crate::paste::{self, PasteTarget};
 use crate::ui::drag::{self, LazyFileProvider, PreparedFuture};
 use crate::ui::item::StickerObject;
 use crate::ui::me::{MeAction, MePage};
@@ -148,6 +149,8 @@ struct Widgets {
     /// Footer safe-mode toggle; clicking it is `S`.
     safe: gtk::ToggleButton,
     safe_label: gtk::Label,
+    /// "paste: by hand" where this session cannot paste for us.
+    paste_note: gtk::Label,
     status: gtk::Label,
     /// The selection's stats, above the footer row.
     details: gtk::Label,
@@ -201,6 +204,10 @@ pub struct Shell {
     search_timer: RefCell<Option<glib::SourceId>>,
     sync: RefCell<sync::SyncPolicy>,
     history_path: PathBuf,
+    /// The window the popup was last opened over, to paste into after a pick.
+    paste_target: RefCell<Option<PasteTarget>>,
+    /// The session the popup was last opened in can paste (`paste.auto`).
+    paste_available: Cell<bool>,
 }
 
 /// A cover changes with the set's cover item or image.
@@ -290,6 +297,8 @@ impl Shell {
             search_timer: RefCell::new(None),
             sync: RefCell::new(sync::SyncPolicy::default()),
             history_path,
+            paste_target: RefCell::new(None),
+            paste_available: Cell::new(true),
             cfg: RefCell::new(cfg),
         });
         if shell.config_error.is_none() && !shell.demo_mode {
@@ -392,18 +401,14 @@ impl Shell {
 
     /// Show the popup; the focused window is captured first.
     pub fn open(self: &Rc<Self>, env: &FocusEnv) {
-        let info = glue::capture_focus(&self.cfg.borrow(), env);
+        let info = self.capture(env);
         self.dispatch(Event::Open(info));
         self.login_prompt();
     }
 
     pub fn toggle(self: &Rc<Self>, env: &FocusEnv) {
         let active = self.w.window.is_visible() && self.w.window.is_active();
-        let open = if active {
-            OpenInfo::default()
-        } else {
-            glue::capture_focus(&self.cfg.borrow(), env)
-        };
+        let open = if active { OpenInfo::default() } else { self.capture(env) };
         self.dispatch(Event::Toggle {
             popup_active: active,
             open,
@@ -414,6 +419,29 @@ impl Shell {
     pub fn hide(self: &Rc<Self>) {
         if self.model.borrow().is_visible() {
             self.dispatch(Event::Hide);
+        }
+    }
+
+    /// Read the focused window before the popup shows: the target app for
+    /// the model, the window to paste into for later.
+    fn capture(&self, env: &FocusEnv) -> OpenInfo {
+        let captured = glue::capture(&self.cfg.borrow(), env);
+        *self.paste_target.borrow_mut() = captured.paste;
+        self.paste_available.set(paste::available(env));
+        captured.open
+    }
+
+    /// A pick was copied: paste it into the window the popup was opened
+    /// over once that has the focus again (off the main thread).
+    fn paste_after_pick(&self) {
+        let hidden = !self.model.borrow().is_visible();
+        let plan = paste::plan(&self.cfg.borrow().paste, self.paste_target.borrow().as_ref(), hidden);
+        match plan {
+            Ok(plan) => {
+                self.paste_target.replace(None);
+                runtime().spawn_blocking(move || paste::run_logged(&plan));
+            }
+            Err(skip) => tracing::debug!("not pasting: {skip}"),
         }
     }
 
@@ -841,6 +869,8 @@ impl Shell {
         w.safe.set_active(f.safe);
         w.safe_label.set_label(safe_label(f.safe));
         set_class(&w.safe_label, "accent", f.safe);
+        w.paste_note
+            .set_visible(self.cfg.borrow().paste.auto && !self.paste_available.get());
         w.details.set_visible(f.details_row);
         w.details.set_label(&f.details);
         w.details
@@ -1235,6 +1265,7 @@ impl Shell {
                     let warning = prepared.warning.clone();
                     this.remember_prepared(prepared.clone());
                     this.dispatch(Event::CopyFinished { item_id: id, warning });
+                    this.paste_after_pick();
                     this.record(item, prepared);
                 }
                 Err(error) => this.dispatch(Event::CopyFailed { item_id: id, error }),
@@ -1843,6 +1874,9 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     safe.add_css_class("flat");
     safe.add_css_class("stickpile-sticker");
     safe.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+Shift+S")]);
+    let paste_note = gtk::Label::builder().visible(false).build();
+    paste_note.add_css_class("caption");
+    paste_note.add_css_class("dim-label");
     let status = gtk::Label::builder()
         .hexpand(true)
         .xalign(1.0)
@@ -1859,6 +1893,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     row.append(&target_hint);
     row.append(&sticker);
     row.append(&safe);
+    row.append(&paste_note);
     row.append(&status);
     let details = gtk::Label::builder()
         .xalign(0.0)
@@ -1921,6 +1956,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         sticker_label,
         safe,
         safe_label,
+        paste_note,
         status,
         details,
         suggest,
@@ -1944,5 +1980,9 @@ fn relabel_widgets(w: &Widgets) {
         .set_tooltip_text(Some(t("Safe mode: hide items tagged nsfw (S, Ctrl+Shift+S)")));
     w.safe
         .update_property(&[gtk::accessible::Property::Label(t("Safe mode"))]);
+    w.paste_note.set_label(t("paste: by hand"));
+    w.paste_note.set_tooltip_text(Some(t(
+        "Automatic paste needs Hyprland, Sway or X11: this session only copies, so paste with Ctrl+V. Settings, Paste after a pick, turns this off.",
+    )));
     w.error.set_title(t("stickpile cannot start"));
 }

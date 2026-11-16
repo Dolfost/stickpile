@@ -430,6 +430,18 @@ pub struct FrontApp {
     pub name: String,
 }
 
+/// Press Cmd+V after a pick ([`PopupUi::paste`]).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PasteRequest {
+    /// The app the popup was opened over: press only while it is the
+    /// frontmost app (and the panel is gone).
+    pub bundle_id: String,
+    /// Longest wait for that, in ms; after it, nothing is pressed.
+    pub wait_ms: u32,
+    /// Pause before the key press once it is so, in ms.
+    pub delay_ms: u32,
+}
+
 /// One representation of the copied item for `NSPasteboardItem.setData(_:forType:)`.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct PasteboardData {
@@ -503,6 +515,11 @@ pub trait PopupUi: Send + Sync {
     fn open_url(&self, url: String);
     /// A Normal-mode key for the Me / Settings page.
     fn page_key(&self, key: PageKey);
+    /// A pick was copied and the panel hidden (`paste.auto`): press Cmd+V
+    /// in the app `request` names once it is frontmost again, with
+    /// `CGEvent`. That needs the Accessibility permission: without it, ask
+    /// once (with an explanation) and otherwise do nothing.
+    fn paste(&self, request: PasteRequest);
     /// Run `task.run()` on the main thread, soon (`DispatchQueue.main.async`).
     /// Called from any thread.
     fn post(&self, task: Arc<MainTask>);

@@ -11,6 +11,7 @@
 //! * [`backend`] — the `Backend` trait over `stickpile_core::Session`
 //! * [`demo`] — `--demo DIR` backend serving a directory of files
 //! * [`pages`]: texts and decisions of the Me and Settings tabs
+//! * [`paste`]: pressing the paste shortcut after a pick (Hyprland, Sway, X11)
 //!
 //! GTK modules, with the `gtk` feature (on by default): [`app`] (resident
 //! application) and [`ui`] (window, tabs, grids, pages, drag source). The
@@ -25,6 +26,7 @@ pub mod glue;
 pub mod keys;
 pub mod offers;
 pub mod pages;
+pub mod paste;
 pub mod sync;
 pub mod thumbs;
 #[cfg(feature = "gtk")]

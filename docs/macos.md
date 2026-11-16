@@ -2,7 +2,7 @@
 
 The same quick-search popup as the Linux client ([desktop.md](desktop.md)),
 as a menu bar app: press the shortcut in any chat app, type, press Enter, and
-paste. Tabs, keys, settings, target detection and the `config.toml` keys are
+the app pastes the item with Cmd+V ([below](#paste-after-a-pick)). Tabs, keys, settings, target detection and the `config.toml` keys are
 the Linux client's.
 
 ## Install
@@ -112,6 +112,35 @@ see [clipboard.md](clipboard.md#6-macos)):
 - **Discord** (Chromium) also takes the file when there is one and uploads it
   as it is, so GIFs stay animated. Image data alone would be a still PNG.
 
+## Paste after a pick
+
+After a pick the item is put on the pasteboard and the popup closes. With
+`paste.auto` on (the default, as on Linux) the app then presses Cmd+V for
+you: it waits until the app the popup was opened over is frontmost with
+the popup gone (at most `paste.wait_ms`, 1 s), pauses `paste.delay_ms`
+(50 ms), checks again and posts Cmd+V. If another app is frontmost by
+then, nothing is pressed. It is always Cmd+V, terminals included:
+`paste.shortcut` is not used on macOS and the Settings tab does not show
+it, but a `[[paste.rules]]` entry with `shortcut = "none"` for an app's
+bundle id (`contains = ["com.apple.terminal"]`) still turns pasting off
+there.
+
+**The Accessibility permission.** macOS lets an app press keys in other
+apps only with the Accessibility permission. The first time a pick would
+paste without it, Stickpile says why it wants it and, if you choose "Open
+System Settings", macOS lists Stickpile under System Settings, Privacy &
+Security, Accessibility, where you turn it on. It asks only once; until the
+permission is on, picks are copied only, and you paste with Cmd+V. Since
+the app is signed ad hoc, macOS may ask for the permission again after an
+update: turn Stickpile off and on again in that list.
+
+**Turning it off.** Settings tab, Copying, "Paste after a pick", or
+`paste.auto = false` in `config.toml`. Without the permission, nothing
+else changes.
+
+The key pressed is the V key of a US keyboard (`kVK_ANSI_V`). Built, not
+run: the Swift part has not been compiled or tried on a Mac yet.
+
 ## Build from source
 
 On a Mac with the Command Line Tools (`xcode-select --install`) and Rust
@@ -140,4 +169,7 @@ grid, the pages, the menu bar item, the global shortcut (Carbon
 `RegisterEventHotKey`, no Accessibility permission) and the pasteboard.
 
 The popup is a non-activating panel: the chat app stays the active app, so
-after a copy the keyboard focus is back in its message box.
+after a copy the keyboard focus is back in its message box. Pasting after a
+pick is decided in Rust (`stickpile_desktop::paste::mac_plan`), which asks
+the app through `PopupUi::paste`; the app (`Paste.swift`) waits for the
+chat app and posts Cmd+V with `CGEvent`.

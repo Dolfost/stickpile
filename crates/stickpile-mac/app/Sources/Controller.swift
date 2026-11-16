@@ -375,6 +375,16 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         }
     }
 
+    func paste(request: PasteRequest) {
+        // Never in snapshot or test runs: the keys would go to the user's app.
+        guard !offscreen, pasteboard.name == .general else { return }
+        // Outside the popup's call: asking for the permission runs a modal alert.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Paste.after(request, panel: self.panel)
+        }
+    }
+
     func post(task: MainTask) {
         DispatchQueue.main.async { [weak self] in
             guard let self else {

@@ -17,6 +17,7 @@ struct Seen {
     hidden: usize,
     thumbnails: Vec<(String, String)>,
     clipboard: Vec<Vec<PasteboardData>>,
+    pastes: Vec<PasteRequest>,
 }
 
 struct FakeUi {
@@ -50,6 +51,9 @@ impl PopupUi for FakeUi {
     }
     fn open_url(&self, _url: String) {}
     fn page_key(&self, _key: PageKey) {}
+    fn paste(&self, request: PasteRequest) {
+        self.seen.lock().unwrap().pastes.push(request);
+    }
     fn post(&self, task: Arc<MainTask>) {
         let _ = self.tasks.lock().unwrap().send(task);
     }
@@ -215,6 +219,15 @@ fn search_copy_and_hide() {
     assert!(items[0].data.starts_with(b"\x89PNG"));
     let v = h.last();
     assert!(!v.visible);
+    // Cmd+V into Telegram, once it is frontmost again.
+    assert_eq!(
+        h.ui.seen.lock().unwrap().pastes,
+        [PasteRequest {
+            bundle_id: "org.telegram.desktop".into(),
+            wait_ms: 1000,
+            delay_ms: 50,
+        }]
+    );
 
     // Typing goes to the field; Escape goes to Normal mode, where j moves.
     h.driver.toggle(None, false);
@@ -222,6 +235,73 @@ fn search_copy_and_hide() {
     assert!(h.key(53, "\u{1b}"));
     assert_eq!(h.last().focus, FocusWish::NoField);
     assert_eq!(h.last().footer.mode.as_deref(), Some("NORMAL"));
+}
+
+/// Open over `front`, search "cat", copy the selected result; wait for the copy.
+fn pick_over(h: &Harness, front: Option<&str>) {
+    let copies = h.ui.seen.lock().unwrap().clipboard.len();
+    h.ui.seen.lock().unwrap().entries.clear();
+    let front = front.map(|b| FrontApp {
+        bundle_id: b.into(),
+        name: "Chat".into(),
+    });
+    h.driver.toggle(front, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("search results", |s| s.entries.len() == 2);
+    assert!(h.key(36, "\r"));
+    h.pump_until("the copy", |s| s.clipboard.len() == copies + 1);
+}
+
+fn pastes(h: &Harness) -> Vec<PasteRequest> {
+    h.ui.seen.lock().unwrap().pastes.clone()
+}
+
+#[test]
+fn paste_after_a_pick_follows_the_settings() {
+    let h = Harness::new();
+    pick_over(&h, Some("com.hnc.Discord"));
+    assert_eq!(pastes(&h).len(), 1);
+    assert_eq!(pastes(&h)[0].bundle_id, "com.hnc.Discord");
+
+    // Off in Settings: copy only.
+    h.driver
+        .set_setting("paste.auto".into(), SettingValue::Bool { value: false });
+    pick_over(&h, Some("com.hnc.Discord"));
+    assert_eq!(pastes(&h).len(), 1);
+
+    // On, but the popup stays open after a copy: the focus is not going back.
+    h.driver.reset_setting("paste.auto".into());
+    h.driver
+        .set_setting("ui.hide_on_copy".into(), SettingValue::Bool { value: false });
+    pick_over(&h, Some("com.hnc.Discord"));
+    assert!(h.last().visible);
+    assert_eq!(pastes(&h).len(), 1);
+    h.driver.hide();
+
+    // No front app known: nothing to paste into.
+    h.driver.reset_setting("ui.hide_on_copy".into());
+    pick_over(&h, None);
+    assert_eq!(pastes(&h).len(), 1);
+
+    h.driver
+        .set_setting("paste.delay_ms".into(), SettingValue::Int { value: 0 });
+    pick_over(&h, Some("org.telegram.desktop"));
+    assert_eq!(pastes(&h).len(), 2);
+    assert_eq!(pastes(&h)[1].delay_ms, 0);
+    assert_eq!(pastes(&h)[1].bundle_id, "org.telegram.desktop");
+
+    // macOS always presses Cmd+V, so the shortcut row is not shown.
+    h.driver.show_tab(TabId::Settings);
+    let keys: Vec<String> = h
+        .last()
+        .settings
+        .groups
+        .iter()
+        .flat_map(|g| &g.rows)
+        .map(|r| r.key.clone())
+        .collect();
+    assert!(keys.contains(&"paste.auto".to_string()));
+    assert!(!keys.contains(&"paste.shortcut".to_string()));
 }
 
 #[test]

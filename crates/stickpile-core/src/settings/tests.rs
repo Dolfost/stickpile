@@ -41,6 +41,10 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "copy.square",
         "copy.background",
         "focus.detect",
+        "paste.auto",
+        "paste.shortcut",
+        "paste.delay_ms",
+        "paste.wait_ms",
     ];
     let mut sorted = keys.clone();
     sorted.sort_unstable();
@@ -206,6 +210,9 @@ fn invalid_values_are_refused_and_the_file_kept() {
         ("ui.start_tab", toml::Value::String("home".into())),
         ("copy.background", toml::Value::String("black".into())),
         ("server_url", toml::Value::String("ftp://x".into())),
+        ("paste.shortcut", toml::Value::String("ctrl+".into())),
+        ("paste.wait_ms", toml::Value::Integer(5001)),
+        ("paste.rules", toml::Value::Array(vec![])),
         ("clipboard.default.still", toml::Value::Array(vec![])),
         ("nope", toml::Value::Integer(1)),
     ];
@@ -374,4 +381,50 @@ fn settings_toml_is_ignored_next_to_a_writable_config() {
     assert!(l.warnings[0].contains("is ignored"), "{}", l.warnings[0]);
     // The standard loader is the layered one.
     assert_eq!(ClientConfig::load(&cfg).unwrap().ui.columns, 6);
+}
+
+#[test]
+fn paste_settings_layer_like_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    // home-manager sets the delay; the popup saved the rest.
+    std::fs::write(&cfg, "[paste]\ndelay_ms = 120\n").unwrap();
+    std::fs::write(
+        settings_path(&cfg),
+        "[paste]\nauto = false\ndelay_ms = 0\nshortcut = \"shift+insert\"\nwait_ms = 9999\n\
+         rules = []\n",
+    )
+    .unwrap();
+    let l = load_layered_as(&cfg, true).unwrap();
+    let p = &l.config.paste;
+    assert!(!p.auto);
+    assert_eq!(p.delay_ms, 120, "config.toml wins");
+    assert_eq!(p.shortcut, "shift+insert");
+    assert_eq!(p.wait_ms, 1000, "out of range: the default");
+    assert_eq!(
+        p.rules,
+        ClientConfig::default().paste.rules,
+        "rules are config.toml only"
+    );
+    assert!(l.locked.contains("paste.delay_ms") && !l.locked.contains("paste.auto"));
+    assert_eq!(l.warnings.len(), 2, "{:?}", l.warnings);
+    assert!(l.warnings.iter().any(|w| w.contains("paste.wait_ms")));
+    assert!(l
+        .warnings
+        .iter()
+        .any(|w| w.contains("paste.rules is not a GUI setting")));
+
+    // A shortcut the loader refuses is skipped too.
+    std::fs::write(settings_path(&cfg), "[paste]\nshortcut = \"hyper+v\"\n").unwrap();
+    let l = load_layered_as(&cfg, true).unwrap();
+    assert_eq!(l.config.paste.shortcut, "ctrl+v");
+    assert!(l.warnings[0].contains("unknown modifier"), "{:?}", l.warnings);
+
+    // Saved from the Settings tab into a writable config.toml.
+    let plain = dir.path().join("plain.toml");
+    set_value(&plain, "paste.auto", toml::Value::Boolean(false)).unwrap();
+    set_value(&plain, "paste.shortcut", toml::Value::String("ctrl+shift+v".into())).unwrap();
+    assert_eq!(read(&plain), "[paste]\nauto = false\nshortcut = \"ctrl+shift+v\"\n");
+    let c = load_layered(&plain).unwrap().config;
+    assert_eq!(c.paste.shortcut_for("vesktop").unwrap().to_string(), "Ctrl+Shift+V");
 }

@@ -58,6 +58,11 @@ pub struct WindowInfo {
     pub class: String,
     pub title: String,
     pub backend: FocusBackend,
+    /// The backend's handle of this window, to find it again (pasting after
+    /// a pick): Hyprland's `address` (`0x5e5ee6b31ee0`), Sway's con id, the
+    /// X11 window id (decimal). `None` when unknown (macOS).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 impl WindowInfo {
@@ -203,7 +208,8 @@ pub fn hyprland_active_window(socket: &Path) -> Result<Option<WindowInfo>, Focus
 }
 
 /// Parse the reply of `j/activewindow`. Hyprland answers `{}` when nothing is
-/// focused (empty workspace). `class` falls back to `initialClass`.
+/// focused (empty workspace). `class` falls back to `initialClass`; the id is
+/// the window's `address`.
 pub fn parse_hyprland_activewindow(json: &str) -> Result<Option<WindowInfo>, FocusError> {
     let parse_err = |message: String| FocusError::Parse {
         backend: FocusBackend::Hyprland,
@@ -225,10 +231,12 @@ pub fn parse_hyprland_activewindow(json: &str) -> Result<Option<WindowInfo>, Foc
     if class.is_empty() && title.is_empty() {
         return Ok(None);
     }
+    let address = s("address");
     Ok(Some(WindowInfo {
         class,
         title,
         backend: FocusBackend::Hyprland,
+        id: (!address.is_empty()).then_some(address),
     }))
 }
 
@@ -293,7 +301,7 @@ pub fn sway_focused_window(socket: &Path) -> Result<Option<WindowInfo>, FocusErr
 }
 
 /// Find the focused window in a `GET_TREE` reply. A focused workspace (no
-/// window) yields `None`.
+/// window) yields `None`. The id is the node's con id.
 pub fn parse_sway_tree(json: &str) -> Result<Option<WindowInfo>, FocusError> {
     let v: Value = serde_json::from_str(json).map_err(|e| FocusError::Parse {
         backend: FocusBackend::Sway,
@@ -332,6 +340,7 @@ pub fn parse_sway_tree(json: &str) -> Result<Option<WindowInfo>, FocusError> {
         class,
         title,
         backend: FocusBackend::Sway,
+        id: node.get("id").and_then(Value::as_i64).map(|id| id.to_string()),
     }))
 }
 
@@ -412,6 +421,7 @@ pub fn x11_active_window(display: Option<&str>) -> Result<Option<WindowInfo>, Fo
         class,
         title,
         backend: FocusBackend::X11,
+        id: Some(window.to_string()),
     }))
 }
 
@@ -467,6 +477,7 @@ mod tests {
         assert_eq!(w.class, "element-desktop");
         assert_eq!(w.title, "Element [1] | T3.5 Leadership");
         assert_eq!(w.backend, FocusBackend::Hyprland);
+        assert_eq!(w.id.as_deref(), Some("0x5e5ee6b31ee0"));
     }
 
     #[test]
@@ -481,6 +492,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(w.class, "com.ayugram.desktop");
+        assert_eq!(w.id, None, "no address in this reply");
     }
 
     #[test]
@@ -495,6 +507,7 @@ mod tests {
         assert_eq!(w.class, "AyuGramDesktop");
         assert_eq!(w.title, "AyuGram");
         assert_eq!(w.backend, FocusBackend::Sway);
+        assert_eq!(w.id.as_deref(), Some("9"));
     }
 
     #[test]
@@ -506,6 +519,7 @@ mod tests {
         // Now the tiled Firefox node is focused too and comes first in the walk.
         let w = parse_sway_tree(&tree).unwrap().unwrap();
         assert_eq!(w.class, "firefox");
+        assert_eq!(w.id.as_deref(), Some("7"));
     }
 
     #[test]
@@ -648,8 +662,13 @@ mod tests {
             class: "io.github.dolfost.Stickpile".into(),
             title: "stickpile".into(),
             backend: FocusBackend::Hyprland,
+            id: None,
         };
         assert!(w.is_app("io.github.dolfost.stickpile"));
+        // The id is optional in JSON (window history files from older versions).
+        let json = serde_json::to_string(&w).unwrap();
+        assert!(!json.contains("\"id\""), "{json}");
+        assert_eq!(serde_json::from_str::<WindowInfo>(&json).unwrap(), w);
         assert!(!w.is_app("firefox"));
     }
 }

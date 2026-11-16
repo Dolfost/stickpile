@@ -134,6 +134,19 @@ let
   };
   rule = contains: target: { inherit contains target; };
 
+  pasteRule = types.submodule {
+    options = {
+      contains = mkOption {
+        type = types.listOf types.str;
+        description = "Substrings of the window class (case-insensitive); any match selects `shortcut`.";
+      };
+      shortcut = mkOption {
+        type = types.str;
+        description = "Shortcut such as `ctrl+shift+v`, or `none` to never paste into these windows.";
+      };
+    };
+  };
+
   # Unset settings are null: drop them, then the fixed sections they leave
   # empty. An empty `clipboard.targets.<name>` stays, since it means "the
   # built-in offers for that target".
@@ -355,6 +368,61 @@ in
                   First match wins; matched case-insensitively against the
                   window class/app id and title. Setting this replaces the
                   whole default list.
+                '';
+          };
+
+          paste = section "Pressing the paste shortcut after a pick (docs/desktop.md)." {
+            auto = setting types.bool true ''
+              After a pick, once the popup has hidden and the window it was
+              opened over has the focus again, press the paste shortcut
+              there (Hyprland, Sway, X11; macOS presses Cmd+V and needs the
+              Accessibility permission). Never in another window.
+            '';
+            wait_ms = setting (types.ints.between 0 5000) 1000 ''
+              Longest wait in milliseconds for that window to get the focus
+              back; after it, nothing is pressed.
+            '';
+            delay_ms = setting (types.ints.between 0 1000) 50 ''
+              Pause in milliseconds between the window getting the focus back
+              and the key press.
+            '';
+            shortcut = setting types.str "ctrl+v" ''
+              Shortcut for windows no rule matches: modifiers (`ctrl`,
+              `shift`, `alt`, `super`) and a letter, a digit or `insert`,
+              joined with `+`; `none` turns pasting off. Not used on macOS.
+            '';
+            rules =
+              setting (types.listOf pasteRule)
+                [
+                  {
+                    contains = [
+                      "kitty"
+                      "foot"
+                      "alacritty"
+                      "wezterm"
+                      "ghostty"
+                      "konsole"
+                      "terminal"
+                      "org.gnome.console"
+                      "kgx"
+                      "ptyxis"
+                      "xterm"
+                      "rxvt"
+                      "terminator"
+                      "tilix"
+                      "terminology"
+                      "blackbox"
+                      "st-256color"
+                      "contour"
+                    ];
+                    shortcut = "ctrl+shift+v";
+                  }
+                ]
+                ''
+                  First match wins; matched case-insensitively against the
+                  window class/app id only (not the title). Setting this
+                  replaces the whole default list (terminals get
+                  `ctrl+shift+v`).
                 '';
           };
 

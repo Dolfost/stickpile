@@ -56,8 +56,8 @@ Default location: `$XDG_CONFIG_HOME/stickpile/config.toml`
 Unknown keys are rejected, so typos fail loudly. `stickpile config check`
 validates a file without contacting the server.
 
-The desktop client reads the same file. The `ui` and `focus` sections only
-affect the desktop popup. When the file is read-only (home-manager), the
+The desktop client reads the same file. The `ui`, `focus` and `paste`
+sections only affect the desktop popup. When the file is read-only (home-manager), the
 popup's Settings tab saves to `settings.toml` next to it, and both clients
 layer that file under `config.toml`; see
 [configuration.md](configuration.md#settings-saved-from-the-popup).
@@ -125,6 +125,19 @@ target = "whatsapp"
 contains = ["slack"]
 target = "slack"
 
+[paste]                 # desktop popup and macOS app only
+auto = true             # after a pick, press the paste shortcut in the window the popup was opened over
+wait_ms = 1000          # longest wait for that window to get the focus back (0..5000)
+delay_ms = 50           # pause before the key press (0..1000)
+shortcut = "ctrl+v"     # for windows no rule matches; none: no paste
+# First match wins; substrings matched case-insensitively against the window class only.
+# Setting `rules` replaces the default list, which is:
+[[paste.rules]]
+contains = ["kitty", "foot", "alacritty", "wezterm", "ghostty", "konsole", "terminal",
+            "org.gnome.console", "kgx", "ptyxis", "xterm", "rxvt", "terminator", "tilix",
+            "terminology", "blackbox", "st-256color", "contour"]
+shortcut = "ctrl+shift+v"
+
 # MIME types put on the clipboard, in offer order, per media kind.
 # Supported: image/png image/gif image/webp image/jpeg text/uri-list
 #            x-special/gnome-copied-files text/plain
@@ -175,6 +188,11 @@ sticker = ["text/uri-list"]
 | `copy.background` | `"keep"` | `white` fills the transparent pixels of stills copied as images |
 | `focus.detect` | `true` | detect the focused window |
 | `focus.rules` | see above | window → target rules |
+| `paste.auto` | `true` | paste after a pick ([desktop.md](desktop.md#paste-after-a-pick)) |
+| `paste.wait_ms` | `1000` | longest wait for the window to get the focus back, 0..5000 |
+| `paste.delay_ms` | `50` | pause before the key press, 0..1000 |
+| `paste.shortcut` | `"ctrl+v"` | shortcut for windows no rule matches (`none`: no paste); not used on macOS |
+| `paste.rules` | see above | window class → shortcut rules (terminals: `ctrl+shift+v`) |
 | `clipboard.default.{still,animation,video,sticker}` | see above | offers per kind |
 | `clipboard.targets.<target>.*` | none | per-target override of the four lists |
 

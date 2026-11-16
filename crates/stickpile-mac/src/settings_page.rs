@@ -10,6 +10,9 @@ use stickpile_i18n::global::t_dyn;
 
 use crate::bridge::{ChoiceOption, SettingKind, SettingRow, SettingValue, SettingsGroup, SettingsView};
 
+/// Settings that mean nothing on macOS: it always pastes with Cmd+V.
+pub const NOT_ON_MAC: &[&str] = &["paste.shortcut"];
+
 #[derive(Debug, Default)]
 pub struct SettingsPage {
     layered: Option<LayeredConfig>,
@@ -60,7 +63,7 @@ impl SettingsPage {
                 title: t_dyn(group),
                 rows: schema
                     .iter()
-                    .filter(|spec| spec.group == *group)
+                    .filter(|spec| spec.group == *group && !NOT_ON_MAC.contains(&spec.key))
                     .map(|spec| {
                         let value = settings::get_value(&layered.config, spec.key);
                         let locked = layered.locked.contains(spec.key);
@@ -138,7 +141,9 @@ mod tests {
         let v = page.view(&config);
         assert!(v.error.is_none());
         let rows: Vec<&SettingRow> = v.groups.iter().flat_map(|g| &g.rows).collect();
-        assert_eq!(rows.len(), settings::settings_schema().len());
+        assert_eq!(rows.len(), settings::settings_schema().len() - NOT_ON_MAC.len());
+        assert!(rows.iter().all(|r| !NOT_ON_MAC.contains(&r.key.as_str())));
+        assert!(rows.iter().any(|r| r.key == "paste.auto"));
         let columns = rows.iter().find(|r| r.key == "ui.columns").unwrap();
         assert_eq!(columns.value, SettingValue::Int { value: 4 });
         assert!(columns.resettable && !columns.locked);

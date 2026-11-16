@@ -215,6 +215,42 @@ background = "keep"   # keep | white: fill the transparent pixels of stills copi
   per option combination, so changing an option never serves an old file:
   `clip/<media>.<variant>.sq-white.bg-white/<name>.png`.
 
+### Paste after a pick
+
+```toml
+[paste]
+auto = true           # after a pick, press the paste shortcut in the window the popup was opened over
+wait_ms = 1000        # longest wait (0..5000 ms) for that window to get the focus back
+delay_ms = 50         # pause (0..1000 ms) between that and the key press
+shortcut = "ctrl+v"   # for windows no rule matches; "none": no paste
+
+[[paste.rules]]       # first match wins; replaces the default list (terminals)
+contains = ["kitty", "foot", "alacritty"]   # substrings of the window class, not the title
+shortcut = "ctrl+shift+v"
+```
+
+On by default. Once the popup has hidden after a pick, it waits for the
+window it was opened over to have the keyboard focus again and presses
+the shortcut there; if another window has the focus when the wait ends,
+nothing is pressed. It works on Hyprland, Sway and X11; on GNOME and KDE
+Wayland the popup only copies and its footer says "paste: by hand". The
+macOS app always presses Cmd+V and needs the Accessibility permission
+([macos.md](macos.md#paste-after-a-pick)).
+
+- A shortcut is modifiers (`ctrl`, `shift`, `alt`, `super`) and one key
+  (a letter, a digit or `insert`) joined with `+`, case ignored; a letter
+  or a digit needs a modifier. Anything else is an error, in
+  `shortcut` and in every rule.
+- The default rules give terminals (kitty, foot, Alacritty, WezTerm,
+  Ghostty, Konsole, GNOME Terminal and Console, Ptyxis, xterm, urxvt,
+  Terminator, Tilix, ...) `ctrl+shift+v`; the whole list is in
+  [desktop.md](desktop.md#paste-after-a-pick). Rules are matched against
+  the window class only, unlike `focus.rules`, which also look at the title.
+- `paste.auto` also reads the focused window when `focus.detect` is off;
+  the target app then still comes from `default_target`.
+
+Details per compositor: [desktop.md](desktop.md#paste-after-a-pick).
+
 ### Settings saved from the popup
 
 The popup's Settings tab edits these keys:
@@ -222,11 +258,11 @@ The popup's Settings tab edits these keys:
 | Group | Keys |
 |---|---|
 | Popup | `ui.language`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
-| Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background` |
+| Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background`, `paste.auto`, `paste.shortcut` (not on macOS), `paste.delay_ms`, `paste.wait_ms` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 
-Clipboard offer lists, focus rules, `token_file` and `cache_dir` are set in
-`config.toml` only.
+Clipboard offer lists, focus rules, paste rules, `token_file` and
+`cache_dir` are set in `config.toml` only.
 
 Where the changes go depends on whether `config.toml` can be written:
 

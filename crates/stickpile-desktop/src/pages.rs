@@ -145,6 +145,7 @@ pub fn needs_new_session(old: &ClientConfig, new: &ClientConfig) -> bool {
     let session_part = |c: &ClientConfig| ClientConfig {
         ui: Default::default(),
         focus: Default::default(),
+        paste: Default::default(),
         default_target: TargetApp::Generic,
         prefer_stickers: false,
         ..c.clone()
@@ -359,6 +360,9 @@ mod tests {
         new.focus.detect = false;
         new.default_target = TargetApp::Telegram;
         new.prefer_stickers = true;
+        new.paste.auto = false;
+        new.paste.shortcut = "shift+insert".into();
+        new.paste.delay_ms = 0;
         assert!(!needs_new_session(&old, &new));
         assert!(!account_changed(&old, &new));
         for change in [

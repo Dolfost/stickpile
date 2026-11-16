@@ -18,7 +18,7 @@ use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_desktop::backend::{self, Backend, BoxFut, CoreBackend, Credentials, LoginError, Profile};
 use stickpile_desktop::demo::DemoBackend;
-use stickpile_desktop::{glue, pages, sync};
+use stickpile_desktop::{glue, pages, paste, sync};
 use stickpile_i18n::global::{t, tf, tp};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::{FocusBackend, WindowInfo};
@@ -82,6 +82,9 @@ struct State {
     settings: SettingsPage,
     /// `entries_revision` of the lists last sent to the app.
     sent_revision: Option<u64>,
+    /// The app the popup was last opened over (its bundle id), to paste
+    /// into after a pick.
+    opened_over: Option<String>,
 }
 
 pub struct Driver {
@@ -184,6 +187,7 @@ impl Driver {
             me: MeState::default(),
             settings: SettingsPage::default(),
             sent_revision: None,
+            opened_over: None,
             cfg,
         };
         Arc::new_cyclic(|weak| Driver {
@@ -354,7 +358,8 @@ impl Driver {
     // -- entry points ------------------------------------------------------------------
 
     fn capture(&self, front: Option<FrontApp>) -> OpenInfo {
-        let s = self.lock();
+        let mut s = self.lock();
+        s.opened_over = front.as_ref().map(|f| f.bundle_id.clone());
         if !s.cfg.focus.detect {
             return OpenInfo::default();
         }
@@ -362,6 +367,7 @@ impl Driver {
             class: f.bundle_id,
             title: f.name,
             backend: FocusBackend::MacOs,
+            id: None,
         });
         glue::open_info(&s.cfg, Ok(window))
     }
@@ -1189,11 +1195,34 @@ impl Driver {
                 Ok(prepared) => {
                     let warning = prepared.warning.clone();
                     d.dispatch(Event::CopyFinished { item_id: id, warning });
+                    d.paste_after_pick();
                     d.record(item, prepared);
                 }
                 Err(error) => d.dispatch(Event::CopyFailed { item_id: id, error }),
             }
         });
+    }
+
+    /// A pick was copied: have the app press Cmd+V in the app the popup was
+    /// opened over, once the popup has hidden (`paste.auto`).
+    fn paste_after_pick(&self) {
+        let plan = {
+            let mut s = self.lock();
+            let hidden = !s.model.is_visible();
+            let plan = paste::mac_plan(&s.cfg.paste, s.opened_over.as_deref(), hidden);
+            if plan.is_ok() {
+                s.opened_over = None;
+            }
+            plan
+        };
+        match plan {
+            Ok(p) => self.ui.paste(PasteRequest {
+                bundle_id: p.bundle_id,
+                wait_ms: p.wait_ms,
+                delay_ms: p.delay_ms,
+            }),
+            Err(skip) => tracing::debug!("not pasting: {skip}"),
+        }
     }
 
     fn set_clipboard(&self, prepared: &PreparedCopy) -> Result<(), String> {

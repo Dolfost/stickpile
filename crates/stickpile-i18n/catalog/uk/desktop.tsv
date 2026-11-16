@@ -153,6 +153,14 @@ Keep	Залишити
 Normal	Звичайний
 Insert	Вставка
 Reset to the default	Повернути типове значення
+Paste after a pick	Вставляти після вибору
+Press the paste shortcut in the window the popup was opened over, once it has the focus again (Hyprland, Sway, X11; macOS with the Accessibility permission).	Натискати клавіші вставлення у вікні, над яким відкрито спливне вікно, щойно воно знову отримає фокус (Hyprland, Sway, X11; macOS із дозволом Універсальний доступ).
+Paste shortcut	Клавіші вставлення
+Pressed after a pick, such as ctrl+v or shift+insert. Terminals get ctrl+shift+v (paste.rules in config.toml).	Натискаються після вибору, наприклад ctrl+v або shift+insert. Терміналам надсилається ctrl+shift+v (paste.rules у config.toml).
+Paste delay	Затримка вставлення
+Milliseconds between the window getting the focus back and the key press.	Мілісекунди між поверненням фокуса до вікна й натисканням клавіш.
+Paste wait	Очікування вставлення
+Longest wait in milliseconds for the window to get the focus back; after it, nothing is pressed.	Найдовше очікування в мілісекундах, поки вікно знову отримає фокус; після нього нічого не натискається.
 # The window
 Search, or try e:😂 set:cats type:gif vibe:tired	Шукайте, наприклад e:😂 set:cats type:gif vibe:tired
 Filter packs by name	Фільтр наборів за назвою
@@ -175,6 +183,8 @@ the popup lost focus before the item was ready — press Enter again	вікно 
 the popup was closed before the item was ready	вікно закрито, поки стікер готувався
 Keys (? or F1)	Клавіші (? або F1)
 Keys	Клавіші
+paste: by hand	вставка: вручну
+Automatic paste needs Hyprland, Sway or X11: this session only copies, so paste with Ctrl+V. Settings, Paste after a pick, turns this off.	Автоматичне вставлення працює в Hyprland, Sway та X11: у цьому сеансі стікер лише копіюється, тож вставте його через Ctrl+V. Вимкнути: Налаштування, Вставляти після вибору.
 # The Me page
 Could not load the profile: {error}	Не вдалося завантажити профіль: {error}
 Enter a username and a password	Введіть ім'я користувача й пароль
@@ -228,6 +238,9 @@ Shortcut	Клавіша виклику
 Target app: click for the next one	Цільова програма: клацніть, щоб вибрати наступну
 Could not write to the pasteboard	Не вдалося записати в буфер обміну
 The pasteboard refused {type}	Буфер обміну не прийняв {type}
+Stickpile can press Cmd+V for you in the app it was opened over. macOS allows that only with the Accessibility permission: turn on Stickpile in System Settings, Privacy & Security, Accessibility. Until then it only copies; Paste after a pick in Settings turns this off.	Stickpile може сам натиснути Cmd+V у програмі, над якою його відкрито. macOS дозволяє це лише з дозволом Універсальний доступ: увімкніть Stickpile у Системних параметрах, розділ Конфіденційність і безпека, Універсальний доступ. Доти він лише копіює; вимкнути це можна в Налаштуваннях, Вставляти після вибору.
+Open System Settings	Відкрити Системні параметри
+Not now	Не зараз
 Undo	Відмінити
 Redo	Повторити
 Cut	Вирізати

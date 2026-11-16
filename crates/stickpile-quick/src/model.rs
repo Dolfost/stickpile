@@ -2675,6 +2675,7 @@ pub(crate) mod tests {
             class: class.into(),
             title: "chat".into(),
             backend: FocusBackend::Hyprland,
+            id: None,
         }
     }
 

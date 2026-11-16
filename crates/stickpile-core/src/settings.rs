@@ -19,7 +19,10 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{DocumentMut, Item, TableLike};
 
-use crate::config::{Background, ClientConfig, ConfigError, SquarePad, StartMode, LANGUAGES, START_TABS};
+use crate::config::{
+    Background, ClientConfig, ConfigError, SquarePad, StartMode, LANGUAGES, PASTE_DELAY_MAX_MS, PASTE_WAIT_MAX_MS,
+    START_TABS,
+};
 
 /// The GUI's settings file, next to `config.toml`.
 pub const SETTINGS_FILE: &str = "settings.toml";
@@ -300,6 +303,44 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "Fill transparent pixels of stills copied as images: keep or white.",
             Choice(Background::NAMES),
             s("keep"),
+        ),
+        spec(
+            "paste.auto",
+            "Copying",
+            "Paste after a pick",
+            "Press the paste shortcut in the window the popup was opened over, once it has the focus again (Hyprland, Sway, X11; macOS with the Accessibility permission).",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "paste.shortcut",
+            "Copying",
+            "Paste shortcut",
+            "Pressed after a pick, such as ctrl+v or shift+insert. Terminals get ctrl+shift+v (paste.rules in config.toml).",
+            Text,
+            s("ctrl+v"),
+        ),
+        spec(
+            "paste.delay_ms",
+            "Copying",
+            "Paste delay",
+            "Milliseconds between the window getting the focus back and the key press.",
+            Int {
+                min: 0,
+                max: PASTE_DELAY_MAX_MS as i64,
+            },
+            i(50),
+        ),
+        spec(
+            "paste.wait_ms",
+            "Copying",
+            "Paste wait",
+            "Longest wait in milliseconds for the window to get the focus back; after it, nothing is pressed.",
+            Int {
+                min: 0,
+                max: PASTE_WAIT_MAX_MS as i64,
+            },
+            i(1000),
         ),
         spec(
             "server_url",
