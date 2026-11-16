@@ -381,3 +381,66 @@ fn pairing_code_login_against_the_real_server() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("invalid or expired pairing code"));
 }
+
+#[test]
+fn export_formats_whatsapp_and_publish() {
+    let server = Server::start();
+    let env = Env::new(&server.url());
+    std::fs::write(env.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    let pw = env.path("pw");
+    env.ok(&["login", "-u", "alice", "--password-file", pw.to_str().unwrap()]);
+    env.ok(&["sets", "create", "trio", "--name", "Trio"]);
+    let mut files = Vec::new();
+    for seed in 1..=3u8 {
+        let p = env.path(&format!("{seed}.png"));
+        std::fs::write(&p, png(seed)).unwrap();
+        files.push(p.to_str().unwrap().to_string());
+    }
+    let mut args = vec!["upload", "trio"];
+    args.extend(files.iter().map(String::as_str));
+    env.ok(&args);
+
+    // Archives: the same files as a directory export.
+    let zip = env.path("out/trio.zip");
+    let out = env.ok(&["export", "trio", "--format", "zip", "-o", zip.to_str().unwrap()]);
+    assert!(out.contains("Wrote"), "{out}");
+    let bytes = std::fs::read(&zip).unwrap();
+    assert!(bytes.starts_with(b"PK\x03\x04"));
+    let names: Vec<String> = stickpile_server::archive::entries(&bytes)
+        .unwrap()
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert!(names.contains(&"trio/set.toml".to_string()), "{names:?}");
+    assert_eq!(names.len(), 4, "{names:?}");
+    let tgz = env.path("out/trio.tar.gz");
+    let j = env.json(&["export", "trio", "--format", "tar.gz", "-o", tgz.to_str().unwrap()]);
+    assert_eq!(j["format"], "tar.gz");
+    assert!(std::fs::read(&tgz).unwrap().starts_with(&[0x1f, 0x8b]));
+    assert!(
+        !env.run(&["export", "trio"]).status.success(),
+        "a directory or a format"
+    );
+
+    // WhatsApp: built on the server, then downloaded.
+    let wa = env.path("out/trio-whatsapp.zip");
+    let out = env.ok(&["export", "trio", "--format", "whatsapp", "-o", wa.to_str().unwrap()]);
+    assert!(out.contains("trio.wastickers: Trio (3 still stickers)"), "{out}");
+    let outer = stickpile_server::archive::entries(&std::fs::read(&wa).unwrap()).unwrap();
+    let names: Vec<&str> = outer.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["contents.json", "trio.wastickers"]);
+
+    // Publishing: nothing is configured on this server.
+    let list = env.json(&["publish", "trio"]);
+    assert_eq!(list[0]["platform"], "telegram");
+    assert_eq!(list[0]["configured"], false);
+    let out = env.ok(&["publish", "trio"]);
+    assert!(out.contains("PLATFORM") && out.contains("telegram"), "{out}");
+    let out = env.run(&["publish", "trio", "--to", "telegram"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("not configured"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

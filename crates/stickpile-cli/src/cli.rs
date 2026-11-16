@@ -60,13 +60,26 @@ pub enum Command {
         #[arg(long, value_name = "SET")]
         into: Option<String>,
     },
-    /// Export a set into a directory (set.toml + numbered files)
+    /// Export a set into a directory (set.toml + numbered files), or as one
+    /// file with --format and -o
+    #[command(group(ArgGroup::new("target").required(true).args(["dir", "format"])))]
     Export {
         /// Set id or own slug
         set: String,
         /// The set directory to write (created; media files not in the set are removed)
-        dir: PathBuf,
+        dir: Option<PathBuf>,
+        /// Download one file instead: zip, tar or tar.gz (the set directory
+        /// as an archive), or whatsapp (the WhatsApp sticker packs, built on
+        /// the server first: a zip of .wastickers files)
+        #[arg(long, value_enum, requires = "output", conflicts_with = "dir")]
+        format: Option<ExportFormat>,
+        /// The file to write with --format
+        #[arg(short, long, value_name = "FILE", requires = "format")]
+        output: Option<PathBuf>,
     },
+    /// Publish a set to one or several platforms at once (--to
+    /// telegram,...), or show where it is published (without --to)
+    Publish(PublishArgs),
     /// Search your library (falls back to the offline cache)
     Search(SearchArgs),
     /// Copy the best match (or an item by id) to the clipboard and record the use
@@ -305,6 +318,33 @@ pub enum GitpackCmd {
     },
 }
 
+/// `stickpile export --format`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ExportFormat {
+    Zip,
+    Tar,
+    #[value(name = "tar.gz", alias = "tgz")]
+    TarGz,
+    Whatsapp,
+}
+
+#[derive(Args, Debug)]
+pub struct PublishArgs {
+    /// Set id or own slug
+    pub set: String,
+    /// Platforms to publish to, comma-separated (e.g. telegram); without
+    /// it, show where the set is published
+    #[arg(long, value_delimiter = ',', value_name = "PLATFORMS")]
+    pub to: Vec<String>,
+    /// An option of one platform as PLATFORM.KEY=VALUE, e.g.
+    /// telegram.pack_name=cats or telegram.title=Cats (repeatable)
+    #[arg(long = "option", short = 'O', value_name = "PLATFORM.KEY=VALUE", value_parser = parse_platform_option, requires = "to")]
+    pub options: Vec<(String, String, String)>,
+    /// Wait for the jobs to finish
+    #[arg(long, requires = "to")]
+    pub wait: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TelegramCmd {
     /// Import a Telegram sticker pack by name into a new set
@@ -459,6 +499,18 @@ pub fn parse_target(s: &str) -> Result<TargetApp, String> {
         let names: Vec<&str> = TargetApp::ALL.iter().map(|t| t.as_str()).collect();
         format!("unknown target {s:?} (one of: {})", names.join(", "))
     })
+}
+
+/// `telegram.pack_name=cats` -> (`telegram`, `pack_name`, `cats`).
+pub fn parse_platform_option(s: &str) -> Result<(String, String, String), String> {
+    let bad = || format!("expected PLATFORM.KEY=VALUE, got {s:?}");
+    let (key, value) = s.split_once('=').ok_or_else(bad)?;
+    let (platform, key) = key.split_once('.').ok_or_else(bad)?;
+    let (platform, key) = (platform.trim(), key.trim());
+    if platform.is_empty() || key.is_empty() {
+        return Err(bad());
+    }
+    Ok((platform.to_string(), key.to_string(), value.to_string()))
 }
 
 pub fn parse_visibility(s: &str) -> Result<Visibility, String> {
@@ -632,6 +684,19 @@ mod tests {
             &["upload", "cats", "a.png", "b.gif"],
             &["import", "./my-cats", "--into", "cats"],
             &["export", "cats", "./out"],
+            &["export", "cats", "--format", "zip", "-o", "cats.zip"],
+            &["export", "cats", "--format", "tar.gz", "--output", "cats.tgz"],
+            &["export", "cats", "--format", "whatsapp", "-o", "cats-whatsapp.zip"],
+            &["publish", "cats"],
+            &[
+                "publish",
+                "cats",
+                "--to",
+                "telegram",
+                "-O",
+                "telegram.pack_name=cats",
+                "--wait",
+            ],
             &["sync"],
             &["flush"],
             &["like", "abc"],
@@ -678,6 +743,33 @@ mod tests {
         );
         assert!(parse(&["login", "--code", "x", "--totp", "123456"]).is_err());
         assert!(parse(&["upload", "cats"]).is_err());
+        // export: a directory or a format with a file, not both.
+        assert!(parse(&["export", "cats"]).is_err());
+        assert!(parse(&["export", "cats", "--format", "zip"]).is_err(), "-o required");
+        assert!(parse(&["export", "cats", "./out", "--format", "zip", "-o", "x.zip"]).is_err());
+        assert!(parse(&["export", "cats", "--format", "rar", "-o", "x.rar"]).is_err());
+        assert!(parse(&["publish", "cats", "-O", "nodot=1", "--to", "telegram"]).is_err());
+        assert!(parse(&["publish", "cats", "--wait"]).is_err(), "--wait needs --to");
+        let cli = parse(&[
+            "publish",
+            "cats",
+            "--to",
+            "telegram,discord",
+            "-O",
+            "telegram.title=A = B",
+        ])
+        .unwrap();
+        let Command::Publish(a) = cli.command else { panic!() };
+        assert_eq!(a.to, ["telegram", "discord"]);
+        assert_eq!(a.options, [("telegram".into(), "title".into(), "A = B".into())]);
+        let cli = parse(&["export", "cats", "--format", "tgz", "-o", "x"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Export {
+                format: Some(ExportFormat::TarGz),
+                ..
+            }
+        ));
     }
 
     #[test]

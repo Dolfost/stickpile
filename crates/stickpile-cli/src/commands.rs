@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::json;
 use stickpile_api::*;
-use stickpile_core::client::{ApiClient, PopularParams, UploadFile};
+use stickpile_core::client::{ApiClient, PopularParams, SetArchive, UploadFile};
 use stickpile_core::clipboard::serve::spawn_detached;
 use stickpile_core::{session, token, ClientConfig, CoreError, Session};
 
@@ -75,7 +75,17 @@ pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
         Command::Sets(c) => sets(ctx, c).await,
         Command::Upload { set, files } => upload(ctx, &set, &files).await,
         Command::Import { dir, into } => import(ctx, &dir, into.as_deref()).await,
-        Command::Export { set, dir } => export(ctx, &set, &dir).await,
+        Command::Export {
+            set,
+            dir,
+            format,
+            output,
+        } => match (dir, format, output) {
+            (Some(dir), None, None) => export(ctx, &set, &dir).await,
+            (None, Some(format), Some(output)) => export_file(ctx, &set, format, &output).await,
+            _ => bail!("give either a directory, or --format with -o FILE"),
+        },
+        Command::Publish(a) => publish(ctx, a).await,
         Command::Search(a) => search(ctx, a).await,
         Command::Copy(a) => copy(ctx, a).await,
         Command::Sync => sync(ctx).await,
@@ -560,6 +570,146 @@ async fn export(ctx: &Ctx, set: &str, dir: &Path) -> Result<()> {
         bundle.manifest.version,
         dir.display()
     );
+    Ok(())
+}
+
+/// `export --format`: one file, the set as an archive or its WhatsApp
+/// packs (built on the server first, then downloaded).
+async fn export_file(ctx: &Ctx, set: &str, format: ExportFormat, output: &Path) -> Result<()> {
+    let client = ctx.client()?;
+    let id = resolve_set(&client, set).await?;
+    let archive = match format {
+        ExportFormat::Zip => Some(SetArchive::Zip),
+        ExportFormat::Tar => Some(SetArchive::Tar),
+        ExportFormat::TarGz => Some(SetArchive::TarGz),
+        ExportFormat::Whatsapp => None,
+    };
+    if let Some(archive) = archive {
+        let n = client.download_export(&id, archive, output).await?;
+        if ctx.json {
+            return output::json(&json!({ "file": output, "format": archive.extension(), "bytes": n }));
+        }
+        println!("Wrote {} ({}).", output.display(), output::bytes(n));
+        return Ok(());
+    }
+    let job = client.whatsapp_build(&id).await?;
+    if !ctx.json {
+        eprintln!("Building the WhatsApp packs (job {})...", job.id);
+    }
+    let job = client.wait_job(&job.id, JOB_POLL, JOB_MAX_WAIT).await?;
+    match job.status {
+        JobStatus::Done => {}
+        JobStatus::Failed => bail!(
+            "building the WhatsApp packs failed: {}",
+            job.error.as_deref().unwrap_or("unknown error")
+        ),
+        _ => bail!(
+            "the WhatsApp packs are not built yet (job {} still {})",
+            job.id,
+            output::name(&job.status)
+        ),
+    }
+    let n = client.download_whatsapp(&id, output).await?;
+    let build: Option<WhatsappBuild> = job.result.and_then(|r| serde_json::from_value(r).ok());
+    if ctx.json {
+        return output::json(&json!({ "file": output, "format": "whatsapp", "bytes": n, "build": build }));
+    }
+    println!("Wrote {} ({}).", output.display(), output::bytes(n));
+    if let Some(b) = build {
+        for p in &b.packs {
+            println!(
+                "  {}: {} ({} {} stickers)",
+                p.file,
+                p.title,
+                p.stickers.len(),
+                if p.animated { "animated" } else { "still" }
+            );
+        }
+        for s in &b.skipped {
+            println!("  left out: {}: {}", s.name, s.reason);
+        }
+    }
+    Ok(())
+}
+
+/// `publish`: show where the set is published, or publish it to the
+/// platforms of `--to` (one job each).
+async fn publish(ctx: &Ctx, a: PublishArgs) -> Result<()> {
+    let client = ctx.client()?;
+    let id = resolve_set(&client, &a.set).await?;
+    if a.to.is_empty() {
+        let list = client.publications(&id).await?;
+        if ctx.json {
+            return output::json(&list);
+        }
+        let mut t = Table::new(&["PLATFORM", "CONFIGURED", "PUBLISHED AS", "PUBLISHED", "LAST", "LINK"]);
+        for p in &list {
+            let last = match (&p.job, &p.last_status) {
+                (Some(j), _) => output::name(&j.status),
+                (None, Some(s)) => output::name(s),
+                (None, None) => "-".into(),
+            };
+            t.row(vec![
+                p.platform.clone(),
+                if p.configured { "yes" } else { "no" }.into(),
+                output::opt(p.target.clone()),
+                output::opt_time(p.published_at),
+                last,
+                output::opt(p.url.clone()),
+            ]);
+        }
+        t.print();
+        for p in list.iter().filter(|p| p.last_status == Some(JobStatus::Failed)) {
+            if let Some(e) = &p.last_error {
+                println!("{}: the last publish failed: {e}", p.platform);
+            }
+        }
+        return Ok(());
+    }
+    let mut options: std::collections::BTreeMap<String, serde_json::Value> = Default::default();
+    for (platform, key, value) in a.options {
+        let entry = options.entry(platform).or_insert_with(|| json!({}));
+        entry[key] = serde_json::Value::String(value);
+    }
+    let req = PublishRequest {
+        platforms: a.to,
+        options,
+    };
+    let queued = client.publish(&id, &req).await?;
+    let mut failed = 0;
+    let mut done = Vec::new();
+    for job in queued.jobs {
+        let job = if a.wait {
+            client.wait_job(&job.id, JOB_POLL, JOB_MAX_WAIT).await?
+        } else {
+            job
+        };
+        if job.status == JobStatus::Failed {
+            failed += 1;
+        }
+        done.push(job);
+    }
+    if ctx.json {
+        output::json(&done)?;
+    } else {
+        for job in &done {
+            println!(
+                "Job {} ({}): {}",
+                job.id,
+                output::name(&job.kind),
+                output::name(&job.status)
+            );
+            if let Some(r) = &job.result {
+                println!("  result:   {r}");
+            }
+            if let Some(e) = &job.error {
+                println!("  error:    {e}");
+            }
+        }
+    }
+    if failed > 0 {
+        bail!("{failed} of {} publish jobs failed", done.len());
+    }
     Ok(())
 }
 

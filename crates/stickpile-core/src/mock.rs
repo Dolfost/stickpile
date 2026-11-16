@@ -7,7 +7,10 @@
 //! `GET /items` cache feed with
 //! cursors and tombstones, files, set cover images, likes, a naive substring
 //! search (with `is:` filters), usage dedup, popular, `/stats/me`, jobs and a
-//! few admin routes. Test hooks: a controllable
+//! few admin routes. The export page's routes answer with placeholders:
+//! ZIP and TAR.GZ downloads are fixed bytes (a valid empty ZIP, a gzip
+//! header), publishing knows one configured platform (`telegram`) and a
+//! WhatsApp build finishes at once with one pack of the set's items. Test hooks: a controllable
 //! clock, page size, artificial delays and forced failures, and a request log.
 //!
 //! The server runs on its own thread and tokio runtime, so it works from both
@@ -110,6 +113,8 @@ pub struct MockState {
     pub tailnet_user: Option<String>,
     /// `METHOD /path` of every request.
     pub requests: Vec<String>,
+    /// Set id -> its WhatsApp build (made when it is requested).
+    pub whatsapp: HashMap<String, WhatsappBuild>,
 }
 
 impl Default for MockState {
@@ -136,6 +141,7 @@ impl Default for MockState {
             fail_usage: None,
             tailnet_user: None,
             requests: Vec::new(),
+            whatsapp: HashMap::new(),
         }
     }
 }
@@ -723,6 +729,12 @@ pub fn router(state: Shared) -> Router {
         .route(r::SET, get(get_set).delete(delete_set).patch(update_set))
         .route(r::SET_ITEMS, post(upload))
         .route(r::SET_EXPORT, get(export_set))
+        .route(r::SET_EXPORT_ZIP, get(export_zip))
+        .route(r::SET_EXPORT_TGZ, get(export_tgz))
+        .route(r::SET_PUBLISH, get(publications).post(publish))
+        .route(r::SET_WHATSAPP, get(whatsapp_status).post(whatsapp_build))
+        .route(r::SET_WHATSAPP_ZIP, get(whatsapp_zip))
+        .route(r::SET_WHATSAPP_PACK, get(whatsapp_pack))
         .route(r::SET_COVER_FILE, get(cover_file))
         .route(r::SETS_IMPORT, post(import_set))
         .route(r::SETS_GITPACK, post(gitpack))
@@ -1104,6 +1116,237 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
     };
     let tar = stickpile_setfmt::write_tar(&bundle, &set.slug).map_err(|e| api_err(500, "internal", &e.to_string()))?;
     Ok(([(header::CONTENT_TYPE, "application/x-tar")], Body::from(tar)).into_response())
+}
+
+/// An empty ZIP archive: only the end of central directory record.
+pub const EMPTY_ZIP: &[u8] = b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+
+fn download(mime: &'static str, name: &str, bytes: Vec<u8>) -> Response {
+    let disposition = format!("attachment; filename=\"{name}\"");
+    (
+        [
+            (header::CONTENT_TYPE, mime.to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        Body::from(bytes),
+    )
+        .into_response()
+}
+
+async fn export_zip(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Response> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let slug = st.set(&id).expect("set").slug.clone();
+    Ok(download("application/zip", &format!("{slug}.zip"), EMPTY_ZIP.to_vec()))
+}
+
+async fn export_tgz(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Response> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let slug = st.set(&id).expect("set").slug.clone();
+    let mut bytes = vec![0x1f, 0x8b];
+    bytes.extend_from_slice(format!("mock tar.gz of {slug}").as_bytes());
+    Ok(download("application/gzip", &format!("{slug}.tar.gz"), bytes))
+}
+
+/// The owner's set: 404 if unreadable, 403 for other readers.
+fn own_set(st: &MockState, u: &User, id: &str) -> HResult<Set> {
+    if !st.can_read(u, id) {
+        return Err(not_found());
+    }
+    if !st.owns(u, id) {
+        return Err(api_err(403, "forbidden", "only the owner can do this"));
+    }
+    Ok(st.set(id).expect("set").clone())
+}
+
+async fn publications(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath(id): AxPath<String>,
+) -> HResult<Json<Vec<Publication>>> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    let set = own_set(&st, &u, &id)?;
+    let job = st
+        .jobs
+        .iter()
+        .rev()
+        .find(|j| j.kind == JobKind::TelegramExport && j.subject.as_deref() == Some(id.as_str()))
+        .cloned();
+    Ok(Json(vec![Publication {
+        platform: "telegram".into(),
+        name: "Telegram".into(),
+        configured: true,
+        url: set
+            .telegram_pack
+            .as_ref()
+            .map(|p| format!("https://t.me/addstickers/{p}")),
+        target: set.telegram_pack,
+        published_at: None,
+        last_status: None,
+        last_finished_at: None,
+        last_error: None,
+        last_result: None,
+        job,
+    }]))
+}
+
+async fn publish(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath(id): AxPath<String>,
+    Json(req): Json<PublishRequest>,
+) -> HResult<Json<PublishJobs>> {
+    let mut st = lock(&s);
+    let u = auth(&st, &h)?;
+    own_set(&st, &u, &id)?;
+    if req.platforms.is_empty() {
+        return Err(api_err(
+            400,
+            "bad_request",
+            "choose at least one platform to publish to",
+        ));
+    }
+    let mut kinds = Vec::new();
+    for p in &req.platforms {
+        match p.as_str() {
+            "telegram" if !kinds.contains(&JobKind::TelegramExport) => kinds.push(JobKind::TelegramExport),
+            "telegram" => {}
+            other => {
+                return Err(api_err(
+                    400,
+                    "bad_request",
+                    &format!("unknown platform {other:?}; this server knows telegram"),
+                ))
+            }
+        }
+    }
+    let jobs = kinds.into_iter().map(|k| st.new_job(k, Some(id.clone()))).collect();
+    Ok(Json(PublishJobs { jobs }))
+}
+
+async fn whatsapp_status(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath(id): AxPath<String>,
+) -> HResult<Json<WhatsappStatus>> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let build = st.whatsapp.get(&id).cloned();
+    Ok(Json(WhatsappStatus {
+        current: build.is_some(),
+        build,
+        job: None,
+    }))
+}
+
+async fn whatsapp_build(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Json<Job>> {
+    let mut st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let set = st.set(&id).expect("set").clone();
+    let mut items: Vec<&MockItem> = st.items.iter().filter(|i| i.item.set_id == id).collect();
+    items.sort_by_key(|i| i.item.position);
+    let stickers: Vec<WhatsappSticker> = items
+        .iter()
+        .take(30)
+        .enumerate()
+        .map(|(k, i)| WhatsappSticker {
+            item_id: i.item.id.clone(),
+            name: i.item.name.clone(),
+            file: format!("{:02}.webp", k + 1),
+            emojis: if i.item.emojis.is_empty() {
+                vec!["\u{1f642}".into()]
+            } else {
+                i.item.emojis.iter().take(3).cloned().collect()
+            },
+            animated: false,
+            size_bytes: 0,
+            note: None,
+        })
+        .collect();
+    if stickers.len() < 3 {
+        let mut job = st.new_job(JobKind::WhatsappExport, Some(id.clone()));
+        job.status = JobStatus::Failed;
+        job.error = Some("nothing to export: a WhatsApp pack needs at least 3 stickers".into());
+        if let Some(j) = st.jobs.iter_mut().find(|j| j.id == job.id) {
+            *j = job.clone();
+        }
+        return Ok(Json(job));
+    }
+    let now = st.clock;
+    let build = WhatsappBuild {
+        built_at: now,
+        set_version: set.version,
+        file: format!("{}-whatsapp.zip", set.slug),
+        url: r::path(r::SET_WHATSAPP_ZIP, &[&id]),
+        size_bytes: EMPTY_ZIP.len() as u64,
+        packs: vec![WhatsappPack {
+            number: 1,
+            identifier: set.slug.clone(),
+            title: set.name.clone(),
+            publisher: set.owner_username.clone(),
+            animated: false,
+            file: format!("{}.wastickers", set.slug),
+            url: r::path(r::SET_WHATSAPP_PACK, &[&id, "1"]),
+            tray_file: "cover.png".into(),
+            image_data_version: "1".into(),
+            size_bytes: EMPTY_ZIP.len() as u64,
+            stickers,
+        }],
+        skipped: Vec::new(),
+    };
+    let result = serde_json::to_value(&build).ok();
+    st.whatsapp.insert(id.clone(), build);
+    let mut job = st.new_job(JobKind::WhatsappExport, Some(id));
+    job.status = JobStatus::Done;
+    job.finished_at = Some(now);
+    job.result = result;
+    if let Some(j) = st.jobs.iter_mut().find(|j| j.id == job.id) {
+        *j = job.clone();
+    }
+    Ok(Json(job))
+}
+
+async fn whatsapp_zip(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<Response> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let build = st.whatsapp.get(&id).ok_or_else(not_found)?;
+    Ok(download("application/zip", &build.file, EMPTY_ZIP.to_vec()))
+}
+
+async fn whatsapp_pack(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath((id, n)): AxPath<(String, String)>,
+) -> HResult<Response> {
+    let st = lock(&s);
+    let u = auth(&st, &h)?;
+    if !st.can_read(&u, &id) {
+        return Err(not_found());
+    }
+    let build = st.whatsapp.get(&id).ok_or_else(not_found)?;
+    let pack = build
+        .packs
+        .iter()
+        .find(|p| p.number.to_string() == n)
+        .ok_or_else(not_found)?;
+    Ok(download("application/octet-stream", &pack.file, EMPTY_ZIP.to_vec()))
 }
 
 async fn cover_file(

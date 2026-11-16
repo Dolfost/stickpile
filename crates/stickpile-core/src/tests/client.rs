@@ -541,3 +541,82 @@ async fn fail_fast_checks_the_server_again() {
     tokio::time::sleep(window + Duration::from_millis(100)).await;
     assert_eq!(client.me().await.unwrap().username, "alice");
 }
+
+#[tokio::test]
+async fn export_formats_publish_and_whatsapp() {
+    use crate::client::SetArchive;
+    let (server, items) = seeded_server();
+    let set_id = items[0].set_id.clone();
+    let private_id = items[3].set_id.clone();
+    server.state().add_user("bob", "pw", Role::User);
+    let alice = client_for(&server.url, Some(server.state().issue_token("alice", "t")));
+    let bob = client_for(&server.url, Some(server.state().issue_token("bob", "t")));
+    let dir = tempfile::tempdir().unwrap();
+
+    // Every archive format downloads to a file; readers may, others not.
+    for format in [SetArchive::Zip, SetArchive::Tar, SetArchive::TarGz] {
+        let dest = dir.path().join(format!("cats.{}", format.extension()));
+        let n = bob.download_export(&set_id, format, &dest).await.unwrap();
+        assert!(n > 0);
+        assert_eq!(std::fs::read(&dest).unwrap().len() as u64, n);
+        let err = bob
+            .download_export(&private_id, format, &dir.path().join("x"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), Some(404));
+    }
+    assert!(std::fs::read(dir.path().join("cats.zip")).unwrap().starts_with(b"PK"));
+
+    // Publishing: the owner only; one job per platform.
+    let list = alice.publications(&set_id).await.unwrap();
+    assert_eq!(list[0].platform, "telegram");
+    assert!(list[0].configured);
+    assert_eq!(bob.publications(&set_id).await.unwrap_err().status(), Some(403));
+    let req = PublishRequest {
+        platforms: vec!["telegram".into(), "telegram".into()],
+        options: [("telegram".to_string(), serde_json::json!({"title": "Cats"}))].into(),
+    };
+    let jobs = alice.publish(&set_id, &req).await.unwrap();
+    assert_eq!(jobs.jobs.len(), 1);
+    assert_eq!(jobs.jobs[0].kind, JobKind::TelegramExport);
+    assert_eq!(bob.publish(&set_id, &req).await.unwrap_err().status(), Some(403));
+    let bad = PublishRequest {
+        platforms: vec!["myspace".into()],
+        ..PublishRequest::default()
+    };
+    let err = alice.publish(&set_id, &bad).await.unwrap_err();
+    assert_eq!(err.status(), Some(400));
+    assert_eq!(err.api_code(), Some("bad_request"));
+
+    // WhatsApp: build, status, the zip and one pack.
+    assert!(bob.whatsapp_status(&set_id).await.unwrap().build.is_none());
+    assert_eq!(
+        bob.download_whatsapp(&set_id, &dir.path().join("none.zip"))
+            .await
+            .unwrap_err()
+            .status(),
+        Some(404)
+    );
+    let job = bob.whatsapp_build(&set_id).await.unwrap();
+    assert_eq!(job.kind, JobKind::WhatsappExport);
+    let job = bob
+        .wait_job(&job.id, Duration::from_millis(10), Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert_eq!(job.status, JobStatus::Done);
+    let status = bob.whatsapp_status(&set_id).await.unwrap();
+    assert!(status.current);
+    let build = status.build.unwrap();
+    assert_eq!(build.packs[0].stickers.len(), 3);
+    let zip = dir.path().join("wa/cats.zip");
+    assert!(bob.download_whatsapp(&set_id, &zip).await.unwrap() > 0);
+    let pack = dir.path().join("wa/cats.wastickers");
+    assert!(bob.download_whatsapp_pack(&set_id, 1, &pack).await.unwrap() > 0);
+    assert_eq!(
+        bob.download_whatsapp_pack(&set_id, 2, &pack)
+            .await
+            .unwrap_err()
+            .status(),
+        Some(404)
+    );
+}

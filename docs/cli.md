@@ -323,6 +323,8 @@ the same file in set memes"). It exits 1 if any file failed.
 stickpile import ~/stickers/my-cats              # creates a set from set.toml (slug, name, visibility, ...)
 stickpile import ~/stickers/my-cats --into cats  # re-import into an existing set
 stickpile export cats ./cats                     # writes ./cats/set.toml + 001-….png …
+stickpile export cats --format zip -o cats.zip   # one file: zip, tar or tar.gz
+stickpile export cats --format whatsapp -o cats-whatsapp.zip   # the WhatsApp sticker packs
 stickpile backup ~/backups/stickpile             # every own set into ~/backups/stickpile/<slug>/
 ```
 
@@ -331,7 +333,23 @@ stickpile backup ~/backups/stickpile             # every own set into ~/backups/
 and non-media files are skipped with a warning. It uploads the set as one tar
 (`archive` part), so the server sees exactly what is on disk. `export`
 downloads the set's tar and writes the directory. Media files that are no
-longer in the set are removed, so the directory matches the export. `backup`
+longer in the set are removed, so the directory matches the export.
+
+`export --format FORMAT -o FILE` downloads one file instead of writing a
+directory (give either a directory or `--format`, not both):
+
+- `zip`, `tar`, `tar.gz` (also `tgz`): the set directory as an archive; the
+  three hold the same files. There is no RAR: making RAR archives needs the
+  proprietary `rar` program.
+- `whatsapp`: the WhatsApp sticker packs. The server builds them first (a
+  job; an unchanged set reuses the last build), then the zip of `.wastickers`
+  files and `contents.json` is downloaded. The packs, their kind and size,
+  and the items that were left out are printed; with `--json`, the build
+  (`WhatsappBuild`) is in the output. It exits 1 if the build failed, for
+  example when fewer than 3 items can become stickers. See
+  [docs/whatsapp.md](whatsapp.md).
+
+Sets that are not yours work by id, as long as you can read them. `backup`
 only covers your sets as directories. The full server backup with the database
 dump is `stickpile-server backup`.
 
@@ -417,6 +435,24 @@ stickpile telegram export cats --pack cats --title "Cats" --wait   # pack cats_b
 
 Both run as server jobs. `--wait` polls until the job is done and exits 1 if
 it failed. See [docs/telegram.md](telegram.md).
+
+### `publish`
+
+```sh
+stickpile publish cats                     # where the set is published, per platform
+stickpile publish cats --to telegram --wait
+stickpile publish cats --to telegram -O telegram.pack_name=cats -O telegram.title="My cats"
+```
+
+Without `--to`, a table of the platforms the server knows: whether each is
+configured, what the set is published as, when it was last published, the
+last outcome and the link (`--json`: the `Publication` list). With `--to`
+(comma-separated platform ids, today `telegram`), one publish job per
+platform is queued through `POST /api/v1/sets/{id}/publish`; the request
+fails as a whole for an unknown or unconfigured platform. `-O
+PLATFORM.KEY=VALUE` (repeatable) sets one of a platform's options
+(Telegram: `pack_name`, `title`). `--wait` waits for every job; the command
+exits 1 if any failed. Only the set's owner may publish.
 
 ### `job`
 

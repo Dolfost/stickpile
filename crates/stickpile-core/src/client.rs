@@ -29,6 +29,36 @@ use stickpile_api::*;
 
 use crate::{ClientConfig, CoreError, Result};
 
+/// Archive formats of a set export ([`ApiClient::download_export`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetArchive {
+    /// `export.zip`
+    Zip,
+    /// `export.tar`
+    Tar,
+    /// `export.tar.gz`
+    TarGz,
+}
+
+impl SetArchive {
+    pub fn route(self) -> &'static str {
+        match self {
+            SetArchive::Zip => routes::SET_EXPORT_ZIP,
+            SetArchive::Tar => routes::SET_EXPORT,
+            SetArchive::TarGz => routes::SET_EXPORT_TGZ,
+        }
+    }
+
+    /// File extension without the dot.
+    pub fn extension(self) -> &'static str {
+        match self {
+            SetArchive::Zip => "zip",
+            SetArchive::Tar => "tar",
+            SetArchive::TarGz => "tar.gz",
+        }
+    }
+}
+
 /// Default timeout for uploads, imports, exports and file downloads.
 pub const DEFAULT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -721,6 +751,51 @@ impl ApiClient {
 
     pub async fn telegram_import(&self, req: &TelegramImport) -> Result<Job> {
         self.post(routes::TELEGRAM_IMPORT, req).await
+    }
+
+    // -- export page: archives, publishing, WhatsApp ---------------------------
+
+    /// Download a set export as `format` into `dest` (via a temporary file,
+    /// see [`ApiClient::download`]). Returns the number of bytes.
+    pub async fn download_export(&self, set_id: &str, format: SetArchive, dest: &Path) -> Result<u64> {
+        self.download(&path(format.route(), &[set_id]), dest).await
+    }
+
+    /// Where the set is published, per platform the server knows (owner).
+    pub async fn publications(&self, set_id: &str) -> Result<Vec<Publication>> {
+        self.get(&path(routes::SET_PUBLISH, &[set_id]), &[]).await
+    }
+
+    /// Publish a set to several platforms at once: one job per platform
+    /// (owner). The whole request fails if one platform is unknown, not
+    /// configured, or refuses its options.
+    pub async fn publish(&self, set_id: &str, req: &PublishRequest) -> Result<PublishJobs> {
+        self.post(&path(routes::SET_PUBLISH, &[set_id]), req).await
+    }
+
+    /// The set's last WhatsApp build and whether it is up to date.
+    pub async fn whatsapp_status(&self, set_id: &str) -> Result<WhatsappStatus> {
+        self.get(&path(routes::SET_WHATSAPP, &[set_id]), &[]).await
+    }
+
+    /// Build the set's WhatsApp sticker packs (a job; an unchanged set
+    /// reuses the last build).
+    pub async fn whatsapp_build(&self, set_id: &str) -> Result<Job> {
+        self.post(&path(routes::SET_WHATSAPP, &[set_id]), &serde_json::json!({}))
+            .await
+    }
+
+    /// Download the last WhatsApp build (every `.wastickers` plus
+    /// `contents.json`, one zip) into `dest`.
+    pub async fn download_whatsapp(&self, set_id: &str, dest: &Path) -> Result<u64> {
+        self.download(&path(routes::SET_WHATSAPP_ZIP, &[set_id]), dest).await
+    }
+
+    /// Download pack `number` of the last WhatsApp build (a `.wastickers`)
+    /// into `dest`.
+    pub async fn download_whatsapp_pack(&self, set_id: &str, number: u32, dest: &Path) -> Result<u64> {
+        self.download(&path(routes::SET_WHATSAPP_PACK, &[set_id, &number.to_string()]), dest)
+            .await
     }
 
     // -- items ----------------------------------------------------------------
