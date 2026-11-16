@@ -6,18 +6,20 @@
 //!
 //! * bare words / `"quoted phrases"`: soft text terms, ranked (name, keywords,
 //!   emojis, vibe, tags, set name, image content)
-//! * `e:` / `emoji:` — item has this emoji
-//! * `set:` — set slug (or name, case-insensitive); repeat for OR
-//! * `vibe:`, `tag:` — exact (case-insensitive); repeat for OR
-//! * `type:` — `still|image`, `animated|animation`, `video`, or a format
+//! * `e:` / `emoji:` - item has this emoji
+//! * `set:` / `s:` - set slug (or name, case-insensitive); repeat for OR
+//! * `vibe:` / `v:`, `tag:` / `t:` - exact (case-insensitive); repeat for OR
+//! * `type:` - `still|image`, `animated|animation`, `video`, or a format
 //!   (`png jpeg jpg webp gif mp4 webm`); repeat for OR
-//! * `q` / `likes` / `copies` with `> >= < <= =` and a number — AND
-//! * `by:` — owner username
+//! * `q` / `likes` / `copies` with `> >= < <= =` and a number - AND
+//! * `by:` / `b:` / `user:` - owner username
 //! * `is:mine | is:liked | is:public`
 //! * `sort:relevance | recent | likes | copies | quality`
 //! * a leading `-` negates a filter or a word
 //!
-//! Unknown `key:value` tokens are treated as plain text.
+//! Keys are case-insensitive; [`Key`] lists them with their one-letter
+//! forms. The normalised form (`Query`'s `Display`) writes the long keys
+//! (and `e:` for emojis). Unknown `key:value` tokens are plain text.
 
 use std::fmt;
 
@@ -107,6 +109,75 @@ pub enum Sort {
     Quality,
 }
 
+/// The key of a `key:value` filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Key {
+    Emoji,
+    Set,
+    Vibe,
+    Tag,
+    By,
+    Type,
+    Is,
+    Sort,
+}
+
+impl Key {
+    pub const ALL: [Key; 8] = [
+        Key::Emoji,
+        Key::Set,
+        Key::Vibe,
+        Key::Tag,
+        Key::By,
+        Key::Type,
+        Key::Is,
+        Key::Sort,
+    ];
+
+    /// The key as written before the `:`, in any case: its long name, its
+    /// one-letter form ([`Key::short`]) or an alias (`emoji`, `user`).
+    pub fn parse(key: &str) -> Option<Key> {
+        Some(match key.to_ascii_lowercase().as_str() {
+            "e" | "emoji" => Key::Emoji,
+            "s" | "set" => Key::Set,
+            "v" | "vibe" => Key::Vibe,
+            "t" | "tag" => Key::Tag,
+            "b" | "by" | "user" => Key::By,
+            "type" => Key::Type,
+            "is" => Key::Is,
+            "sort" => Key::Sort,
+            _ => return None,
+        })
+    }
+
+    /// The long name: `emoji`, `set`, `vibe`, `tag`, `by`, `type`, `is`, `sort`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Key::Emoji => "emoji",
+            Key::Set => "set",
+            Key::Vibe => "vibe",
+            Key::Tag => "tag",
+            Key::By => "by",
+            Key::Type => "type",
+            Key::Is => "is",
+            Key::Sort => "sort",
+        }
+    }
+
+    /// The one-letter form of the keys that have one: `e` for `emoji`,
+    /// `s` for `set`, `v` for `vibe`, `t` for `tag`, `b` for `by`.
+    pub fn short(self) -> Option<&'static str> {
+        match self {
+            Key::Emoji => Some("e"),
+            Key::Set => Some("s"),
+            Key::Vibe => Some("v"),
+            Key::Tag => Some("t"),
+            Key::By => Some("b"),
+            Key::Type | Key::Is | Key::Sort => None,
+        }
+    }
+}
+
 /// A filter value list: item must match any of `any` (if non-empty) and none of `none`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter<T> {
@@ -183,20 +254,20 @@ impl Query {
             if let Some((key, val)) = tok.split_once(':') {
                 if !val.is_empty() {
                     let lower = val.to_lowercase();
-                    let handled = match key.to_ascii_lowercase().as_str() {
-                        "e" | "emoji" => push(&mut q.emojis, neg, val.to_string()),
-                        "set" => push(&mut q.sets, neg, lower),
-                        "vibe" => push(&mut q.vibes, neg, lower),
-                        "tag" => push(&mut q.tags, neg, lower),
-                        "by" | "user" => push(&mut q.owners, neg, lower),
-                        "type" => TypeFilter::parse(val).map(|t| push(&mut q.types, neg, t)).is_some(),
-                        "is" => match lower.as_str() {
+                    let handled = match Key::parse(key) {
+                        Some(Key::Emoji) => push(&mut q.emojis, neg, val.to_string()),
+                        Some(Key::Set) => push(&mut q.sets, neg, lower),
+                        Some(Key::Vibe) => push(&mut q.vibes, neg, lower),
+                        Some(Key::Tag) => push(&mut q.tags, neg, lower),
+                        Some(Key::By) => push(&mut q.owners, neg, lower),
+                        Some(Key::Type) => TypeFilter::parse(val).map(|t| push(&mut q.types, neg, t)).is_some(),
+                        Some(Key::Is) => match lower.as_str() {
                             "mine" => push(&mut q.is, neg, Is::Mine),
                             "liked" => push(&mut q.is, neg, Is::Liked),
                             "public" => push(&mut q.is, neg, Is::Public),
                             _ => false,
                         },
-                        "sort" => {
+                        Some(Key::Sort) => {
                             let s = match lower.as_str() {
                                 "relevance" => Some(Sort::Relevance),
                                 "recent" | "new" => Some(Sort::Recent),
@@ -207,7 +278,7 @@ impl Query {
                             };
                             s.map(|s| q.sort = s).is_some()
                         }
-                        _ => false,
+                        None => false,
                     };
                     if handled {
                         continue;
@@ -435,6 +506,65 @@ mod tests {
         let q = Query::parse(src);
         let again = Query::parse(&q.to_string());
         assert_eq!(q, again);
+    }
+
+    #[test]
+    fn short_keys_are_the_long_ones() {
+        let short = Query::parse("v:tired t:reaction s:cats b:alice e:😂");
+        let long = Query::parse("vibe:tired tag:reaction set:cats by:alice emoji:😂");
+        assert_eq!(short, long);
+        assert_eq!(short.vibes.any, vec!["tired"]);
+        assert_eq!(short.tags.any, vec!["reaction"]);
+        assert_eq!(short.sets.any, vec!["cats"]);
+        assert_eq!(short.owners.any, vec!["alice"]);
+        assert_eq!(short.emojis.any, vec!["😂"]);
+        assert!(short.text.is_empty());
+        assert_eq!(Query::parse("user:alice"), Query::parse("b:alice"), "user: stays");
+        assert_eq!(Query::parse("V:Tired T:NSFW"), Query::parse("vibe:tired tag:nsfw"), "any case");
+    }
+
+    #[test]
+    fn short_keys_negated_and_quoted() {
+        let q = Query::parse(r#"-v:tired -t:nsfw -s:"my cats" -b:bob v:"very sad" t:a t:b"#);
+        assert_eq!(q.vibes.none, vec!["tired"]);
+        assert_eq!(q.tags.none, vec!["nsfw"]);
+        assert_eq!(q.sets.none, vec!["my cats"]);
+        assert_eq!(q.owners.none, vec!["bob"]);
+        assert_eq!(q.vibes.any, vec!["very sad"]);
+        assert_eq!(q.tags.any, vec!["a", "b"], "repeated: either");
+        assert!(q.text.is_empty() && q.exclude_text.is_empty());
+        let q = Query::parse(r#""v:tired""#);
+        assert_eq!(q.text, vec!["v:tired"], "a quoted token is a phrase");
+        assert!(q.vibes.is_empty());
+        let q = Query::parse("v: t:");
+        assert_eq!(q.text, vec!["v:", "t:"], "no value: text");
+    }
+
+    #[test]
+    fn short_keys_normalise_to_the_long_ones() {
+        let q = Query::parse(r#"cat v:tired -t:nsfw s:"my cats" b:alice e:😂"#);
+        assert_eq!(
+            q.to_string(),
+            r#"cat e:😂 set:"my cats" vibe:tired -tag:nsfw by:alice"#
+        );
+        assert_eq!(Query::parse(&q.to_string()), q);
+    }
+
+    #[test]
+    fn keys_and_their_forms() {
+        for key in Key::ALL {
+            assert_eq!(Key::parse(key.name()), Some(key));
+            assert_eq!(Key::parse(&key.name().to_uppercase()), Some(key));
+            if let Some(s) = key.short() {
+                assert_eq!(s.len(), 1);
+                assert_eq!(Key::parse(s), Some(key));
+            }
+        }
+        let shorts: Vec<_> = Key::ALL.iter().filter_map(|k| k.short()).collect();
+        assert_eq!(shorts, ["e", "s", "v", "t", "b"]);
+        assert_eq!(Key::parse("user"), Some(Key::By));
+        assert_eq!(Key::parse("x"), None);
+        assert_eq!(Key::parse("q"), None, "q is a comparison, not a filter key");
     }
 
     #[test]
