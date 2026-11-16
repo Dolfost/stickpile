@@ -35,8 +35,13 @@
 //! Reads that fall back to the cache (search, the lists, `account`) only
 //! throw `Unreachable` when the cache cannot answer either. Input checked
 //! before any request is `InvalidInput` with the argument's name
-//! (`server_url`, `code`, `variant`), and `prepare` throws `NothingFits`
-//! when no rendition fits the field. Config file errors: unreadable as a
+//! (`server_url`, `code`, `variant`, `pack_id`), and `prepare` throws
+//! `NothingFits` when no rendition fits the field. `whatsapp_packs` has
+//! three of its own: `InvalidInput { field: "pack" }` for a pack with too
+//! few stickers (the server's job failed with "nothing to export"),
+//! `Server { status: 404 }` for a server without the WhatsApp routes (they
+//! answer 404, the pack itself does not), and `Other` for a failed build
+//! or a file from the server that cannot be used. Config file errors: unreadable as a
 //! config is `InvalidInput { field: "config_file" }`, failing to read or
 //! write it is `Io`.
 //!
@@ -51,6 +56,7 @@ mod hints;
 mod library;
 mod motion;
 pub mod types;
+mod whatsapp;
 
 pub use error::{LibraryError, LibraryErrorKind};
 pub use library::StickpileLibrary;

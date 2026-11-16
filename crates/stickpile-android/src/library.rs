@@ -18,6 +18,7 @@ use stickpile_quick::within::Within;
 
 use crate::hints::{self, Words};
 use crate::motion;
+use crate::whatsapp;
 
 use crate::types::*;
 use crate::{device, LibraryError, LibraryErrorKind};
@@ -126,6 +127,11 @@ struct Inner {
     /// they were read at.
     vocabulary: Mutex<Option<(u64, Arc<Words>)>>,
     generation: Mutex<Generation>,
+    /// Held while WhatsApp packs are fetched, so that two never write the
+    /// same files.
+    whatsapp: tokio::sync::Mutex<()>,
+    /// How far each `whatsapp_packs` under way is, by pack id.
+    whatsapp_progress: Mutex<HashMap<String, WhatsappProgress>>,
 }
 
 /// Counts the account and server changes (logins, logouts, another
@@ -281,6 +287,8 @@ impl Inner {
         lock(&self.packs_seen).clear();
         *lock(&self.vocabulary) = None;
         *self.session.write().unwrap_or_else(|e| e.into_inner()) = session;
+        // The old server's packs leave the phone (and WhatsApp's reach).
+        self.whatsapp_store().clear();
     }
 
     /// Sign out of `old`'s server before going to another one, so that its
@@ -361,6 +369,13 @@ impl Inner {
         *lock(&self.sync) = SyncStatus::new(&self.session());
         lock(&self.seen).clear();
         lock(&self.packs_seen).clear();
+        // The old account's packs leave the phone (and WhatsApp's reach).
+        self.whatsapp_store().clear();
+    }
+
+    /// The WhatsApp packs unpacked on this device.
+    fn whatsapp_store(&self) -> whatsapp::Store {
+        whatsapp::Store::new(&self.dirs.cache_dir)
     }
 
     /// Keep `packs`, listed at `generation`, by id for `pack_cover`.
@@ -690,6 +705,8 @@ impl StickpileLibrary {
             packs_seen: Mutex::new(HashMap::new()),
             vocabulary: Mutex::new(None),
             generation: Mutex::new(Generation::default()),
+            whatsapp: tokio::sync::Mutex::new(()),
+            whatsapp_progress: Mutex::new(HashMap::new()),
         };
         tracing::info!(
             "stickpile {} (Android library), server {}",
@@ -1292,6 +1309,90 @@ impl StickpileLibrary {
         .await
     }
 
+    // -- WhatsApp ---------------------------------------------------------------
+
+    /// Make a pack ready for WhatsApp (docs/whatsapp.md): the server's
+    /// WhatsApp build of it, asked for when the pack changed since the last
+    /// one (or there is none) and waited for (10 minutes at most), each
+    /// part downloaded and unpacked into this device's files unless it is
+    /// here already (`whatsapp_unpacked`, the app's WhatsApp provider). A
+    /// part is downloaded only when its `version` changed. Offline (or the
+    /// server failing): the parts unpacked before, `offline = true`.
+    /// `whatsapp_progress` says how far it is meanwhile. Stops when the
+    /// calling coroutine is cancelled; the server's build goes on, and the
+    /// next call waits for it.
+    ///
+    /// Throws `InvalidInput` (field `pack_id`) for an id that is not one,
+    /// `InvalidInput` (field `pack`) when the pack has fewer than 3 items
+    /// that can become WhatsApp stickers of one kind, `Server` with status
+    /// 404 when the server makes no WhatsApp packs (an older stickpile),
+    /// `NotFound` for a pack this account cannot read, `Unreachable` when
+    /// the server cannot be reached and nothing was unpacked before,
+    /// `Other` when the server's build failed or a file it sent cannot be
+    /// used (an entry that is not a plain file name, too large, too many,
+    /// not the picture its name says).
+    pub async fn whatsapp_packs(&self, pack_id: String) -> Result<WhatsappPacks, LibraryError> {
+        self.read(move |inner| async move {
+            if !whatsapp::is_pack_id(&pack_id) {
+                return Err(LibraryError::invalid("pack_id", "not a pack id"));
+            }
+            let _one = inner.whatsapp.lock().await;
+            let (generation, session) = inner.current();
+            // Asked for by the user: tried even if the server was away a moment ago.
+            session.client().forget_unreachable();
+            let store = inner.whatsapp_store();
+            let _progress = Progress {
+                inner: &inner,
+                pack_id: &pack_id,
+            };
+            let report = |p: WhatsappProgress| {
+                lock(&inner.whatsapp_progress).insert(pack_id.clone(), p);
+            };
+            let fetched = match whatsapp::fetch(session.client(), &store, &pack_id, &report).await {
+                Ok(index) => {
+                    let mut committed = Err(LibraryError::other("the account or server changed meanwhile"));
+                    inner.if_current(generation, || committed = store.commit(&pack_id, &index));
+                    committed.map(|parts| WhatsappPacks {
+                        parts,
+                        skipped: index.skipped,
+                        offline: false,
+                    })
+                }
+                Err(e) => Err(e),
+            };
+            match fetched {
+                Err(e)
+                    if matches!(e, LibraryError::Unreachable { .. })
+                        || matches!(e, LibraryError::Server { status, .. } if status >= 500) =>
+                {
+                    match store.unpacked(&pack_id) {
+                        Some((parts, skipped)) => Ok(WhatsappPacks {
+                            parts,
+                            skipped,
+                            offline: true,
+                        }),
+                        None => Err(e),
+                    }
+                }
+                other => other,
+            }
+        })
+        .await
+    }
+
+    /// How far `whatsapp_packs` for `pack_id` is; `None` when it is not
+    /// running (no network).
+    pub fn whatsapp_progress(&self, pack_id: String) -> Option<WhatsappProgress> {
+        lock(&self.inner.whatsapp_progress).get(&pack_id).cloned()
+    }
+
+    /// Every WhatsApp part unpacked on this device, by pack and number:
+    /// what the app's WhatsApp provider serves (no network). They stay
+    /// until the account or server changes; `clear_cache` leaves them.
+    pub fn whatsapp_unpacked(&self) -> Vec<WhatsappPart> {
+        self.inner.whatsapp_store().all()
+    }
+
     // -- pairing input ----------------------------------------------------------
 
     /// Read a scanned pairing link (`stickpile://pair?url=...&code=...`);
@@ -1367,6 +1468,19 @@ impl StickpileLibrary {
     /// offline; files are fetched again when needed.
     pub fn clear_cache(&self) -> Result<u64, LibraryError> {
         Ok(self.inner.session().cache().clear_files()?.freed_bytes)
+    }
+}
+
+/// Clears a pack's `whatsapp_progress` when its `whatsapp_packs` ends
+/// (also when it is cancelled).
+struct Progress<'a> {
+    inner: &'a Inner,
+    pack_id: &'a str,
+}
+
+impl Drop for Progress<'_> {
+    fn drop(&mut self) {
+        lock(&self.inner.whatsapp_progress).remove(self.pack_id);
     }
 }
 
