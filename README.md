@@ -26,8 +26,12 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
   and picks one.
 - **Quality badge** (0–100), near-duplicate detection and "find a better
   version" of the same meme.
-- **Telegram import/export**: pull an existing pack into a set, or publish a
-  set as a pack.
+- **Telegram, Discord and Signal**: pull an existing Telegram pack, a
+  Discord server's stickers or emoji, or a Signal pack into a set, or
+  publish a set to several of them at once
+  ([Telegram](docs/telegram.md), [Discord](docs/discord.md),
+  [Signal](docs/signal.md)); WhatsApp packs and a Signal-ready zip are
+  downloads.
 - **Collaboration**: add contributors to a pack and choose what each may do,
   or propose stickers and changes to someone else's pack; both sides follow
   the requests on a Collaboration tab ([docs](docs/collaboration.md)).
@@ -259,4 +263,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and
 More documentation is in [docs/](docs/): [architecture and plan](docs/plan.md),
 [API](docs/api.md), [security](docs/security.md), [media
 pipeline](docs/media.md), [quality score](docs/quality.md), [AI](docs/ai.md),
-[Telegram](docs/telegram.md), [Nix](docs/nix.md) and [backup](docs/backup.md).
+[Telegram](docs/telegram.md), [Discord](docs/discord.md),
+[Signal](docs/signal.md), [WhatsApp](docs/whatsapp.md), [Nix](docs/nix.md)
+and [backup](docs/backup.md).

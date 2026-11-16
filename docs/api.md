@@ -216,6 +216,9 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 | `POST /api/v1/hooks/git/{id}` | raw body -> `Job` (202) | **Unauthenticated** forge webhook: `X-Stickpile-Webhook-Secret` or `X-Gitlab-Token` with the secret, or `X-Hub-Signature-256` (HMAC-SHA256 of the body). 401 without, 403 with a wrong secret or signature, 404 for an unknown set or one that is not a git pack, 429 over 60 calls per minute per client IP. |
 | `POST /api/v1/sets/{id}/telegram/export` | `TelegramExport` -> `Job` | Owner only. 400 for a bad pack name/title or when the caller has no Telegram user id and `telegram.default_owner_user_id` is unset. See [telegram.md](telegram.md). |
 | `POST /api/v1/telegram/import` | `TelegramImport` -> `Job` | Into a new set; 409 if the slug is taken; counts as an upload for rate limiting. |
+| `POST /api/v1/discord/import` | `DiscordImport` -> `Job` | A Discord server's stickers (`stickers`, default true) and/or emoji (`emojis`, default false) into a new set named after the server; `guild_id` is the server id or a `discord.com/channels/` link (400 otherwise, and when neither kind is chosen); 409 if a given `slug` is taken; counts as an upload. See [discord.md](discord.md#in-the-server). |
+| `POST /api/v1/signal/import` | `SignalImport` -> `Job` | A Signal pack from its `link` (`https://signal.art/addstickers/#pack_id=...&pack_key=...` or `sgnl://addstickers/?...`; 400 otherwise) into a new set named after its title; 409 if a given `slug` is taken; counts as an upload. Needs no Signal account. The link is removed from the job when it finishes. See [signal.md](signal.md#in-the-server). |
+| `GET /api/v1/sets/{id}/signal.zip` | -> `application/zip` | The [Signal-ready zip](signal.md#signal-ready-zip): 512x512 stickers numbered in order, `emoji.txt`, `manifest.json` for signal-cli, `README.txt`, `left-out.txt` when items were left out. Anyone who can read the set, with or without Signal configured. Made on the first request after a change (counts as an upload), then reused; 400 when no item can become a Signal sticker. |
 | `GET /api/v1/sets/{id}/publish` | -> `[Publication]` | Where the set is published, per platform. Owner only. See [Publishing](#publishing). |
 | `POST /api/v1/sets/{id}/publish` | `PublishRequest` -> `PublishJobs` | Publish to several platforms at once, one job each. Owner only. See [Publishing](#publishing). |
 | `GET /api/v1/sets/{id}/whatsapp` | -> `WhatsappStatus` | The last WhatsApp build. Anyone who can read the set. See [WhatsApp packs](#whatsapp-packs). |
@@ -225,7 +228,9 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 
 With `git.enabled = false`, the three git endpoints answer `404`. If
 Telegram is not configured (`telegram.enabled` and a readable token file),
-the two Telegram endpoints do the same. Every content or metadata change
+the two Telegram endpoints do the same; so does the Discord import without
+`discord.enabled` and a readable token, and the Signal import without
+`signal.enabled`. Every content or metadata change
 bumps the set's `version`, and for push-mode git packs it also schedules a
 push. Read-only git packs refuse every edit with `403` (`editable: false`).
 
@@ -306,15 +311,18 @@ only.
 
 A set can be published to every platform the server is configured for, one
 or several at once (the export page's Publish section uses the same calls).
-Platforms are implemented in `service::publish` (a registry: Telegram today;
-Discord and Signal are added the same way). Only the set's owner may
-publish or read the publish state: others who can read the set get 403,
-everyone else 404.
+Platforms are implemented in `service::publish`, a registry of
+`telegram`, `discord` and `signal`. Only the set's owner may publish or
+read the publish state: others who can read the set get 403, everyone else
+404.
 
 - `GET /api/v1/sets/{id}/publish` lists one `Publication` per platform the
-  server knows, configured or not: `platform` (the id: `telegram`), `name`,
-  `configured`, `target` and `url` (what the set is published as and its
-  link, e.g. the pack name and `https://t.me/addstickers/<name>`),
+  server knows, configured or not, in the order `telegram`, `discord`,
+  `signal`: `platform` (the id), `name`, `configured`, `target` and `url`
+  (what the set is published as and its link: the pack name and
+  `https://t.me/addstickers/<name>`; the Discord server's name and
+  `https://discord.com/channels/<server id>`; the set's name and the newest
+  Signal pack's `https://signal.art/addstickers/#...` link),
   `published_at` (the last successful publish), `last_status` (`done` or
   `failed`), `last_finished_at`, `last_error`, `last_result` (the result of
   the last successful publish, kind-specific) and `job` (a publish that is
@@ -323,15 +331,26 @@ everyone else 404.
   `{"platforms": ["telegram"], "options": {"telegram": {"pack_name": "cats", "title": "Cats"}}}`
   queues one job per platform, in the order given (a platform listed twice
   once), and returns `{"jobs": [Job, ...]}`. `options` is optional; each
-  platform's object is what its own export takes (Telegram:
-  `TelegramExport`, both fields optional). Every platform is checked before
-  any job is queued, so the request fails as a whole with 400 when
-  `platforms` is empty, names an unknown platform ("unknown platform ...;
-  this server knows telegram"), one that is not configured ("Telegram is
-  not configured on this server"), or options a platform refuses (for
-  Telegram the same 400s as `POST /sets/{id}/telegram/export`).
-- The jobs are the platforms' own (`telegram_export` for Telegram, exactly
-  what `POST /sets/{id}/telegram/export` queues). When one finishes, done
+  platform's object is what its own export takes, all strings:
+  Telegram's `TelegramExport` (`pack_name`, `title`, both optional);
+  Discord's `DiscordExport` (`guild_id`, required the first time and then
+  defaulting to the server used last, also accepted as `guild`; `kind`,
+  `stickers` (default) or `emojis`); Signal takes none. For example
+  `{"platforms": ["telegram", "discord", "signal"], "options": {"discord":
+  {"guild_id": "100000000000000001", "kind": "emojis"}}}` queues three jobs.
+  Every platform is checked before any job is queued, so the request fails
+  as a whole with 400 when `platforms` is empty, names an unknown platform
+  ("unknown platform ...; this server knows telegram, discord, signal"),
+  one that is not configured ("Discord is not configured on this server"),
+  or options a platform refuses (for Telegram the same 400s as `POST
+  /sets/{id}/telegram/export`; for Discord a missing or bad `guild_id`, a
+  bad `kind`, or a server and kind another stickpile user publishes to;
+  for Signal any option).
+- The jobs are the platforms' own: `telegram_export` (exactly what `POST
+  /sets/{id}/telegram/export` queues), `discord_export` (a server's stickers
+  or emoji kept in line with the set, [discord.md](discord.md#in-the-server))
+  and `signal_export` (a new pack every time,
+  [signal.md](signal.md#in-the-server)). When one finishes, done
   or failed, the outcome is stored with the set (`set_publications`,
   migration 0012), so `published_at`, `last_result` and `last_error`
   outlive the job rows, which are deleted after 30 days. A failed publish
@@ -605,3 +624,7 @@ days. `Job.result` is kind-specific:
 | `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
 | `telegram_export` | `POST /sets/{id}/telegram/export`, `POST /sets/{id}/publish` | `pack_name`, `url` (`https://t.me/addstickers/<name>`), `created_pack`, `added`, `removed`, `updated`, `reordered`, `exported`, `skipped` |
 | `whatsapp_export` | `POST /sets/{id}/whatsapp` | a `WhatsappBuild` (`packs`, `skipped`, `file`, `url`, ...) plus `set_id` and `reused` |
+| `discord_import` | `POST /discord/import` | `set_id`, `slug`, `guild_id`, `guild_name`, `url`, `imported`, `skipped` (`[{kind, remote_id, reason}]`), `bound` (expressions linked for publishing back) |
+| `discord_export` | `POST /sets/{id}/publish` | `guild_id`, `guild_name`, `kind` (`sticker` or `emoji`), `url`, `added`, `removed`, `updated`, `unchanged`, `exported`, `skipped` (`[{item_id, name, reason}]`), `notes`, `slots`, `animated_slots`, `premium_tier` |
+| `signal_import` | `POST /signal/import` | `set_id`, `slug`, `title`, `author`, `imported`, `skipped` (`[{sticker_id, reason}]`), `cover`; never the link |
+| `signal_export` | `POST /sets/{id}/publish` | `url` (the new pack's `signal.art` link), `title`, `exported`, `skipped`, `notes` |

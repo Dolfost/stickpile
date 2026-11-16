@@ -128,9 +128,10 @@ What the module does:
   it to TOML and checks the result with `stickpile-server check-config` at
   build time (`validateConfig`). See [nix.md](nix.md#the-drift-guard) for why
   the two cannot drift.
-- **Secrets are paths only.** There are five: `trusted_proxy.secret_file`,
+- **Secrets are paths only.** There are seven: `trusted_proxy.secret_file`,
   `auth.initial_admin_password_file`, `telegram.bot_token_file`,
-  `git.ssh_key_file` and `git.https_token_file`. Each must be an absolute path
+  `discord.bot_token_file`, `signal.credentials_file`, `git.ssh_key_file`
+  and `git.https_token_file`. Each must be an absolute path
   outside the Nix store (the option type rejects store paths). systemd reads
   the file as root (`LoadCredential=`), and the server sees it as
   `/run/credentials/stickpile.service/<name>`. The file can therefore stay

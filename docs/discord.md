@@ -7,12 +7,11 @@ only the guild sticker and emoji routes. It can:
   **emoji**, and keep them in line with the set on later exports;
 - **import** a server's stickers and/or emoji into a new set.
 
-The implementation is `crates/stickpile-discord`. It is a library: the
-server does not call it yet. Wiring it into the server (configuration, jobs,
-endpoints, web UI) is a later step through the server's platform registry;
-[What the server will do](#what-the-server-will-do) describes the plan.
-Everything below about the crate's behaviour was tested against an
-in-process mock of the Discord API, not against Discord itself.
+The Discord side is `crates/stickpile-discord`; the server uses it
+through its platform registry ([In the server](#in-the-server):
+configuration, the export page, jobs, API routes). Everything here was
+tested against an in-process mock of the Discord API and CDN, never against
+Discord itself.
 
 ## Bot setup
 
@@ -20,7 +19,9 @@ in-process mock of the Discord API, not against Discord itself.
    **New Application**, give it a name. On the **Bot** page, **Reset
    Token** and copy the token. The bot needs no privileged gateway intents:
    stickpile uses only REST.
-2. Store the token in a file readable only by the service user:
+2. Store the token in a file readable only by the service user, and name
+   it in the server's configuration (`discord.bot_token_file`,
+   [configuration.md](configuration.md#discord)):
 
    ```sh
    install -m 0400 -o stickpile /dev/stdin /run/secrets/stickpile-discord-token <<< 'MTk4NjIy...'
@@ -185,29 +186,99 @@ Expressions.)
 
 ## Renditions
 
-The crate checks files but does not render them. The server needs, per
-item (none of the current variants in docs/media.md fits as is):
+The crate checks files but does not render them. The server makes them in
+the publish job from each item's stored original (`stickpile_media::pack`,
+`service::renditions`); they are not stored as item variants. The sizes and
+limits come from the crate's `requirements(kind)`, and every file passes
+`check_file` before it is sent (one that does not is skipped with the
+crate's reason):
 
 | Kind | Still | Animation or video |
 |---|---|---|
-| Sticker | PNG, 320x320 (longest side 320, padded with transparency), at most 512 KiB | APNG or GIF, 320x320, at most 5 s, at most 512 KiB (`discord_gif` is up to 640 px and up to 10 s, so it needs a 320 px, 5 s variant) |
-| Emoji | PNG, 128x128, at most 256 KiB | GIF, 128x128, at most 256 KiB |
+| Sticker | PNG, 320x320 (the longest side 320, centred on transparency); at most 512 KiB | APNG, looping, at most 320x320 and 5 s (longer ones are cut), at most 512 KiB |
+| Emoji | PNG, 128x128; at most 256 KiB | GIF, looping, at most 128x128 and 10 s (stickpile's own cap: Discord gives none), at most 256 KiB |
 
-## What the server will do
+A still is lossless RGBA PNG when that fits, else a PNG of 256 colours (at
+these sizes the lossless one always fits). An animation is sampled at its
+own frame rate, at most 20 frames per second; an APNG has one palette of
+256 colours with alpha for every frame and later frames cover only what
+changed, a GIF a palette per frame and on/off transparency (pixels at least
+half opaque are drawn). Too large: fewer frames per second (15, 12, ...),
+then a smaller square (down to a quarter of the side, 5 frames per second);
+an item that does not fit even then is skipped with `does not fit the 512
+KB limit of Discord stickers, even smaller and at 5 frames per second`.
+Videos need ffmpeg on the server. An animation whose frames all look the
+same becomes a still sticker. The job result lists what was cut
+(`notes`: `cut to the first 5 seconds`) and what was left out (`skipped`).
 
-Planned, not implemented in this crate:
+## In the server
 
-- Configuration like Telegram's: `discord.enabled` and
-  `discord.bot_token_file`; the integration is on only when the token file
-  is readable and not empty.
-- An export job per (set, server id, kind) storing the mapping, the
-  server id and the result; the set owner chooses the server id and whether
-  to export stickers or emoji. Because one bot serves every user, the server
-  should record which stickpile user first exported to a server and kind,
-  as it does for Telegram pack names.
-- An import job creating a set from a server's stickers and/or emoji, with
-  each item's emoji and keywords from the tags, seeding the mapping from
-  the expressions the bot created.
+**Configuration** (`[discord]`, [configuration.md](configuration.md#discord)):
+`enabled` and `bot_token_file`; the integration is on only when the file
+reads as a token (`stickpile-server check-config` warns otherwise, naming
+the file, never its content). `api_url`, `cdn_url` and `media_url` point
+the tests at the mock.
+
+**Publishing** is the `discord` platform of the publish registry
+(`service::discord`, docs/api.md "Publishing"), next to Telegram and
+Signal. Only the set's owner publishes. Options:
+
+- `guild_id`: the server id (a number, or a `discord.com/channels/<id>`
+  link). Required the first time; afterwards the server the set was
+  published to last is used when it is left out.
+- `kind`: `stickers` (default) or `emojis`; left out, the kind used last
+  for that server.
+
+The `discord_export` job renders the items for the kind, runs
+`sync_guild` with the mapping stored for (set, server, kind) and stores the
+new mapping in `set_publications.state` (also the partial mapping of a
+failed sync: what it created is cleaned up by the next one). The set's
+publication is the server's name with the link
+`https://discord.com/channels/<server id>`. A publish to another server or
+kind keeps the earlier mappings, so publishing back to a server keeps what
+stickpile made there. The result has `guild_id`, `guild_name`, `kind`,
+`url`, `added`, `removed`, `updated`, `unchanged`, `exported`, `skipped`,
+`notes`, `slots`, `animated_slots` and `premium_tier`; the export page
+shows it as `3 stickers: 2 added, 1 removed, 0 left out` (or `... emoji:
+...`), with what was left out and why.
+
+A 429 or a 5xx answer and network errors are retried by the job queue (up
+to 3 attempts, with the mapping kept in between); a missing permission, an
+unknown server (`Discord does not know this server, or the bot is not a
+member of it`) or another refusal fails the job at once.
+
+**Server ownership.** One bot serves every stickpile user and may edit
+everything it created, so the first user who publishes to a server and
+kind owns it (`discord_guilds`, migration 0013; the claim is made by the
+job). Others get `another stickpile user publishes this kind (stickers or
+emoji) to that Discord server` (400 when publishing). The same user may
+publish several sets to one server and kind; each set keeps its own
+mapping and touches only what it created.
+
+**Import**: `POST /api/v1/discord/import` (`DiscordImport`: `guild_id`,
+`stickers` default true, `emojis` default false, optional `slug` and
+`visibility`) or the web page `/discord/import` ("Import from Discord", on
+the sets list and the upload page) queue a `discord_import` job
+(`import_guild`, files capped at `limits.max_upload_mb`). It creates a set
+named after the server (slug from its name, `-2`, `-3`, ... when taken;
+a slug given in the request must be free, 409 otherwise). Each sticker or
+emoji becomes an item through the normal ingest: its name (an emoji's `_`
+turned back into spaces), the emoji of a sticker's tags as the item's
+emoji and the other tag words as keywords. Lottie stickers, emoji managed
+by an integration, files that are too large and duplicates are listed in
+`skipped`. The set's source stays `local` (the API's `SetSource` has no
+`discord`).
+
+Expressions the bot created seed the new set's mapping, so publishing the
+set back to that server keeps them instead of uploading copies, but only
+for the user who owns the server's publishing (or for an admin, who adopts
+an unowned server and kind this way), and only expressions no other set
+maps already. Anyone else gets a plain copy; the result's `bound` says how
+many were linked.
+
+**Disabled**: without `discord.enabled` and a readable token the platform
+is listed as not configured (publishing to it is a 400), the import route
+answers 404 and the import page does not exist, as for Telegram.
 
 ## Testing
 
@@ -225,3 +296,13 @@ foreign stickers left alone, skipped files and duplicates, emoji slot
 counting and unique names, items deleted by hand, a failed export's partial
 mapping, and imports. The tests need no network access; the mock is this
 crate's reading of the docs, not recorded Discord behaviour.
+
+The server's tests (`crates/stickpile-server/tests/integrations_discord.rs`,
+with a copy of the mock in `tests/integrations_support/mock_discord.rs`)
+publish through the registry and the export page: create, keep, update and
+remove; slot limits; emoji; owner-only publishing and server ownership; the
+partial mapping of a failed publish; imports with and without adopting what
+the bot made; the import page; and that the token is in no job error,
+result, admin page or log line. `tests/renditions.rs` checks the
+renditions of stills, animations and (with ffmpeg) a video with
+`check_file`.

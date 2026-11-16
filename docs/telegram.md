@@ -141,8 +141,8 @@ each, and unbinds any later sets bound to the same pack.
 ## Where publishing lives
 
 Telegram is the first platform of the publish registry
-(`crates/stickpile-server/src/service/publish.rs`), next to which Discord and
-Signal will be added. In the web UI, publishing lives on the set's export
+(`crates/stickpile-server/src/service/publish.rs`), next to Discord
+([discord.md](discord.md)) and Signal ([signal.md](signal.md)). In the web UI, publishing lives on the set's export
 page, `/sets/{id}/export` ([web.md](web.md#export-and-publish)): its
 Publish section has a row for Telegram with the pack's link, when it was
 last published and what that changed, the last error, the pack name and

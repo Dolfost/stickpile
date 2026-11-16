@@ -16,6 +16,7 @@ Public API (see `crates/stickpile-media/src/lib.rs`):
 | `decode_frame(bytes, &Limits)` | First frame of a still or animation as RGBA (used to re-process Telegram stickers). |
 | `Tools::from_env(tmp_dir, timeout)` | `STICKPILE_FFMPEG` / `STICKPILE_FFPROBE`, or `ffmpeg` / `ffprobe` on `PATH`. |
 | `whatsapp::{still, animated, first_frame, tray, inspect}` | WhatsApp pack stickers (512 x 512 WebP within WhatsApp's limits), the tray icon, and a check of a WebP's canvas and frames. See [whatsapp.md](whatsapp.md). |
+| `pack::{sticker, still, PackTarget}` | Square stickers of a given side and byte budget: PNG or WebP stills, APNG or GIF animations (Discord and Signal). See below. |
 | `hash::{phash, dhash, hamming, to_hex, from_hex}` | 64-bit perceptual hashes. |
 | `quality::{assess, jpeg_quality_estimate, total}` | Quality score, see [quality.md](quality.md). |
 
@@ -154,6 +155,30 @@ stays at a few frames whatever the length. Animations are decoded in Rust
 and need no ffmpeg; videos are decoded by ffmpeg into raw RGBA frames
 (`-f rawvideo -pix_fmt rgba`, the first 10 s, at most 15 fps, scaled with
 `scale`), read back from a scratch file.
+
+### Discord and Signal stickers
+
+Not stored as variants either: `pack::sticker(original, probe, tools,
+target)` makes one in the Discord and Signal publish jobs and for the
+Signal-ready zip (`service::renditions`), for a `PackTarget` the server
+takes from the platform crates (side, byte budget, longest animation, still
+and animation format; [discord.md](discord.md#renditions),
+[signal.md](signal.md#in-the-server)). Stills are squared like WhatsApp's
+and written as lossless PNG (else 256 colours) or WebP (lossless, else
+lossy). Animations and videos are sampled at a constant rate (at most 20
+frames per second, cut at the longest animation the platform takes) into
+squares, then written as an APNG (one NeuQuant palette of 256 colours with
+alpha for all frames, from the `color_quant` crate the `gif` and `image`
+crates use; equal neighbours merged; frames after the first only cover the
+rectangle that changed, blend "source") or a GIF (a palette per frame,
+transparency on or off, each frame cleared before the next), both looping
+forever. Too large: fewer frames per second, then a smaller square (a
+ladder down to a quarter of the side at 5 frames per second; rungs the last
+attempt predicts to be well over the budget are skipped); `None` when even
+that does not fit. Videos are decoded by ffmpeg into raw RGBA frames as for
+WhatsApp. The crate is built with optimisation in debug builds too
+(`[profile.dev.package.stickpile-media]`), as these pixel loops are slow
+otherwise.
 
 ## 4. ffmpeg / ffprobe invocation policy
 

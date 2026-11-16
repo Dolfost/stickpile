@@ -20,7 +20,7 @@ Use systemd credentials, agenix/sops-nix or podman secrets to provide them.
 | Command | Does |
 |---|---|
 | `stickpile-server [serve]` | Run the server until SIGINT/SIGTERM (graceful shutdown). |
-| `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: missing CLIP model files when `ai.enabled`, an unreadable or empty Telegram token or git token file, a missing `git.ssh_key_file`. |
+| `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: missing CLIP model files when `ai.enabled`, an unreadable or empty Telegram token or git token file, a Discord token file that does not read as a token, a Signal credentials file that does not read as credentials (or none: import only), a missing `git.ssh_key_file`. Warnings name the files, never their content. |
 | `stickpile-server create-user <username> [--admin] [--password-file F] [--tailscale-login L]` | Create a user directly in the database (at least one of `--password-file` / `--tailscale-login`). |
 | `stickpile-server reset-password <username> --password-file F [--revoke-tokens] [--reset-totp]` | Set a new password for a user who forgot theirs; signs them out of every web session (see [deployment](deployment.md#forgotten-passwords)). |
 | `stickpile-server backup <dir>` | Full backup: every set as a set directory plus a database snapshot; safe while the server runs. See [backup.md](backup.md). |
@@ -119,6 +119,33 @@ Used by Telegram import/export (integrations, [telegram.md](telegram.md)).
 | `bot_token_file` | path | unset | File with the bot token. |
 | `api_url` | string | `"https://api.telegram.org"` | Bot API base URL (local Bot API server or tests). |
 | `default_owner_user_id` | integer | unset | Telegram user id that owns packs created on export, unless the exporting user set their own. |
+
+## `[discord]`
+
+Discord import and publishing through a bot ([discord.md](discord.md)).
+The integration is on when `enabled` is set and `bot_token_file` reads as a
+token.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable Discord import and publishing. Requires `bot_token_file`. |
+| `bot_token_file` | path | unset | File with the bot token. The bot needs the Create Expressions permission in each server. |
+| `api_url` | string | `"https://discord.com/api/v10"` | REST API base URL (tests). |
+| `cdn_url` | string | `"https://cdn.discordapp.com"` | Image CDN imports download from (tests). |
+| `media_url` | string | `"https://media.discordapp.net"` | Media proxy that serves GIF stickers (tests). |
+
+## `[signal]`
+
+Signal sticker packs ([signal.md](signal.md)). The Signal-ready zip needs
+none of this.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable importing packs from their links (no account needed); with `credentials_file` also publishing. |
+| `credentials_file` | path | unset | JSON credentials of a dedicated Signal account or linked device that uploads packs (`{"aci", "device_id", "password"}`, Signal Desktop's `{"username", "password"}`, or a signal-cli account file; see [signal.md](signal.md#credentials)). Publishing is on only when it reads as credentials. |
+| `service_url` | string | `"https://chat.signal.org"` | Chat service base URL, which issues upload forms (tests). |
+| `cdn_url` | string | `"https://cdn.signal.org"` | CDN base URL for pack files (tests). |
+| `trust_public_roots` | bool | `false` | Also trust the public web PKI for these hosts; by default only Signal's own root certificate is trusted ([signal.md](signal.md#tls)). |
 
 ## `[git]`
 

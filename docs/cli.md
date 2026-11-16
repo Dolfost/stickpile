@@ -442,17 +442,28 @@ it failed. See [docs/telegram.md](telegram.md).
 stickpile publish cats                     # where the set is published, per platform
 stickpile publish cats --to telegram --wait
 stickpile publish cats --to telegram -O telegram.pack_name=cats -O telegram.title="My cats"
+stickpile publish cats --to discord -O discord.guild_id=100000000000000001 -O discord.kind=emojis
+stickpile publish cats --to telegram,discord,signal --wait   # Discord: the server used last
 ```
 
 Without `--to`, a table of the platforms the server knows: whether each is
 configured, what the set is published as, when it was last published, the
 last outcome and the link (`--json`: the `Publication` list). With `--to`
-(comma-separated platform ids, today `telegram`), one publish job per
-platform is queued through `POST /api/v1/sets/{id}/publish`; the request
-fails as a whole for an unknown or unconfigured platform. `-O
-PLATFORM.KEY=VALUE` (repeatable) sets one of a platform's options
-(Telegram: `pack_name`, `title`). `--wait` waits for every job; the command
-exits 1 if any failed. Only the set's owner may publish.
+(comma-separated platform ids: `telegram`, `discord`, `signal`), one
+publish job per platform is queued through `POST /api/v1/sets/{id}/publish`;
+the request fails as a whole for an unknown or unconfigured platform or a
+bad option. `-O PLATFORM.KEY=VALUE` (repeatable) sets one of a platform's
+options: Telegram's `pack_name` and `title`; Discord's `guild_id` (the
+server id, required the first time, afterwards the server used last;
+`discord.guild=...` works too) and `kind` (`stickers` or `emojis`); Signal
+has none, and every publish makes a new Signal pack with a new link.
+`--wait` waits for every job; the command exits 1 if any failed. Only the
+set's owner may publish. See [discord.md](discord.md#in-the-server) and
+[signal.md](signal.md#in-the-server).
+
+There is no `stickpile discord` or `stickpile signal` command for imports
+yet: use the web pages (`/discord/import`, `/signal/import`) or the API
+(`POST /api/v1/discord/import`, `POST /api/v1/signal/import`).
 
 ### `job`
 

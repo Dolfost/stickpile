@@ -524,6 +524,21 @@ Shown only when enabled on the server.
   updates the pack. Packs belong to your Telegram user id (Settings) or the
   server's default owner. The older one-platform form at
   `/sets/{id}/telegram` still works.
+- **Discord** (`discord.enabled` and a bot token): "Import from Discord"
+  (`/discord/import`: the server id, stickers and/or emoji, slug,
+  visibility) creates a set in the background; publishing a set to a
+  server is a row of the [export page](#export-and-publish). See
+  [discord.md](discord.md#in-the-server).
+- **Signal** (`signal.enabled`): "Import a Signal pack" (`/signal/import`:
+  the pack's link, slug, visibility) creates a set in the background; the
+  link is not kept and a refused one is not shown back. Publishing needs
+  `signal.credentials_file` too and is a row of the export page. See
+  [signal.md](signal.md#in-the-server).
+
+The import pages are linked from the sets list and from the upload page's
+"More sources". On a set page, "Publish to Telegram" / "Update Telegram
+pack" leads to the export page's Publish section; without Telegram but
+with Discord or Signal set up, the button is "Publish".
 
 Background work (git pulls, Telegram, "Re-run AI") shows a status box that
 polls itself every 2 seconds with htmx (`hx-trigger="every 2s"`) until the job
@@ -540,7 +555,15 @@ every set page. Three sections:
   `export.tar` and `export.tar.gz`; every format holds the same files, see
   [set-format.md](set-format.md)). **RAR is not offered**: writing RAR
   archives needs the proprietary `rar` program, which a free server cannot
-  ship, and everything that opens RAR opens ZIP too.
+  ship, and everything that opens RAR opens ZIP too. Below them, the
+  **Signal-ready zip** (`signal.zip`): every item as a 512x512 Signal
+  sticker with `emoji.txt` and a `manifest.json` for signal-cli, to make a
+  pack by hand in Signal Desktop (File, Create/upload sticker pack). It is
+  offered whether or not the server publishes to Signal; when it does not,
+  the text says this is the way to make a Signal pack. It is made when it
+  is downloaded (a large animated set takes a while) and items that cannot
+  become Signal stickers are listed in its `left-out.txt`
+  ([signal.md](signal.md#signal-ready-zip)).
 - **WhatsApp sticker packs**, for anyone who can read the set too: "Build
   WhatsApp packs" queues a job (htmx shows its status box; without
   JavaScript the page refreshes itself while it runs). The last build is
@@ -551,13 +574,21 @@ every set page. Three sections:
   reason. When the set changed since, a note says so and the button builds
   them again. See [whatsapp.md](whatsapp.md).
 - **Publish**, for the owner only: a table with one row per platform the
-  server is configured for (today Telegram; Discord and Signal will appear
-  the same way). Each row shows where the set is published (the pack's
-  link), when it was last published with a summary of that result (for
-  Telegram: stickers, added, removed, left out), the last error if the last
-  publish failed, a running publish's status box, the platform's options
-  (Telegram: pack short name and title, both optional) and a note when a
-  setting is missing (Telegram: no Telegram user id and no default owner).
+  server is configured for: Telegram, Discord, Signal. Each row shows where
+  the set is published (the Telegram pack, the Discord server, the newest
+  Signal pack, each with its link), when it was last published with a
+  summary of that result (Telegram and Discord: stickers or emoji, added,
+  removed, left out; Signal: stickers in the new pack, left out) and, folded,
+  the items that were left out or changed to fit with the reason, the last
+  error if the last publish failed, a running publish's status box, the
+  platform's options and a note. Options: Telegram's pack short name and
+  title (both optional); Discord's server id (required the first time) and
+  "Publish as" stickers or emoji, prefilled with what the set was published
+  with last; Signal has none. Notes: Telegram when no Telegram user id and
+  no default owner are set; Discord that the bot must be in the server with
+  the Create Expressions permission and only what stickpile created there
+  is changed; Signal that packs cannot be changed, so every publish
+  uploads a new pack with a new link.
   Tick several rows and press "Publish to the selected platforms" to queue
   one job per platform, or press a row's own "Publish to X only". The page
   comes back with the queued jobs' status boxes. Errors (no platform
@@ -740,9 +771,13 @@ the file, one emoji per line.
 ## Tests
 
 `crates/stickpile-server/tests/web_auth.rs`, `web_pages.rs` and
-`web_flows.rs` (helpers in `tests/web_common/`), and the export page's test
+`web_flows.rs` (helpers in `tests/web_common/`), the export page's tests
 in `export.rs` (downloads for readers, publishing only for the owner, form
-errors keeping the input, the publish and WhatsApp jobs) cover: every page renders for
+errors keeping the input, the publish and WhatsApp jobs, Telegram, Discord
+and Signal published together with Discord's options prefilled), and the
+import pages' tests in `integrations_discord.rs` and `integrations_signal.rs`
+(form errors, a refused Signal link not shown back, the pages and links
+gone when the platform is off, the Signal-ready zip offered) cover: every page renders for
 its user; anonymous redirects (401 + `HX-Redirect` for htmx); 404 for content
 you cannot see; 403 for admin pages and others' sets; CSRF on urlencoded,
 htmx and multipart forms, and cross-site posts; the login flow and cookie

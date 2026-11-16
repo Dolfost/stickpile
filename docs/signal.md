@@ -9,13 +9,13 @@ stickpile can:
   and emoji for Signal Desktop's sticker creator, and a manifest signal-cli
   can upload as it is.
 
-The implementation is `crates/stickpile-signal`. It is a library: the server
-does not call it yet. Wiring it into the server is a later step through the
-server's platform registry; [What the server will do](#what-the-server-will-do)
-describes the plan. The format details below come from Signal's open source
-code (cited per section) and were checked against encrypted packs from
-Signal-Desktop's own test fixtures. The network side (service and CDN) was
-tested only against an in-process mock, never against Signal's servers.
+The Signal side is `crates/stickpile-signal`; the server uses it through
+its platform registry ([In the server](#in-the-server): configuration, the
+export page, jobs, API routes). The format details below come from Signal's
+open source code (cited per section) and were checked against encrypted
+packs from Signal-Desktop's own test fixtures. The network side (service
+and CDN) was tested only against an in-process mock, never against
+Signal's servers.
 
 ## Links
 
@@ -272,30 +272,107 @@ against the same certificate (`utils/ca/cacert.pem`). The crate pins it
 2032-01-24, SHA-256 of the DER
 `ddb0f92bb95c8d6fd202ea6e8cc5ccd182b544f8cd696f47d580659ddc9df65a`) as the
 only trust anchor. `SignalConfig::trust_public_roots` adds the public web
-PKI, for the case Signal moves a host to a public CA. That the live hosts
-present certificates under this root was not checked: the crate's tests and
-scripts never contact Signal.
+PKI, for the case Signal moves a host to a public CA (the server's
+`signal.trust_public_roots`, off by default). That the live hosts present
+certificates under this root was not checked: the crate's tests and scripts
+never contact Signal.
 
-## What the server will do
+## In the server
 
-Planned, not implemented in this crate:
+**Configuration** (`[signal]`, [configuration.md](configuration.md#signal)):
 
-- Import: `POST` with a pack link queues a job that calls `import_pack` and
-  creates a set (title as name, author noted, stickers in order, each
-  sticker's emoji as the item's emoji, cover as the set cover). The link is
-  a secret for private packs: the server should not store or log it beyond
-  what the job needs.
-- Upload: configuration `signal.enabled` and `signal.credentials_file`
-  (a path; the integration is on when the file reads as credentials). The
-  set owner publishes; the job renders 512x512 stickers (WebP or PNG for
-  stills, APNG for animations, none of which the current variants in
-  docs/media.md provide), skips items `check_sticker` refuses with the
-  reason, uploads, and stores the latest link on the set. Each publish is a
-  new pack.
-- The Signal-ready zip as a download for any set, with the same renditions
-  and no credentials.
+- `enabled` turns on pack import from links, which needs no account;
+- `credentials_file` (a path to a credentials file, see
+  [Credentials](#credentials)) also turns on publishing: Signal counts as
+  configured only when the file reads as credentials
+  (`stickpile-server check-config` warns otherwise, naming the file, never
+  its content);
+- `service_url` and `cdn_url` point the tests at the mock;
+  `trust_public_roots` see [TLS](#tls).
+
+**Renditions**, made from each item's stored original where they are
+needed (the publish job and the zip below; `stickpile_media::pack`,
+`service::renditions`), never stored as variants. Sizes and limits come
+from the crate's `STICKER_REQUIREMENTS`, and every file passes
+`check_sticker` (one that does not is left out with the crate's reason):
+
+- stills: 512x512 (the longest side 512, centred on transparency), WebP,
+  lossless when it fits 300 KiB, else lossy at the highest quality that
+  fits;
+- animations and videos (videos need ffmpeg): APNG looping forever, at
+  most 3 s (longer ones are cut, noted as `cut to the first 3 seconds`), at
+  most 20 frames per second, one palette of 256 colours with alpha, later
+  frames covering only what changed. Too large: fewer frames per second,
+  then a smaller square (Signal takes squares up to 512), down to 128x128
+  at 5 frames per second; past that the item is left out (`does not fit the
+  300 KB limit of Signal stickers, even smaller and at 5 frames per
+  second`). An animation whose frames all look the same becomes a still;
+- the emoji: the item's first emoji, else `🙂` (`sticker_emoji`); at most
+  200 stickers (`a Signal pack holds at most 200 stickers` for the rest);
+- the cover: the set's cover image or chosen cover item as a still, else
+  the first sticker; the title is the set's name, the author the owner's
+  display name (else the username).
+
+**Publishing** is the `signal` platform of the publish registry
+(`service::signal`, docs/api.md "Publishing"); it takes no options. Only
+the set's owner publishes. The `signal_export` job uploads a **new** pack
+every time (packs cannot be changed): the newest `signal.art` link becomes
+the set's publication link (`set_publications`, with the pack id in
+`state`), and the export page says so next to the row ("Signal packs
+cannot be changed: every publish uploads a new pack with a new link.").
+Older links keep working and keep showing the older stickers. The result
+has `url`, `title`, `exported`, `skipped` and `notes`; the page shows it as
+`3 stickers in a new pack, 0 left out`. A rate limit (a burst of 50 forms,
+then one every 72 minutes) and refused credentials fail the job at once
+with the crate's message; network errors and 5xx answers are retried.
+
+**Import**: `POST /api/v1/signal/import` (`SignalImport`: `link` in
+either form, optional `slug` and `visibility`) or the web page
+`/signal/import` ("Import a Signal pack", on the sets list and the upload
+page) queue a `signal_import` job. A link that does not parse is a 400
+before anything is queued. The job (`import_pack`, files capped at
+`limits.max_upload_mb`) creates a set named after the pack's title (slug
+from it, `-2`, `-3`, ... when taken), adds the stickers in order as
+`sticker 1`, `sticker 2`, ... with their emoji, and makes the pack's cover
+the set's cover (the cover sticker's item, or the separate cover image).
+Stickers that are missing, damaged or duplicates are listed in `skipped`;
+APNG stickers keep their first frame (the ingest's rule). The result has
+`set_id`, `slug`, `title`, `author`, `imported`, `skipped` and `cover`.
+The set's source stays `local` (the API's `SetSource` has no `signal`).
+
+**The link is a secret** (its key opens the pack): it is in the job's
+payload only while the job may run and is removed from it when the job
+finishes, done or failed; the job has no subject naming the pack, and
+neither the result nor errors nor logs contain the key. The web form does
+not show a refused link back.
+
+**The Signal-ready zip**: `GET /api/v1/sets/{id}/signal.zip`, for anyone
+who can read the set, whether Signal is configured or not, and the
+"Signal-ready zip" button in the export page's Download section (which
+says, when the server does not publish to Signal, that this is the way to
+make a pack). It is `signal_ready_files` of the same renditions plus a
+`left-out.txt` naming the items that are not in it, stored without
+compression. Made on the first request after a change (that counts as an
+upload for rate limiting; a large animated set takes a while), it is kept
+in `<data_dir>/exports/<set id>/signal/` and served again while the items,
+their emoji, the set's name, cover and owner name are unchanged. A set
+with nothing to put in it answers 400.
+
+**Disabled**: without `signal.enabled` the import route answers 404 and the
+import page does not exist; without readable credentials the platform is
+listed as not configured and publishing to it is a 400, as for Telegram.
 
 ## Testing
+
+The server's tests (`crates/stickpile-server/tests/integrations_signal.rs`,
+with a copy of the mock in `tests/integrations_support/mock_signal.rs`)
+publish through the registry (a new pack each time, read back with
+`import_pack` and checked with `check_sticker`), the rate limit and wrong
+credentials, imports from both link forms with the cover and the link
+removed from the finished job, the Signal-ready zip with and without Signal
+configured, the import page, and the routes when Signal is off.
+
+The crate's own tests:
 
 `crates/stickpile-signal/tests/signal_api.rs` runs import, upload and the
 zip against an in-process axum mock of Signal's service and CDN on two
