@@ -10,10 +10,14 @@
 //!   fall back to the offline cache.
 //! * Ordinary requests use the configured `timeout_secs`; uploads, imports,
 //!   exports and file downloads use [`ApiClient::transfer_timeout`].
+//! * Opt-in ([`ApiClient::with_fail_fast`]): once a request finds the server
+//!   unreachable, reads fail as offline at once for a while instead of each
+//!   waiting for the timeout, and the server is tried again in the
+//!   background.
 
 use std::path::Path;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use reqwest::multipart::{Form, Part};
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
@@ -110,6 +114,111 @@ impl GitPackResponse {
     }
 }
 
+/// The message of a read refused because the server was unreachable a
+/// moment ago ([`ApiClient::with_fail_fast`]).
+pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached a moment ago";
+
+/// What a client with [`ApiClient::with_fail_fast`] remembers of the
+/// server: when a request last found it unreachable, and whether a request
+/// is trying it again now. Shared by the client's clones.
+#[derive(Debug)]
+struct Reachability {
+    /// How long a failure is believed.
+    window: Duration,
+    /// How long after a failure the reads that come in check the server in
+    /// the background.
+    recheck: Duration,
+    state: Mutex<ReachState>,
+}
+
+/// The longest wait between background checks while reads come in.
+const MAX_RECHECK: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Default)]
+struct ReachState {
+    /// When a request last found the server unreachable; `None` once it
+    /// answered.
+    down_at: Option<Instant>,
+    /// A request is trying the server again (a read let through, or the
+    /// background check); the others are refused meanwhile.
+    probing: bool,
+}
+
+/// What to do with a read.
+#[derive(Debug, PartialEq, Eq)]
+enum Gate {
+    /// Send it.
+    Send,
+    /// Send it as the one request trying the server again.
+    Probe,
+    /// Fail it at once; `background`: and check the server in the
+    /// background.
+    Refuse { background: bool },
+}
+
+impl Reachability {
+    fn new(window: Duration) -> Reachability {
+        Reachability {
+            window,
+            recheck: (window / 2).min(MAX_RECHECK),
+            state: Mutex::new(ReachState::default()),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, ReachState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A read at `now`: sent while the server is believed reachable.
+    /// Within `window` of a failure it is refused, and from `recheck` on
+    /// the server is checked in the background (a failed check is a new
+    /// failure), so that a client in use never waits again while the server
+    /// stays away, and finds it as soon as it is back. After the window (a
+    /// client left alone that long) one read at a time goes out to try it,
+    /// the others refused until it is answered; taking that slot is the
+    /// caller's [`Probing`] guard.
+    fn gate(&self, now: Instant) -> Gate {
+        let mut s = self.state();
+        let Some(at) = s.down_at else {
+            return Gate::Send;
+        };
+        if s.probing {
+            return Gate::Refuse { background: false };
+        }
+        let age = now.saturating_duration_since(at);
+        if age >= self.window {
+            s.probing = true;
+            return Gate::Probe;
+        }
+        let background = age >= self.recheck;
+        s.probing = background;
+        Gate::Refuse { background }
+    }
+
+    /// Note what a request's `result` says of the server, at `now`.
+    fn record<T>(&self, result: &Result<T>, now: Instant) {
+        let mut s = self.state();
+        s.down_at = match result {
+            Err(e) if e.is_offline() => Some(now),
+            _ => None,
+        };
+    }
+
+    fn forget(&self) {
+        self.state().down_at = None;
+    }
+}
+
+/// The slot of the request trying the server again; given back when
+/// dropped, also when the request is cancelled.
+struct Probing(Arc<Reachability>);
+
+impl Drop for Probing {
+    fn drop(&mut self) {
+        self.0.state().probing = false;
+    }
+}
+
 /// Async REST client. Cheap to clone (shares the connection pool and token).
 #[derive(Clone)]
 pub struct ApiClient {
@@ -118,6 +227,8 @@ pub struct ApiClient {
     token: Arc<RwLock<Option<String>>>,
     timeout: Duration,
     transfer_timeout: Duration,
+    /// `Some` with [`ApiClient::with_fail_fast`].
+    reach: Option<Arc<Reachability>>,
 }
 
 impl std::fmt::Debug for ApiClient {
@@ -149,6 +260,7 @@ impl ApiClient {
             token: Arc::new(RwLock::new(None)),
             timeout,
             transfer_timeout: DEFAULT_TRANSFER_TIMEOUT.max(timeout),
+            reach: None,
         })
     }
 
@@ -171,12 +283,42 @@ impl ApiClient {
             token: Arc::new(RwLock::new(None)),
             timeout: self.timeout,
             transfer_timeout: self.transfer_timeout,
+            reach: self.reach.clone(),
         }
     }
 
     pub fn with_transfer_timeout(mut self, timeout: Duration) -> ApiClient {
         self.transfer_timeout = timeout;
         self
+    }
+
+    /// Fail fast while the server is away: once a request finds it
+    /// unreachable ([`CoreError::Offline`]), reads (`GET`) fail the same way
+    /// at once for `window` instead of each waiting for the timeout, so a
+    /// caller with an offline cache answers from it straight away
+    /// ([`RECENTLY_UNREACHABLE`]). Meanwhile, while reads come in,
+    /// `GET /healthz` checks the server in the background, 15 s (or half
+    /// the window, if less) after the last failure; a failed check renews
+    /// the failure. After the window one read at a time tries the server
+    /// itself. Any answer from the server ends it. Writes are always sent.
+    /// Shared with the clones made from now on.
+    pub fn with_fail_fast(mut self, window: Duration) -> ApiClient {
+        self.reach = Some(Arc::new(Reachability::new(window)));
+        self
+    }
+
+    /// Forget that the server was unreachable: the next read goes out (the
+    /// user asked to refresh). Nothing without [`ApiClient::with_fail_fast`].
+    pub fn forget_unreachable(&self) {
+        if let Some(reach) = &self.reach {
+            reach.forget();
+        }
+    }
+
+    /// The server was found unreachable lately and reads fail at once
+    /// ([`ApiClient::with_fail_fast`]).
+    pub fn believed_unreachable(&self) -> bool {
+        self.reach.as_ref().is_some_and(|r| r.state().down_at.is_some())
     }
 
     pub fn set_token(&self, token: Option<String>) {
@@ -221,7 +363,47 @@ impl ApiClient {
     }
 
     async fn send(&self, rb: RequestBuilder) -> Result<Response> {
-        let resp = rb.send().await.map_err(map_reqwest)?;
+        let Some(reach) = self.reach.clone() else {
+            return self.answer(rb.send().await).await;
+        };
+        let request = rb.build().map_err(map_reqwest)?;
+        let _probing = if *request.method() == Method::GET {
+            match reach.gate(Instant::now()) {
+                Gate::Send => None,
+                Gate::Probe => Some(Probing(reach.clone())),
+                Gate::Refuse { background } => {
+                    if background {
+                        self.check_in_background(Probing(reach));
+                    }
+                    return Err(CoreError::Offline(RECENTLY_UNREACHABLE.into()));
+                }
+            }
+        } else {
+            None
+        };
+        let result = self.answer(self.http.execute(request).await).await;
+        reach.record(&result, Instant::now());
+        result
+    }
+
+    /// `GET /healthz` on the current Tokio runtime, noting what it says of
+    /// the server; `probing` is given back when it ends.
+    fn check_in_background(&self, probing: Probing) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let client = self.clone();
+        runtime.spawn(async move {
+            let rb = client.http.get(client.url(routes::HEALTH)).timeout(client.timeout);
+            let result = client.answer(rb.send().await).await;
+            probing.0.record(&result, Instant::now());
+            drop(probing);
+        });
+    }
+
+    /// What a request got back: its response, or the error it means.
+    async fn answer(&self, sent: reqwest::Result<Response>) -> Result<Response> {
+        let resp = sent.map_err(map_reqwest)?;
         let public = is_public_path(resp.url().path());
         match check_status(resp).await {
             Err(e) if e.status() == Some(401) && !public && !self.has_token() => Err(CoreError::NotLoggedIn),
@@ -891,5 +1073,73 @@ fn summary_of(i: &Item, set_slug: &str, set_name: &str, owner_username: &str) ->
         phash: i.media.phash.clone(),
         variants: i.media.variants.clone(),
         updated_at: i.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    #[test]
+    fn a_failure_is_believed_for_a_window_then_one_read_tries_again() {
+        let reach = Arc::new(Reachability::new(secs(10)));
+        let t0 = Instant::now();
+        assert_eq!(reach.gate(t0), Gate::Send);
+
+        reach.record::<()>(&Err(CoreError::Offline("refused".into())), t0);
+        assert_eq!(reach.gate(t0 + secs(1)), Gate::Refuse { background: false });
+        assert_eq!(reach.gate(t0 + secs(5)), Gate::Refuse { background: true });
+        assert_eq!(
+            reach.gate(t0 + secs(6)),
+            Gate::Refuse { background: false },
+            "one check at a time"
+        );
+        // The check timed out: the failure is newer.
+        reach.record::<()>(&Err(CoreError::Offline("timeout".into())), t0 + secs(8));
+        drop(Probing(reach.clone()));
+        assert_eq!(reach.gate(t0 + secs(17)), Gate::Refuse { background: true });
+        drop(Probing(reach.clone()));
+
+        assert_eq!(
+            reach.gate(t0 + secs(18)),
+            Gate::Probe,
+            "after the window a read goes out"
+        );
+        assert_eq!(
+            reach.gate(t0 + secs(18)),
+            Gate::Refuse { background: false },
+            "only one"
+        );
+        drop(Probing(reach.clone()));
+        assert_eq!(
+            reach.gate(t0 + secs(19)),
+            Gate::Probe,
+            "a cancelled one gives its slot back"
+        );
+
+        // Any answer of the server ends it, an error too.
+        let error = CoreError::Api {
+            status: 500,
+            error: ApiError {
+                code: "internal".into(),
+                message: "boom".into(),
+            },
+        };
+        reach.record::<()>(&Err(error), t0 + secs(20));
+        drop(Probing(reach.clone()));
+        assert_eq!(reach.gate(t0 + secs(20)), Gate::Send);
+
+        reach.record::<()>(&Err(CoreError::Offline("refused".into())), t0 + secs(30));
+        reach.forget();
+        assert_eq!(reach.gate(t0 + secs(30)), Gate::Send);
+        // A long window still checks every 15 s while reads come in.
+        let long = Reachability::new(secs(300));
+        long.record::<()>(&Err(CoreError::Offline("refused".into())), t0);
+        assert_eq!(long.gate(t0 + secs(14)), Gate::Refuse { background: false });
+        assert_eq!(long.gate(t0 + secs(15)), Gate::Refuse { background: true });
     }
 }

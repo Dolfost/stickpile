@@ -463,3 +463,81 @@ async fn admin_routes_require_admin() {
         .unwrap();
     assert!(inv.url.contains(&inv.invitation.id));
 }
+
+#[tokio::test]
+async fn fail_fast_answers_reads_at_once_while_the_server_is_away() {
+    let mut server = MockServer::start();
+    let token = server.state().issue_token("alice", "t");
+    let client = client_for(&server.url, Some(token)).with_fail_fast(Duration::from_secs(60));
+    let plain = client_for(&server.url, None);
+    assert_eq!(client.me().await.unwrap().username, "alice");
+    assert!(!client.believed_unreachable());
+
+    server.stop();
+    assert!(client.me().await.unwrap_err().is_offline());
+    assert!(client.believed_unreachable());
+    server.restart();
+    server.state().requests.clear();
+    let err = client.me().await.unwrap_err();
+    assert!(err.is_offline(), "{err:?}");
+    assert!(err.to_string().contains(crate::client::RECENTLY_UNREACHABLE), "{err}");
+    assert!(
+        client.anonymous().health().await.unwrap_err().is_offline(),
+        "the clones know it too"
+    );
+    plain.health().await.expect("a client without fail-fast tries");
+    assert_eq!(server.state().requests, vec!["GET /healthz".to_string()]);
+
+    // A write goes out, and the server's answer ends it.
+    let login = TokenRequest {
+        username: "alice".into(),
+        password: "secret".into(),
+        totp: None,
+        token_name: "t2".into(),
+    };
+    client.login(&login).await.unwrap();
+    assert!(!client.believed_unreachable());
+    assert_eq!(client.me().await.unwrap().username, "alice");
+
+    // Refreshing by hand forgets it too.
+    server.stop();
+    client.me().await.unwrap_err();
+    server.restart();
+    client.forget_unreachable();
+    assert_eq!(client.me().await.unwrap().username, "alice");
+}
+
+#[tokio::test]
+async fn fail_fast_checks_the_server_again() {
+    let window = Duration::from_millis(1000);
+    let mut server = MockServer::start();
+    let token = server.state().issue_token("alice", "t");
+    let client = client_for(&server.url, Some(token)).with_fail_fast(window);
+
+    server.stop();
+    client.me().await.unwrap_err();
+    server.restart();
+    server.state().requests.clear();
+    assert!(client.me().await.unwrap_err().is_offline(), "early in the window");
+    tokio::time::sleep(window / 2 + Duration::from_millis(100)).await;
+    assert!(
+        client.me().await.unwrap_err().is_offline(),
+        "still refused, but the server is checked"
+    );
+    for _ in 0..100 {
+        if !client.believed_unreachable() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!client.believed_unreachable(), "the check found the server");
+    assert_eq!(server.state().requests, vec!["GET /healthz".to_string()]);
+    assert_eq!(client.me().await.unwrap().username, "alice");
+
+    // Past the window a read itself goes out.
+    server.stop();
+    client.me().await.unwrap_err();
+    server.restart();
+    tokio::time::sleep(window + Duration::from_millis(100)).await;
+    assert_eq!(client.me().await.unwrap().username, "alice");
+}

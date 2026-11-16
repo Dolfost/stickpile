@@ -56,6 +56,43 @@ async fn search_online_offline_and_signed_out() {
     assert!(empty.offline && empty.items.is_empty());
 }
 
+/// The user's complaint: with the server away every list waited for the
+/// timeout. Once a request finds it unreachable, the next reads answer
+/// from the cache at once, without a request, until a refresh asks for it.
+#[tokio::test]
+async fn a_server_found_unreachable_is_not_waited_for_again() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    lib.sync_now().await.unwrap();
+    assert!(!lib.packs().await.unwrap().offline);
+
+    server.stop();
+    assert!(lib.favorites(10).await.is_err() || lib.packs().await.unwrap().offline);
+    server.restart();
+    server.state().requests.clear();
+    let started = std::time::Instant::now();
+    let packs = lib.packs().await.unwrap();
+    let found = lib.search("fire".into(), Target::Generic, 10).await.unwrap();
+    let used = lib.most_used(10).await.unwrap();
+    assert!(packs.offline && found.offline && used.offline);
+    assert_eq!(ids(&found.items), vec![items[3].id.clone()]);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "answered at once: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        server.state().requests.is_empty(),
+        "nothing was sent: {:?}",
+        server.state().requests
+    );
+
+    // A refresh tries the server, and then the lists come from it again.
+    lib.sync_now().await.unwrap();
+    assert!(!lib.packs().await.unwrap().offline);
+}
+
 #[tokio::test]
 async fn search_uses_the_suggested_filter_value() {
     let (server, items) = seeded_server();

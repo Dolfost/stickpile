@@ -173,7 +173,11 @@ stickers, and licences.
 The app syncs in the background every 15 minutes when there is a network
 (WorkManager), and when the app or the keyboard opens. Offline, search, the
 lists and the thumbnails come from the cache, and stickers inserted before
-can be inserted again.
+can be inserted again. When the server stops answering, only the first
+list waits for it (5 s by default); for the next five minutes the lists
+come from the cache at once, while the server is checked in the
+background every 15 seconds, and once it answers they are live again.
+Sync now (or pulling the grid down) always tries the server.
 
 ## Build from source
 
@@ -500,6 +504,16 @@ Behaviour the signatures do not show:
   the cached rendition `prepare` would use, fetched unless cached; with
   `download` false nothing is fetched and null means not cached (the
   app's "Wi-Fi only"). Like the other file fetches it runs to its end.
+- **An unreachable server.** Once a request finds the server unreachable
+  (no connection, a timeout, or 502 to 504 from a proxy), the reads fail
+  as `Unreachable` at once for five minutes instead of each waiting for
+  the timeout, so the lists answer from the cache straight away
+  (`stickpile_core::ApiClient::with_fail_fast`). While reads come in, the
+  server is checked in the background 15 s after the last failure; when
+  it answers, the reads go to it again. After five minutes without a
+  check one read tries the server itself. What the user asks for tries
+  the server whatever it did a moment ago: `sync_now`, `prepare`,
+  `toggle_like`, `upload` and the logins.
 - **Pairing input.** `parse_pairing_link` returns the server URL
   normalised (above), the one `login_pairing` contacts, and null for a
   link whose URL has a user name or password, a query or a fragment.

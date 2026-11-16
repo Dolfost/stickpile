@@ -38,6 +38,14 @@ const FAVORITES_KEY: &str = "android_favorites:";
 /// server's most for a search.
 const FAVORITES_SAVED: usize = 200;
 
+/// How long a server found unreachable is believed so: meanwhile the reads
+/// answer from the offline cache at once, without each waiting for the
+/// timeout, and while they come in the server is checked in the background
+/// every 15 s, so the lists are live again as soon as it is back
+/// ([`ApiClient::with_fail_fast`]). Only a library left alone longer tries
+/// the server in the foreground (waiting for the timeout once).
+const FAIL_FAST: Duration = Duration::from_secs(5 * 60);
+
 /// The stickpile library: an account on one server, its offline cache, and
 /// the sync. Create one per process and share it; every method may be
 /// called from any thread. `suspend` methods run on the library's own Tokio
@@ -547,7 +555,10 @@ impl Inner {
 }
 
 async fn open_session(config: ClientConfig) -> Result<Session, LibraryError> {
-    Ok(Session::open(config).await?.with_client_name(crate::client_name()))
+    Ok(Session::open(config)
+        .await?
+        .with_client_name(crate::client_name())
+        .with_fail_fast(FAIL_FAST))
 }
 
 impl StickpileLibrary {
@@ -730,6 +741,7 @@ impl StickpileLibrary {
         self.write(|inner| async move {
             let _busy = inner.busy.lock().await;
             let session = inner.session();
+            session.client().forget_unreachable();
             let Some(created) = tailnet_login(session.client(), &device::token_name()).await? else {
                 return Ok(None);
             };
@@ -1072,6 +1084,8 @@ impl StickpileLibrary {
     ) -> Result<Prepared, LibraryError> {
         self.write(move |inner| async move {
             let (generation, session) = inner.current();
+            // Asked for by the user: tried even if the server was away a moment ago.
+            session.client().forget_unreachable();
             let item = inner.item_fresh_first(generation, &session, &item_id).await?;
             let target = stickpile_core::target_for_package(&editor_package);
             let choice =
@@ -1127,6 +1141,8 @@ impl StickpileLibrary {
     pub async fn toggle_like(&self, item_id: String) -> Result<bool, LibraryError> {
         self.write(move |inner| async move {
             let (generation, session) = inner.current();
+            // Asked for by the user: tried even if the server was away a moment ago.
+            session.client().forget_unreachable();
             let liked = session.toggle_like(&item_id).await?;
             inner.favorite_changed(generation, &session, &item_id, liked);
             Ok(liked)
@@ -1144,6 +1160,8 @@ impl StickpileLibrary {
     pub async fn upload(&self, set_id: String, file: UploadFile) -> Result<Item, LibraryError> {
         self.write(move |inner| async move {
             let (generation, session) = inner.current();
+            // Asked for by the user: tried even if the server was away a moment ago.
+            session.client().forget_unreachable();
             let path = PathBuf::from(&file.path);
             let filename = path
                 .file_name()
@@ -1232,6 +1250,8 @@ impl StickpileLibrary {
     pub async fn sync_now(&self) -> Result<SyncState, LibraryError> {
         self.write(|inner| async move {
             let _busy = inner.busy.lock().await;
+            // Asked for: the server is tried even if it was away a moment ago.
+            inner.session().client().forget_unreachable();
             inner.run_sync().await
         })
         .await

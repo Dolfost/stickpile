@@ -127,6 +127,14 @@ impl Session {
         self
     }
 
+    /// Once the server is found unreachable, answer reads from the offline
+    /// cache at once for `window` instead of waiting for the timeout on each
+    /// ([`ApiClient::with_fail_fast`]).
+    pub fn with_fail_fast(mut self, window: std::time::Duration) -> Session {
+        self.client = self.client.with_fail_fast(window);
+        self
+    }
+
     pub fn config(&self) -> &ClientConfig {
         &self.config
     }
