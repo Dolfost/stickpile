@@ -140,7 +140,13 @@ pub const PACK_THUMBNAIL_PX: u32 = 100;
 /// exactly [`PACK_THUMBNAIL_PX`], centred on a transparent square of that
 /// size (Telegram wants exactly 100×100), as PNG (a few KB; the limit is 128).
 pub(crate) fn pack_thumbnail(frame: &RgbaImage) -> Result<Vec<u8>, MediaError> {
-    let side = PACK_THUMBNAIL_PX;
+    square_png(frame, PACK_THUMBNAIL_PX)
+}
+
+/// `frame` scaled so its longer side is exactly `side`, centred on a
+/// transparent `side` x `side` square, as PNG (pack thumbnails and tray
+/// icons).
+pub(crate) fn square_png(frame: &RgbaImage, side: u32) -> Result<Vec<u8>, MediaError> {
     let (w, h) = fit_exact(frame.width().max(1), frame.height().max(1), side);
     let (w, h) = (w.clamp(1, side), h.clamp(1, side));
     let scaled = image::imageops::resize(frame, w, h, FilterType::Lanczos3);
@@ -233,7 +239,7 @@ pub(crate) fn tg_pack_sticker_webp(bytes: &[u8]) -> Result<Option<Vec<u8>>, Medi
 
 /// Lossy sticker WebP at the highest quality <= 95 that fits `max` bytes
 /// (binary search); `None` when even quality 1 does not fit.
-fn squeeze_webp(img: &RgbaImage, max: u64) -> Result<Option<Vec<u8>>, MediaError> {
+pub(crate) fn squeeze_webp(img: &RgbaImage, max: u64) -> Result<Option<Vec<u8>>, MediaError> {
     let fits = |b: &Vec<u8>| b.len() as u64 <= max;
     let top = webp_sticker_lossy(img, STICKER_MAX_QUALITY as f32)?;
     if fits(&top) {
@@ -253,14 +259,14 @@ fn squeeze_webp(img: &RgbaImage, max: u64) -> Result<Option<Vec<u8>>, MediaError
     match best {
         Some(b) => Ok(Some(b)),
         None => {
-            warn!("telegram sticker does not fit {max} bytes even at quality 1, skipped");
+            warn!("sticker does not fit {max} bytes even at quality 1, skipped");
             Ok(None)
         }
     }
 }
 
 /// Limits for re-decoding an original that already passed ingest.
-fn trusted_limits(probe: &Probe) -> Limits {
+pub(crate) fn trusted_limits(probe: &Probe) -> Limits {
     let d = Limits::default();
     Limits {
         max_bytes: u64::MAX,

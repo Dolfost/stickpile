@@ -85,6 +85,9 @@ totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 governor = "0.8"
 subtle = "2"
 tar = "0.4"
+# Set exports as ZIP and WhatsApp `.wastickers` (stored entries only: the
+# media inside is compressed already).
+zip = { version = "9", default-features = false }
 mime_guess = "2"
 
 # http client

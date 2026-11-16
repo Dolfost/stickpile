@@ -22,7 +22,9 @@ pub use stickpile_api::{MediaFormat, MediaKind, QualityComponent, QualityReport,
 pub mod hash;
 pub mod quality;
 pub mod signature;
+pub mod whatsapp;
 
+mod anim_webp;
 mod grey;
 mod jpeg;
 mod raster;

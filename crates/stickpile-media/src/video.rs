@@ -141,7 +141,7 @@ fn check_duration(ms: u64, limits: &Limits) -> Result<(), MediaError> {
 }
 
 /// One PNG frame at ~10 % of the duration (falls back to the first frame).
-fn representative_frame(
+pub(crate) fn representative_frame(
     video: &Path,
     fmt: MediaFormat,
     duration_ms: u64,

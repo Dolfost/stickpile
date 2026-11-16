@@ -13,6 +13,9 @@ stickpile-api.workspace = true
 image.workspace = true
 gif.workspace = true
 webp.workspace = true
+# libwebp's animation encoder, fed one frame at a time (WhatsApp stickers);
+# the same library the `webp` crate builds.
+libwebp-sys = "0.9"
 sha2.workspace = true
 hex.workspace = true
 serde.workspace = true

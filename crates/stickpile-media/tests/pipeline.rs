@@ -984,3 +984,110 @@ fn decode_frame_handles_every_raster_format() {
     };
     assert!(matches!(decode_frame(&png, &tight), Err(MediaError::TooLarge(_))));
 }
+
+/// Check a WhatsApp sticker as WhatsApp's sample app does: 512x512, the
+/// size limit of its kind, frames of at least 8 ms, at most 10 s.
+fn assert_whatsapp_sticker(bytes: &[u8], animated: bool) -> whatsapp::WebpFacts {
+    let facts = whatsapp::inspect(bytes).unwrap();
+    assert_eq!((facts.width, facts.height), (whatsapp::SIDE, whatsapp::SIDE));
+    assert_eq!(facts.animated, animated);
+    if animated {
+        assert!(bytes.len() as u64 <= whatsapp::ANIMATED_MAX_BYTES, "{}", bytes.len());
+        assert!(facts.durations.len() > 1, "{:?}", facts.durations);
+        assert!(facts.durations.iter().all(|d| *d >= whatsapp::MIN_FRAME_MS));
+        let total: u64 = facts.durations.iter().map(|d| u64::from(*d)).sum();
+        assert!(total <= whatsapp::MAX_DURATION_MS, "{total}");
+    } else {
+        assert!(bytes.len() as u64 <= whatsapp::STATIC_MAX_BYTES, "{}", bytes.len());
+    }
+    facts
+}
+
+#[test]
+fn whatsapp_animated_stickers_from_animations() {
+    let e = env();
+    let dir = tempfile::tempdir().unwrap();
+    for (name, bytes) in [
+        ("anim.gif", animated_gif(60, 40)),
+        ("anim.webp", animated_webp(64, 64, 6)),
+    ] {
+        let ing = ingest(&bytes, &opts(), &e.tools).unwrap();
+        assert_eq!(ing.probe.kind, MediaKind::Animation, "{name}");
+        let path = dir.path().join(name);
+        std::fs::write(&path, &ing.original).unwrap();
+        match whatsapp::animated(&path, &ing.probe, &e.tools).unwrap() {
+            whatsapp::Animated::Webp { bytes, cut } => {
+                assert!(!cut, "{name}");
+                assert_whatsapp_sticker(&bytes, true);
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+        // The still fallback is the first frame, squared.
+        let frame = whatsapp::first_frame(&path, &ing.probe, &e.tools).unwrap();
+        let still = whatsapp::still(&frame).unwrap().unwrap();
+        assert_whatsapp_sticker(&still, false);
+    }
+    // Noise does not compress: every rate and quality is tried, and none
+    // fits (the last one comes within a few per cent of 500 KB).
+    let ing = ingest(&noisy_gif(200, 200, 40), &opts(), &e.tools).unwrap();
+    let path = dir.path().join("noise.gif");
+    std::fs::write(&path, &ing.original).unwrap();
+    assert_eq!(
+        whatsapp::animated(&path, &ing.probe, &e.tools).unwrap(),
+        whatsapp::Animated::TooLarge
+    );
+}
+
+#[test]
+fn whatsapp_animated_stickers_from_videos_are_cut_at_ten_seconds() {
+    let e = env();
+    let dir = tempfile::tempdir().unwrap();
+    for (name, bytes, cut) in [
+        ("short.mp4", mp4_fixture(dir.path(), 2), false),
+        ("long.mp4", mp4_fixture(dir.path(), 12), true),
+        ("alpha.webm", webm_fixture(dir.path(), true), false),
+    ] {
+        let ing = ingest(&bytes, &opts(), &e.tools).unwrap();
+        let path = dir.path().join(format!("orig-{name}"));
+        std::fs::write(&path, &ing.original).unwrap();
+        match whatsapp::animated(&path, &ing.probe, &e.tools).unwrap() {
+            whatsapp::Animated::Webp { bytes, cut: was_cut } => {
+                assert_eq!(was_cut, cut, "{name}");
+                let facts = assert_whatsapp_sticker(&bytes, true);
+                let total: u32 = facts.durations.iter().sum();
+                if cut {
+                    assert!(total > 9_000, "{name}: {total}");
+                }
+                if name == "alpha.webm" {
+                    // The left half of the fixture is transparent.
+                    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+                    assert_eq!(img.get_pixel(30, 256)[3], 0);
+                    assert_eq!(img.get_pixel(400, 256)[3], 255);
+                }
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+        let frame = whatsapp::first_frame(&path, &ing.probe, &e.tools).unwrap();
+        assert_whatsapp_sticker(&whatsapp::still(&frame).unwrap().unwrap(), false);
+    }
+}
+
+#[test]
+fn whatsapp_still_is_padded_and_not_animated() {
+    let e = env();
+    let img = sticker(300, 120);
+    let ing = ingest(&png_with_text(&img), &opts(), &e.tools).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("still.png");
+    std::fs::write(&path, &ing.original).unwrap();
+    assert_eq!(
+        whatsapp::animated(&path, &ing.probe, &e.tools).unwrap(),
+        whatsapp::Animated::NotAnimated
+    );
+    let frame = whatsapp::first_frame(&path, &ing.probe, &e.tools).unwrap();
+    let bytes = whatsapp::still(&frame).unwrap().unwrap();
+    assert_whatsapp_sticker(&bytes, false);
+    let back = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    assert_eq!(back.get_pixel(256, 5)[3], 0, "padded above");
+    assert_eq!(back.get_pixel(256, 506)[3], 0, "padded below");
+}
