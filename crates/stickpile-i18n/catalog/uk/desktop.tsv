@@ -164,7 +164,7 @@ Longest wait in milliseconds for the window to get the focus back; after it, not
 # The window
 Search, or try e:😂 v:tired t:reaction type:gif	Шукайте, наприклад e:😂 v:tired t:reaction type:gif
 Filter packs by name	Фільтр наборів за назвою
-Search in {pack}, or try v:tired t:reaction type:gif	Шукайте в {pack}, наприклад v:tired t:reaction type:gif
+Search in {pack}, or try v:tired t:reaction type:gif	Шукайте в наборі {pack}, наприклад v:tired t:reaction type:gif
 Search syntax (F2)	Синтаксис пошуку (F2)
 Syntax	Синтаксис
 sticker: on	стікер: увімк.

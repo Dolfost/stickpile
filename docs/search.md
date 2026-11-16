@@ -40,7 +40,10 @@ Rules:
   one-letter forms of `emoji:`, `set:`, `vibe:`, `tag:` and `by:`
   (`stickpile_api::query::Key`): `-v:tired`, `t:"two words"` and the
   suggestions work as with the long keys. The normalised query
-  (`Query`'s `Display`) writes the long keys, and `e:` for emojis.
+  (`Query`'s `Display`) writes the long keys, and `e:` for emojis. The
+  desktop popup and the Android app send them long
+  (`stickpile_quick::suggest::resolve`), so a server older than the short
+  keys reads them too.
 - Unknown `key:value` tokens are plain text.
 
 Examples:

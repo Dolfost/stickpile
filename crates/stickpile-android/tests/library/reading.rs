@@ -382,18 +382,18 @@ async fn pack_search_online_offline_and_unknown() {
         (vec![naahh.clone(), sleepy.clone()], false)
     );
     assert_eq!(in_pack(&lib, &cats, "v:tired").await.0, [naahh.clone(), sleepy.clone()]);
-    assert_eq!(in_pack(&lib, &cats, "v:tired -t:nsfw").await.0, [sleepy.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "v:tired -t:nsfw").await.0, [sleepy.as_str()]);
     assert_eq!(
         in_pack(&lib, &cats, "t:reaction").await.0,
         [grumpy.clone(), sleepy.clone()]
     );
-    assert_eq!(in_pack(&lib, &cats, "type:gif").await.0, [naahh.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "type:gif").await.0, [naahh.as_str()]);
     assert_eq!(
         in_pack(&lib, &cats, "v:tir").await.0,
         [naahh.clone(), sleepy.clone()],
         "half typed"
     );
-    assert_eq!(in_pack(&lib, &cats, "grumpy").await.0, [grumpy.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "grumpy").await.0, [grumpy.as_str()]);
     assert_eq!(in_pack(&lib, &cats, "grumpy type:gif").await.0, Vec::<String>::new());
     assert!(
         in_pack(&lib, &cats, "dog").await.0.is_empty(),
@@ -415,7 +415,7 @@ async fn pack_search_online_offline_and_unknown() {
     assert_eq!(in_pack(&lib, &cats, "is:mine").await.0, all);
     assert!(lib.toggle_like(sleepy.clone()).await.unwrap());
     lib.favorites(10).await.unwrap();
-    assert_eq!(in_pack(&lib, &cats, "is:liked").await.0, [sleepy.clone()]);
+    assert_eq!(in_pack(&lib, &cats, "is:liked").await.0, [sleepy.as_str()]);
 
     // Offline: the cached items of the pack.
     server.stop();

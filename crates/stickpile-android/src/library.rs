@@ -901,7 +901,8 @@ impl StickpileLibrary {
     /// Items matching `query` (the search syntax of the other clients:
     /// words, `vibe:`, `tag:`, `set:`, `is:liked`, ...), best first, with
     /// hints for `target`. A `key:value` filter whose value is half typed or
-    /// misspelled searches for its best suggestion (`suggestions`).
+    /// misspelled searches for its best suggestion (`suggestions`), and a
+    /// one-letter key (`v:`) goes to the server written long (`vibe:`).
     /// When the server is unreachable the offline cache answers
     /// (`offline = true`, names and keywords only).
     pub async fn search(&self, query: String, target: Target, limit: u32) -> Result<ItemList, LibraryError> {

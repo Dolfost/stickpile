@@ -286,4 +286,37 @@ fn placeholders_say_what_the_field_does() {
     assert_eq!(m.placeholder(), "Filter packs by name");
     m.handle(Event::ShowTab(Tab::Search));
     assert_eq!(m.placeholder(), "Search, or try e:😂 v:tired t:reaction type:gif");
+    assert!(m.searches());
+}
+
+#[test]
+fn the_syntax_button_shows_where_the_field_searches() {
+    let mut m = pack();
+    assert!(m.searches(), "inside a pack");
+    m.handle(Event::ToggleSyntax);
+    assert_eq!(m.help_page(), Some(HelpPage::Syntax));
+    m.handle(Event::ToggleSyntax);
+    assert_eq!(m.help_page(), None);
+    m.handle(Event::PackBack);
+    assert!(!m.searches(), "the pack list's filter is no search");
+    m.handle(Event::ShowTab(Tab::Recent));
+    assert!(!m.searches());
+}
+
+#[test]
+fn the_search_tab_sends_short_keys_long() {
+    let mut m = pack();
+    m.handle(Event::ShowTab(Tab::Search));
+    let cmds = m.handle(Event::QueryChanged("cat v:tir -t:x".into()));
+    let sent = cmds.iter().find_map(|c| match c {
+        Command::Search { query, .. } => Some(query.clone()),
+        _ => None,
+    });
+    assert_eq!(sent.as_deref(), Some("cat vibe:tired -tag:x"));
+    assert_eq!(m.query(), "cat v:tir -t:x", "the field keeps what was typed");
+    let line = {
+        m.handle(Event::QueryChanged("cat v:t".into()));
+        m.suggestions().unwrap()
+    };
+    assert_eq!((line.key.as_str(), line.words[0].as_str()), ("v:", "tired"));
 }

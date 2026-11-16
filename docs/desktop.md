@@ -221,7 +221,9 @@ instead of covering it, and goes away with the space after the value.
 
 The search does not wait for the value to be finished: a half-typed or
 misspelled value is searched as its best match (the highlighted one), so
-`vibe:sar` already shows the sarcastic stickers. Tab puts the highlighted
+`vibe:sar` already shows the sarcastic stickers. The short keys go out
+long (`v:sar` as `vibe:sarcastic`), so an older server understands them
+too. Tab puts the highlighted
 value into the field, and pressing it again goes on to the next one
 (Shift+Tab: the previous one); a click on a value puts it in and finishes
 the filter. Without a filter being typed, Tab switches tabs as before.

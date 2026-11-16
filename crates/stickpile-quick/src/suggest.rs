@@ -217,7 +217,9 @@ pub fn suggest(query: &str, vocab: &Vocabulary) -> Option<Suggestions> {
 
 /// `query` with every filter value of a [`Field`] that is not a known value
 /// replaced by its best match, and empty filters (`vibe:`) left out; also
-/// the replacements made, as (typed, used).
+/// the replacements made, as (typed, used). The one-letter keys go out
+/// long (`v:sad` as `vibe:sad`), so a server from before them reads them
+/// too.
 pub fn resolve(query: &str, vocab: &Vocabulary) -> (String, Vec<(String, String)>) {
     let mut out = String::with_capacity(query.len());
     let mut fixes = Vec::new();
@@ -227,9 +229,9 @@ pub fn resolve(query: &str, vocab: &Vocabulary) -> (String, Vec<(String, String)
             Some(Resolved::Drop) => continue,
             Some(Resolved::Use(prefix, typed, word)) => {
                 fixes.push((typed.to_string(), word.clone()));
-                format!("{prefix}{word}")
+                long_key(&format!("{prefix}{word}"))
             }
-            None => token.to_string(),
+            None => long_key(token),
         };
         if !out.is_empty() {
             out.push(' ');
@@ -242,6 +244,23 @@ pub fn resolve(query: &str, vocab: &Vocabulary) -> (String, Vec<(String, String)
 enum Resolved<'a> {
     Drop,
     Use(&'a str, &'a str, String),
+}
+
+/// `token` with its key written long when it is a one-letter key other
+/// than `e:` (which every server reads): `-v:x` is `-vibe:x`.
+fn long_key(token: &str) -> String {
+    let (neg, bare) = match token.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", token),
+    };
+    if let Some((key, value)) = bare.split_once(':') {
+        if let Some(k) = Key::parse(key) {
+            if k != Key::Emoji && k.short().is_some_and(|s| s.eq_ignore_ascii_case(key)) {
+                return format!("{neg}{}:{value}", k.name());
+            }
+        }
+    }
+    token.to_string()
 }
 
 fn resolve_token<'a>(token: &'a str, vocab: &Vocabulary) -> Option<Resolved<'a>> {
@@ -446,15 +465,27 @@ mod tests {
     }
 
     #[test]
-    fn resolve_short_keys() {
+    fn resolve_short_keys_and_send_them_long() {
         let v = vocab();
-        assert_eq!(resolve("cat v:sarcstic", &v).0, "cat v:sarcastic");
+        assert_eq!(resolve("cat v:sarcstic", &v).0, "cat vibe:sarcastic");
         assert_eq!(
             resolve("v:sar -t:nsf s:wor b:al", &v).0,
-            "v:sarcastic -t:nsfw s:work-memes b:alice"
+            "vibe:sarcastic -tag:nsfw set:work-memes by:alice"
         );
         assert_eq!(resolve("cat v: t:", &v).0, "cat", "empty filters are left out");
-        assert_eq!(resolve("v:sad", &v), ("v:sad".into(), vec![]), "a known value stays");
+        assert_eq!(resolve("v:sad", &v), ("vibe:sad".into(), vec![]), "a known value stays");
+        assert_eq!(
+            resolve("V:xyzzy", &v).0,
+            "vibe:xyzzy",
+            "no match: as typed, the key long"
+        );
+        let none = Vocabulary::default();
+        assert_eq!(
+            resolve(r#"v:"very sad" -T:a e:😂 "v:x" user:bob"#, &none).0,
+            r#"vibe:"very sad" -tag:a e:😂 "v:x" user:bob"#,
+            "quoted values too; e:, phrases and long keys stay"
+        );
+        assert_eq!(resolve("http://x q>70", &none).0, "http://x q>70");
     }
 
     #[test]

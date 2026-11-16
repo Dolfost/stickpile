@@ -499,7 +499,8 @@ Behaviour the signatures do not show:
 - **Search** resolves a half-typed `key:value` filter to its best
   suggestion, as the desktop popup does. The one-letter keys `v:`, `t:`,
   `s:`, `b:` (and `e:`) are `vibe:`, `tag:`, `set:`, `by:` (and
-  `emoji:`). Reads (search, account, favorites, most used, packs, pack
+  `emoji:`); the query goes to the server with them written long, so a
+  server older than them reads them too. Reads (search, account, favorites, most used, packs, pack
   items, pack search) stop when the calling coroutine is cancelled;
   writes and file fetches run to their end.
 - **Pack search.** `pack_search(pack_id, query)` reads the pack's items as
