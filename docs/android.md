@@ -928,7 +928,9 @@ on an emulator image without Google Play (where `adb root` works):
 adb root
 adb shell content query --uri content://io.github.dolfost.stickpile.whatsapp/metadata
 adb shell content query --uri content://io.github.dolfost.stickpile.whatsapp/stickers/<identifier>
-adb shell content read --uri content://io.github.dolfost.stickpile.whatsapp/stickers_asset/<identifier>/cover.png > cover.png
+adb shell content type --uri content://io.github.dolfost.stickpile.whatsapp/stickers_asset/<identifier>/01.webp
+adb exec-out content read --uri content://io.github.dolfost.stickpile.whatsapp/stickers_asset/<identifier>/cover.png > cover.png
+adb shell run-as io.github.dolfost.stickpile ls -lR no_backup/cache/whatsapp    # a debug build
 adb logcat -s stickpile
 ```
 
