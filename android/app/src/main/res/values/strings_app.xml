@@ -116,6 +116,8 @@
 
     <!-- The library screen. -->
     <string name="library_search">Search stickers</string>
+    <!-- The search field with a pack open: it searches only there. %1$s: the pack's name. -->
+    <string name="library_search_in_pack">Search in %1$s</string>
     <string name="library_search_clear">Clear the search</string>
     <!-- The menu button next to the search field (content description). -->
     <string name="library_more">More options</string>
@@ -132,6 +134,8 @@
     <string name="library_empty_most_used">Nothing used yet.</string>
     <string name="library_empty_packs">No packs yet.</string>
     <string name="library_empty_pack">This pack is empty.</string>
+    <string name="library_empty_pack_search">Nothing in this pack matches.</string>
+    <string name="library_empty_pack_search_safe">Nothing in this pack matches with safe mode on.</string>
     <string name="library_all_packs">All packs</string>
     <!-- A pack in the list: %1$s its owner, %2$s its size (library_items). -->
     <string name="library_pack_details">by %1$s, %2$s</string>

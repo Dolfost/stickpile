@@ -5,12 +5,43 @@ import io.github.dolfost.stickpile.display.Columns
 /** The picker's tabs. */
 enum class PickerTab { RESULTS, RECENT, LIKED, MOST_USED, SETS }
 
+/** What the picker's grid loads ([PickerSearch.load]). */
+sealed interface PickerLoad {
+    /** The search over everything (the Results tab). */
+    data class Search(val query: String) : PickerLoad
+
+    /** [query] searched inside the set [setId] only. */
+    data class InSet(val setId: String, val query: String) : PickerLoad
+
+    /** The set [setId], all of it. */
+    data class WholeSet(val setId: String) : PickerLoad
+
+    /** A tab's own list (Recent, Liked, Most used, the sets). */
+    data class Tab(val tab: PickerTab) : PickerLoad
+}
+
 /**
  * The picker's decisions about its search, tabs and grid. Pure.
  */
 object PickerSearch {
     /** How long typing pauses before the search goes out. */
     const val SEARCH_DELAY_MS = 120L
+
+    /**
+     * What the grid shows for [query] on [tab] with the set [setId] open
+     * (in Sets; null: none): while a set is open the query searches inside
+     * it, and a blank one shows it whole; else the Results tab searches
+     * everything and the other tabs show their lists.
+     */
+    fun load(query: String, tab: PickerTab, setId: String?): PickerLoad {
+        val q = query.trim()
+        return when {
+            setId != null && q.isNotEmpty() -> PickerLoad.InSet(setId, q)
+            setId != null -> PickerLoad.WholeSet(setId)
+            tab == PickerTab.RESULTS && q.isNotEmpty() -> PickerLoad.Search(q)
+            else -> PickerLoad.Tab(tab)
+        }
+    }
 
     /** The size of a cell while the search keys show, in dp: small, so that two rows fit above the keys. */
     const val TYPING_CELL_DP = 56

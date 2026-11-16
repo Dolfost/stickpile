@@ -62,10 +62,17 @@ cover image, else its first sticker).
 
 - **Search** as on the desktop ([search syntax](#search-syntax)); results
   follow the typing. Under the field the app offers what fits what is
-  typed: the filter keys (`tag:`, `vibe:`, `e:`, ...), the values of the
-  filter being typed (`vibe:sar` offers `sarcastic`), the emojis for `e:`,
-  and for a bare word the tags, vibes and packs containing it (`rea`
-  offers `tag:reaction`). A tap puts it in.
+  typed: the filter keys with their short forms (`tag: (t:)`, `vibe:
+  (v:)`, `e:`, ...), the values of the filter being typed (`vibe:sar` and
+  `v:sar` offer `sarcastic`), the emojis for `e:`, and for a bare word the
+  tags, vibes and packs containing it (`rea` offers `tag:reaction`). A
+  tap puts it in.
+- **Search in a pack.** With a pack open (Packs tab), the field says
+  "Search in <pack>" and searches only that pack, with the whole syntax
+  (`v:tired`, `type:gif`, `-t:nsfw`, `is:liked`, `sort:copies`, words),
+  offline too; the pack's name stays above the grid. Clearing the field
+  shows the whole pack again; the back arrow leaves the pack, and what is
+  typed then searches everything.
 - **Safe mode** (the shield) hides the stickers tagged `nsfw` from every
   list and search, and says how many it hid.
 - **Sticker info** (the eye) shows or hides the information over each
@@ -99,9 +106,12 @@ cover image, else its first sticker).
 png, webp, jpeg, mp4, webm, still, animated, video), `is:mine`,
 `is:liked`, `is:public`, `q>70`, `likes>=2`, `copies<5`, `sort:likes`
 (relevance, recent, likes, copies, quality); `tag:a tag:b` is either; a
-leading `-` leaves out (`-tag:nsfw`). A misspelled or half-typed filter
-value searches for the closest one. The app and the keyboard show this
-list from their menus.
+leading `-` leaves out (`-tag:nsfw`). `v:`, `t:`, `s:` and `b:` are short
+for `vibe:`, `tag:`, `set:` and `by:` (`v:tired -t:nsfw`). A misspelled
+or half-typed filter value searches for the closest one. With a pack (in
+the keyboard: a set) open, the search looks only inside it, with all of
+this. The app and the keyboard show this list from their menus
+([search.md](search.md#query-syntax)).
 
 ## The picker keyboard
 
@@ -125,7 +135,11 @@ Using it:
   on the grid, puts the keys away. A sticker picked after you changed the
   search leaves the field's text alone.
 - Or browse the tabs Recent, Liked, Most used and Sets (each set with its
-  cover); the row of emojis narrows the grid.
+  cover); the row of emojis narrows the grid. With a set open, the search
+  box says "Search in <set>" and what you type searches only that set,
+  with the whole syntax (offline too); clearing it shows the whole set
+  again. The Results tab, All sets or another tab leave the set, and the
+  search then looks everywhere again.
 - The shield is safe mode and the menu has the sticker info, the
   stickers in a row (a slider over the top of the grid, which follows it
   as it moves) and the search syntax, all shared with the app. GIFs and

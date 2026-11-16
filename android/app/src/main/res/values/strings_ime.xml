@@ -6,6 +6,8 @@
 
     <!-- The search bar: the search box (its hint and clear button) and the menu button (content description). -->
     <string name="ime_search_hint">Search stickers</string>
+    <!-- The search box's hint with a set open: it searches only there. %1$s: the set's name. -->
+    <string name="ime_search_in_set">Search in %1$s</string>
     <string name="ime_search_clear">Clear the search</string>
     <string name="ime_menu">More options</string>
     <string name="ime_close">Close</string>
@@ -50,6 +52,7 @@
     <string name="ime_empty_sets">No sets yet.</string>
     <string name="ime_empty_set">This set is empty.</string>
     <string name="ime_empty_results">Nothing found for \"%1$s\".</string>
+    <string name="ime_empty_set_results">Nothing in this set for \"%1$s\".</string>
     <string name="ime_offline">Offline: showing saved stickers.</string>
     <string name="ime_loading">Loading</string>
 

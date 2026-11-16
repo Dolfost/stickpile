@@ -129,6 +129,7 @@ fun LibraryScreen(
                 Column(Modifier.statusBarsPadding()) {
                     SearchRow(
                         query = state.query,
+                        pack = state.pack?.name,
                         display = display,
                         onQuery = vm::setQuery,
                         onFocusChange = { focused ->
@@ -169,7 +170,8 @@ fun LibraryScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             val pack = state.pack
-            if (state.query.isBlank() && pack != null) PackHeader(pack, onBack = { vm.closePack() })
+            // Also while searching: the search looks inside this pack.
+            if (pack != null) PackHeader(pack, onBack = { vm.closePack() })
             val content = state.content
             val offline = (content as? LibraryContent.Items)?.offline ?: (content as? LibraryContent.Packs)?.offline ?: false
             if (offline) OfflineNotice()
@@ -234,6 +236,8 @@ private val LibraryTab.label: Int
 
 private fun emptyText(request: LibraryRequest, safeMode: Boolean): Int = when (request) {
     is LibraryRequest.Search -> if (safeMode) R.string.library_empty_search_safe else R.string.library_empty_search
+    is LibraryRequest.PackSearch ->
+        if (safeMode) R.string.library_empty_pack_search_safe else R.string.library_empty_pack_search
     LibraryRequest.Recent -> R.string.library_empty_recent
     LibraryRequest.Favorites -> R.string.library_empty_liked
     LibraryRequest.MostUsed -> R.string.library_empty_most_used

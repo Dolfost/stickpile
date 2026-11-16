@@ -40,6 +40,9 @@ class FakeLibrary : StickpileLibraryInterface {
     var mostUsed: suspend () -> ItemList = { ItemList(emptyList(), false) }
     var packs: suspend () -> PackList = { PackList(emptyList(), false) }
     var packItems: suspend (String) -> ItemList = { ItemList(emptyList(), false) }
+
+    /** The pack's id and the query. */
+    var packSearch: suspend (String, String) -> ItemList = { _, _ -> ItemList(emptyList(), false) }
     var prepare: suspend (String) -> Prepared = { unexpected("prepare") }
     var toggleLike: suspend (String) -> Boolean = { unexpected("toggleLike") }
     var parsePairingLink: (String) -> PairingLink? = { null }
@@ -107,6 +110,11 @@ class FakeLibrary : StickpileLibraryInterface {
     override suspend fun packItems(packId: String): ItemList {
         calls += "packItems $packId"
         return packItems.invoke(packId)
+    }
+
+    override suspend fun packSearch(packId: String, query: String): ItemList {
+        calls += "packSearch $packId $query"
+        return packSearch.invoke(packId, query)
     }
 
     override suspend fun packs(): PackList {

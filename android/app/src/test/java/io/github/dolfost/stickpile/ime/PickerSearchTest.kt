@@ -16,6 +16,17 @@ class PickerSearchTest {
     }
 
     @Test
+    fun withASetOpenTheQuerySearchesInsideIt() {
+        assertEquals(PickerLoad.InSet("s1", "v:tired"), PickerSearch.load(" v:tired ", PickerTab.SETS, "s1"))
+        assertEquals("cleared: the set whole", PickerLoad.WholeSet("s1"), PickerSearch.load("  ", PickerTab.SETS, "s1"))
+        assertEquals(PickerLoad.Search("cat"), PickerSearch.load("cat", PickerTab.RESULTS, null))
+        assertEquals("left the set: the lists", PickerLoad.Tab(PickerTab.SETS), PickerSearch.load("cat", PickerTab.SETS, null))
+        assertEquals(PickerLoad.Tab(PickerTab.RECENT), PickerSearch.load("cat", PickerTab.RECENT, null))
+        assertEquals(PickerLoad.Tab(PickerTab.LIKED), PickerSearch.load("", PickerTab.LIKED, null))
+        assertEquals(PickerLoad.Tab(PickerTab.RESULTS), PickerSearch.load("", PickerTab.RESULTS, null))
+    }
+
+    @Test
     fun aPickDeletesTheDraftOnlyWhileTheQueryIsTheDraft() {
         assertTrue(PickerSearch.fromDraft(draft = "cat", query = "cat", resultsFor = "cat"))
         assertTrue(PickerSearch.fromDraft(draft = "cat", query = "cat ", resultsFor = "cat"))
@@ -52,6 +63,7 @@ class PickerSearchTest {
         assertEquals("is:mine ", PickerSearch.exampleQuery("is:mine, is:liked, is:public"))
         assertEquals("q>70 ", PickerSearch.exampleQuery("q>70, likes>=2, copies<5"))
         assertEquals("vibe:", PickerSearch.exampleQuery("vibe: tag: set: by: e:"))
+        assertEquals("v:", PickerSearch.exampleQuery("v: t: s: b:"))
         assertEquals("cat \"big chungus\" ", PickerSearch.exampleQuery("cat \"big chungus\""))
         assertEquals("tag:a tag:b ", PickerSearch.exampleQuery("tag:a tag:b"))
         for (line in SyntaxHelp.SECTIONS.flatMap { it.lines }) {

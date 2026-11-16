@@ -4,6 +4,7 @@
     <string name="ime_back_to_keyboard">Назад до клавіатури</string>
 
     <string name="ime_search_hint">Пошук стікерів</string>
+    <string name="ime_search_in_set">Пошук у наборі %1$s</string>
     <string name="ime_search_clear">Очистити пошук</string>
     <string name="ime_menu">Більше дій</string>
     <string name="ime_close">Закрити</string>
@@ -41,6 +42,7 @@
     <string name="ime_empty_sets">Наборів ще немає.</string>
     <string name="ime_empty_set">У цьому наборі порожньо.</string>
     <string name="ime_empty_results">За запитом \"%1$s\" нічого не знайдено.</string>
+    <string name="ime_empty_set_results">У цьому наборі за запитом \"%1$s\" нічого не знайдено.</string>
     <string name="ime_offline">Немає зв\'язку: показано збережені стікери.</string>
     <string name="ime_loading">Завантаження</string>
 

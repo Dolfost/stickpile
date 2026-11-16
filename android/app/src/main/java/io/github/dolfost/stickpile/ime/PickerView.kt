@@ -56,7 +56,8 @@ import kotlinx.coroutines.launch
  * The query starts as the draft read from the field, if any. The keys and
  * the offers edit it here only: the editor never sees it, and it is never
  * logged. Each change asks for the offers and, after a short pause
- * ([PickerSearch.SEARCH_DELAY_MS]), searches. Safe mode (shared with the
+ * ([PickerSearch.SEARCH_DELAY_MS]), searches: inside the set while one is
+ * open in Sets, everywhere otherwise ([PickerSearch.load]). Safe mode (shared with the
  * app through [DisplaySettings]) leaves nsfw out of the search and of every
  * list.
  *
@@ -342,7 +343,9 @@ internal class PickerView(
 
     /**
      * The query is now [text]: the offers for it, and the results (after a
-     * pause) while it is not blank; Recent again once it is cleared.
+     * pause) while it is not blank; Recent again once it is cleared. With
+     * a set open the query searches inside it, and the set shows whole
+     * again once it is cleared ([PickerSearch.load]).
      */
     private fun setQuery(text: String) {
         if (text == query) return
@@ -350,10 +353,22 @@ internal class PickerView(
         showQuery()
         updateChipRows()
         requestHints()
-        if (query.isNotBlank()) {
+        val p = pack
+        if (p != null) {
             closeDetails()
             syntax.close()
-            if (tab != PickerTab.RESULTS || pack != null) enter(PickerTab.RESULTS) else setTabs(PickerTab.RESULTS)
+            // Results stays offered: it searches everything, out of the set.
+            setTabs(PickerTab.SETS)
+            if (query.isNotBlank()) {
+                scheduleSearch()
+            } else {
+                searchJob?.cancel()
+                loadPack(p, keep = true)
+            }
+        } else if (query.isNotBlank()) {
+            closeDetails()
+            syntax.close()
+            if (tab != PickerTab.RESULTS) enter(PickerTab.RESULTS) else setTabs(PickerTab.RESULTS)
             scheduleSearch()
         } else {
             searchJob?.cancel()
@@ -366,13 +381,27 @@ internal class PickerView(
         clear.isVisible = query.isNotEmpty()
     }
 
-    /** The search after a pause; none when the results shown are already for this query (a space typed). */
+    /**
+     * The search after a pause, inside the open set if there is one; none
+     * when the results shown are already for this query (a space typed).
+     */
     private fun scheduleSearch() {
         searchJob?.cancel()
         if (query.trim() == resultsFor && loadJob?.isActive != true) return
         searchJob = scope.launch {
             delay(PickerSearch.SEARCH_DELAY_MS)
-            loadTab(PickerTab.RESULTS)
+            val p = pack
+            if (p != null) loadPack(p, keep = true) else loadTab(PickerTab.RESULTS)
+        }
+    }
+
+    /** The search box's hint says where the query searches: the open set, or everywhere. */
+    private fun showHint() {
+        val p = pack
+        queryView.hint = if (p != null) {
+            context.getString(R.string.ime_search_in_set, p.name)
+        } else {
+            context.getString(R.string.ime_search_hint)
         }
     }
 
@@ -451,6 +480,7 @@ internal class PickerView(
         tab = t
         pack = null
         setHeader.visibility = View.GONE
+        showHint()
         setTabs(t)
     }
 
@@ -507,14 +537,26 @@ internal class PickerView(
 
     private fun openPack(pack: Pack) = loadPack(pack)
 
+    /** Opens the set [p]: all of it, or what the query finds in it. */
     private fun loadPack(p: Pack, keep: Boolean = false, top: Boolean = true) {
         pack = p
         setName.text = p.name
         setHeader.isVisible = !keysShown
-        load(keep, top) {
-            val list = library.packItems(p.id)
-            items(list.items, list.offline, context.getString(R.string.ime_empty_set))
+        showHint()
+        when (val what = PickerSearch.load(query, PickerTab.SETS, p.id)) {
+            is PickerLoad.InSet -> load(keep, top) { searchIn(what) }
+            else -> load(keep, top) {
+                val list = library.packItems(p.id)
+                items(list.items, list.offline, context.getString(R.string.ime_empty_set))
+            }
         }
+    }
+
+    /** The search inside a set, with safe mode's filter in safe mode. */
+    private suspend fun searchIn(what: PickerLoad.InSet): Shown {
+        val list = library.packSearch(what.setId, SafeMode.query(what.query, display.safeMode))
+        val empty = context.getString(R.string.ime_empty_set_results, what.query)
+        return items(list.items, list.offline, empty, resultsFor = what.query)
     }
 
     /** What is shown, loaded again over it (after safe mode or the likes changed). */

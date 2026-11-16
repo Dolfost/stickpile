@@ -10,6 +10,7 @@ import io.github.dolfost.stickpile.ui.library.LibraryEvent
 import io.github.dolfost.stickpile.ui.library.LibraryRequest
 import io.github.dolfost.stickpile.ui.library.LibraryTab
 import io.github.dolfost.stickpile.ui.library.LibraryViewModel
+import io.github.dolfost.stickpile.ui.library.refines
 import io.github.dolfost.stickpile.ui.library.requestFor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,14 +45,89 @@ class LibraryViewModelTest {
     }
 
     @Test
-    fun aQuerySearchesWhateverTheTab() {
+    fun aQuerySearchesWhateverTheTabAndInsideAnOpenPack() {
         val p = pack("p1")
-        assertEquals(LibraryRequest.Search("cat"), requestFor("cat", LibraryTab.PACKS, p))
+        assertEquals(LibraryRequest.Search("cat"), requestFor("cat", LibraryTab.PACKS, null))
+        assertEquals(LibraryRequest.Search("cat"), requestFor("cat", LibraryTab.RECENT, null))
+        assertEquals(LibraryRequest.PackSearch("p1", "v:tired"), requestFor("v:tired", LibraryTab.PACKS, p))
         assertEquals(LibraryRequest.Recent, requestFor("  ", LibraryTab.RECENT, null))
         assertEquals(LibraryRequest.Favorites, requestFor("", LibraryTab.LIKED, null))
         assertEquals(LibraryRequest.MostUsed, requestFor("", LibraryTab.MOST_USED, null))
         assertEquals(LibraryRequest.Packs, requestFor("", LibraryTab.PACKS, null))
         assertEquals(LibraryRequest.PackItems("p1"), requestFor("", LibraryTab.PACKS, p))
+        assertEquals(LibraryRequest.PackItems("p1"), requestFor(" ", LibraryTab.PACKS, p))
+    }
+
+    @Test
+    fun searchesInsideAPackRefineIt() {
+        val inP1 = LibraryRequest.PackSearch("p1", "cat")
+        assertTrue(refines(LibraryRequest.PackItems("p1"), inP1))
+        assertTrue(refines(LibraryRequest.PackSearch("p1", "ca"), inP1))
+        assertTrue("cleared: the pack again", refines(inP1, LibraryRequest.PackItems("p1")))
+        assertFalse(refines(LibraryRequest.PackItems("p2"), inP1))
+        assertFalse(refines(LibraryRequest.Search("cat"), inP1))
+        assertFalse("out of the pack", refines(inP1, LibraryRequest.Search("cat")))
+        assertTrue(refines(LibraryRequest.Search("ca"), LibraryRequest.Search("cat")))
+        assertTrue(refines(LibraryRequest.Recent, LibraryRequest.Recent))
+        assertFalse(refines(null, LibraryRequest.Recent))
+        assertFalse(refines(LibraryRequest.Packs, LibraryRequest.PackItems("p1")))
+    }
+
+    @Test
+    fun typingWithAPackOpenSearchesThatPack() = runTest(main.dispatcher) {
+        val vm = started()
+        library.packs = { PackList(listOf(pack("p1")), offline = false) }
+        library.packItems = { ItemList(listOf(item("a"), item("b")), offline = false) }
+        val gate = CompletableDeferred<Unit>()
+        library.packSearch = { _, _ ->
+            gate.await()
+            ItemList(listOf(item("b")), offline = true)
+        }
+        vm.selectTab(LibraryTab.PACKS)
+        advanceUntilIdle()
+        vm.openPack(pack("p1"))
+        advanceUntilIdle()
+        library.calls.clear()
+
+        vm.setQuery("v:tired")
+        advanceUntilIdle()
+        assertEquals(listOf("packSearch p1 v:tired"), library.calls.filter { !it.startsWith("hints") })
+        assertEquals(
+            "the pack stays until the answer comes",
+            LibraryContent.Items(listOf(item("a"), item("b")), offline = false),
+            vm.state.content,
+        )
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LibraryContent.Items(listOf(item("b")), offline = true), vm.state.content)
+        assertEquals(pack("p1"), vm.state.pack)
+
+        // Cleared: the pack again; left: the search over everything.
+        library.calls.clear()
+        vm.setQuery("")
+        advanceUntilIdle()
+        assertEquals(listOf("packItems p1"), library.calls.filter { !it.startsWith("hints") })
+        vm.setQuery("cat")
+        advanceUntilIdle()
+        library.calls.clear()
+        assertTrue(vm.closePack())
+        advanceUntilIdle()
+        assertEquals(listOf("search cat GENERIC"), library.calls)
+        assertEquals(LibraryRequest.Search("cat"), vm.state.request)
+    }
+
+    @Test
+    fun aPackSearchInSafeModeLeavesNsfwOut() = runTest(main.dispatcher) {
+        val display = MutableStateFlow(Display(safeMode = true))
+        val vm = LibraryViewModel(library, display, io = main.dispatcher, log = { _, _ -> })
+        library.packSearch = { _, _ -> ItemList(listOf(item("a"), item("x", tags = listOf("nsfw"))), offline = false) }
+        vm.selectTab(LibraryTab.PACKS)
+        vm.openPack(pack("p1"))
+        advanceUntilIdle()
+        vm.setQuery("type:gif ")
+        advanceUntilIdle()
+        assertEquals("packSearch p1 type:gif -tag:nsfw", library.calls.last { it.startsWith("packSearch") })
+        assertEquals(LibraryContent.Items(listOf(item("a")), offline = false, hidden = 1), vm.state.content)
     }
 
     @Test

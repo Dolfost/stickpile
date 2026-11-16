@@ -58,12 +58,14 @@
     <string name="display_syntax_tag">має цей тег</string>
     <string name="display_syntax_set">у цьому наборі (його slug або назва)</string>
     <string name="display_syntax_by">у наборі цього користувача</string>
+    <string name="display_syntax_short">скорочено vibe: tag: set: by:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)</string>
     <string name="display_syntax_is">ваші, вподобані вами, публічні</string>
     <string name="display_syntax_numbers">якість, вподобання, копіювання (&gt; &gt;= &lt; &lt;= =)</string>
     <string name="display_syntax_sort">relevance (доречність), recent (нові), likes (вподобання), copies (копіювання), quality (якість)</string>
     <string name="display_syntax_either">будь-який із них</string>
     <string name="display_syntax_leave_out">виключити</string>
+    <string name="display_syntax_in_pack">коли набір відкрито, пошук шукає лише в ньому, з усім цим синтаксисом</string>
     <string name="display_syntax_offers">Підказки</string>
     <string name="display_syntax_offers_values">значення, які вже вживаються, з\'являються під полем, найчастіші першими; торкніться, щоб вставити</string>
     <string name="display_syntax_offers_words">слово пропонує теги, настрої й набори, що його містять</string>

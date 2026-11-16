@@ -57,12 +57,14 @@
     <string name="display_syntax_tag">has this tag</string>
     <string name="display_syntax_set">in this pack (its slug or name)</string>
     <string name="display_syntax_by">in a pack of this user</string>
+    <string name="display_syntax_short">short for vibe: tag: set: by:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still, animated, video</string>
     <string name="display_syntax_is">yours, liked by you, public</string>
     <string name="display_syntax_numbers">quality, likes, copies (&gt; &gt;= &lt; &lt;= =)</string>
     <string name="display_syntax_sort">relevance, recent, likes, copies, quality</string>
     <string name="display_syntax_either">either of them</string>
     <string name="display_syntax_leave_out">leave out</string>
+    <string name="display_syntax_in_pack">with a pack or set open, the search looks only inside it, with all of this</string>
     <string name="display_syntax_offers">Suggestions</string>
     <string name="display_syntax_offers_values">the values in use are offered under the field, most used first; tap one to put it in</string>
     <string name="display_syntax_offers_words">a word offers the tags, vibes and packs that contain it</string>

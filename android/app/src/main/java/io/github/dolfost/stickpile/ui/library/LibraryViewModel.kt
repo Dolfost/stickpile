@@ -46,6 +46,9 @@ enum class LibraryTab { RECENT, LIKED, PACKS, MOST_USED }
 /** What the library screen asks the library for. */
 sealed interface LibraryRequest {
     data class Search(val query: String) : LibraryRequest
+
+    /** [query] searched inside the pack [packId] only, with the whole syntax. */
+    data class PackSearch(val packId: String, val query: String) : LibraryRequest
     data object Recent : LibraryRequest
     data object Favorites : LibraryRequest
     data object MostUsed : LibraryRequest
@@ -55,15 +58,38 @@ sealed interface LibraryRequest {
 
 /**
  * What to show for a [query] (searched when not blank, whatever the tab),
- * else the [tab], where [pack] is the pack opened in the packs tab.
+ * else the [tab], where [pack] is the pack opened in the packs tab: with
+ * a pack open, a query searches inside it, and a blank one shows it whole.
  */
 fun requestFor(query: String, tab: LibraryTab, pack: Pack?): LibraryRequest = when {
+    pack != null && query.isNotBlank() -> LibraryRequest.PackSearch(pack.id, query)
     query.isNotBlank() -> LibraryRequest.Search(query)
     tab == LibraryTab.RECENT -> LibraryRequest.Recent
     tab == LibraryTab.LIKED -> LibraryRequest.Favorites
     tab == LibraryTab.MOST_USED -> LibraryRequest.MostUsed
     pack != null -> LibraryRequest.PackItems(pack.id)
     else -> LibraryRequest.Packs
+}
+
+/**
+ * Whether [new] refines what [old] shows, so that the old list stays until
+ * the new one is there: another search, a search in the same pack, and
+ * that pack whole again (the search cleared).
+ */
+fun refines(old: LibraryRequest?, new: LibraryRequest): Boolean {
+    val packOf = { r: LibraryRequest? ->
+        when (r) {
+            is LibraryRequest.PackSearch -> r.packId
+            is LibraryRequest.PackItems -> r.packId
+            else -> null
+        }
+    }
+    if (new == old) return true
+    return when (new) {
+        is LibraryRequest.Search -> old is LibraryRequest.Search
+        is LibraryRequest.PackSearch, is LibraryRequest.PackItems -> packOf(old) == packOf(new)
+        else -> false
+    }
 }
 
 /** What the grid area shows. */
@@ -109,7 +135,8 @@ sealed interface LibraryEvent {
 
 /**
  * The library screen (docs/android-plan.md 4.8): a search (debounced, with
- * offers for what is typed), tabs, a grid; a tap shares an item, a long
+ * offers for what is typed; with a pack open, inside that pack only), tabs,
+ * a grid; a tap shares an item, a long
  * press opens its details, a refresh syncs. In safe mode ([display], shared
  * with the keyboard) the searches leave out the items tagged nsfw and the
  * lists hide them. [refreshLikes] reads the account's likes in the
@@ -287,8 +314,7 @@ class LibraryViewModel(
     private suspend fun load(request: LibraryRequest) {
         // A reload or a refined search keeps the old list until the new
         // one is there; anything else (another tab or pack) starts empty.
-        val refines = request == shown || (request is LibraryRequest.Search && shown is LibraryRequest.Search)
-        if (!refines) show(LibraryContent.Loading)
+        if (!refines(shown, request)) show(LibraryContent.Loading)
         shown = request
         val result = catching { fetch(request) }
         show(
@@ -305,6 +331,10 @@ class LibraryViewModel(
         is LibraryRequest.Search -> {
             val query = SafeMode.query(request.query, display.value.safeMode)
             items(library.search(query, Target.GENERIC, SEARCH_LIMIT))
+        }
+        is LibraryRequest.PackSearch -> {
+            val query = SafeMode.query(request.query, display.value.safeMode)
+            items(library.packSearch(request.packId, query))
         }
         LibraryRequest.Recent -> LibraryContent.Items(withContext(io) { library.recent(LIST_LIMIT) }, offline = false)
         LibraryRequest.Favorites -> items(library.favorites(LIST_LIMIT))

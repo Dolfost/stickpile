@@ -51,6 +51,9 @@ internal class ImeLibrary(private val app: StickpileApp) {
 
     suspend fun packItems(packId: String): ItemList = call { it.packItems(packId) }
 
+    /** [query] inside the set [packId] only (the whole syntax; searched by the library, offline too). */
+    suspend fun packSearch(packId: String, query: String): ItemList = call { it.packSearch(packId, query) }
+
     suspend fun thumbnail(itemId: String): String = call { it.thumbnail(itemId) }
 
     /** The file of a pack's cover; null for a pack without one. */

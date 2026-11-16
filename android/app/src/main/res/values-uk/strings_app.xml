@@ -90,6 +90,7 @@
     <string name="keyboard_setup_skip">Пропустити поки що</string>
 
     <string name="library_search">Пошук стікерів</string>
+    <string name="library_search_in_pack">Пошук у наборі %1$s</string>
     <string name="library_search_clear">Очистити пошук</string>
     <string name="library_more">Інші дії</string>
     <string name="library_sync">Синхронізувати</string>
@@ -105,6 +106,8 @@
     <string name="library_empty_most_used">Ще нічого не використано.</string>
     <string name="library_empty_packs">Наборів ще немає.</string>
     <string name="library_empty_pack">Цей набір порожній.</string>
+    <string name="library_empty_pack_search">У цьому наборі нічого не знайдено.</string>
+    <string name="library_empty_pack_search_safe">У цьому наборі в безпечному режимі нічого не знайдено.</string>
     <string name="library_all_packs">Усі набори</string>
     <string name="library_pack_details">від %1$s, %2$s</string>
     <plurals name="library_items">

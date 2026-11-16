@@ -53,11 +53,13 @@ internal enum class LibraryMenu { DISPLAY, SYNTAX, SYNC, SETTINGS }
 /**
  * The top row: the search field, safe mode and the tiles' info as
  * toggles, and the menu. The field shows [query]; when [query] is changed
- * from elsewhere (an offer taken), the cursor goes to its end.
+ * from elsewhere (an offer taken), the cursor goes to its end. [pack]: the
+ * name of the open pack, which the field searches in.
  */
 @Composable
 internal fun SearchRow(
     query: String,
+    pack: String?,
     display: Display,
     onQuery: (String) -> Unit,
     onFocusChange: (Boolean) -> Unit,
@@ -81,7 +83,14 @@ internal fun SearchRow(
                 field = it
                 if (it.text != query) onQuery(it.text)
             },
-            placeholder = { Text(stringResource(R.string.library_search), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            placeholder = {
+                val hint = if (pack != null) {
+                    stringResource(R.string.library_search_in_pack, pack)
+                } else {
+                    stringResource(R.string.library_search)
+                }
+                Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
