@@ -5,10 +5,7 @@
   and dark.
 -->
 <resources>
-    <color name="ime_tile_scrim">#A6000000</color>
     <color name="ime_tile_text">#FFFFFFFF</color>
-    <color name="ime_tile_badge">#B3000000</color>
-    <color name="ime_tile_nsfw">#E6C62828</color>
-    <color name="ime_tile_heart">#FFFF5A79</color>
-    <color name="ime_tile_heart_back">#73000000</color>
+    <!-- The outline around a tile's letters (HaloTextView), as around its icons. -->
+    <color name="ime_tile_halo">#B3000000</color>
 </resources>

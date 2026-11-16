@@ -18,18 +18,14 @@
         <item name="android:textStyle">bold</item>
     </style>
 
-    <!-- A badge in the top corner of a tile: GIF, VIDEO, NSFW. -->
-    <style name="Widget.Stickpile.Ime.TileBadge" parent="">
+    <!--
+      An icon in a corner of a tile: the kind, NSFW, liked (TileIcons; each
+      has its own outline and size).
+    -->
+    <style name="Widget.Stickpile.Ime.TileIcon" parent="">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginEnd">2dp</item>
-        <item name="android:background">@drawable/ime_tile_badge</item>
-        <item name="android:includeFontPadding">false</item>
-        <item name="android:paddingHorizontal">3dp</item>
-        <item name="android:paddingVertical">1dp</item>
-        <item name="android:textColor">@color/ime_tile_text</item>
-        <item name="android:textSize">8sp</item>
-        <item name="android:textStyle">bold</item>
+        <item name="android:layout_marginEnd">1dp</item>
         <item name="android:visibility">gone</item>
     </style>
 

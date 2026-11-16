@@ -2,9 +2,11 @@
 <!--
   One sticker in the picker's grid: its thumbnail in a square cell
   (moving, or a video over it, as MotionBinder makes it), and over it
-  what Display shows (ItemsAdapter fills them in): the badges in the
-  top-start corner, the heart of a liked one in the top-end corner, and
-  lines of text on a dark band at the bottom.
+  what Display shows (ItemsAdapter fills them in): the kind and NSFW
+  icons in the top-start corner, the heart of a liked one in the top-end
+  corner, and lines of text at the bottom. Nothing has a background: the
+  icons and the letters carry a dark outline of their own, so they show
+  on any sticker (TileIcons, HaloTextView).
 -->
 <io.github.dolfost.stickpile.ime.SquareFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -36,57 +38,54 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:layout_margin="2dp"
+        android:gravity="center_vertical"
         android:importantForAccessibility="noHideDescendants"
         android:orientation="horizontal">
 
-        <TextView
+        <ImageView
             android:id="@+id/ime_item_badge"
-            style="@style/Widget.Stickpile.Ime.TileBadge" />
+            style="@style/Widget.Stickpile.Ime.TileIcon"
+            android:importantForAccessibility="no" />
 
-        <TextView
+        <ImageView
             android:id="@+id/ime_item_nsfw"
-            style="@style/Widget.Stickpile.Ime.TileBadge"
-            android:background="@drawable/ime_tile_nsfw"
-            android:text="@string/display_nsfw_badge" />
+            style="@style/Widget.Stickpile.Ime.TileIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_tile_nsfw" />
     </LinearLayout>
 
     <ImageView
         android:id="@+id/ime_item_liked"
-        android:layout_width="16dp"
-        android:layout_height="16dp"
+        style="@style/Widget.Stickpile.Ime.TileIcon"
         android:layout_gravity="top|end"
-        android:layout_margin="2dp"
-        android:background="@drawable/ime_tile_heart"
         android:importantForAccessibility="no"
-        android:padding="3dp"
-        android:src="@drawable/ic_heart"
-        android:visibility="gone" />
+        android:layout_margin="2dp"
+        android:src="@drawable/ic_tile_heart" />
 
     <LinearLayout
         android:id="@+id/ime_item_info"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="@drawable/ime_tile_scrim"
         android:importantForAccessibility="noHideDescendants"
         android:orientation="vertical"
-        android:paddingHorizontal="3dp"
-        android:paddingVertical="2dp"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="3dp"
         android:visibility="gone">
 
-        <TextView
+        <io.github.dolfost.stickpile.ime.HaloTextView
             android:id="@+id/ime_item_name"
             style="@style/Widget.Stickpile.Ime.TileText.Name" />
 
-        <TextView
+        <io.github.dolfost.stickpile.ime.HaloTextView
             android:id="@+id/ime_item_emojis"
             style="@style/Widget.Stickpile.Ime.TileText" />
 
-        <TextView
+        <io.github.dolfost.stickpile.ime.HaloTextView
             android:id="@+id/ime_item_tags"
             style="@style/Widget.Stickpile.Ime.TileText" />
 
-        <TextView
+        <io.github.dolfost.stickpile.ime.HaloTextView
             android:id="@+id/ime_item_stats"
             style="@style/Widget.Stickpile.Ime.TileText" />
     </LinearLayout>

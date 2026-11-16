@@ -68,9 +68,11 @@ Most used, and a grid.
 - **Safe mode** (the shield) hides the stickers tagged `nsfw` from every
   list and search, and says how many it hid.
 - **Sticker info** (the eye) shows or hides the information over each
-  tile: a GIF, WEBP or VIDEO badge and an NSFW mark, a heart on the ones
-  you liked, the name, the emojis and vibe, the tags, and a line with the
-  format and resolution, times copied, likes and the quality score. The
+  tile: an icon for a GIF, another animation or a video and one for NSFW,
+  a heart on the ones you liked, the name, the emojis and vibe, the tags,
+  and a line with the format and resolution, times copied, likes and the
+  quality score. Nothing has a box or a band behind it: the icons and the
+  letters have a dark outline, so they show on any sticker. The
   menu's "Sticker info" (also in Settings) turns each piece on or off and
   sets the stickers in a row, 2 to 8, with a slider (with the phone
   upright; held sideways, more of the same size fit). A small tile shows

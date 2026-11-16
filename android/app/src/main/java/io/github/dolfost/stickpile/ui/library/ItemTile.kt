@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ui.library
 
 import android.graphics.drawable.Drawable
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,10 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -56,7 +57,7 @@ import io.github.dolfost.stickpile.display.Autoplay
 import io.github.dolfost.stickpile.display.Columns
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.Stat
-import io.github.dolfost.stickpile.display.TileField
+import io.github.dolfost.stickpile.display.TileIcons
 import io.github.dolfost.stickpile.ime.TileInfo as LineFit
 import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.motion.MotionPolicy
@@ -66,11 +67,16 @@ import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.MotionKind
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 
-/** The dark band and badges over a thumbnail: light text stays readable on any picture. */
-private val Scrim = Color(0x99000000)
-private val OnScrim = Color.White
-private val LikedRed = Color(0xFFFF5A6E)
-private val BandStyle = TextStyle(color = OnScrim, fontSize = 10.sp, lineHeight = 12.sp)
+/**
+ * The lines over a thumbnail: white letters with a dark outline under them
+ * ([Halo], as around the icons, [TileIcons]), readable on any picture
+ * without a band behind them.
+ */
+private val LineStyle = TextStyle(color = Color.White, fontSize = 10.sp, lineHeight = 12.sp)
+private val Halo = Color(0xB3000000)
+
+/** The outline around the letters, both sides together. */
+private val HALO_WIDTH = 2.5.dp
 
 /**
  * The items as tiles, [Display.columns] in a row (more in a wider window,
@@ -137,28 +143,27 @@ internal fun ItemGrid(
 /** More columns than this: the tiles stand closer. */
 private const val TIGHT_ABOVE = 4
 
-/** The badges top left, the like top right, the band of texts at the bottom. */
+/**
+ * The kind and NSFW icons top left, the like top right, the lines at the
+ * bottom; nothing has a background ([TileIcons], [HaloLine]).
+ */
 @Composable
 private fun BoxScope.TileOverlays(info: TileInfo) {
     if (info.badge != null || info.nsfw) {
-        Row(Modifier.align(Alignment.TopStart).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            info.badge?.let { Pill(it, Scrim, OnScrim) }
-            if (info.nsfw) {
-                Pill(stringResource(R.string.display_nsfw_badge), MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.onError)
-            }
+        Row(
+            Modifier.align(Alignment.TopStart).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            info.badge?.let { TileIcon(TileIcons.badge(it), it) }
+            if (info.nsfw) TileIcon(TileIcons.NSFW, stringResource(R.string.display_nsfw_badge))
         }
     }
     if (info.liked) {
-        Icon(
-            painterResource(R.drawable.ic_heart),
-            contentDescription = stringResource(R.string.display_liked_by_you),
-            tint = LikedRed,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(4.dp)
-                .background(Scrim, CircleShape)
-                .padding(3.dp)
-                .size(12.dp),
+        TileIcon(
+            TileIcons.LIKED,
+            stringResource(R.string.display_liked_by_you),
+            Modifier.align(Alignment.TopEnd).padding(4.dp),
         )
     }
     if (info.hasBand) {
@@ -166,57 +171,46 @@ private fun BoxScope.TileOverlays(info: TileInfo) {
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Scrim)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(horizontal = 5.dp, vertical = 3.dp),
         ) {
-            info.name?.let { BandLine(it, weight = FontWeight.SemiBold) }
-            info.mood?.let { BandLine(it) }
-            info.tags?.let { BandLine(it) }
+            info.name?.let { HaloLine(it, weight = FontWeight.SemiBold) }
+            info.mood?.let { HaloLine(it) }
+            info.tags?.let { HaloLine(it) }
             if (info.hasStatsLine) StatsLine(info.shape, info.stats)
         }
     }
 }
 
+/** An icon over the tile, at its own size, not tinted (it has its own outline). */
 @Composable
-private fun Pill(text: String, background: Color, color: Color) {
-    Text(
-        text,
-        color = color,
-        fontSize = 9.sp,
-        lineHeight = 11.sp,
-        fontWeight = FontWeight.Bold,
-        maxLines = 1,
-        modifier = Modifier
-            .background(background, RoundedCornerShape(4.dp))
-            .padding(horizontal = 3.dp),
-    )
+private fun TileIcon(@DrawableRes icon: Int, description: String?, modifier: Modifier = Modifier) {
+    Image(painterResource(icon), contentDescription = description, modifier = modifier)
 }
 
+/** A line of white text with a dark outline around its letters. */
 @Composable
-private fun BandLine(text: String, modifier: Modifier = Modifier, weight: FontWeight? = null) {
-    Text(text, style = BandStyle, fontWeight = weight, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+private fun HaloLine(text: String, modifier: Modifier = Modifier, weight: FontWeight? = null) {
+    val halo = with(LocalDensity.current) { HALO_WIDTH.toPx() }
+    val outline = remember(halo) { LineStyle.copy(color = Halo, drawStyle = Stroke(width = halo, join = StrokeJoin.Round)) }
+    Box(modifier) {
+        Text(text, style = outline, fontWeight = weight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text, style = LineStyle, fontWeight = weight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 /** "PNG 512x512" (cut short first when the tile is narrow), then each number with its icon. */
 @Composable
 private fun StatsLine(shape: String?, stats: List<Stat>) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        shape?.let { BandLine(it, Modifier.weight(1f, fill = false)) }
+        shape?.let { HaloLine(it, Modifier.weight(1f, fill = false)) }
         stats.forEach { stat ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                Icon(painterResource(stat.kind.icon), contentDescription = null, tint = OnScrim, modifier = Modifier.size(9.dp))
-                BandLine(stat.text)
+                TileIcon(TileIcons.stat(stat.kind), null, Modifier.size(10.dp))
+                HaloLine(stat.text)
             }
         }
     }
 }
-
-private val TileField.icon: Int
-    get() = when (this) {
-        TileField.LIKES -> R.drawable.ic_heart
-        TileField.QUALITY -> R.drawable.ic_quality
-        else -> R.drawable.ic_copies
-    }
 
 /**
  * The item's picture, fitted: its thumbnail, moving instead for an

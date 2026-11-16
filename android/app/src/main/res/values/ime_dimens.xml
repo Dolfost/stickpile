@@ -13,5 +13,7 @@
     <!-- The picture in the details panel (ime_details.xml). -->
     <dimen name="ime_details_picture">128dp</dimen>
     <!-- The icons in a tile's stats line. -->
-    <dimen name="ime_tile_icon">9dp</dimen>
+    <dimen name="ime_tile_icon">10dp</dimen>
+    <!-- The outline around a tile's letters, both sides together (HaloTextView). -->
+    <dimen name="ime_tile_halo">2.5dp</dimen>
 </resources>

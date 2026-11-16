@@ -1,7 +1,6 @@
 package io.github.dolfost.stickpile.ime
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.text.SpannableStringBuilder
@@ -22,6 +21,7 @@ import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.ItemLabels
 import io.github.dolfost.stickpile.display.TileField
+import io.github.dolfost.stickpile.display.TileIcons
 import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.Pack
@@ -42,16 +42,12 @@ internal class TileLook(context: Context) {
     var likedOf: (Item) -> Boolean = { it.liked }
 
     private val iconPx = context.resources.getDimensionPixelSize(R.dimen.ime_tile_icon)
-    private val icons: Map<TileField, Drawable> = mapOf(
-        TileField.COPIES to R.drawable.ic_copies,
-        TileField.LIKES to R.drawable.ic_heart,
-        TileField.QUALITY to R.drawable.ic_quality,
-    ).mapValues { (_, res) ->
-        requireNotNull(ContextCompat.getDrawable(context, res)).mutate().apply {
-            setTint(ContextCompat.getColor(context, R.color.ime_tile_text))
-            setBounds(0, 0, iconPx, iconPx)
+    private val icons: Map<TileField, Drawable> = listOf(TileField.COPIES, TileField.LIKES, TileField.QUALITY)
+        .associateWith { field ->
+            requireNotNull(ContextCompat.getDrawable(context, TileIcons.stat(field))).mutate().apply {
+                setBounds(0, 0, iconPx, iconPx)
+            }
         }
-    }
 
     /**
      * The stats line: the format and size, then each number after its icon
@@ -91,8 +87,8 @@ internal class ItemsAdapter(
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
         val image: ImageView = view.findViewById(R.id.ime_item_image)
         val video: LoopingVideoView = view.findViewById(R.id.ime_item_video)
-        val badge: TextView = view.findViewById(R.id.ime_item_badge)
-        val nsfw: TextView = view.findViewById(R.id.ime_item_nsfw)
+        val badge: ImageView = view.findViewById(R.id.ime_item_badge)
+        val nsfw: ImageView = view.findViewById(R.id.ime_item_nsfw)
         val liked: ImageView = view.findViewById(R.id.ime_item_liked)
         val info: View = view.findViewById(R.id.ime_item_info)
         val lines: Map<TileLine, TextView> = mapOf(
@@ -105,12 +101,8 @@ internal class ItemsAdapter(
         var motionJob: Job? = null
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-        val holder = Holder(LayoutInflater.from(parent.context).inflate(R.layout.ime_item, parent, false))
-        holder.liked.imageTintList =
-            ColorStateList.valueOf(ContextCompat.getColor(parent.context, R.color.ime_tile_heart))
-        return holder
-    }
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
+        Holder(LayoutInflater.from(parent.context).inflate(R.layout.ime_item, parent, false))
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = getItem(position)
@@ -175,7 +167,7 @@ internal class ItemsAdapter(
     private fun bindInfo(holder: Holder, item: Item) {
         val display = look.display
         val badge = ItemLabels.badge(item)?.takeIf { display.shows(TileField.BADGES) }
-        holder.badge.text = badge
+        if (badge != null) holder.badge.setImageResource(TileIcons.badge(badge))
         holder.badge.isVisible = badge != null
         holder.nsfw.isVisible = display.shows(TileField.BADGES) && item.nsfw && !display.safeMode
         holder.liked.isVisible = display.shows(TileField.LIKED) && look.likedOf(item)
