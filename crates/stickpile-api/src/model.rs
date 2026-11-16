@@ -189,6 +189,10 @@ pub enum JobKind {
     SignalImport,
     /// Upload a set as a new Signal sticker pack.
     SignalExport,
+    /// A kind this client does not know (added by a newer server), so a
+    /// job list still reads. A server never makes one.
+    #[serde(other)]
+    Other,
 }
 
 /// Chat apps clients can target. `Generic` = browser chats and anything unknown.
@@ -1795,6 +1799,14 @@ mod tests {
         assert_eq!(null.vibe, Some(None));
         let set: UpdateItem = serde_json::from_str(r#"{"vibe": "tired"}"#).unwrap();
         assert_eq!(set.vibe, Some(Some("tired".into())));
+    }
+
+    #[test]
+    fn an_unknown_job_kind_reads_as_other() {
+        let kind: JobKind = serde_json::from_str("\"git_push\"").unwrap();
+        assert_eq!(kind, JobKind::GitPush);
+        let kind: JobKind = serde_json::from_str("\"made_up_later\"").unwrap();
+        assert_eq!(kind, JobKind::Other);
     }
 
     #[test]

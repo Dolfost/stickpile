@@ -245,7 +245,7 @@ pub async fn dispatch(state: &AppState, job: &JobRow) -> JobResult {
         Some(JobKind::DiscordExport) => crate::service::discord::export_job(state, job).await,
         Some(JobKind::SignalImport) => crate::service::signal::import_job(state, job).await,
         Some(JobKind::SignalExport) => crate::service::signal::export_job(state, job).await,
-        None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
+        Some(JobKind::Other) | None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
     }
 }
 

@@ -46,3 +46,6 @@ Publish to the selected platforms	Опублікувати на вибраних
 Open in {platform}	Відкрити в {platform}
 {exported} stickers: {added} added, {removed} removed, {skipped} left out	Стікерів: {exported}; додано {added}, вилучено {removed}, пропущено {skipped}
 choose at least one platform to publish to	виберіть щонайменше одну платформу для публікації
+
+# A job of a kind this server version does not know (web/integrations.rs).
+Job	Завдання
