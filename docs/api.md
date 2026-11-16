@@ -205,6 +205,8 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 | `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `edit_pack` permission. `item_ids` must list every item exactly once (else 400). |
 | `POST /api/v1/sets/{id}/items` | multipart -> `[UploadResult]` | Upload, see below; the `add` permission. |
 | `GET /api/v1/sets/{id}/export.tar` | -> `application/x-tar` | Anyone who can read the set. |
+| `GET /api/v1/sets/{id}/export.zip` | -> `application/zip` | The same files as the tar, as a ZIP (stored entries). Anyone who can read the set. |
+| `GET /api/v1/sets/{id}/export.tar.gz` | -> `application/gzip` | The tar, gzip-compressed. Anyone who can read the set. |
 | `PUT /api/v1/sets/{id}/cover` | multipart, one file part -> `Set` | The set's own [cover image](#cover-image); `edit_pack` permission, not read-only git packs. |
 | `DELETE /api/v1/sets/{id}/cover` | -> `Set` | Removes the cover image (idempotent). |
 | `GET /api/v1/sets/{id}/cover/{variant}` | -> image bytes | `original` or `thumb` of the cover image; anyone who can read the set. |
@@ -214,6 +216,12 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 | `POST /api/v1/hooks/git/{id}` | raw body -> `Job` (202) | **Unauthenticated** forge webhook: `X-Stickpile-Webhook-Secret` or `X-Gitlab-Token` with the secret, or `X-Hub-Signature-256` (HMAC-SHA256 of the body). 401 without, 403 with a wrong secret or signature, 404 for an unknown set or one that is not a git pack, 429 over 60 calls per minute per client IP. |
 | `POST /api/v1/sets/{id}/telegram/export` | `TelegramExport` -> `Job` | Owner only. 400 for a bad pack name/title or when the caller has no Telegram user id and `telegram.default_owner_user_id` is unset. See [telegram.md](telegram.md). |
 | `POST /api/v1/telegram/import` | `TelegramImport` -> `Job` | Into a new set; 409 if the slug is taken; counts as an upload for rate limiting. |
+| `GET /api/v1/sets/{id}/publish` | -> `[Publication]` | Where the set is published, per platform. Owner only. See [Publishing](#publishing). |
+| `POST /api/v1/sets/{id}/publish` | `PublishRequest` -> `PublishJobs` | Publish to several platforms at once, one job each. Owner only. See [Publishing](#publishing). |
+| `GET /api/v1/sets/{id}/whatsapp` | -> `WhatsappStatus` | The last WhatsApp build. Anyone who can read the set. See [WhatsApp packs](#whatsapp-packs). |
+| `POST /api/v1/sets/{id}/whatsapp` | -> `Job` | Build the WhatsApp packs. Anyone who can read the set. |
+| `GET /api/v1/sets/{id}/whatsapp.zip` | -> `application/zip` | The last build: every `.wastickers` plus `contents.json`. 404 before the first build. |
+| `GET /api/v1/sets/{id}/whatsapp/packs/{n}` | -> `.wastickers` | One pack of the last build (`WhatsappPack.number`). |
 
 With `git.enabled = false`, the three git endpoints answer `404`. If
 Telegram is not configured (`telegram.enabled` and a readable token file),
@@ -287,7 +295,81 @@ holding a tar. The format is described in [set-format.md](set-format.md).
 `001-<stem>.<ext>`, and the cover image as `cover.<ext>` when the set has one
 (`cover_image` in set.toml; an import takes it back, never as an item).
 Importing an export into a new set and exporting it again gives the same
-manifest data and byte-identical files.
+manifest data and byte-identical files. `export.zip` holds exactly the
+entries of the tar (the `<slug>/` directory, `set.toml`, the files), stored
+without compression since the media is compressed already, with fixed
+timestamps; `export.tar.gz` is the tar gzip-compressed. RAR is not offered
+(writing RAR needs the proprietary `rar` program). The import takes tars
+only.
+
+#### Publishing
+
+A set can be published to every platform the server is configured for, one
+or several at once (the export page's Publish section uses the same calls).
+Platforms are implemented in `service::publish` (a registry: Telegram today;
+Discord and Signal are added the same way). Only the set's owner may
+publish or read the publish state: others who can read the set get 403,
+everyone else 404.
+
+- `GET /api/v1/sets/{id}/publish` lists one `Publication` per platform the
+  server knows, configured or not: `platform` (the id: `telegram`), `name`,
+  `configured`, `target` and `url` (what the set is published as and its
+  link, e.g. the pack name and `https://t.me/addstickers/<name>`),
+  `published_at` (the last successful publish), `last_status` (`done` or
+  `failed`), `last_finished_at`, `last_error`, `last_result` (the result of
+  the last successful publish, kind-specific) and `job` (a publish that is
+  queued or running).
+- `POST /api/v1/sets/{id}/publish` with
+  `{"platforms": ["telegram"], "options": {"telegram": {"pack_name": "cats", "title": "Cats"}}}`
+  queues one job per platform, in the order given (a platform listed twice
+  once), and returns `{"jobs": [Job, ...]}`. `options` is optional; each
+  platform's object is what its own export takes (Telegram:
+  `TelegramExport`, both fields optional). Every platform is checked before
+  any job is queued, so the request fails as a whole with 400 when
+  `platforms` is empty, names an unknown platform ("unknown platform ...;
+  this server knows telegram"), one that is not configured ("Telegram is
+  not configured on this server"), or options a platform refuses (for
+  Telegram the same 400s as `POST /sets/{id}/telegram/export`).
+- The jobs are the platforms' own (`telegram_export` for Telegram, exactly
+  what `POST /sets/{id}/telegram/export` queues). When one finishes, done
+  or failed, the outcome is stored with the set (`set_publications`,
+  migration 0012), so `published_at`, `last_result` and `last_error`
+  outlive the job rows, which are deleted after 30 days. A failed publish
+  keeps the last good `published_at` and `last_result`.
+
+#### WhatsApp packs
+
+WhatsApp has no API for sticker packs; packs reach it through a sticker app
+on the phone. The server builds them as `.wastickers` files (layout and
+rules in [whatsapp.md](whatsapp.md)) for anyone who can read the set, so the
+Android app can fetch WhatsApp-ready files too.
+
+- `POST /api/v1/sets/{id}/whatsapp` queues a `whatsapp_export` job and
+  returns it. While the caller's build of the set is queued or running, the
+  same job is returned. Counts as an upload for rate limiting. If the set
+  did not change since the last build (same items, order, names, emoji,
+  set name, slug, cover, owner name), the job reuses it (`reused: true`).
+- The job's result is a `WhatsappBuild` plus `set_id` and `reused`:
+  `built_at`, `set_version`, `file` and `url` (the zip), `size_bytes`,
+  `packs` (`WhatsappPack`: `number`, `identifier`, `title`, `publisher`,
+  `animated`, `file` and `url` of its `.wastickers`, `tray_file`,
+  `image_data_version`, `size_bytes`, `stickers`: `item_id`, `name`, `file`
+  inside the archive, `emojis`, `animated`, `size_bytes`, `note`) and
+  `skipped` (`[{item_id, name, reason}]`). A set where fewer than 3 items
+  can become stickers of one kind fails the job ("nothing to export: a
+  WhatsApp pack needs at least 3 stickers, ...").
+- `GET /api/v1/sets/{id}/whatsapp` returns `WhatsappStatus`: `build` (the
+  last finished build or `null`), `current` (it matches the set as it is
+  now) and `job` (the caller's build in progress).
+- `GET /api/v1/sets/{id}/whatsapp.zip` downloads the last build: one zip
+  with every pack's `.wastickers` and a `contents.json` in the layout of
+  WhatsApp's sample app (each pack has an extra `wastickers` key naming the
+  file with its images). `Range` and `HEAD` work. 404 before the first
+  build. `GET /api/v1/sets/{id}/whatsapp/packs/{n}` downloads pack `n`
+  alone.
+- Private sets stay 404 for others on all four routes. The files live in
+  `<data_dir>/exports/<set id>/whatsapp/` and are removed by the periodic
+  cleanup once the set is deleted.
 
 #### Cover image
 
@@ -521,4 +603,5 @@ days. `Job.result` is kind-specific:
 | `git_pull` | binding, `POST /sets/{id}/pull`, webhook, scheduler | `commit`, `changed`; after an import also `version`, `created`, `updated`, `unchanged`, `removed`, `errors`; `pushed` when local edits were pushed instead |
 | `git_push` | every change of a push-mode pack (debounced 5 s) | `pushed`, `committed`, `commit`, `version`, or `skipped` |
 | `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
-| `telegram_export` | `POST /sets/{id}/telegram/export` | `pack_name`, `url` (`https://t.me/addstickers/…`), `created_pack`, `added`, `removed`, `updated`, `reordered`, `exported`, `skipped` |
+| `telegram_export` | `POST /sets/{id}/telegram/export`, `POST /sets/{id}/publish` | `pack_name`, `url` (`https://t.me/addstickers/<name>`), `created_pack`, `added`, `removed`, `updated`, `reordered`, `exported`, `skipped` |
+| `whatsapp_export` | `POST /sets/{id}/whatsapp` | a `WhatsappBuild` (`packs`, `skipped`, `file`, `url`, ...) plus `set_id` and `reused` |

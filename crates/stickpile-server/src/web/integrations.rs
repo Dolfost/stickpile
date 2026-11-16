@@ -60,7 +60,8 @@ pub fn upload_page_links(state: &AppState) -> Markup {
 }
 
 /// Owner actions on the set page: "Pull now" for git packs, "Publish to
-/// Telegram" when the integration is on.
+/// Telegram" (to the export page's publish section) when the integration
+/// is on.
 pub fn set_actions(state: &AppState, ctx: &Ctx, set: &Set) -> Markup {
     let pull_url = format!("/sets/{}/pull", set.id);
     html! {
@@ -71,7 +72,7 @@ pub fn set_actions(state: &AppState, ctx: &Ctx, set: &Set) -> Markup {
             }
         }
         @if telegram::enabled(state) && set.item_count > 0 {
-            a.button href=(format!("/sets/{}/telegram", set.id)) {
+            a.button href=(format!("/sets/{}/export#publish", set.id)) {
                 @if set.telegram_pack.is_some() { (t("Update Telegram pack")) } @else { (t("Publish to Telegram")) }
             }
         }
@@ -91,6 +92,7 @@ fn kind_label(k: JobKind) -> &'static str {
         JobKind::GitPush => t("Git push"),
         JobKind::TelegramImport => t("Telegram import"),
         JobKind::TelegramExport => t("Telegram export"),
+        JobKind::WhatsappExport => t("WhatsApp packs"),
     }
 }
 
@@ -111,6 +113,15 @@ fn status_label(s: JobStatus) -> &'static str {
         JobStatus::Running => "running",
         JobStatus::Done => "done",
         JobStatus::Failed => "failed",
+    }
+}
+
+/// The link to what a job published: "Open in <platform>" for the publish
+/// platforms, Telegram's for its import.
+fn open_label(kind: JobKind) -> String {
+    match crate::service::publish::for_job(kind) {
+        Some(p) => tf("Open in {platform}", &[("platform", &p.name())]),
+        None => t("Open in Telegram").to_string(),
     }
 }
 
@@ -155,7 +166,7 @@ pub fn job_fragment(job: &Job, back: Option<&str>) -> Markup {
                 }
                 p.job-links {
                     @if let Some(sid) = result_set { a href=(set_url(sid)) { (t("Open the set")) } " " }
-                    @if let Some(u) = result_url { a href=(u) rel="noopener noreferrer" target="_blank" { (t("Open in Telegram")) } " " }
+                    @if let Some(u) = result_url { a href=(u) rel="noopener noreferrer" target="_blank" { (open_label(job.kind)) } " " }
                     @if let Some(b) = back { a href=(b) { (t("Reload to see the changes")) } }
                 }
             }

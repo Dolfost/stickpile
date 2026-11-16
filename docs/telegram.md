@@ -138,6 +138,28 @@ to a pack, in the `telegram_packs` table (migration
 The migration gives existing packs to the owner of the earliest set bound to
 each, and unbinds any later sets bound to the same pack.
 
+## Where publishing lives
+
+Telegram is the first platform of the publish registry
+(`crates/stickpile-server/src/service/publish.rs`), next to which Discord and
+Signal will be added. In the web UI, publishing lives on the set's export
+page, `/sets/{id}/export` ([web.md](web.md#export-and-publish)): its
+Publish section has a row for Telegram with the pack's link, when it was
+last published and what that changed, the last error, the pack name and
+title fields and the Telegram user id hint, and a checkbox to publish to
+Telegram together with other platforms. The set page's "Publish to
+Telegram" / "Update Telegram pack" button leads there; the older form at
+`/sets/{id}/telegram` still works.
+
+In the API, `POST /api/v1/sets/{id}/publish` with `{"platforms":
+["telegram"], "options": {"telegram": {"pack_name": ..., "title": ...}}}`
+queues the same `telegram_export` job as the route below, which stays as it
+is; `GET /api/v1/sets/{id}/publish` reports where the set is published
+([api.md](api.md#publishing)). Every finished `telegram_export` job, from
+either route, is recorded with the set (`set_publications`, migration 0012):
+when it was last published, that result and the last error. The pack
+binding itself stays in `sets.telegram_*`.
+
 ## Export
 
 `POST /api/v1/sets/{id}/telegram/export` with `{"pack_name": null, "title":

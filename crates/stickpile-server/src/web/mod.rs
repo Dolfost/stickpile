@@ -26,6 +26,7 @@ mod admin;
 mod auth;
 mod collab;
 mod components;
+mod export;
 mod home;
 mod integrations;
 mod items;
@@ -149,6 +150,7 @@ pub fn routes() -> Router<AppState> {
         // jobs and integrations
         .route("/jobs/{id}", get(integrations::job_status))
         .merge(integrations::routes())
+        .merge(export::routes())
         .fallback(not_found)
         .layer(from_fn(html_errors))
 }

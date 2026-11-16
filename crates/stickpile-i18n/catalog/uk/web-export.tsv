@@ -1,0 +1,48 @@
+# Ukrainian: web-export. English<TAB>Ukrainian, one entry per line (see src/lib.rs).
+
+# Export page (web/export.rs) and its link on the set page.
+Export	Експорт
+Export {name}	Експорт: {name}
+The set's files and its set.toml, as stickpile exports and imports them. Each format holds the same files.	Файли набору та його set.toml у тому вигляді, у якому stickpile їх експортує та імпортує. Кожен формат містить ті самі файли.
+RAR is not offered: making RAR archives needs the proprietary rar program. Everything that opens RAR opens ZIP too.	RAR не пропонуємо: щоб створювати архіви RAR, потрібна пропрієтарна програма rar. Усе, що відкриває RAR, відкриває й ZIP.
+
+# WhatsApp packs (web/export.rs, service/whatsapp.rs).
+WhatsApp sticker packs	Набори стікерів для WhatsApp
+WhatsApp packs	Набори для WhatsApp
+whatsapp packs	набори для WhatsApp
+Every item becomes a 512x512 WebP sticker. Sticker apps such as Sticker Maker add .wastickers packs to WhatsApp.	Кожен стікер стане стікером WebP 512x512. Набори .wastickers додають до WhatsApp застосунки для стікерів, як-от Sticker Maker.
+A pack holds 3 to 30 stickers, all still or all animated, so a larger set is split into several packs.	Набір для WhatsApp вміщує від 3 до 30 стікерів, лише статичних або лише анімованих, тож більший набір буде поділено на кілька.
+Videos are left out: animated stickers from videos need ffmpeg on the server.	Відео буде пропущено: для анімованих стікерів із відео на сервері потрібен ffmpeg.
+The set changed after these packs were built; build them again to update them.	Набір змінився після того, як набори для WhatsApp було зібрано; зберіть їх знову, щоб оновити.
+Built {time}.	Зібрано {time}.
+Download all packs	Звантажити всі набори
+Build WhatsApp packs	Зібрати набори для WhatsApp
+Build the packs again	Зібрати набори знову
+{n} animated sticker|{n} animated stickers	{n} анімований стікер|{n} анімовані стікери|{n} анімованих стікерів
+{n} still sticker|{n} still stickers	{n} статичний стікер|{n} статичні стікери|{n} статичних стікерів
+{n} sticker was changed to fit|{n} stickers were changed to fit	{n} стікер змінено, щоб він підійшов|{n} стікери змінено, щоб вони підійшли|{n} стікерів змінено, щоб вони підійшли
+{n} item was left out|{n} items were left out	{n} стікер пропущено|{n} стікери пропущено|{n} стікерів пропущено
+every frame looks the same: sent as a still sticker	усі кадри однакові: надіслано як статичний стікер
+cut to the first 10 seconds	обрізано до перших 10 секунд
+sent as a still sticker: a WhatsApp pack needs at least 3 animated stickers	надіслано як статичний стікер: набір для WhatsApp потребує щонайменше 3 анімованих стікерів
+does not fit WhatsApp's 100 KB limit for static stickers	не вміщується в обмеження WhatsApp 100 КБ для статичних стікерів
+does not fit WhatsApp's 500 KB limit for animated stickers, even at 5 frames per second	не вміщується в обмеження WhatsApp 500 КБ для анімованих стікерів навіть за 5 кадрів на секунду
+animated stickers from videos need ffmpeg on the server	для анімованих стікерів із відео на сервері потрібен ffmpeg
+a WhatsApp pack needs at least 3 stickers and cannot mix still and animated ones; this set has fewer than 3 still ones	набір для WhatsApp потребує щонайменше 3 стікерів і не може поєднувати статичні з анімованими; у цьому наборі менше 3 статичних
+the original file is missing	бракує оригінального файлу
+this set has no WhatsApp packs yet; build them first (POST /api/v1/sets/{id}/whatsapp)	для цього набору ще немає наборів для WhatsApp; спершу зберіть їх (POST /api/v1/sets/{id}/whatsapp)
+
+# Publishing (web/export.rs, service/publish.rs).
+Publishing creates the pack on the platform the first time and updates it later. Tick several platforms to publish to all of them at once.	Перша публікація створює набір на платформі, наступні оновлюють його. Позначте кілька платформ, щоб опублікувати на всіх одразу.
+No platform to publish to is set up on this server.	На цьому сервері не налаштовано жодної платформи для публікації.
+Platform	Платформа
+Published as	Опубліковано як
+Last publish	Остання публікація
+Options	Параметри
+not yet	ще ні
+The last publish failed: {error}	Остання публікація не вдалася: {error}
+Publish to {platform} only	Опублікувати лише в {platform}
+Publish to the selected platforms	Опублікувати на вибраних платформах
+Open in {platform}	Відкрити в {platform}
+{exported} stickers: {added} added, {removed} removed, {skipped} left out	Стікерів: {exported}; додано {added}, вилучено {removed}, пропущено {skipped}
+choose at least one platform to publish to	виберіть щонайменше одну платформу для публікації

@@ -52,6 +52,10 @@ pub const SET_ORDER: &str = "/api/v1/sets/{id}/order";
 pub const SET_ITEMS: &str = "/api/v1/sets/{id}/items";
 /// GET -> `application/x-tar` of the set directory (set.toml + numbered files).
 pub const SET_EXPORT: &str = "/api/v1/sets/{id}/export.tar";
+/// GET -> `application/zip` with the same content as [`SET_EXPORT`].
+pub const SET_EXPORT_ZIP: &str = "/api/v1/sets/{id}/export.zip";
+/// GET -> `application/gzip`: the [`SET_EXPORT`] tar, gzip-compressed.
+pub const SET_EXPORT_TGZ: &str = "/api/v1/sets/{id}/export.tar.gz";
 /// PUT multipart (one file part: a still PNG, JPEG or WebP) -> [`crate::model::Set`]:
 /// the set's own cover image, replacing an earlier one. DELETE -> Set: remove it.
 pub const SET_COVER: &str = "/api/v1/sets/{id}/cover";
@@ -75,6 +79,20 @@ pub const GIT_WEBHOOK: &str = "/api/v1/hooks/git/{id}";
 pub const SET_TELEGRAM_EXPORT: &str = "/api/v1/sets/{id}/telegram/export";
 /// POST [`crate::model::TelegramImport`] -> [`crate::model::Job`]
 pub const TELEGRAM_IMPORT: &str = "/api/v1/telegram/import";
+/// GET -> `Vec<`[`crate::model::Publication`]`>`: where the set is published,
+/// per platform the server knows (owner). POST
+/// [`crate::model::PublishRequest`] -> [`crate::model::PublishJobs`]: one
+/// export job per platform (owner).
+pub const SET_PUBLISH: &str = "/api/v1/sets/{id}/publish";
+/// GET -> [`crate::model::WhatsappStatus`]; POST -> [`crate::model::Job`]:
+/// build the set's WhatsApp sticker packs (anyone who can read the set).
+pub const SET_WHATSAPP: &str = "/api/v1/sets/{id}/whatsapp";
+/// GET -> `application/zip`: the last WhatsApp build, every `.wastickers`
+/// plus `contents.json` (404 before the first build).
+pub const SET_WHATSAPP_ZIP: &str = "/api/v1/sets/{id}/whatsapp.zip";
+/// GET -> one pack of the last build as a `.wastickers` file; `{n}` is
+/// [`crate::model::WhatsappPack::number`].
+pub const SET_WHATSAPP_PACK: &str = "/api/v1/sets/{id}/whatsapp/packs/{n}";
 
 // --- problems ------------------------------------------------------------------
 /// GET `?severity=error|warning|info&kind=<ProblemKind>&dismissed=true` ->

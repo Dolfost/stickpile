@@ -145,17 +145,59 @@ pub async fn import(
     responses((status = 200, content_type = "application/x-tar", description = "tar archive"), (status = 404, body = ApiError)),
     security(("bearer" = []), ("session" = [])))]
 pub async fn export(State(state): State<AppState>, user: CurrentUser, Path(id): Path<String>) -> AppResult<Response> {
-    let (slug, tar) = transfer::export_tar(&state, &user, &id).await?;
-    let mut resp = tar.into_response();
+    archive_response(&state, &user, &id, transfer::ArchiveFormat::Tar).await
+}
+
+/// Export a set directory as a ZIP: the same entries as the tar export.
+#[utoipa::path(get, path = r::SET_EXPORT_ZIP, tag = "sets", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, content_type = "application/zip", description = "zip archive"), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn export_zip(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    archive_response(&state, &user, &id, transfer::ArchiveFormat::Zip).await
+}
+
+/// Export a set directory as a gzip-compressed tar.
+#[utoipa::path(get, path = r::SET_EXPORT_TGZ, tag = "sets", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, content_type = "application/gzip", description = "tar.gz archive"), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn export_tgz(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    archive_response(&state, &user, &id, transfer::ArchiveFormat::TarGz).await
+}
+
+/// A set export as an attachment named `<slug>.<ext>`.
+async fn archive_response(
+    state: &AppState,
+    user: &CurrentUser,
+    id: &str,
+    format: transfer::ArchiveFormat,
+) -> AppResult<Response> {
+    let (slug, bytes) = transfer::export_archive(state, user, id, format).await?;
+    Ok(attachment(
+        bytes,
+        format.mime(),
+        &format!("{slug}.{}", format.extension()),
+    ))
+}
+
+/// `bytes` as a download (`Content-Disposition: attachment`), never cached
+/// by shared caches.
+pub fn attachment(bytes: Vec<u8>, mime: &'static str, filename: &str) -> Response {
+    let mut resp = bytes.into_response();
     resp.headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-tar"));
-    resp.headers_mut().insert(
-        header::CONTENT_DISPOSITION,
-        disposition("attachment", &format!("{slug}.tar")),
-    );
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
+    resp.headers_mut()
+        .insert(header::CONTENT_DISPOSITION, disposition("attachment", filename));
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
-    Ok(resp)
+    resp
 }
 
 /// Upload the set's own cover image (owner; not read-only git packs): one

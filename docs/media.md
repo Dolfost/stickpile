@@ -15,6 +15,7 @@ Public API (see `crates/stickpile-media/src/lib.rs`):
 | `generate_variants(path, &Probe, &VariantOptions, &Tools)` | All renditions except `Original` and `Thumb`, sorted by `Variant`. |
 | `decode_frame(bytes, &Limits)` | First frame of a still or animation as RGBA (used to re-process Telegram stickers). |
 | `Tools::from_env(tmp_dir, timeout)` | `STICKPILE_FFMPEG` / `STICKPILE_FFPROBE`, or `ffmpeg` / `ffprobe` on `PATH`. |
+| `whatsapp::{still, animated, first_frame, tray, inspect}` | WhatsApp pack stickers (512 x 512 WebP within WhatsApp's limits), the tray icon, and a check of a WebP's canvas and frames. See [whatsapp.md](whatsapp.md). |
 | `hash::{phash, dhash, hamming, to_hex, from_hex}` | 64-bit perceptual hashes. |
 | `quality::{assess, jpeg_quality_estimate, total}` | Quality score, see [quality.md](quality.md). |
 
@@ -139,6 +140,20 @@ Animations are decoded in Rust (ffmpeg 8.1 cannot decode animated WebP),
 resampled to a constant frame rate by repeating or dropping frames at the
 output timestamps, and streamed to ffmpeg as raw video on stdin. Videos are
 read by ffmpeg from a copy of the stored original inside `tmp_dir`.
+
+### WhatsApp stickers
+
+Not stored as variants: the WhatsApp export job (`service::whatsapp`)
+makes them from the stored original when a set's packs are built, with the
+rules and steps in [whatsapp.md](whatsapp.md). Stills are squared (longer
+side 512, centred on transparency) and written lossless, or lossy when over
+100 KB. Animations and videos become animated WebP through libwebp's
+`WebPAnimEncoder` (`anim_webp.rs`, on `libwebp-sys`, the library the `webp`
+crate builds): frames are added one at a time and freed at once, so memory
+stays at a few frames whatever the length. Animations are decoded in Rust
+and need no ffmpeg; videos are decoded by ffmpeg into raw RGBA frames
+(`-f rawvideo -pix_fmt rgba`, the first 10 s, at most 15 fps, scaled with
+`scale`), read back from a scratch file.
 
 ## 4. ffmpeg / ffprobe invocation policy
 

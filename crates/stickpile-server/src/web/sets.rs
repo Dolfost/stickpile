@@ -7,7 +7,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup, PreEscaped};
 use serde::Deserialize;
-use stickpile_api::routes as r;
 use stickpile_api::{
     CreateSet, Item, MediaFormat, ReorderItems, Set, SetDetail, SetRole, SetSource, UpdateSet, Variant, Visibility,
 };
@@ -527,7 +526,7 @@ pub async fn page(
                 @if collab::can_propose(set) {
                     a.button href=(format!("/sets/{}/propose", set.id)) { (t("Propose…")) }
                 }
-                a.button href=(r::path(r::SET_EXPORT, &[&set.id])) download { (t("Export (.tar)")) }
+                a.button href=(format!("/sets/{}/export", set.id)) { (t("Export")) }
                 a.button href=(format!("/popular?scope=set&set={}", set.id)) { (t("Popular in this set")) }
                 @if is_owner { (integrations::set_actions(&state, &ctx, set)) }
             }

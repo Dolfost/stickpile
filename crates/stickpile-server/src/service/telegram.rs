@@ -360,6 +360,20 @@ async fn authorize_export(state: &AppState, api: &BotApi, user: &db::UserRow, na
 /// Queue the export of one of the caller's sets as a sticker pack the bot
 /// owns (created on the first export, updated afterwards).
 pub async fn export(state: &AppState, user: &CurrentUser, set_id: &str, req: TelegramExport) -> AppResult<Job> {
+    let payload = prepare_export(state, user, set_id, req).await?;
+    let set_id = payload["set_id"].as_str().unwrap_or(set_id).to_string();
+    jobs::enqueue(state, JobKind::TelegramExport, payload, Some(set_id), Some(user.id())).await
+}
+
+/// Check an export of `set_id` by `user` and return the `TelegramExport`
+/// job payload, without queuing it ([`export`], and the publish registry,
+/// which checks every platform before it queues any).
+pub async fn prepare_export(
+    state: &AppState,
+    user: &CurrentUser,
+    set_id: &str,
+    req: TelegramExport,
+) -> AppResult<Value> {
     if !enabled(state) {
         return Err(disabled());
     }
@@ -381,14 +395,7 @@ pub async fn export(state: &AppState, user: &CurrentUser, set_id: &str, req: Tel
     if owner_id(state, &row).is_none() {
         return Err(AppError::bad_request(NO_OWNER));
     }
-    jobs::enqueue(
-        state,
-        JobKind::TelegramExport,
-        json!({ "set_id": set.id, "pack_name": pack_name, "title": title }),
-        Some(set.id.clone()),
-        Some(user.id()),
-    )
-    .await
+    Ok(json!({ "set_id": set.id, "pack_name": pack_name, "title": title }))
 }
 
 fn find_variant(rows: Option<&Vec<VariantRow>>, want: Variant) -> Option<VariantRow> {

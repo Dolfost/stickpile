@@ -94,6 +94,7 @@ fn job_kind_label(k: &str) -> String {
         "git_push" => t("git push").to_string(),
         "telegram_import" => t("telegram import").to_string(),
         "telegram_export" => t("telegram export").to_string(),
+        "whatsapp_export" => t("whatsapp packs").to_string(),
         other => other.replace('_', " "),
     }
 }

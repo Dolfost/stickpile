@@ -570,3 +570,46 @@ pub async fn export_tar(state: &AppState, viewer: &CurrentUser, set_id: &str) ->
     let tar = tokio::task::spawn_blocking(move || stickpile_setfmt::write_tar(&bundle, &top)).await??;
     Ok((slug, tar))
 }
+
+/// Archive formats of a set export (docs/set-format.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveFormat {
+    Tar,
+    TarGz,
+    Zip,
+}
+
+impl ArchiveFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            ArchiveFormat::Tar => "tar",
+            ArchiveFormat::TarGz => "tar.gz",
+            ArchiveFormat::Zip => "zip",
+        }
+    }
+
+    pub fn mime(self) -> &'static str {
+        match self {
+            ArchiveFormat::Tar => "application/x-tar",
+            ArchiveFormat::TarGz => "application/gzip",
+            ArchiveFormat::Zip => "application/zip",
+        }
+    }
+}
+
+/// Export a set as `format`: the tar of [`export_tar`], gzipped, or its
+/// entries as a ZIP (same files, same names). Returns the slug and bytes.
+pub async fn export_archive(
+    state: &AppState,
+    viewer: &CurrentUser,
+    set_id: &str,
+    format: ArchiveFormat,
+) -> AppResult<(String, Vec<u8>)> {
+    let (slug, tar) = export_tar(state, viewer, set_id).await?;
+    let bytes = match format {
+        ArchiveFormat::Tar => tar,
+        ArchiveFormat::TarGz => tokio::task::spawn_blocking(move || crate::archive::gzip(&tar)).await??,
+        ArchiveFormat::Zip => tokio::task::spawn_blocking(move || crate::archive::tar_to_zip(&tar)).await??,
+    };
+    Ok((slug, bytes))
+}

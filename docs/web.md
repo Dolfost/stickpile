@@ -26,11 +26,12 @@ more than the API allows.
 | `/` | Search box, items you copied recently (the set page's cards, read-only, each with its set, and a "View" control of their own), your sets with covers (with the set lists' "View" control). |
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. Each card shows the cover, name, description, item count, visibility and source labels, owner and slug; the "View" control arranges them (see [Display options and themes](#display-options-and-themes)). |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
-| `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, "Edit pack" for contributors who may, "Propose…" on others' packs, export `.tar`, popular in this set, pull now, publish to Telegram), the upload form (for the owner and contributors who may add), "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
+| `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, "Edit pack" for contributors who may, "Propose…" on others' packs, Export (the [export page](#export-and-publish)), popular in this set, pull now, publish to Telegram), the upload form (for the owner and contributors who may add), "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
 | `/collaboration` | Proposals waiting for you (with Accept and Decline and a note), the ones you sent (Withdraw), the packs you contribute to, and the decided proposals. The nav link shows how many wait for you. See [collaboration.md](collaboration.md). |
 | `/proposals/{id}` | One proposal: the stickers with thumbnails, or a table of the current and the proposed values, with the same buttons. |
 | `/sets/{id}/propose` | On someone else's pack: propose new stickers, a new name, description or cover, or a cover image. |
 | `/items/{id}/suggest` | On someone else's sticker: suggest a new name, keywords, emojis, tags or vibe. |
+| `/sets/{id}/export` | Downloads (ZIP, TAR, TAR.GZ), the WhatsApp sticker packs, and for the owner publishing to one or several platforms at once. See [Export and publish](#export-and-publish). |
 | `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default) or its own cover image, then the **Cover image** form (upload, crop, replace, remove; see [Set covers](#set-covers)), plus "Delete this set…". Read-only git packs only offer deletion. A contributor who may edit the pack gets an "Edit pack" page with the name, description and cover. The set page itself lists the **Contributors** for the owner (permissions to tick, Remove, and "Add a contributor") and for contributors (with Leave). |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
@@ -43,7 +44,8 @@ more than the API allows.
 | `/jobs/{id}` | Status of a background job (yours, or any job for admins). |
 
 Git packs (`/gitpacks/new`) and Telegram (`/telegram/import`,
-`/sets/{id}/telegram`) are described in [Integrations](#integrations).
+`/sets/{id}/telegram`) are described in [Integrations](#integrations), the
+export page in [Export and publish](#export-and-publish).
 
 ### Tailnet users
 
@@ -516,14 +518,55 @@ Shown only when enabled on the server.
   pull, last error) and "Pull now"; read-only packs show "Edit upstream" and no
   edit controls.
 - **Telegram** (`telegram.enabled` and a bot token): "Import a Telegram pack"
-  (pack name or `t.me/addstickers/…` link) creates a set in the background;
-  "Publish to Telegram" on your sets creates or updates the pack. Packs belong
-  to your Telegram user id (Settings) or the server's default owner.
+  (pack name or `t.me/addstickers/...` link) creates a set in the background;
+  "Publish to Telegram" (or "Update Telegram pack") on your sets leads to the
+  publish section of the [export page](#export-and-publish), which creates or
+  updates the pack. Packs belong to your Telegram user id (Settings) or the
+  server's default owner. The older one-platform form at
+  `/sets/{id}/telegram` still works.
 
 Background work (git pulls, Telegram, "Re-run AI") shows a status box that
 polls itself every 2 seconds with htmx (`hx-trigger="every 2s"`) until the job
 is done or failed, then links to the result. Without JavaScript the job page
 refreshes itself while the job runs.
+
+## Export and publish
+
+`/sets/{id}/export` (code: `src/web/export.rs`), linked as "Export" from
+every set page. Three sections:
+
+- **Download**, for anyone who can read the set: the set's files and its
+  `set.toml` as **ZIP**, **TAR** or **TAR.GZ** (the API's `export.zip`,
+  `export.tar` and `export.tar.gz`; every format holds the same files, see
+  [set-format.md](set-format.md)). **RAR is not offered**: writing RAR
+  archives needs the proprietary `rar` program, which a free server cannot
+  ship, and everything that opens RAR opens ZIP too.
+- **WhatsApp sticker packs**, for anyone who can read the set too: "Build
+  WhatsApp packs" queues a job (htmx shows its status box; without
+  JavaScript the page refreshes itself while it runs). The last build is
+  listed: each pack's `.wastickers` file with its title, kind (still or
+  animated), sticker count and size, "Download all packs" (one zip), the
+  stickers that were changed to fit (an animation sent as a still, a long
+  video cut to 10 s) and the items that were left out, each with the
+  reason. When the set changed since, a note says so and the button builds
+  them again. See [whatsapp.md](whatsapp.md).
+- **Publish**, for the owner only: a table with one row per platform the
+  server is configured for (today Telegram; Discord and Signal will appear
+  the same way). Each row shows where the set is published (the pack's
+  link), when it was last published with a summary of that result (for
+  Telegram: stickers, added, removed, left out), the last error if the last
+  publish failed, a running publish's status box, the platform's options
+  (Telegram: pack short name and title, both optional) and a note when a
+  setting is missing (Telegram: no Telegram user id and no default owner).
+  Tick several rows and press "Publish to the selected platforms" to queue
+  one job per platform, or press a row's own "Publish to X only". The page
+  comes back with the queued jobs' status boxes. Errors (no platform
+  ticked, bad options) are shown above the table with what was typed kept;
+  nothing is queued then. A platform is ticked by default when the set is
+  already published there, or when it is the only one.
+
+The publish state comes from `GET /api/v1/sets/{id}/publish` data
+(`service::publish`, the platform registry; see [api.md](api.md#publishing)).
 
 <!-- ---- problems (begin) ---- -->
 
@@ -697,7 +740,9 @@ the file, one emoji per line.
 ## Tests
 
 `crates/stickpile-server/tests/web_auth.rs`, `web_pages.rs` and
-`web_flows.rs` (helpers in `tests/web_common/`) cover: every page renders for
+`web_flows.rs` (helpers in `tests/web_common/`), and the export page's test
+in `export.rs` (downloads for readers, publishing only for the owner, form
+errors keeping the input, the publish and WhatsApp jobs) cover: every page renders for
 its user; anonymous redirects (401 + `HX-Redirect` for htmx); 404 for content
 you cannot see; 403 for admin pages and others' sets; CSRF on urlencoded,
 htmx and multipart forms, and cross-site posts; the login flow and cookie

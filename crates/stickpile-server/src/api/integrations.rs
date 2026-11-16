@@ -1,17 +1,24 @@
-//! Git-pack and Telegram endpoints (docs/git-packs.md, docs/telegram.md).
-//! The work runs as background jobs; these handlers validate, enqueue and
-//! return the job. The git webhook is the only unauthenticated route here.
+//! Git-pack, Telegram, publishing and WhatsApp endpoints (docs/git-packs.md,
+//! docs/telegram.md, docs/whatsapp.md). The work runs as background jobs;
+//! these handlers validate, enqueue and return the job. The git webhook is
+//! the only unauthenticated route here.
 
+use axum::body::Body;
 use axum::extract::{Path, Request, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use stickpile_api::routes as r;
-use stickpile_api::{ApiError, CreateGitPack, GitPackCreated, Job, TelegramExport, TelegramImport};
+use stickpile_api::{
+    ApiError, CreateGitPack, GitPackCreated, Job, Publication, PublishJobs, PublishRequest, TelegramExport,
+    TelegramImport, WhatsappStatus,
+};
+use tower::ServiceExt;
 
+use super::disposition;
 use crate::auth::{ClientIp, CurrentUser};
 use crate::error::{AppError, AppResult};
-use crate::service::{gitpack, telegram};
+use crate::service::{gitpack, publish, telegram, whatsapp};
 use crate::state::AppState;
 
 /// Largest webhook payload read (the route's default body limit is 2 MiB).
@@ -96,4 +103,107 @@ pub async fn telegram_import(
     Json(req): Json<TelegramImport>,
 ) -> AppResult<Json<Job>> {
     Ok(Json(telegram::import(&state, &user, req).await?))
+}
+
+/// Where the set is published, one entry per platform the server knows
+/// (configured or not). Owner only.
+#[utoipa::path(get, path = r::SET_PUBLISH, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, body = Vec<Publication>), (status = 403, body = ApiError), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn publications(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<Vec<Publication>>> {
+    Ok(Json(publish::list(&state, &user, &id).await?))
+}
+
+/// Publish a set to several platforms at once: one job per platform, in
+/// the order given. Every platform is checked before any job is queued.
+/// Owner only.
+#[utoipa::path(post, path = r::SET_PUBLISH, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    request_body = PublishRequest,
+    responses((status = 200, body = PublishJobs),
+              (status = 400, description = "no platform, an unknown or unconfigured one, or bad options for one", body = ApiError),
+              (status = 403, body = ApiError), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn publish_set(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+    Json(req): Json<PublishRequest>,
+) -> AppResult<Json<PublishJobs>> {
+    Ok(Json(publish::publish(&state, &user, &id, req).await?))
+}
+
+/// The set's last WhatsApp build, whether it matches the set as it is now,
+/// and the caller's build in progress. Anyone who can read the set.
+#[utoipa::path(get, path = r::SET_WHATSAPP, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, body = WhatsappStatus), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn whatsapp_status(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<WhatsappStatus>> {
+    Ok(Json(whatsapp::status(&state, &user, &id).await?))
+}
+
+/// Build the set's WhatsApp sticker packs, as a job (the caller's queued
+/// build is returned instead of a second one; an unchanged set reuses the
+/// last build). Anyone who can read the set; counts as an upload for rate
+/// limiting.
+#[utoipa::path(post, path = r::SET_WHATSAPP, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, body = Job), (status = 404, body = ApiError), (status = 429, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn whatsapp_build(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<Job>> {
+    Ok(Json(whatsapp::build(&state, &user, &id).await?))
+}
+
+/// The last WhatsApp build as one zip: every `.wastickers` plus
+/// `contents.json`. 404 before the first build.
+#[utoipa::path(get, path = r::SET_WHATSAPP_ZIP, tag = "integrations", params(("id" = String, Path, description = "set id")),
+    responses((status = 200, content_type = "application/zip", description = "zip archive"), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn whatsapp_zip(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+    req: Request,
+) -> AppResult<Response> {
+    let (name, path) = whatsapp::zip_file(&state, &user, &id).await?;
+    // ServeFile handles Range / If-Range / HEAD; the body of `req` is unused.
+    let (parts, _) = req.into_parts();
+    let inner = Request::from_parts(parts, Body::empty());
+    let mut resp = tower_http::services::ServeFile::new(&path)
+        .oneshot(inner)
+        .await
+        .map_err(|e| AppError::internal(format!("serving file: {e}")))?
+        .map(Body::new);
+    if resp.status().is_success() {
+        let h = resp.headers_mut();
+        h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/zip"));
+        h.insert(header::CONTENT_DISPOSITION, disposition("attachment", &name));
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+    }
+    Ok(resp.into_response())
+}
+
+/// One pack of the last WhatsApp build as a `.wastickers` file (a zip of
+/// `title.txt`, `author.txt`, `cover.png` and the stickers).
+#[utoipa::path(get, path = r::SET_WHATSAPP_PACK, tag = "integrations",
+    params(("id" = String, Path, description = "set id"), ("n" = u32, Path, description = "pack number, from 1")),
+    responses((status = 200, content_type = "application/octet-stream", description = ".wastickers file"), (status = 404, body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn whatsapp_pack(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path((id, n)): Path<(String, String)>,
+) -> AppResult<Response> {
+    let (name, bytes) = whatsapp::pack_file(&state, &user, &id, &n).await?;
+    Ok(super::sets::attachment(bytes, "application/octet-stream", &name))
 }

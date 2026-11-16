@@ -90,7 +90,16 @@ async fn every_page_renders_for_its_user() {
     assert!(html.contains("Move down"));
     assert!(html.contains("enctype=\"multipart/form-data\""));
     assert!(html.contains("webkitdirectory"));
-    assert!(html.contains(&format!("/api/v1/sets/{}/export.tar", set.id)));
+    // Downloads moved to the export page, which the set page links to.
+    assert!(html.contains(&format!("href=\"/sets/{}/export\"", set.id)));
+    let export = b.get(&format!("/sets/{}/export", set.id)).await;
+    assert_page(&export);
+    for format in ["export.tar", "export.zip", "export.tar.gz"] {
+        assert!(
+            export.text().contains(&format!("/api/v1/sets/{}/{format}", set.id)),
+            "{format}"
+        );
+    }
     // The View control (Regular by default) and the context menu.
     assert!(html.contains("type=\"radio\" name=\"view\" value=\"compact\""));
     assert!(html.contains("class=\"items-section\""));

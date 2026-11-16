@@ -53,6 +53,8 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::SET_ORDER, put(sets::reorder))
         .route(r::SET_ITEMS, post(sets::upload).layer(big))
         .route(r::SET_EXPORT, get(sets::export))
+        .route(r::SET_EXPORT_ZIP, get(sets::export_zip))
+        .route(r::SET_EXPORT_TGZ, get(sets::export_tgz))
         .route(r::SET_COVER, put(sets::put_cover).delete(sets::delete_cover).layer(big))
         .route(r::SET_COVER_FILE, get(sets::cover_file))
         .route(r::SET_MEMBERS, get(collab::list_members))
@@ -64,6 +66,16 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::GIT_WEBHOOK, post(integrations::git_webhook))
         .route(r::SET_TELEGRAM_EXPORT, post(integrations::telegram_export))
         .route(r::TELEGRAM_IMPORT, post(integrations::telegram_import))
+        .route(
+            r::SET_PUBLISH,
+            get(integrations::publications).post(integrations::publish_set),
+        )
+        .route(
+            r::SET_WHATSAPP,
+            get(integrations::whatsapp_status).post(integrations::whatsapp_build),
+        )
+        .route(r::SET_WHATSAPP_ZIP, get(integrations::whatsapp_zip))
+        .route(r::SET_WHATSAPP_PACK, get(integrations::whatsapp_pack))
         // problems
         .route(r::SET_PROBLEMS, get(problems::for_set))
         .route(

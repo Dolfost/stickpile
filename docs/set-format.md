@@ -1,7 +1,8 @@
 # Set directory format
 
 A stickpile set can be written out as a plain directory and read back in. The
-format is used for export (`GET /api/v1/sets/{id}/export.tar`, CLI export),
+format is used for export (`GET /api/v1/sets/{id}/export.tar`, also as
+`export.zip` and `export.tar.gz`, the web UI's export page, CLI export),
 import (folder or tar upload, CLI import) and git packs
 ([git-packs.md](git-packs.md)).
 
@@ -188,6 +189,13 @@ one inside the folder.
 `<slug>/`. It contains `set.toml` first, then the media files in set order.
 It is reproducible: GNU headers (long names supported), mode 0644 for files
 and 0755 for the directory, uid/gid 0, empty owner names, mtime 1.
+
+The server also offers the export as ZIP (`export.zip`: exactly the tar's
+directory and files, in the same order, stored without compression, with
+the fixed time 1980-01-01 and modes 0644 and 0755; written by
+`crates/stickpile-server/src/archive.rs` from the tar) and as the tar
+gzip-compressed (`export.tar.gz`). Imports take tars only. RAR is not
+offered: writing RAR archives needs the proprietary `rar` program.
 
 `read_tar` accepts that layout, a flat archive without a top-level directory,
 `./`-prefixed paths and `git archive` output (its pax global header is

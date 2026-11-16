@@ -3,9 +3,11 @@
 //! by polling. Failures are retried with exponential backoff up to
 //! [`MAX_ATTEMPTS`]; [`JobError::Fatal`] fails immediately.
 //!
-//! Adding a job kind: add a handler and a match arm in [`dispatch`]. Git
-//! and Telegram job bodies live next to their services
-//! ([`crate::service::gitpack`], [`crate::service::telegram`]).
+//! Adding a job kind: add a handler and a match arm in [`dispatch`]. Git,
+//! Telegram and WhatsApp job bodies live next to their services
+//! ([`crate::service::gitpack`], [`crate::service::telegram`],
+//! [`crate::service::whatsapp`]). Publish jobs of the platforms in
+//! [`crate::service::publish`] also record their outcome on the set.
 
 pub mod media;
 
@@ -237,6 +239,7 @@ pub async fn dispatch(state: &AppState, job: &JobRow) -> JobResult {
         Some(JobKind::GitPush) => crate::service::gitpack::push_job(state, job).await,
         Some(JobKind::TelegramImport) => crate::service::telegram::import_job(state, job).await,
         Some(JobKind::TelegramExport) => crate::service::telegram::export_job(state, job).await,
+        Some(JobKind::WhatsappExport) => crate::service::whatsapp::build_job(state, job).await,
         None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
     }
 }
@@ -247,10 +250,11 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
         Ok(result) => {
             sqlx::query("UPDATE jobs SET status = 'done', finished_at = ?, result = ?, error = NULL WHERE id = ?")
                 .bind(t)
-                .bind(result.map(|r| r.to_string()))
+                .bind(result.as_ref().map(|r| r.to_string()))
                 .bind(&job.id)
                 .execute(db)
                 .await?;
+            note_publish(db, job, JobStatus::Done, result.as_ref(), None).await;
         }
         Err(JobError::Retry(msg)) if job.attempts < MAX_ATTEMPTS => {
             let backoff = BASE_BACKOFF_SECS << (job.attempts - 1).clamp(0, 10);
@@ -270,9 +274,19 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
                 .bind(&job.id)
                 .execute(db)
                 .await?;
+            note_publish(db, job, JobStatus::Failed, None, Some(&e.to_string())).await;
         }
     }
     Ok(())
+}
+
+/// A finished publish job updates the set's publish state
+/// ([`crate::service::publish::record_job`]); a failure to note it is
+/// logged, the job's own outcome stands.
+async fn note_publish(db: &SqlitePool, job: &JobRow, status: JobStatus, result: Option<&Value>, error: Option<&str>) {
+    if let Err(e) = crate::service::publish::record_job(db, job, status, result, error).await {
+        tracing::error!(job = %job.id, "recording the publish state: {e}");
+    }
 }
 
 /// Claim and run every runnable job now (tests and the CLI use this to drain

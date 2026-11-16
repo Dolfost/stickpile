@@ -179,6 +179,8 @@ pub enum JobKind {
     GitPush,
     TelegramImport,
     TelegramExport,
+    /// Build the WhatsApp sticker packs (`.wastickers`) of a set for download.
+    WhatsappExport,
 }
 
 /// Chat apps clients can target. `Generic` = browser chats and anything unknown.
@@ -858,6 +860,145 @@ pub struct TelegramExport {
     pub pack_name: Option<String>,
     /// Pack title; default set name.
     pub title: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Publishing to several platforms, WhatsApp packs
+// ---------------------------------------------------------------------------
+
+/// `POST /api/v1/sets/{id}/publish`: queue one export job per platform.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PublishRequest {
+    /// Platform ids ([`Publication::platform`]), e.g. `["telegram"]`.
+    /// Unknown or unconfigured ones fail the whole request (400).
+    pub platforms: Vec<String>,
+    /// Options per platform id, e.g. `{"telegram": {"pack_name": "cats",
+    /// "title": "Cats"}}` (Telegram's are [`TelegramExport`]). A platform
+    /// without an entry uses its defaults.
+    #[serde(default)]
+    pub options: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+/// The jobs [`PublishRequest`] queued, in the order of its `platforms`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PublishJobs {
+    pub jobs: Vec<Job>,
+}
+
+/// Where and how a set is published on one platform
+/// (`GET /api/v1/sets/{id}/publish`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Publication {
+    /// Stable id used in the API: `telegram`.
+    pub platform: String,
+    /// Name for people: `Telegram`.
+    pub name: String,
+    /// The platform is set up on this server; only configured platforms
+    /// can be published to.
+    pub configured: bool,
+    /// What the set is published as (Telegram: the pack name), if it is.
+    pub target: Option<String>,
+    /// Link to the published pack.
+    pub url: Option<String>,
+    /// When the last successful publish finished.
+    pub published_at: Option<i64>,
+    /// The last finished publish: `done` or `failed`.
+    pub last_status: Option<JobStatus>,
+    pub last_finished_at: Option<i64>,
+    /// Why the last publish failed.
+    pub last_error: Option<String>,
+    /// The result of the last successful publish (the job's `result`).
+    pub last_result: Option<serde_json::Value>,
+    /// A publish of this set to the platform that is queued or running.
+    pub job: Option<Job>,
+}
+
+/// An item left out of an export, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExportSkip {
+    pub item_id: String,
+    pub name: String,
+    pub reason: String,
+}
+
+/// One sticker of a WhatsApp pack.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WhatsappSticker {
+    pub item_id: String,
+    pub name: String,
+    /// File name inside the `.wastickers` archive (`01.webp`).
+    pub file: String,
+    /// 1 to 3 emoji (`🙂` when the item has none).
+    pub emojis: Vec<String>,
+    pub animated: bool,
+    pub size_bytes: u64,
+    /// What was changed to fit WhatsApp, e.g. an animation sent as a still.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// One WhatsApp sticker pack: a `.wastickers` file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WhatsappPack {
+    /// 1-based; packs are numbered in the order of the set.
+    pub number: u32,
+    /// `contents.json` identifier: `<slug>` or `<slug>-<number>`.
+    pub identifier: String,
+    /// Pack name (at most 128 characters).
+    pub title: String,
+    /// Publisher (at most 128 characters): the set owner's display name.
+    pub publisher: String,
+    /// WhatsApp packs are either all static or all animated.
+    pub animated: bool,
+    /// File name of the pack's `.wastickers`.
+    pub file: String,
+    /// Download path of the `.wastickers` alone.
+    pub url: String,
+    /// The tray icon inside the archive (96x96 PNG).
+    pub tray_file: String,
+    /// Changes whenever the pack's stickers or tray icon change
+    /// (`image_data_version` of `contents.json`).
+    pub image_data_version: String,
+    pub size_bytes: u64,
+    pub stickers: Vec<WhatsappSticker>,
+}
+
+/// A finished WhatsApp build of a set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WhatsappBuild {
+    pub built_at: i64,
+    /// The set's `version` when it was built.
+    pub set_version: u64,
+    /// File name of the download (a zip of every `.wastickers` plus
+    /// `contents.json`).
+    pub file: String,
+    /// Download path of that zip.
+    pub url: String,
+    pub size_bytes: u64,
+    pub packs: Vec<WhatsappPack>,
+    /// Items that could not become WhatsApp stickers.
+    pub skipped: Vec<ExportSkip>,
+}
+
+/// `GET /api/v1/sets/{id}/whatsapp`: the last build and whether it is
+/// still up to date.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WhatsappStatus {
+    /// The last finished build, if there is one.
+    pub build: Option<WhatsappBuild>,
+    /// The build matches the set as it is now (same items, order, emoji,
+    /// name and cover).
+    pub current: bool,
+    /// The caller's build of this set that is queued or running.
+    pub job: Option<Job>,
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@
 
 pub mod api;
 pub mod app;
+pub mod archive;
 pub mod assets;
 pub mod auth;
 pub mod authz;

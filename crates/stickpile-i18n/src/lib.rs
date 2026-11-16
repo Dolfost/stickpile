@@ -123,6 +123,7 @@ fn named_sources(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("web-account", include_str!("../catalog/uk/web-account.tsv")),
             ("web-admin", include_str!("../catalog/uk/web-admin.tsv")),
             ("web-problems", include_str!("../catalog/uk/web-problems.tsv")),
+            ("web-export", include_str!("../catalog/uk/web-export.tsv")),
             ("server", include_str!("../catalog/uk/server.tsv")),
             ("desktop", include_str!("../catalog/uk/desktop.tsv")),
             ("js", include_str!("../catalog/uk/js.tsv")),

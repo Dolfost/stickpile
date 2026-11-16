@@ -325,7 +325,8 @@ pub fn spawn_background(state: &AppState, cancel: &CancellationToken) -> Vec<Joi
 }
 
 /// Expired sessions and pairing codes, stale temp files, idle rate-limit
-/// keys, old finished jobs and tombstones, orphaned media.
+/// keys, old finished jobs and tombstones, orphaned media, git checkouts
+/// and exports of deleted sets.
 pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     let sessions = auth::session::purge_expired(&state.db).await?;
     let pairing_codes = auth::pairing::purge(&state.db).await?;
@@ -337,7 +338,8 @@ pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
     let tombstones = service::items::purge_tombstones(&state.db, 180 * 86_400).await?;
     let media = gc_orphan_media(state).await?;
     let checkouts = service::gitpack::gc_checkouts(state).await? as u64;
-    if sessions + pairing_codes + stale as u64 + jobs + tombstones + media + checkouts > 0 {
+    let exports = service::whatsapp::gc_exports(state).await? as u64;
+    if sessions + pairing_codes + stale as u64 + jobs + tombstones + media + checkouts + exports > 0 {
         tracing::info!(
             sessions,
             pairing_codes,
@@ -346,6 +348,7 @@ pub async fn cleanup_once(state: &AppState) -> AppResult<()> {
             tombstones,
             media,
             checkouts,
+            exports,
             "cleanup"
         );
     }

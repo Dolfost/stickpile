@@ -33,7 +33,7 @@ pub struct ServerConfig {
     pub listen: SocketAddr,
     /// Absolute external base URL, used in webhook and invitation links.
     pub public_url: String,
-    /// All state: `stickpile.db`, `media/`, `gitpacks/`, `tmp/`.
+    /// All state: `stickpile.db`, `media/`, `gitpacks/`, `exports/`, `tmp/`.
     pub data_dir: PathBuf,
     /// tracing filter, e.g. `info` or `stickpile_server=debug,info`.
     pub log: String,
@@ -405,6 +405,11 @@ impl Config {
     }
     pub fn tmp_dir(&self) -> PathBuf {
         self.server.data_dir.join("tmp")
+    }
+    /// Built downloads that are kept between requests (WhatsApp packs):
+    /// `exports/<set id>/...`. Everything here can be made again.
+    pub fn exports_dir(&self) -> PathBuf {
+        self.server.data_dir.join("exports")
     }
 }
 
