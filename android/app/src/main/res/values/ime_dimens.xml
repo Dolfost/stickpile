@@ -12,6 +12,8 @@
     <dimen name="ime_grid_padding">4dp</dimen>
     <!-- The picture in the details panel (ime_details.xml). -->
     <dimen name="ime_details_picture">128dp</dimen>
+    <!-- A set's cover in the list of sets (ime_pack.xml). -->
+    <dimen name="ime_pack_cover">40dp</dimen>
     <!-- The icons in a tile's stats line. -->
     <dimen name="ime_tile_icon">10dp</dimen>
     <!-- The outline around a tile's letters, both sides together (HaloTextView). -->

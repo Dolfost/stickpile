@@ -53,6 +53,9 @@ internal class ImeLibrary(private val app: StickpileApp) {
 
     suspend fun thumbnail(itemId: String): String = call { it.thumbnail(itemId) }
 
+    /** The file of a pack's cover; null for a pack without one. */
+    suspend fun packCover(packId: String): String? = call { it.packCover(packId) }
+
     /** The file to play for a moving item; [download] false: only a cached one. */
     suspend fun motion(itemId: String, download: Boolean): Motion? = call { it.motion(itemId, download) }
 

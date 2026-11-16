@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -193,7 +194,7 @@ fun LibraryScreen(
                         if (content.packs.isEmpty()) {
                             Empty(stringResource(R.string.library_empty_packs))
                         } else {
-                            PackList(content.packs, vm::openPack)
+                            PackList(content.packs, library, vm::openPack)
                         }
                     is LibraryContent.Failed -> Failed(content, vm::reload, onSignInAgain)
                 }
@@ -219,6 +220,9 @@ fun LibraryScreen(
         null -> Unit
     }
 }
+
+/** A pack's cover in the list of packs. */
+private val PACK_COVER = 48.dp
 
 private val LibraryTab.label: Int
     get() = when (this) {
@@ -298,11 +302,12 @@ private fun Failed(failed: LibraryContent.Failed, onRetry: () -> Unit, onSignInA
 }
 
 @Composable
-private fun PackList(packs: List<Pack>, onOpen: (Pack) -> Unit) {
+private fun PackList(packs: List<Pack>, library: StickpileLibraryInterface, onOpen: (Pack) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(packs.distinctBy { it.id }, key = { it.id }) { pack ->
             val count = pack.itemCount.toInt()
             ListItem(
+                leadingContent = { PackCover(library, pack.id, Modifier.size(PACK_COVER)) },
                 headlineContent = { Text(pack.name) },
                 supportingContent = {
                     Text(stringResource(R.string.library_pack_details, pack.owner, pluralStringResource(R.plurals.library_items, count, count)))

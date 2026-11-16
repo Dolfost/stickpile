@@ -191,6 +191,7 @@ class FakeLibrary : StickpileLibraryInterface {
     }
 
     override suspend fun thumbnail(itemId: String): String = unexpected("thumbnail")
+    override suspend fun packCover(packId: String): String? = null
 
     override suspend fun motion(itemId: String, download: Boolean): Motion? = unexpected("motion")
 

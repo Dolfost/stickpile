@@ -279,6 +279,26 @@ private const val MAX_MOTION_PX = 768
 
 private val PICTURE_PADDING = 6.dp
 
+/** A pack's cover, fitted, once it is loaded; nothing for a pack without one. */
+@Composable
+internal fun PackCover(library: StickpileLibraryInterface, packId: String, modifier: Modifier = Modifier) {
+    val resources = LocalResources.current
+    val drawable: Drawable? by produceState(Thumbnails.cachedCover(packId), packId) {
+        if (value == null) value = Thumbnails.loadCover(library, packId, resources)
+    }
+    Box(modifier) {
+        drawable?.let { d ->
+            val painter = remember(d) { DrawablePainter(d) }
+            Image(
+                painter = painter,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 /** The item's thumbnail, fitted, once it is loaded (from memory at once when it is there). */
 @Composable
 internal fun Thumbnail(library: StickpileLibraryInterface, itemId: String, modifier: Modifier = Modifier) {

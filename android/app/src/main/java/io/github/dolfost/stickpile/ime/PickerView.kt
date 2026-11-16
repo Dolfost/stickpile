@@ -132,7 +132,7 @@ internal class PickerView(
     private val thumbnails = ThumbnailLoader(scope, library, context.resources, largestCellPx())
     private val motions = MotionBinder(scope, library, context)
     private val itemsAdapter = ItemsAdapter(thumbnails, motions, look, ::onItemClick, ::onItemLongClick)
-    private val packsAdapter = PacksAdapter(::openPack)
+    private val packsAdapter = PacksAdapter(thumbnails, ::openPack)
     private val chipRows = ChipRows(
         root,
         onOffer = { setQuery(it.query) },

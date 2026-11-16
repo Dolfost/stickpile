@@ -48,22 +48,30 @@ internal class ThumbnailLoader(
     }
 
     /** Shows [itemId]'s thumbnail in [image]; the job to cancel when the view is reused, if any. */
-    fun bind(itemId: String, image: ImageView): Job? {
-        image.tag = itemId
-        cache.get(itemId)?.let {
+    fun bind(itemId: String, image: ImageView): Job? = bind(itemId, image) { library.thumbnail(itemId) }
+
+    /** Shows the cover of the pack [packId] in [image] (nothing for a pack without one); as [bind]. */
+    fun bindCover(packId: String, image: ImageView): Job? =
+        bind(COVER_KEY + packId, image) { library.packCover(packId) }
+
+    /** Shows the picture in the file [file] gives (null: none) in [image], cached under [key]. */
+    private fun bind(key: String, image: ImageView, file: suspend () -> String?): Job? {
+        image.tag = key
+        cache.get(key)?.let {
             show(image, it)
             return null
         }
         image.setImageDrawable(null)
         return scope.launch {
-            val drawable = try {
-                decode(library.thumbnail(itemId))
+            val path = try {
+                file()
             } catch (e: LibraryException) {
                 Log.d(TAG, "no thumbnail: ${e.kind}")
                 null
             } ?: return@launch
-            cache.put(itemId, drawable)
-            if (image.tag == itemId) show(image, drawable)
+            val drawable = decode(path) ?: return@launch
+            cache.put(key, drawable)
+            if (image.tag == key) show(image, drawable)
         }
     }
 
@@ -121,6 +129,9 @@ internal class ThumbnailLoader(
 
     private companion object {
         const val TAG = "stickpile.ime"
+
+        /** Before a pack's id, the key of its cover (item ids never start so). */
+        const val COVER_KEY = "pack:"
 
         /** An eighth of what the process may use, at most 32 MiB. */
         fun cacheBytes(): Int = minOf(Runtime.getRuntime().maxMemory() / 8, 32L * 1024 * 1024).toInt()

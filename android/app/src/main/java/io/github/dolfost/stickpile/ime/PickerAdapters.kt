@@ -198,12 +198,15 @@ internal class ItemsAdapter(
 
 /** The list of sets. */
 internal class PacksAdapter(
+    private val thumbnails: ThumbnailLoader,
     private val onClick: (Pack) -> Unit,
 ) : ListAdapter<Pack, PacksAdapter.Holder>(DIFF) {
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
+        val cover: ImageView = view.findViewById(R.id.ime_pack_cover)
         val name: TextView = view.findViewById(R.id.ime_pack_name)
         val summary: TextView = view.findViewById(R.id.ime_pack_summary)
+        var coverJob: Job? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -220,6 +223,14 @@ internal class PacksAdapter(
             resources.getQuantityString(R.plurals.ime_set_items, count, count),
         )
         holder.itemView.setOnClickListener { onClick(pack) }
+        holder.coverJob?.cancel()
+        holder.coverJob = thumbnails.bindCover(pack.id, holder.cover)
+    }
+
+    override fun onViewRecycled(holder: Holder) {
+        holder.coverJob?.cancel()
+        holder.coverJob = null
+        thumbnails.unbind(holder.cover)
     }
 
     private companion object {

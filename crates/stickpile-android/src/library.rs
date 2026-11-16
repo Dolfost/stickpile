@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
-use stickpile_api::{pairing, ItemSummary, PairRequest, TokenCreated, TokenRequest, UploadMeta, User, Variant};
+use stickpile_api::{
+    pairing, ItemSummary, PairRequest, SetSummary, TokenCreated, TokenRequest, UploadMeta, User, Variant,
+};
 use stickpile_core::session::{save_login, tailnet_login};
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
 use stickpile_quick::suggest;
@@ -117,6 +119,8 @@ struct Inner {
     /// the two never overlap.
     busy: tokio::sync::Mutex<()>,
     seen: Mutex<HashMap<String, ItemSummary>>,
+    /// The packs listed last (`packs`, `own_packs`) by id, for `pack_cover`.
+    packs_seen: Mutex<HashMap<String, SetSummary>>,
     /// The words of the suggestions and hints, and the cache generation
     /// they were read at.
     vocabulary: Mutex<Option<(u64, Arc<Words>)>>,
@@ -273,6 +277,7 @@ impl Inner {
         let session = Arc::new(session);
         *lock(&self.sync) = SyncStatus::new(&session);
         lock(&self.seen).clear();
+        lock(&self.packs_seen).clear();
         *lock(&self.vocabulary) = None;
         *self.session.write().unwrap_or_else(|e| e.into_inner()) = session;
     }
@@ -354,6 +359,20 @@ impl Inner {
     fn account_changed(&self) {
         *lock(&self.sync) = SyncStatus::new(&self.session());
         lock(&self.seen).clear();
+        lock(&self.packs_seen).clear();
+    }
+
+    /// Keep `packs`, listed at `generation`, by id for `pack_cover`.
+    fn remember_packs(&self, generation: u64, packs: &[SetSummary]) {
+        self.if_current(generation, || {
+            let mut seen = lock(&self.packs_seen);
+            if seen.len() + packs.len() > SEEN_MAX {
+                seen.clear();
+            }
+            for pack in packs {
+                seen.insert(pack.id.clone(), pack.clone());
+            }
+        });
     }
 
     /// Keep `items`, read at `generation`, by id for `thumbnail`, `prepare`
@@ -646,6 +665,7 @@ impl StickpileLibrary {
             session: RwLock::new(Arc::new(session)),
             busy: tokio::sync::Mutex::new(()),
             seen: Mutex::new(HashMap::new()),
+            packs_seen: Mutex::new(HashMap::new()),
             vocabulary: Mutex::new(None),
             generation: Mutex::new(Generation::default()),
         };
@@ -935,8 +955,9 @@ impl StickpileLibrary {
     /// `Unreachable` if there are none.
     pub async fn packs(&self) -> Result<PackList, LibraryError> {
         self.read(|inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let listing = session.packs().await?;
+            inner.remember_packs(generation, &listing.items);
             let me = match session.cache().me()? {
                 Some(user) => Some(user.username),
                 None if !listing.offline => session.client().me().await.ok().map(|u| u.username),
@@ -956,8 +977,9 @@ impl StickpileLibrary {
     /// empty ones; throws `Unreachable` if none are cached.
     pub async fn own_packs(&self) -> Result<PackList, LibraryError> {
         self.read(|inner| async move {
-            let session = inner.session();
+            let (generation, session) = inner.current();
             let listing = session.own_packs().await?;
+            inner.remember_packs(generation, &listing.items);
             Ok(PackList {
                 packs: listing
                     .items
@@ -1025,6 +1047,24 @@ impl StickpileLibrary {
     }
 
     // -- files ------------------------------------------------------------------
+
+    /// The path of a pack's cover (WebP, at most 256 px): the pack's own
+    /// cover image, else its cover item's thumbnail (the first item unless
+    /// one was chosen), downloaded into the cache unless it is there.
+    /// `None` for a pack with neither, and for one that `packs` or
+    /// `own_packs` has not listed since the account last changed. Offline:
+    /// the cached file; throws `Unreachable` if it is not cached (offline
+    /// lists name the first cached item by name as the cover).
+    pub async fn pack_cover(&self, pack_id: String) -> Result<Option<String>, LibraryError> {
+        self.write(move |inner| async move {
+            let session = inner.session();
+            let Some(pack) = lock(&inner.packs_seen).get(&pack_id).cloned() else {
+                return Ok(None);
+            };
+            Ok(session.pack_cover(&pack).await?.map(|p| path_string(&p)))
+        })
+        .await
+    }
 
     /// The path of the item's thumbnail (WebP, at most 256 px), downloaded
     /// into the cache unless it is there. Offline: the cached file; throws

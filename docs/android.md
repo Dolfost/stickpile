@@ -57,7 +57,8 @@ on stickers.example.org") and walks you through turning on the keyboard.
 ## The library
 
 The app's main screen: a search field, the tabs Recent, Liked, Packs and
-Most used, and a grid.
+Most used, and a grid. Packs lists each pack with its cover (its own
+cover image, else its first sticker).
 
 - **Search** as on the desktop ([search syntax](#search-syntax)); results
   follow the typing. Under the field the app offers what fits what is
@@ -123,8 +124,8 @@ Using it:
   there goes only into that search, never into the chat. Done, or a tap
   on the grid, puts the keys away. A sticker picked after you changed the
   search leaves the field's text alone.
-- Or browse the tabs Recent, Liked, Most used and Sets; the row of emojis
-  narrows the grid.
+- Or browse the tabs Recent, Liked, Most used and Sets (each set with its
+  cover); the row of emojis narrows the grid.
 - The shield is safe mode and the menu has the sticker info, the
   stickers in a row (a slider over the top of the grid, which follows it
   as it moves) and the search syntax, all shared with the app. GIFs and
@@ -339,6 +340,8 @@ object StickpileLibrary
 
   // files
   async fn thumbnail(item_id: String) throws -> String // path of the cached thumbnail
+  async fn pack_cover(pack_id: String) throws -> String?
+                                                       // path of a listed pack's cover
   async fn motion(item_id: String, download: Boolean) throws -> Motion?
                                                        // a moving item's rendition to play
   async fn prepare(item_id: String, editor_package: String,
@@ -506,6 +509,11 @@ Behaviour the signatures do not show:
   the cached rendition `prepare` would use, fetched unless cached; with
   `download` false nothing is fetched and null means not cached (the
   app's "Wi-Fi only"). Like the other file fetches it runs to its end.
+- **Pack covers.** `pack_cover` is the pack's own cover image, else its
+  cover item's thumbnail (the first item unless one was chosen; offline,
+  the first cached item by name), fetched unless cached. Null for a pack
+  with neither, and for one `packs` or `own_packs` has not listed since
+  the account last changed. Offline and not cached: `Unreachable`.
 - **An unreachable server.** Once a request finds the server unreachable
   (no connection, a timeout, or 502 to 504 from a proxy), the reads fail
   as `Unreachable` at once for five minutes instead of each waiting for

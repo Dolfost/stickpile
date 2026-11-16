@@ -44,21 +44,34 @@ object Thumbnails {
     /** The decoded thumbnail if it is in memory. */
     fun cached(itemId: String): Drawable? = memory.get(itemId)
 
+    /** The decoded cover of a pack if it is in memory. */
+    fun cachedCover(packId: String): Drawable? = memory.get(COVER_KEY + packId)
+
     /**
      * The item's thumbnail: from memory, else fetched by the library and
      * decoded off the main thread. Null when it cannot be had (offline and
      * not cached, or not decodable); the reason goes to the log.
      */
-    suspend fun load(library: StickpileLibraryInterface, itemId: String, resources: Resources): Drawable? {
-        memory.get(itemId)?.let { return it }
-        val path = catching { library.thumbnail(itemId) }.getOrElse { e ->
+    suspend fun load(library: StickpileLibraryInterface, itemId: String, resources: Resources): Drawable? =
+        load(itemId, resources) { library.thumbnail(itemId) }
+
+    /** A pack's cover, as [load]; also null for a pack without one. */
+    suspend fun loadCover(library: StickpileLibraryInterface, packId: String, resources: Resources): Drawable? =
+        load(COVER_KEY + packId, resources) { library.packCover(packId) }
+
+    private suspend fun load(key: String, resources: Resources, file: suspend () -> String?): Drawable? {
+        memory.get(key)?.let { return it }
+        val path = catching { file() }.getOrElse { e ->
             FailureLog.android.failed(Doing.LOADING, e)
             return null
-        }
+        } ?: return null
         val drawable = withContext(Dispatchers.IO) { catching { decode(path, resources) }.getOrNull() } ?: return null
-        memory.put(itemId, drawable)
+        memory.put(key, drawable)
         return drawable
     }
+
+    /** Before a pack's id, the key of its cover (item ids never start so). */
+    private const val COVER_KEY = "pack:"
 
     /** Forget every decoded thumbnail (the cache was cleared). */
     fun clear() {

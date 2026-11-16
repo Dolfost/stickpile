@@ -63,6 +63,7 @@ const CONTRACT: &[&str] = &[
     "fn StickpileLibrary.sync_state() -> SyncState",
     "fn StickpileLibrary.pending_usage() -> u32",
     "async fn StickpileLibrary.own_packs() -> PackList throws LibraryError",
+    "async fn StickpileLibrary.pack_cover(pack_id: String) -> String? throws LibraryError",
     "fn StickpileLibrary.cache_bytes() -> u64 throws LibraryError",
     "fn StickpileLibrary.clear_cache() -> u64 throws LibraryError",
     // records

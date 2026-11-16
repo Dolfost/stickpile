@@ -50,6 +50,41 @@ async fn thumbnails_are_cached_and_work_offline() {
 }
 
 #[tokio::test]
+async fn pack_covers_are_the_cover_image_else_the_cover_item() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    let cats = items[0].set_id.clone();
+    let memes = items[3].set_id.clone();
+    assert_eq!(lib.pack_cover(cats.clone()).await.unwrap(), None, "not listed yet");
+
+    server.state().set_cover_image(&memes, png_bytes(30, 30, 9));
+    let listed = lib.packs().await.unwrap();
+    assert!(listed.packs.iter().any(|p| p.id == memes));
+    let first = lib.pack_cover(cats.clone()).await.unwrap().expect("a cover");
+    assert_eq!(
+        first,
+        lib.thumbnail(items[0].id.clone()).await.unwrap(),
+        "the first item's thumbnail"
+    );
+    let own = lib.pack_cover(memes.clone()).await.unwrap().expect("a cover");
+    assert_ne!(own, lib.thumbnail(items[3].id.clone()).await.unwrap(), "its own image");
+    let img = image::load_from_memory(&std::fs::read(&own).unwrap()).unwrap();
+    assert_eq!((img.width(), img.height()), (30, 30));
+    assert_eq!(
+        lib.pack_cover(memes.clone()).await.unwrap().as_deref(),
+        Some(own.as_str()),
+        "cached"
+    );
+
+    // Offline the cached files answer.
+    lib.sync_now().await.unwrap();
+    server.stop();
+    assert!(lib.packs().await.unwrap().offline);
+    assert_eq!(lib.pack_cover(cats).await.unwrap(), Some(first));
+}
+
+#[tokio::test]
 async fn motion_plays_the_animated_original_and_waits_for_leave_to_download() {
     let (mut server, items) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
