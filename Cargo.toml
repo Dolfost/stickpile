@@ -8,6 +8,8 @@ members = [
     "crates/stickpile-media",
     "crates/stickpile-ai",
     "crates/stickpile-telegram",
+    "crates/stickpile-discord",
+    "crates/stickpile-signal",
     "crates/stickpile-gitpack",
     "crates/stickpile-server",
     "crates/stickpile-core",
