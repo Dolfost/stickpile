@@ -12,8 +12,8 @@
     <string name="whatsapp_downloading">Downloading pack %1$d of %2$d</string>
     <string name="whatsapp_offline">Cannot reach the server: these are the WhatsApp packs made before.</string>
     <plurals name="whatsapp_parts">
-        <item quantity="one">WhatsApp takes at most 30 stickers in a pack, so this one comes in %d pack. Add each one.</item>
-        <item quantity="other">WhatsApp takes at most 30 stickers in a pack, so this one comes in %d packs. Add each one.</item>
+        <item quantity="one">A WhatsApp pack holds at most 30 stickers, all still or all animated, so this one comes in %d pack. Add each one.</item>
+        <item quantity="other">A WhatsApp pack holds at most 30 stickers, all still or all animated, so this one comes in %d packs. Add each one.</item>
     </plurals>
     <plurals name="whatsapp_skipped">
         <item quantity="one">%d item could not be made into a WhatsApp sticker and was left out.</item>
