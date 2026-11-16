@@ -69,7 +69,10 @@ likes, quality) above the mode, the target and the toggles (`zi` hides
 them). While a filter such as `vibe:` is typed, its values are offered in
 a line under the search field; Tab puts one in (see
 [search suggestions](desktop.md#search-suggestions)), and F2 (fn+F2 on
-most keyboards) or `g/` shows the search syntax. The version next to `?`
+most keyboards), `g/` or the Syntax button next to the search field shows
+the search syntax, short keys (`v:` for `vibe:`, `t:` for `tag:`, ...)
+included. Inside an opened pack the field searches the pack's items with
+the whole syntax, as on Linux ([Packs](desktop.md#normal-mode)). The version next to `?`
 opens the project page. Control works as Ctrl too. The vim keys of Normal
 mode work with a Cyrillic layout active.
 

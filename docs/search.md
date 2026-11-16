@@ -21,11 +21,11 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | `word`, `"a phrase"` | Soft text term, ranked. A phrase (or a term with inner punctuation such as `big-chungus`) must match consecutive words. |
 | `-word`, `-"a phrase"` | No text field may contain this word or phrase (whole words, after normalisation). |
 | `e:😂`, `emoji:😂` | The item has this emoji. |
-| `set:cats`, `set:"my cats"` | Set slug or set name (case- and accent-insensitive). The set id also works. |
-| `vibe:tired` | Exact vibe label, case-insensitive. |
-| `tag:reaction` | Exact tag, case-insensitive. |
+| `set:cats`, `s:cats`, `set:"my cats"` | Set slug or set name (case- and accent-insensitive). The set id also works. |
+| `vibe:tired`, `v:tired` | Exact vibe label, case-insensitive. |
+| `tag:reaction`, `t:reaction` | Exact tag, case-insensitive. |
 | `type:gif` | `still`/`image`, `animated`/`animation`, `video`, or a format: `png jpeg jpg webp gif mp4 webm`. |
-| `by:alice`, `user:alice` | Owner username, case-insensitive. |
+| `by:alice`, `b:alice`, `user:alice` | Owner username, case-insensitive. |
 | `is:mine`, `is:liked`, `is:public` | Own items, items you liked, items in public sets. |
 | `q>70`, `likes>=2`, `copies<5` | Comparisons with `> >= < <= =`. Several are ANDed: `q>=50 q<90`. Items without a quality score never pass a `q` filter. |
 | `sort:relevance` (default), `sort:recent`/`new`, `sort:likes`, `sort:copies`/`used`/`popular`, `sort:quality` | Result order. |
@@ -36,6 +36,11 @@ Rules:
 - A leading `-` negates any filter (`-tag:nsfw`, `-e:😂`, `-is:mine`). Every
   negation must hold.
 - Different filters are ANDed.
+- Keys are case-insensitive. `e:`, `s:`, `v:`, `t:` and `b:` are the
+  one-letter forms of `emoji:`, `set:`, `vibe:`, `tag:` and `by:`
+  (`stickpile_api::query::Key`): `-v:tired`, `t:"two words"` and the
+  suggestions work as with the long keys. The normalised query
+  (`Query`'s `Display`) writes the long keys, and `e:` for emojis.
 - Unknown `key:value` tokens are plain text.
 
 Examples:
@@ -53,6 +58,7 @@ Examples:
 | `set:cats likes>=3 sort:likes` | The cats set, items with at least 3 likes, most liked first ("hide below N likes"). |
 | `is:liked sort:recent` | Your likes, newest first. |
 | `vibe:tired -is:mine` | Tired items from other users' public sets. |
+| `v:tired t:reaction -t:nsfw` | The same as `vibe:tired tag:reaction -tag:nsfw`. |
 
 ## Visibility
 
@@ -241,6 +247,30 @@ similarity and AI related terms do not. Vibe-synonym expansion works offline
 if the client ships the vibe vocabulary. When the server is reachable,
 clients use `GET /api/v1/search` (`stickpile_api::routes::SEARCH`), which
 adds the vector side.
+
+## Inside a pack
+
+With a pack open, the clients search its items by themselves, online and
+offline alike: the desktop popup (GTK and macOS) in the field of an opened
+pack, the Android app with a pack open and the keyboard with a set open
+(`StickpileLibrary::pack_search`). `stickpile_quick::within` puts the
+pack's items (as the client loaded them for the pack) into an `Index` of
+their own and searches it with the whole syntax:
+
+- Every filter works as above. `is:public` follows the pack's visibility,
+  `is:mine` compares the owner with the viewer's username (from the
+  cache), `is:liked` uses the likes the client knows.
+- The pack's name and slug are not indexed as words (every item has
+  them, so `cats` would find the whole Cats pack); `set:` compares them
+  (and the pack's id) itself.
+- Words are ranked as above. As the pack's old substring filter did, a
+  word also finds the items with it anywhere in the name, a keyword, an
+  emoji or a tag (`c`, `at` while `cat` is typed); those come after the
+  ranked ones, in pack order.
+- Filters alone keep the pack's order; `sort:` other than relevance sorts
+  as above.
+- No embeddings and no expansions: image similarity and vibe synonyms
+  are left out, as offline.
 
 ## Limits and performance
 

@@ -36,7 +36,7 @@ fn more_url(q: &str, offset: usize) -> String {
 }
 
 pub fn cheat_sheet() -> Markup {
-    let rows: [(&str, &str); 12] = [
+    let rows: [(&str, &str); 13] = [
         (
             "cat \"big chungus\"",
             t("words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)"),
@@ -51,6 +51,7 @@ pub fn cheat_sheet() -> Markup {
             t("still, animated, video, or a format: png jpeg webp gif mp4 webm"),
         ),
         ("by:alice", t("owner")),
+        ("v: t: s: b: e:", t("short for vibe: tag: set: by: emoji:")),
         ("is:mine  is:liked  is:public", t("your items, your likes, public sets")),
         ("q>70", t("quality score (also >= < <= =)")),
         ("likes>=2  copies<5", t("like and copy counts")),

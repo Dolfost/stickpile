@@ -175,7 +175,8 @@ From top to bottom the window has the tab row (click a tab, or press its
 number; on the right the client's version, which opens the project page on
 GitHub, and `?`, the key help), a header with the title ("Packs / Cats"
 inside a pack, with a back arrow), the text field on Search and Packs
-(an item count on the other grids), the line of
+(an item count on the other grids) with a Syntax button next to it where
+it searches (Search, and inside a pack), the line of
 [suggestions](#search-suggestions) while a filter is typed, the grid or
 page, and the footer. Its first line has the selected item's stats: name,
 pack, format and size, how often it was copied, likes and quality ("cat ·
@@ -209,10 +210,11 @@ Pack covers on the pack list are not filtered.
 ### Search suggestions
 
 While a filter is typed in the search field (`vibe:`, `tag:`, `-tag:`,
-`set:`, `by:`, `type:`, `is:`, `sort:`), a line under the field offers its
+`set:`, `by:`, `type:`, `is:`, `sort:`, or the short `v:`, `t:`, `s:`,
+`b:`), a line under the field offers its
 values: the vibes, tags, packs and owners of the items you can see (from
 the offline cache), most used first, and the fixed words of `type:`, `is:`
-and `sort:`. They match what is typed so far: its start first, then
+and `sort:`. Inside a pack the pack's own values come first. They match what is typed so far: its start first, then
 anywhere in the value, then with a typo or two forgiven, so `vibe:sarcstic`
 and `vibe:sacr` still offer `sarcastic`. The line pushes the grid down
 instead of covering it, and goes away with the space after the value.
@@ -224,8 +226,10 @@ value into the field, and pressing it again goes on to the next one
 (Shift+Tab: the previous one); a click on a value puts it in and finishes
 the filter. Without a filter being typed, Tab switches tabs as before.
 
-F2 (or `g/` in Normal mode) shows the whole search syntax over the popup,
-as `?` shows the keys.
+F2 (or `g/` in Normal mode, or the Syntax button next to the search
+field) shows the whole search syntax over the popup, as `?` shows the
+keys. It lists the short keys: `v:` is `vibe:`, `t:` is `tag:`, `s:` is
+`set:`, `b:` is `by:` and `e:` is `emoji:` ([search.md](search.md#query-syntax)).
 
 ## Keys
 
@@ -249,7 +253,7 @@ popup.
 
 | Key | Action |
 |---|---|
-| typing | search (after a 120 ms pause; an empty query shows recently used items). On Packs: filter the packs by name, or inside a pack its items by name, keyword or emoji |
+| typing | search (after a 120 ms pause; an empty query shows recently used items). On Packs: filter the packs by name, or inside a pack search its items with the whole search syntax |
 | Tab / Shift+Tab | while a filter is typed (`vibe:sa`): put in the next / previous [suggested value](#search-suggestions); otherwise the next / previous tab |
 | arrow keys | move in the grid |
 | Home / End | first / last item |
@@ -295,7 +299,14 @@ nothing.
 
 **Packs.** The Packs tab lists your packs. Enter, or `o` in Normal mode,
 opens the selected one: its items fill the grid, the header reads
-"Packs / <name>", and the text field filters the items. `-`, Backspace or
+"Packs / <name>", and the text field searches the pack's items with the
+whole search syntax: `v:tired`, `type:gif`, `-t:nsfw`, `is:liked`, `q>70`,
+`sort:copies`, and words as in the search (typos forgiven; a word also
+finds the items with it anywhere in the name, a keyword, an emoji or a
+tag). Filters alone keep the pack's order. This runs in the popup, over
+the items the pack showed, so it works offline too
+([search.md](search.md#inside-a-pack)); clearing the field shows the
+whole pack again. `-`, Backspace or
 Escape in Normal mode go back to the list, with the pack you came from
 selected and the list filter as it was.
 
@@ -335,7 +346,9 @@ Mouse: hovering selects, a click copies (in the pack list: opens the
 pack), and dragging an item drops the file itself into the target (useful
 for Telegram stickers and when an app ignores pasted file references).
 The search syntax of the server works in
-the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`.
+the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`, and the
+short keys `v:tired`, `t:reaction`, `s:cats`, `b:alice`
+([search.md](search.md#query-syntax)).
 
 The footer shows the selected item's stats (see above), the target app and
 how it was chosen (`auto: <window class>`, `default`, `chosen`), the
