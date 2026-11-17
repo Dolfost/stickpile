@@ -1,0 +1,1 @@
+Search by the words in a picture: the server reads a sticker's text (OCR) when it is uploaded, and text: or x: searches it. e:skull finds stickers by an emoji's English name, and e: offers your emojis with their names. The text shows in a sticker's details and, when you turn it on, on the tiles. Search suggestions now appear on the first opening too.
