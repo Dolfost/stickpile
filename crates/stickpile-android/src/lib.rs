@@ -24,6 +24,7 @@
 //! |---|---|
 //! | `NotLoggedIn` (a 401 without a token) | `NotSignedIn` |
 //! | `Offline` (no connection, timeout, a proxy's 502/503/504) | `Unreachable` |
+//! | `NotOnDevice` (the server unreachable, the file not on this phone) | `NotOnDevice` |
 //! | `Api` 401 | `Unauthorized`; `InvalidInput { field: "totp" }` for `totp_required` in `login_password` |
 //! | `Api` 404 | `NotFound` |
 //! | `Api` 429 | `RateLimited` |
@@ -50,6 +51,7 @@ mod error;
 mod hints;
 mod library;
 mod motion;
+mod offline;
 pub mod types;
 
 pub use error::{LibraryError, LibraryErrorKind};

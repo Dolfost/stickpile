@@ -11,10 +11,12 @@ use std::time::{Duration, Instant};
 use stickpile_api::{
     pairing, ItemSummary, PairRequest, SetSummary, TokenCreated, TokenRequest, UploadMeta, User, Variant,
 };
+use stickpile_core::offline::OfflineControl;
 use stickpile_core::session::{save_login, tailnet_login};
 use stickpile_core::{settings, token, ApiClient, ClientConfig, CoreError, Session, SyncPolicy};
 use stickpile_quick::suggest::{self, Vocabulary};
 use stickpile_quick::within::Within;
+use tokio::sync::watch;
 
 use crate::hints::{self, Words};
 use crate::motion;
@@ -62,7 +64,7 @@ pub struct StickpileLibrary {
     /// `Some` until the library is dropped.
     runtime: Option<tokio::runtime::Runtime>,
     handle: tokio::runtime::Handle,
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
 impl std::fmt::Debug for StickpileLibrary {
@@ -111,7 +113,7 @@ impl Dirs {
     }
 }
 
-struct Inner {
+pub(crate) struct Inner {
     dirs: Dirs,
     /// Replaced when the server changes.
     session: RwLock<Arc<Session>>,
@@ -126,6 +128,16 @@ struct Inner {
     /// they were read at.
     vocabulary: Mutex<Option<(u64, Arc<Words>)>>,
     generation: Mutex<Generation>,
+    /// The offline downloader's pause, cancel and status, one for every
+    /// run of this library (crate::offline).
+    pub(crate) offline: OfflineControl,
+    /// The offline options the app set (`set_offline_options`), for every
+    /// session: a new server's session gets them too.
+    pub(crate) offline_options: Mutex<Option<OfflineOptions>>,
+    /// Held while a run goes on: runs never overlap.
+    pub(crate) offline_one: tokio::sync::Mutex<()>,
+    /// A run goes on (`OfflineStatus.running`).
+    pub(crate) offline_running: watch::Sender<bool>,
 }
 
 /// Counts the account and server changes (logins, logouts, another
@@ -190,7 +202,7 @@ fn now_unix() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -206,6 +218,15 @@ fn to_u32(n: usize) -> u32 {
 /// the server is unreachable or failing.
 fn falls_back(e: &CoreError) -> bool {
     e.is_offline() || e.status().is_some_and(|s| s >= 500)
+}
+
+/// `item` with only the renditions whose files are on this phone
+/// (`Session::variant_on_device`): what `variant_for` may choose from with
+/// the server unreachable. Nothing is downloaded or touched.
+pub(crate) fn on_device(session: &Session, item: &ItemSummary) -> ItemSummary {
+    let mut here = item.clone();
+    here.variants.retain(|v| session.variant_on_device(item, v.variant));
+    here
 }
 
 /// A server URL as typed, checked and normalised as a pairing link's is
@@ -238,7 +259,7 @@ impl Drop for AbortOnDrop {
 }
 
 impl Inner {
-    fn session(&self) -> Arc<Session> {
+    pub(crate) fn session(&self) -> Arc<Session> {
         self.session.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -265,16 +286,22 @@ impl Inner {
 
     /// An account or server change begins; it ends when the result is
     /// dropped. Until then no read keeps what it learnt, and none that
-    /// began before keeps it after. The caller holds `busy`.
+    /// began before keeps it after. The caller holds `busy`. An offline
+    /// run going on ends: what it keeps belongs to the account before.
     fn begin_change(&self) -> Change<'_> {
         let mut g = lock(&self.generation);
         g.count += 1;
         g.changing = true;
+        self.offline.cancel();
         Change(self)
     }
 
-    /// Use `session` from now on (the server changed).
+    /// Use `session` from now on (the server changed), with the offline
+    /// options the app set.
     fn replace_session(&self, session: Session) {
+        if let Some(options) = lock(&self.offline_options).as_ref() {
+            session.set_offline_options(options.over(&session.config().offline));
+        }
         let session = Arc::new(session);
         *lock(&self.sync) = SyncStatus::new(&session);
         lock(&self.seen).clear();
@@ -405,7 +432,7 @@ impl Inner {
     }
 
     /// An item shown before, else the cached one; no request.
-    fn local_item(&self, session: &Session, id: &str) -> Result<Option<ItemSummary>, LibraryError> {
+    pub(crate) fn local_item(&self, session: &Session, id: &str) -> Result<Option<ItemSummary>, LibraryError> {
         if let Some(item) = lock(&self.seen).get(id) {
             return Ok(Some(item.clone()));
         }
@@ -574,6 +601,7 @@ impl Inner {
             pending_usage: to_u32(session.pending_usage()),
             due: status.policy.due(Instant::now()),
             cache_changed: false,
+            synced: false,
         }
     }
 
@@ -595,23 +623,27 @@ impl Inner {
         }
         result.map(|changed| SyncState {
             cache_changed: changed,
+            synced: true,
             ..self.sync_state()
         })
     }
 }
 
+/// The session for `config`. The app's grids play GIFs and videos
+/// (`motion`), so a sticker kept offline keeps the file they play too.
 async fn open_session(config: ClientConfig) -> Result<Session, LibraryError> {
     Ok(Session::open(config)
         .await?
         .with_client_name(crate::client_name())
-        .with_fail_fast(FAIL_FAST))
+        .with_fail_fast(FAIL_FAST)
+        .with_grid_playback(true))
 }
 
 impl StickpileLibrary {
     /// Run `f` on the runtime. When the caller stops waiting (the Kotlin
     /// coroutine was cancelled), the work is aborted: for calls that only
     /// read.
-    async fn read<T, F, Fut>(&self, f: F) -> Result<T, LibraryError>
+    pub(crate) async fn read<T, F, Fut>(&self, f: F) -> Result<T, LibraryError>
     where
         F: FnOnce(Arc<Inner>) -> Fut,
         Fut: Future<Output = Result<T, LibraryError>> + Send + 'static,
@@ -624,7 +656,7 @@ impl StickpileLibrary {
 
     /// Run `f` on the runtime to its end, even when the caller stops waiting:
     /// for calls that change something or write files.
-    async fn write<T, F, Fut>(&self, f: F) -> Result<T, LibraryError>
+    pub(crate) async fn write<T, F, Fut>(&self, f: F) -> Result<T, LibraryError>
     where
         F: FnOnce(Arc<Inner>) -> Fut,
         Fut: Future<Output = Result<T, LibraryError>> + Send + 'static,
@@ -695,6 +727,10 @@ impl StickpileLibrary {
             packs_seen: Mutex::new(HashMap::new()),
             vocabulary: Mutex::new(None),
             generation: Mutex::new(Generation::default()),
+            offline: OfflineControl::new(),
+            offline_options: Mutex::new(None),
+            offline_one: tokio::sync::Mutex::new(()),
+            offline_running: watch::channel(false).0,
         };
         tracing::info!(
             "stickpile {} (Android library), server {}",
@@ -1138,7 +1174,7 @@ impl StickpileLibrary {
     /// else an MP4 or WebM, fetched into the cache unless it is there. With
     /// `download` false nothing is downloaded: the cached file or `None`.
     /// `None` also for a still and for an item without a playable
-    /// rendition. Offline: the cached file; throws `Unreachable` if it is
+    /// rendition. Offline: the cached file; throws `NotOnDevice` if it is
     /// not cached. Runs to its end once started, like `prepare`.
     pub async fn motion(&self, item_id: String, download: bool) -> Result<Option<Motion>, LibraryError> {
         self.write(move |inner| async move {
@@ -1167,9 +1203,11 @@ impl StickpileLibrary {
     /// rendition for the chat app behind the package (the sticker rendition
     /// first when `sticker` is set and the app has stickers), never of a type
     /// the field did not list. The file is fetched into the cache and named
-    /// `<item name>.<extension>`; offline the cached file is used. Throws
-    /// `NothingFits` when no rendition fits the field, `Unreachable` when the
-    /// file is not cached and the server cannot be reached.
+    /// `<item name>.<extension>`; offline the cached file is used, and when
+    /// the best rendition is not on this phone, the best one the field
+    /// takes that is (as `available_offline` says). Throws `NothingFits`
+    /// when no rendition fits the field, `NotOnDevice` when none the field
+    /// takes is on this phone and the server cannot be reached.
     pub async fn prepare(
         &self,
         item_id: String,
@@ -1194,7 +1232,19 @@ impl StickpileLibrary {
                         ),
                     }
                 })?;
-            let path = session.fetch_variant(&item, choice.variant.variant).await?;
+            let (choice, path) = match session.fetch_variant(&item, choice.variant.variant).await {
+                Ok(path) => (choice, path),
+                Err(e) if e.is_not_on_device() => {
+                    // Offline: another rendition the field takes may be here.
+                    let here = on_device(&session, &item);
+                    let Some(other) = stickpile_core::variant_for(&here, target, &accepted_mime_types, sticker) else {
+                        return Err(e.into());
+                    };
+                    let path = session.fetch_variant(&here, other.variant.variant).await?;
+                    (other, path)
+                }
+                Err(e) => return Err(e.into()),
+            };
             Ok(Prepared {
                 display_name: path
                     .file_name()
@@ -1365,17 +1415,12 @@ impl StickpileLibrary {
         to_u32(self.inner.session().pending_usage())
     }
 
-    /// Bytes of files in the offline cache: thumbnails and prepared
-    /// renditions (no network). The item list is not counted.
-    pub fn cache_bytes(&self) -> Result<u64, LibraryError> {
-        Ok(self.inner.session().cache().files_total_bytes()?)
-    }
-
-    /// Deletes every cached file (thumbnails and prepared renditions) and
-    /// returns the bytes freed. The item list stays, so search still works
-    /// offline; files are fetched again when needed.
-    pub fn clear_cache(&self) -> Result<u64, LibraryError> {
-        Ok(self.inner.session().cache().clear_files()?.freed_bytes)
+    /// "Clear cache": deletes the cached files that are not kept offline
+    /// (thumbnails and prepared renditions) and says what it freed and how
+    /// many kept files stay. The item list stays, so search still works
+    /// offline; files are fetched again when needed (no network).
+    pub fn clear_cache(&self) -> Result<CacheCleared, LibraryError> {
+        Ok(self.inner.session().clear_cache()?.into())
     }
 }
 

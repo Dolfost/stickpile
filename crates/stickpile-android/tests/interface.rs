@@ -65,8 +65,27 @@ const CONTRACT: &[&str] = &[
     "fn StickpileLibrary.pending_usage() -> u32",
     "async fn StickpileLibrary.own_packs() -> PackList throws LibraryError",
     "async fn StickpileLibrary.pack_cover(pack_id: String) -> String? throws LibraryError",
-    "fn StickpileLibrary.cache_bytes() -> u64 throws LibraryError",
-    "fn StickpileLibrary.clear_cache() -> u64 throws LibraryError",
+    "fn StickpileLibrary.clear_cache() -> CacheCleared throws LibraryError",
+    // offline
+    "fn StickpileLibrary.offline_options() -> OfflineOptions",
+    "fn StickpileLibrary.set_offline_options(options: OfflineOptions)",
+    "async fn StickpileLibrary.keep_offline(scope: OfflineScope) throws LibraryError",
+    "async fn StickpileLibrary.release_offline(scope: OfflineScope) throws LibraryError",
+    "fn StickpileLibrary.offline_keeps() -> List<OfflineScope> throws LibraryError",
+    "fn StickpileLibrary.offline_reasons(item_id: String) -> List<KeepReason> throws LibraryError",
+    "async fn StickpileLibrary.offline_estimate(scope: OfflineScope) -> OfflineEstimate throws LibraryError",
+    "async fn StickpileLibrary.offline_plan() -> OfflinePlan throws LibraryError",
+    "fn StickpileLibrary.offline_usage() -> OfflineUsage throws LibraryError",
+    "fn StickpileLibrary.remove_kept_files() -> CacheCleared throws LibraryError",
+    "fn StickpileLibrary.available_offline(item_ids: List<String>, editor_package: String, \
+     accepted_mime_types: List<String>, sticker: Boolean) -> List<Boolean>",
+    "fn StickpileLibrary.server_unreachable() -> Boolean",
+    "async fn StickpileLibrary.offline_run() -> OfflineOutcome throws LibraryError",
+    "fn StickpileLibrary.offline_status() -> OfflineStatus",
+    "async fn StickpileLibrary.offline_status_change(seen: OfflineStatus?) -> OfflineStatus throws LibraryError",
+    "fn StickpileLibrary.pause_offline()",
+    "fn StickpileLibrary.resume_offline()",
+    "fn StickpileLibrary.cancel_offline()",
     // records
     "record LibraryDirs { config_file: String, cache_dir: String, token_file: String }",
     "record Account { username: String, display_name: String?, server_url: String, auth: AuthKind, is_admin: Boolean }",
@@ -86,7 +105,25 @@ const CONTRACT: &[&str] = &[
     "record UploadFile { path: String, name: String?, keywords: List<String>, emojis: List<String>, \
      text: String? }",
     "record SyncState { last_sync: i64?, last_error: LibraryErrorKind?, pending_usage: u32, due: Boolean, \
-     cache_changed: Boolean }",
+     cache_changed: Boolean, synced: Boolean }",
+    "record OfflineOptions { sticker_renditions: Boolean, stills: Boolean, animations: Boolean, videos: Boolean, \
+     max_file_mb: u64, max_mb: u64, auto_thumbnails: Boolean, auto_used: Boolean, auto_used_count: u32, \
+     auto_liked: Boolean, auto_own_packs: Boolean, mobile_data: Boolean }",
+    "record OfflineTotals { files: u64, bytes: u64, present_files: u64, present_bytes: u64 }",
+    "record OfflineSkips { kind_off: u64, too_large: u64, not_cached: u64, no_rendition: u64 }",
+    "record OfflinePartTotals { part: OfflinePart, name: String?, items: u64, totals: OfflineTotals }",
+    "record OfflinePlan { totals: OfflineTotals, items: u64, skipped: OfflineSkips, failed: u64, budget: u64?, \
+     over_budget: Boolean, parts: List<OfflinePartTotals> }",
+    "record OfflineEstimate { totals: OfflineTotals, items: u64, skipped: OfflineSkips, kept_bytes_after: u64, \
+     budget: u64?, fits: Boolean }",
+    "record OfflineUsage { kept_files: u64, kept_bytes: u64, other_files: u64, other_bytes: u64, budget: u64? }",
+    "record CacheCleared { removed_files: u64, freed_bytes: u64, kept_files: u64, kept_bytes: u64 }",
+    "record OfflinePartProgress { part: OfflinePart, name: String?, files_done: u64, files_total: u64, \
+     bytes_done: u64, bytes_total: u64 }",
+    "record OfflineStatus { state: OfflineState, files_done: u64, files_total: u64, bytes_done: u64, \
+     bytes_total: u64, skipped: u64, failed: u64, parts: List<OfflinePartProgress>, message: String?, \
+     running: Boolean, paused: Boolean }",
+    "record OfflineOutcome { end: OfflineEnd, complete: Boolean, status: OfflineStatus }",
     // enums
     "enum AuthKind { Token, Tailnet }",
     "enum Target { Telegram, Discord, Signal, Whatsapp, Slack, Generic }",
@@ -95,12 +132,18 @@ const CONTRACT: &[&str] = &[
     "enum HintKind { Value, Filter, Key }",
     "enum MotionKind { Picture, Video }",
     "enum LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited, NothingFits, \
-     InvalidInput, Server, Io, Other }",
+     InvalidInput, Server, Io, Other, NotOnDevice }",
+    "enum OfflineScope { Sticker { item_id: String }, Pack { pack_id: String }, Library }",
+    "enum KeepReason { Sticker, Pack, Library, Used, Liked, OwnPack }",
+    "enum OfflinePart { Thumbnails, Kept { scope: OfflineScope }, Used, Liked, OwnPacks }",
+    "enum OfflineState { Idle, Downloading, Paused, WaitingForNetwork, LimitReached, DiskFull }",
+    "enum OfflineEnd { Complete, Cancelled, WaitingForNetwork, LimitReached, DiskFull, Unauthorized }",
     // the error
     "error LibraryError { NotSignedIn { detail: String }, Unauthorized { detail: String }, \
      Unreachable { detail: String }, NotFound { detail: String }, RateLimited { detail: String }, \
      NothingFits { detail: String }, InvalidInput { field: String, detail: String }, \
-     Server { status: u16, detail: String }, Io { detail: String }, Other { detail: String } }",
+     Server { status: u16, detail: String }, Io { detail: String }, Other { detail: String }, \
+     NotOnDevice { detail: String } }",
 ];
 
 fn cdylib() -> PathBuf {
@@ -280,4 +323,47 @@ fn the_library_exports_the_contract() {
             .collect::<Vec<_>>()
             .join("\n"),
     );
+}
+
+/// The defaults Kotlin's `OfflineOptions()` takes (the record's
+/// `#[uniffi(default = ...)]`) are the core's (`[offline]`), field by field.
+#[test]
+fn the_offline_options_default_to_the_cores() {
+    use uniffi_meta::{DefaultValueMetadata, LiteralMetadata};
+    let record = metadata()
+        .into_iter()
+        .find_map(|m| match m {
+            Metadata::Record(r) if r.name == "OfflineOptions" => Some(r),
+            _ => None,
+        })
+        .expect("OfflineOptions");
+    let core = stickpile_android::OfflineOptions::default();
+    let want = [
+        ("sticker_renditions", core.sticker_renditions.to_string()),
+        ("stills", core.stills.to_string()),
+        ("animations", core.animations.to_string()),
+        ("videos", core.videos.to_string()),
+        ("max_file_mb", core.max_file_mb.to_string()),
+        ("max_mb", core.max_mb.to_string()),
+        ("auto_thumbnails", core.auto_thumbnails.to_string()),
+        ("auto_used", core.auto_used.to_string()),
+        ("auto_used_count", core.auto_used_count.to_string()),
+        ("auto_liked", core.auto_liked.to_string()),
+        ("auto_own_packs", core.auto_own_packs.to_string()),
+        ("mobile_data", core.mobile_data.to_string()),
+    ];
+    let got: Vec<(String, String)> = record
+        .fields
+        .iter()
+        .map(|f| {
+            let value = match &f.default {
+                Some(DefaultValueMetadata::Literal(LiteralMetadata::Boolean(b))) => b.to_string(),
+                Some(DefaultValueMetadata::Literal(LiteralMetadata::UInt(n, _, _))) => n.to_string(),
+                other => format!("{other:?}"),
+            };
+            (f.name.clone(), value)
+        })
+        .collect();
+    let want: Vec<(String, String)> = want.into_iter().map(|(n, v)| (n.to_string(), v)).collect();
+    assert_eq!(got, want);
 }

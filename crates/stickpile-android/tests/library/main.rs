@@ -4,6 +4,7 @@
 
 mod account;
 mod files;
+mod offline;
 mod reading;
 mod sync;
 mod writing;

@@ -1,6 +1,9 @@
 //! Which rendition of a moving item the grids play
-//! ([`crate::StickpileLibrary::motion`]). The thumbnail is a still of the
-//! first frame; to move, a tile needs a file Android can play on its own:
+//! ([`crate::StickpileLibrary::motion`]): the core's rule,
+//! [`stickpile_core::offline::played_rendition`] (moved there from here
+//! unchanged, so that keeping a sticker offline keeps what the grids play
+//! too). The thumbnail is a still of the first frame; to move, a tile needs
+//! a file Android can play on its own:
 //!
 //! - An animation plays as a picture (`ImageDecoder` animates a GIF or an
 //!   animated WebP, transparency kept): the original when it is a GIF or a
@@ -10,36 +13,32 @@
 //!   made when the original is a WebM or not plain H.264 (what browsers
 //!   play, and so does every Android), else the original.
 
-use stickpile_api::{ItemSummary, MediaKind, Variant, VariantInfo};
+use stickpile_api::{ItemSummary, VariantInfo};
+use stickpile_core::offline::{played_rendition, Playback};
 
 use crate::types::MotionKind;
+
+impl From<Playback> for MotionKind {
+    fn from(p: Playback) -> Self {
+        match p {
+            Playback::Picture => MotionKind::Picture,
+            Playback::Video => MotionKind::Video,
+        }
+    }
+}
 
 /// The rendition to play for `item` and how; `None` for a still, or a
 /// moving item without a playable rendition.
 pub fn choose(item: &ItemSummary) -> Option<(&VariantInfo, MotionKind)> {
-    let find = |v: Variant| item.variants.iter().find(|i| i.variant == v);
-    let picture = |i: &&VariantInfo| matches!(i.mime.as_str(), "image/gif" | "image/webp");
-    let video = |i: &&VariantInfo| matches!(i.mime.as_str(), "video/mp4" | "video/webm");
-    match item.kind {
-        MediaKind::Still => None,
-        MediaKind::Animation => [find(Variant::Original), find(Variant::DiscordGif)]
-            .into_iter()
-            .flatten()
-            .filter(picture)
-            .min_by_key(|i| i.size_bytes)
-            .map(|i| (i, MotionKind::Picture))
-            .or_else(|| find(Variant::Mp4).filter(video).map(|i| (i, MotionKind::Video))),
-        MediaKind::Video => find(Variant::Mp4)
-            .or_else(|| find(Variant::Original))
-            .filter(video)
-            .map(|i| (i, MotionKind::Video)),
-    }
+    played_rendition(item).map(|(info, playback)| (info, playback.into()))
 }
 
+/// The tests of the rule from before it moved, unchanged: the core's rule
+/// gives the same answers.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stickpile_api::MediaFormat;
+    use stickpile_api::{MediaFormat, MediaKind, Variant};
 
     fn info(variant: Variant, mime: &str, size_bytes: u64) -> VariantInfo {
         VariantInfo {

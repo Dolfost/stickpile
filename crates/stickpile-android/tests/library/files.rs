@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use stickpile_android::{LibraryErrorKind, MotionKind, Prepared, Target};
+use stickpile_android::{CacheCleared, LibraryErrorKind, MotionKind, OfflineOptions, OfflineUsage, Prepared, Target};
 use stickpile_api::Variant;
 
 use super::*;
@@ -272,11 +272,11 @@ async fn prepare_works_offline_once_cached() {
         .await
         .unwrap();
     assert_eq!(cached, first);
-    // Not cached.
+    // Not cached: said so, not as a network error.
     let missing = fresh
         .prepare(items[0].id.clone(), "com.discord".into(), mimes(&["image/png"]), false)
         .await;
-    assert_eq!(kind(missing), LibraryErrorKind::Unreachable);
+    assert_eq!(kind(missing), LibraryErrorKind::NotOnDevice);
 
     server.restart();
     let out = tempfile::tempdir().unwrap();
@@ -292,16 +292,40 @@ async fn the_cache_size_counts_files_and_clearing_keeps_the_items() {
     let (mut server, items) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
     let lib = signed_in(&server, dir.path());
-    assert_eq!(lib.cache_bytes().unwrap(), 0);
+    // Nothing kept: every thumbnail is an ordinary cached file.
+    lib.set_offline_options(OfflineOptions {
+        auto_thumbnails: false,
+        ..OfflineOptions::default()
+    });
+    assert_eq!(
+        lib.offline_usage().unwrap(),
+        OfflineUsage {
+            budget: Some(1024 * 1024 * 1024),
+            ..OfflineUsage::default()
+        }
+    );
     lib.sync_now().await.unwrap();
     let thumb = lib.thumbnail(items[0].id.clone()).await.unwrap();
-    let bytes = lib.cache_bytes().unwrap();
-    assert!(bytes > 0, "the thumbnail is counted");
+    let usage = lib.offline_usage().unwrap();
+    assert!(usage.other_bytes > 0, "the thumbnail is counted");
+    assert_eq!((usage.other_files, usage.kept_files, usage.kept_bytes), (1, 0, 0));
 
-    assert_eq!(lib.clear_cache().unwrap(), bytes);
-    assert_eq!(lib.cache_bytes().unwrap(), 0);
+    assert_eq!(
+        lib.clear_cache().unwrap(),
+        CacheCleared {
+            removed_files: 1,
+            freed_bytes: usage.other_bytes,
+            kept_files: 0,
+            kept_bytes: 0
+        }
+    );
+    assert_eq!(lib.offline_usage().unwrap().other_bytes, 0);
     assert!(!Path::new(&thumb).exists(), "the file is gone");
-    assert_eq!(lib.clear_cache().unwrap(), 0, "nothing left to clear");
+    assert_eq!(
+        lib.clear_cache().unwrap(),
+        CacheCleared::default(),
+        "nothing left to clear"
+    );
 
     // The item list stays: offline search still answers.
     server.stop();

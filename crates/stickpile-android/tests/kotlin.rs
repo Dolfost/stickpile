@@ -60,8 +60,26 @@ const METHODS: &[&str] = &[
     "suspend fun `ownPacks`(): PackList",
     "suspend fun `packCover`(`packId`: kotlin.String): kotlin.String?",
     // cache
-    "fun `cacheBytes`(): kotlin.ULong",
-    "fun `clearCache`(): kotlin.ULong",
+    "fun `clearCache`(): CacheCleared",
+    // offline
+    "fun `offlineOptions`(): OfflineOptions",
+    "fun `setOfflineOptions`(`options`: OfflineOptions)",
+    "suspend fun `keepOffline`(`scope`: OfflineScope)",
+    "suspend fun `releaseOffline`(`scope`: OfflineScope)",
+    "fun `offlineKeeps`(): List<OfflineScope>",
+    "fun `offlineReasons`(`itemId`: kotlin.String): List<KeepReason>",
+    "suspend fun `offlineEstimate`(`scope`: OfflineScope): OfflineEstimate",
+    "suspend fun `offlinePlan`(): OfflinePlan",
+    "fun `offlineUsage`(): OfflineUsage",
+    "fun `removeKeptFiles`(): CacheCleared",
+    "fun `availableOffline`(`itemIds`: List<kotlin.String>, `editorPackage`: kotlin.String, `acceptedMimeTypes`: List<kotlin.String>, `sticker`: kotlin.Boolean): List<kotlin.Boolean>",
+    "fun `serverUnreachable`(): kotlin.Boolean",
+    "suspend fun `offlineRun`(): OfflineOutcome",
+    "fun `offlineStatus`(): OfflineStatus",
+    "suspend fun `offlineStatusChange`(`seen`: OfflineStatus?): OfflineStatus",
+    "fun `pauseOffline`()",
+    "fun `resumeOffline`()",
+    "fun `cancelOffline`()",
 ];
 
 /// The methods that do not throw (`throws` is missing in the contract).
@@ -75,6 +93,14 @@ const NOT_THROWING: &[&str] = &[
     "pendingUsage",
     "hints",
     "itemUrl",
+    "offlineOptions",
+    "setOfflineOptions",
+    "availableOffline",
+    "serverUnreachable",
+    "offlineStatus",
+    "pauseOffline",
+    "resumeOffline",
+    "cancelOffline",
 ];
 
 /// Records with their fields in order, as `name: type`.
@@ -191,6 +217,148 @@ const RECORDS: &[(&str, &[&str])] = &[
             "pendingUsage: kotlin.UInt",
             "due: kotlin.Boolean",
             "cacheChanged: kotlin.Boolean",
+            "synced: kotlin.Boolean = false",
+        ],
+    ),
+    // `OfflineOptions()` is the core's defaults (tests/interface.rs).
+    (
+        "OfflineOptions",
+        &[
+            "stickerRenditions: kotlin.Boolean = true",
+            "stills: kotlin.Boolean = true",
+            "animations: kotlin.Boolean = true",
+            "videos: kotlin.Boolean = false",
+            "maxFileMb: kotlin.ULong = 0uL",
+            "maxMb: kotlin.ULong = 1024uL",
+            "autoThumbnails: kotlin.Boolean = true",
+            "autoUsed: kotlin.Boolean = false",
+            "autoUsedCount: kotlin.UInt = 200u",
+            "autoLiked: kotlin.Boolean = false",
+            "autoOwnPacks: kotlin.Boolean = false",
+            "mobileData: kotlin.Boolean = false",
+        ],
+    ),
+    (
+        "OfflineTotals",
+        &[
+            "files: kotlin.ULong",
+            "bytes: kotlin.ULong",
+            "presentFiles: kotlin.ULong",
+            "presentBytes: kotlin.ULong",
+        ],
+    ),
+    (
+        "OfflineSkips",
+        &[
+            "kindOff: kotlin.ULong",
+            "tooLarge: kotlin.ULong",
+            "notCached: kotlin.ULong",
+            "noRendition: kotlin.ULong",
+        ],
+    ),
+    (
+        "OfflinePartTotals",
+        &[
+            "part: OfflinePart",
+            "name: kotlin.String?",
+            "items: kotlin.ULong",
+            "totals: OfflineTotals",
+        ],
+    ),
+    (
+        "OfflinePlan",
+        &[
+            "totals: OfflineTotals",
+            "items: kotlin.ULong",
+            "skipped: OfflineSkips",
+            "failed: kotlin.ULong",
+            "budget: kotlin.ULong?",
+            "overBudget: kotlin.Boolean",
+            "parts: List<OfflinePartTotals>",
+        ],
+    ),
+    (
+        "OfflineEstimate",
+        &[
+            "totals: OfflineTotals",
+            "items: kotlin.ULong",
+            "skipped: OfflineSkips",
+            "keptBytesAfter: kotlin.ULong",
+            "budget: kotlin.ULong?",
+            "fits: kotlin.Boolean",
+        ],
+    ),
+    (
+        "OfflineUsage",
+        &[
+            "keptFiles: kotlin.ULong",
+            "keptBytes: kotlin.ULong",
+            "otherFiles: kotlin.ULong",
+            "otherBytes: kotlin.ULong",
+            "budget: kotlin.ULong?",
+        ],
+    ),
+    (
+        "CacheCleared",
+        &[
+            "removedFiles: kotlin.ULong",
+            "freedBytes: kotlin.ULong",
+            "keptFiles: kotlin.ULong",
+            "keptBytes: kotlin.ULong",
+        ],
+    ),
+    (
+        "OfflinePartProgress",
+        &[
+            "part: OfflinePart",
+            "name: kotlin.String?",
+            "filesDone: kotlin.ULong",
+            "filesTotal: kotlin.ULong",
+            "bytesDone: kotlin.ULong",
+            "bytesTotal: kotlin.ULong",
+        ],
+    ),
+    (
+        "OfflineStatus",
+        &[
+            "state: OfflineState",
+            "filesDone: kotlin.ULong",
+            "filesTotal: kotlin.ULong",
+            "bytesDone: kotlin.ULong",
+            "bytesTotal: kotlin.ULong",
+            "skipped: kotlin.ULong",
+            "failed: kotlin.ULong",
+            "parts: List<OfflinePartProgress>",
+            "message: kotlin.String?",
+            "running: kotlin.Boolean",
+            "paused: kotlin.Boolean",
+        ],
+    ),
+    (
+        "OfflineOutcome",
+        &["end: OfflineEnd", "complete: kotlin.Boolean", "status: OfflineStatus"],
+    ),
+];
+
+/// Enums whose variants carry data (Kotlin: sealed classes), each variant
+/// as declared.
+const SEALED: &[(&str, &[&str])] = &[
+    (
+        "OfflineScope",
+        &[
+            "data class Sticker(val `itemId`: kotlin.String) : OfflineScope()",
+            "data class Pack(val `packId`: kotlin.String) : OfflineScope()",
+            "object Library : OfflineScope()",
+        ],
+    ),
+    (
+        "OfflinePart",
+        &[
+            "object Thumbnails : OfflinePart()",
+            "data class Kept(val `scope`: io.github.dolfost.stickpile.rust.OfflineScope) : OfflinePart()",
+            "object Used : OfflinePart()",
+            "object Liked : OfflinePart()",
+            "object OwnPacks : OfflinePart()",
         ],
     ),
 ];
@@ -218,6 +386,33 @@ const ENUMS: &[(&str, &[&str])] = &[
             "SERVER",
             "IO",
             "OTHER",
+            "NOT_ON_DEVICE",
+        ],
+    ),
+    (
+        "KeepReason",
+        &["STICKER", "PACK", "LIBRARY", "USED", "LIKED", "OWN_PACK"],
+    ),
+    (
+        "OfflineState",
+        &[
+            "IDLE",
+            "DOWNLOADING",
+            "PAUSED",
+            "WAITING_FOR_NETWORK",
+            "LIMIT_REACHED",
+            "DISK_FULL",
+        ],
+    ),
+    (
+        "OfflineEnd",
+        &[
+            "COMPLETE",
+            "CANCELLED",
+            "WAITING_FOR_NETWORK",
+            "LIMIT_REACHED",
+            "DISK_FULL",
+            "UNAUTHORIZED",
         ],
     ),
 ];
@@ -234,6 +429,7 @@ const ERRORS: &[(&str, &[&str])] = &[
     ("Server", &["status: kotlin.UShort", "detail: kotlin.String"]),
     ("Io", &["detail: kotlin.String"]),
     ("Other", &["detail: kotlin.String"]),
+    ("NotOnDevice", &["detail: kotlin.String"]),
 ];
 
 /// The top-level functions besides `StickpileLibrary`.
@@ -325,7 +521,7 @@ fn the_kotlin_bindings_carry_the_contract() {
         .filter_map(|l| l.strip_prefix("import "))
         .filter_map(|l| l.trim().rsplit('.').next())
         .collect();
-    let exported = RECORDS.iter().chain(ENUMS).map(|(name, _)| *name).chain([
+    let exported = RECORDS.iter().chain(ENUMS).chain(SEALED).map(|(name, _)| *name).chain([
         "StickpileLibrary",
         "StickpileLibraryInterface",
         "LibraryException",
@@ -401,6 +597,19 @@ fn the_kotlin_bindings_carry_the_contract() {
     for (name, variants) in ENUMS {
         let want = squash(&format!("enum class {name} {{ {}; ", variants.join(", ")));
         assert!(squashed.contains(&want), "enum {name}: {want}");
+    }
+    for (name, variants) in SEALED {
+        let body = squashed
+            .split(&squash(&format!("sealed class {name} {{")))
+            .nth(1)
+            .unwrap_or_else(|| panic!("sealed class {name}"));
+        // Up to its converter: the variants are declared before it.
+        let body = body.split("public object FfiConverterType").next().unwrap_or_default();
+        let declared = body.matches(&squash(&format!(": {name}()"))).count();
+        assert_eq!(declared, variants.len(), "{name}'s variants");
+        for v in *variants {
+            assert!(body.contains(&squash(v)), "{name}: {v}");
+        }
     }
     assert!(squashed.contains(&squash("sealed class LibraryException: kotlin.Exception() {")));
     let variants = squashed.matches(&squash(": LibraryException() {")).count();

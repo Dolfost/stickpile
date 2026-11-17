@@ -2,6 +2,7 @@
 //! `stickpile-api` counterpart (no UniFFI derive goes on those).
 
 use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, User};
+use stickpile_core::offline;
 
 /// Where the library keeps its files: absolute paths inside the app's
 /// private storage.
@@ -389,4 +390,518 @@ pub struct SyncState {
     /// different now, so offers on screen are asked for again. False from
     /// `sync_state`, and when no sync was due.
     pub cache_changed: bool,
+    /// This call ran a sync, and it went through: the offline downloads
+    /// follow it. False from `sync_state`, and when no sync was due.
+    #[uniffi(default)]
+    pub synced: bool,
+}
+
+// -- keeping stickers offline (docs/offline.md) ------------------------------
+
+/// What can be kept on this phone (`StickpileLibrary.keep_offline`). The
+/// choice is stored in the offline cache, on this phone only.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum OfflineScope {
+    /// One sticker: always downloaded whole, whatever the per-kind options
+    /// say.
+    Sticker { item_id: String },
+    /// A pack: its stickers now, and those a sync adds later.
+    Pack { pack_id: String },
+    /// Everything the account can see, now and later.
+    Library,
+}
+
+impl From<OfflineScope> for offline::Scope {
+    fn from(s: OfflineScope) -> Self {
+        match s {
+            OfflineScope::Sticker { item_id } => offline::Scope::Item(item_id),
+            OfflineScope::Pack { pack_id } => offline::Scope::Set(pack_id),
+            OfflineScope::Library => offline::Scope::Library,
+        }
+    }
+}
+
+impl From<offline::Scope> for OfflineScope {
+    fn from(s: offline::Scope) -> Self {
+        match s {
+            offline::Scope::Item(item_id) => OfflineScope::Sticker { item_id },
+            offline::Scope::Set(pack_id) => OfflineScope::Pack { pack_id },
+            offline::Scope::Library => OfflineScope::Library,
+        }
+    }
+}
+
+/// Why a sticker is kept on this phone. Reasons combine: it stays until the
+/// last one is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum KeepReason {
+    /// Kept by itself ([`OfflineScope::Sticker`]).
+    Sticker,
+    /// Its pack is kept.
+    Pack,
+    /// The library is kept.
+    Library,
+    /// One of the stickers sent last from this phone (`auto_used`).
+    Used,
+    /// Liked by the account (`auto_liked`).
+    Liked,
+    /// In a pack the account owns (`auto_own_packs`).
+    OwnPack,
+}
+
+impl From<offline::Reason> for KeepReason {
+    fn from(r: offline::Reason) -> Self {
+        match r {
+            offline::Reason::Item => KeepReason::Sticker,
+            offline::Reason::Set => KeepReason::Pack,
+            offline::Reason::Library => KeepReason::Library,
+            offline::Reason::Used => KeepReason::Used,
+            offline::Reason::Liked => KeepReason::Liked,
+            offline::Reason::OwnPack => KeepReason::OwnPack,
+        }
+    }
+}
+
+/// What totals and progress are counted for: a scope the user keeps, or an
+/// automatic rule that is on.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum OfflinePart {
+    /// `auto_thumbnails`: every sticker's thumbnail.
+    Thumbnails,
+    Kept {
+        scope: OfflineScope,
+    },
+    /// `auto_used`.
+    Used,
+    /// `auto_liked`.
+    Liked,
+    /// `auto_own_packs`.
+    OwnPacks,
+}
+
+impl From<offline::PlanScope> for OfflinePart {
+    fn from(s: offline::PlanScope) -> Self {
+        match s {
+            offline::PlanScope::Thumbnails => OfflinePart::Thumbnails,
+            offline::PlanScope::Kept(scope) => OfflinePart::Kept { scope: scope.into() },
+            offline::PlanScope::Used => OfflinePart::Used,
+            offline::PlanScope::Liked => OfflinePart::Liked,
+            offline::PlanScope::OwnPacks => OfflinePart::OwnPacks,
+        }
+    }
+}
+
+/// Files and bytes wanted, and how much of it is on this phone. Sizes as
+/// the stickers' metadata says (an unknown size counts 0).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineTotals {
+    pub files: u64,
+    pub bytes: u64,
+    pub present_files: u64,
+    pub present_bytes: u64,
+}
+
+impl From<offline::Totals> for OfflineTotals {
+    fn from(t: offline::Totals) -> Self {
+        OfflineTotals {
+            files: t.files,
+            bytes: t.bytes,
+            present_files: t.present_files,
+            present_bytes: t.present_bytes,
+        }
+    }
+}
+
+/// What the options leave out, counted by reason: skipped, not failed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineSkips {
+    /// Stickers of a kind switched off (`stills`, `animations`, `videos`),
+    /// kept only with a pack, the library or an automatic rule.
+    pub kind_off: u64,
+    /// Files larger than `max_file_mb`.
+    pub too_large: u64,
+    /// Stickers kept by themselves that the offline cache does not hold
+    /// yet (a sync brings them).
+    pub not_cached: u64,
+    /// Stickers with no file a copy could use.
+    pub no_rendition: u64,
+}
+
+impl From<&[offline::Skipped]> for OfflineSkips {
+    fn from(skipped: &[offline::Skipped]) -> Self {
+        let mut out = OfflineSkips::default();
+        for s in skipped {
+            match s.reason {
+                offline::SkipReason::KindOff { .. } => out.kind_off += 1,
+                offline::SkipReason::TooLarge { .. } => out.too_large += 1,
+                offline::SkipReason::NotCached => out.not_cached += 1,
+                offline::SkipReason::NoRendition => out.no_rendition += 1,
+            }
+        }
+        out
+    }
+}
+
+/// The totals of one kept scope or automatic rule.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflinePartTotals {
+    pub part: OfflinePart,
+    /// The kept sticker's or pack's name, from the offline cache; `None`
+    /// for the library, the rules, and what the cache does not hold.
+    pub name: Option<String>,
+    /// Stickers it keeps (skipped ones left out).
+    pub items: u64,
+    pub totals: OfflineTotals,
+}
+
+/// What is kept on this phone and what that means in files
+/// (`StickpileLibrary.offline_plan`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflinePlan {
+    pub totals: OfflineTotals,
+    /// Stickers kept for at least one reason, skipped ones included.
+    pub items: u64,
+    pub skipped: OfflineSkips,
+    /// Wanted files whose download failed (the reasons are logged).
+    pub failed: u64,
+    /// `max_mb` in bytes; `None`: no limit.
+    pub budget: Option<u64>,
+    /// The files wanted are more than the budget allows.
+    pub over_budget: bool,
+    /// Per kept scope and automatic rule, in display order.
+    pub parts: Vec<OfflinePartTotals>,
+}
+
+impl From<offline::Plan> for OfflinePlan {
+    fn from(p: offline::Plan) -> Self {
+        OfflinePlan {
+            totals: p.totals.into(),
+            items: p.items,
+            skipped: p.skipped.as_slice().into(),
+            failed: p.failures.len() as u64,
+            budget: p.budget,
+            over_budget: p.over_budget(),
+            parts: p
+                .scopes
+                .into_iter()
+                .map(|s| OfflinePartTotals {
+                    part: s.scope.into(),
+                    name: s.name,
+                    items: s.items,
+                    totals: s.totals.into(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// What keeping a scope would take, shown before keeping a pack or the
+/// library is confirmed (`StickpileLibrary.offline_estimate`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineEstimate {
+    /// The scope's own files: how many, how large, how much of it is on
+    /// this phone already.
+    pub totals: OfflineTotals,
+    /// Stickers it would keep (skipped ones left out).
+    pub items: u64,
+    pub skipped: OfflineSkips,
+    /// Bytes every kept file would take with the scope kept too.
+    pub kept_bytes_after: u64,
+    /// `max_mb` in bytes; `None`: no limit.
+    pub budget: Option<u64>,
+    /// `kept_bytes_after` is within the budget.
+    pub fits: bool,
+}
+
+impl From<offline::Estimate> for OfflineEstimate {
+    fn from(e: offline::Estimate) -> Self {
+        OfflineEstimate {
+            fits: e.fits(),
+            totals: e.totals.into(),
+            items: e.items,
+            skipped: e.skipped.as_slice().into(),
+            kept_bytes_after: e.kept_bytes_after,
+            budget: e.budget,
+        }
+    }
+}
+
+/// The files on this phone: those kept offline, and the others (thumbnails
+/// and sent files the cache size limit governs).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineUsage {
+    pub kept_files: u64,
+    pub kept_bytes: u64,
+    pub other_files: u64,
+    pub other_bytes: u64,
+    /// `max_mb` in bytes; `None`: no limit.
+    pub budget: Option<u64>,
+}
+
+impl From<offline::OfflineUsage> for OfflineUsage {
+    fn from(u: offline::OfflineUsage) -> Self {
+        OfflineUsage {
+            kept_files: u.kept_files,
+            kept_bytes: u.kept_bytes,
+            other_files: u.other_files,
+            other_bytes: u.other_bytes,
+            budget: u.budget,
+        }
+    }
+}
+
+/// What clearing deleted, and the kept files that stay
+/// (`StickpileLibrary.clear_cache`, `remove_kept_files`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct CacheCleared {
+    pub removed_files: u64,
+    pub freed_bytes: u64,
+    /// Kept files left on this phone afterwards.
+    pub kept_files: u64,
+    pub kept_bytes: u64,
+}
+
+impl From<stickpile_core::cache::EvictReport> for CacheCleared {
+    fn from(r: stickpile_core::cache::EvictReport) -> Self {
+        CacheCleared {
+            removed_files: r.removed_files as u64,
+            freed_bytes: r.freed_bytes,
+            kept_files: r.kept_files as u64,
+            kept_bytes: r.kept_bytes,
+        }
+    }
+}
+
+/// What the offline downloader is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum OfflineState {
+    /// Not downloading: finished, cancelled, or not started.
+    Idle,
+    Downloading,
+    /// Paused (`pause_offline`).
+    Paused,
+    /// The server could not be reached; the next run after a sync goes on.
+    WaitingForNetwork,
+    /// The next file would go over `max_mb`; nothing was deleted.
+    LimitReached,
+    /// The phone's storage is full; nothing was deleted.
+    DiskFull,
+}
+
+impl From<offline::OfflineState> for OfflineState {
+    fn from(s: offline::OfflineState) -> Self {
+        match s {
+            offline::OfflineState::Idle => OfflineState::Idle,
+            offline::OfflineState::Downloading => OfflineState::Downloading,
+            offline::OfflineState::Paused => OfflineState::Paused,
+            offline::OfflineState::WaitingForNetwork => OfflineState::WaitingForNetwork,
+            offline::OfflineState::LimitReached => OfflineState::LimitReached,
+            offline::OfflineState::DiskFull => OfflineState::DiskFull,
+        }
+    }
+}
+
+/// The progress of one kept scope or automatic rule.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflinePartProgress {
+    pub part: OfflinePart,
+    pub name: Option<String>,
+    pub files_done: u64,
+    pub files_total: u64,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+/// Where the offline downloader stands (`StickpileLibrary.offline_status`).
+/// "Done" counts the wanted files on this phone, those there before the
+/// run included.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineStatus {
+    /// As the last run left it: `Downloading` stays after a run that was
+    /// stopped from outside (see `running`).
+    pub state: OfflineState,
+    pub files_done: u64,
+    pub files_total: u64,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    /// Stickers and files the options leave out.
+    pub skipped: u64,
+    /// Wanted files whose download failed.
+    pub failed: u64,
+    pub parts: Vec<OfflinePartProgress>,
+    /// What stopped or holds the run, in English, for logs.
+    pub message: Option<String>,
+    /// A run (`offline_run`) is going on in this process now.
+    pub running: bool,
+    /// Downloads are paused (`pause_offline`) until `resume_offline`.
+    pub paused: bool,
+}
+
+impl OfflineStatus {
+    pub(crate) fn new(s: &offline::OfflineStatus, running: bool, paused: bool) -> OfflineStatus {
+        OfflineStatus {
+            state: s.state.into(),
+            files_done: s.files_done,
+            files_total: s.files_total,
+            bytes_done: s.bytes_done,
+            bytes_total: s.bytes_total,
+            skipped: s.skipped,
+            failed: s.failed,
+            parts: s
+                .scopes
+                .iter()
+                .map(|p| OfflinePartProgress {
+                    part: p.scope.clone().into(),
+                    name: p.name.clone(),
+                    files_done: p.files_done,
+                    files_total: p.files_total,
+                    bytes_done: p.bytes_done,
+                    bytes_total: p.bytes_total,
+                })
+                .collect(),
+            message: s.message.clone(),
+            running,
+            paused,
+        }
+    }
+}
+
+/// How a run of the offline downloader ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum OfflineEnd {
+    /// Every file was tried: on this phone, or failed.
+    Complete,
+    /// Cancelled (`cancel_offline`, an account change, "Remove kept files").
+    Cancelled,
+    /// The server could not be reached.
+    WaitingForNetwork,
+    /// `max_mb` is reached.
+    LimitReached,
+    /// The phone's storage is full.
+    DiskFull,
+    /// The server refused the sign-in.
+    Unauthorized,
+}
+
+impl From<offline::RunEnd> for OfflineEnd {
+    fn from(e: offline::RunEnd) -> Self {
+        match e {
+            offline::RunEnd::Complete => OfflineEnd::Complete,
+            offline::RunEnd::Cancelled => OfflineEnd::Cancelled,
+            offline::RunEnd::WaitingForNetwork => OfflineEnd::WaitingForNetwork,
+            offline::RunEnd::LimitReached => OfflineEnd::LimitReached,
+            offline::RunEnd::DiskFull => OfflineEnd::DiskFull,
+            offline::RunEnd::Unauthorized => OfflineEnd::Unauthorized,
+        }
+    }
+}
+
+/// What a run did (`StickpileLibrary.offline_run`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineOutcome {
+    pub end: OfflineEnd,
+    /// Every wanted file is on this phone.
+    pub complete: bool,
+    /// The last status of the run.
+    pub status: OfflineStatus,
+}
+
+/// The options of keeping offline, which the app keeps in its settings
+/// and gives the library (`set_offline_options`). The defaults are the
+/// core's (`[offline]`, docs/offline.md); `tests/interface.rs` checks that
+/// they agree. The chat apps whose files are kept are not here: those of
+/// the config (none on Android), else this phone's default and those
+/// stickers were sent to from it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OfflineOptions {
+    /// Also keep the file sent as a sticker (Telegram's sticker WebP or
+    /// WebM).
+    #[uniffi(default = true)]
+    pub sticker_renditions: bool,
+    /// Download stills when keeping a pack, the library or by a rule. A
+    /// sticker kept by itself is always downloaded.
+    #[uniffi(default = true)]
+    pub stills: bool,
+    /// The same for animations.
+    #[uniffi(default = true)]
+    pub animations: bool,
+    /// The same for videos.
+    #[uniffi(default = false)]
+    pub videos: bool,
+    /// Skip a file larger than this many MiB when keeping a pack, the
+    /// library or by a rule (0: no limit).
+    #[uniffi(default = 0)]
+    pub max_file_mb: u64,
+    /// The most space kept files may take, in MiB (0: no limit).
+    #[uniffi(default = 1024)]
+    pub max_mb: u64,
+    /// Keep every sticker's thumbnail.
+    #[uniffi(default = true)]
+    pub auto_thumbnails: bool,
+    /// Keep the stickers sent last from this phone...
+    #[uniffi(default = false)]
+    pub auto_used: bool,
+    /// ...this many (1 to 2000).
+    #[uniffi(default = 200)]
+    pub auto_used_count: u32,
+    /// Keep the stickers the account liked.
+    #[uniffi(default = false)]
+    pub auto_liked: bool,
+    /// Keep the packs the account owns.
+    #[uniffi(default = false)]
+    pub auto_own_packs: bool,
+    /// Also download on metered networks (mobile data). The app decides
+    /// when the downloader runs with it; the library does not read it.
+    #[uniffi(default = false)]
+    pub mobile_data: bool,
+}
+
+impl Default for OfflineOptions {
+    /// The core's defaults.
+    fn default() -> Self {
+        OfflineOptions::from(&offline::OfflineOptions::default())
+    }
+}
+
+impl From<&offline::OfflineOptions> for OfflineOptions {
+    fn from(o: &offline::OfflineOptions) -> Self {
+        OfflineOptions {
+            sticker_renditions: o.sticker_renditions,
+            stills: o.stills,
+            animations: o.animations,
+            videos: o.videos,
+            max_file_mb: o.max_file_mb,
+            max_mb: o.max_mb,
+            auto_thumbnails: o.auto.thumbnails,
+            auto_used: o.auto.used,
+            auto_used_count: o.auto.used_count,
+            auto_liked: o.auto.liked,
+            auto_own_packs: o.auto.own_packs,
+            mobile_data: o.mobile_data,
+        }
+    }
+}
+
+impl OfflineOptions {
+    /// These options over `base` (the config's `[offline]`): its `targets`
+    /// stay; the used count is kept within 1 to 2000.
+    pub(crate) fn over(&self, base: &offline::OfflineOptions) -> offline::OfflineOptions {
+        offline::OfflineOptions {
+            targets: base.targets.clone(),
+            sticker_renditions: self.sticker_renditions,
+            stills: self.stills,
+            animations: self.animations,
+            videos: self.videos,
+            max_file_mb: self.max_file_mb,
+            max_mb: self.max_mb,
+            auto: offline::AutoKeepConfig {
+                thumbnails: self.auto_thumbnails,
+                used: self.auto_used,
+                used_count: self.auto_used_count.clamp(1, stickpile_core::config::AUTO_USED_MAX),
+                liked: self.auto_liked,
+                own_packs: self.auto_own_packs,
+            },
+            mobile_data: self.mobile_data,
+        }
+    }
 }

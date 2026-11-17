@@ -51,6 +51,12 @@ pub enum LibraryError {
     /// Anything else.
     #[error("{detail}")]
     Other { detail: String },
+    /// The server could not be reached and the file a call needs (a
+    /// rendition to insert, share or play) is not on this phone: the
+    /// sticker is not kept offline, or its file is still to be downloaded.
+    /// The app explains that instead of naming a network error.
+    #[error("not on this device: {detail}")]
+    NotOnDevice { detail: String },
 }
 
 /// The kind of a `LibraryError`, without its details
@@ -67,6 +73,7 @@ pub enum LibraryErrorKind {
     Server,
     Io,
     Other,
+    NotOnDevice,
 }
 
 impl LibraryError {
@@ -83,6 +90,7 @@ impl LibraryError {
             LibraryError::Server { .. } => LibraryErrorKind::Server,
             LibraryError::Io { .. } => LibraryErrorKind::Io,
             LibraryError::Other { .. } => LibraryErrorKind::Other,
+            LibraryError::NotOnDevice { .. } => LibraryErrorKind::NotOnDevice,
         }
     }
 
@@ -165,7 +173,8 @@ impl From<CoreError> for LibraryError {
         let detail = redact_urls(&e.to_string());
         match e {
             CoreError::NotLoggedIn => LibraryError::NotSignedIn { detail },
-            CoreError::Offline(_) | CoreError::NotOnDevice { .. } => LibraryError::Unreachable { detail },
+            CoreError::Offline(_) => LibraryError::Unreachable { detail },
+            CoreError::NotOnDevice { .. } => LibraryError::NotOnDevice { detail },
             CoreError::Api { status, .. } => match status {
                 401 => LibraryError::Unauthorized { detail },
                 404 => LibraryError::NotFound { detail },
@@ -228,6 +237,15 @@ mod tests {
         assert_eq!(kind(CoreError::Cache("x".into())), LibraryErrorKind::Io);
         assert_eq!(kind(std::io::Error::other("x").into()), LibraryErrorKind::Io);
         assert_eq!(kind(CoreError::Other("x".into())), LibraryErrorKind::Other);
+        assert_eq!(
+            kind(CoreError::NotOnDevice {
+                item: "cat".into(),
+                variant: stickpile_api::Variant::Original,
+                cause: "x".into()
+            }),
+            LibraryErrorKind::NotOnDevice,
+            "explained, not a network error"
+        );
         assert_eq!(
             LibraryError::from(api(503, "unavailable")),
             LibraryError::Server {
