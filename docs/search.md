@@ -21,6 +21,7 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | `word`, `"a phrase"` | Soft text term, ranked. A phrase (or a term with inner punctuation such as `big-chungus`) must match consecutive words. |
 | `-word`, `-"a phrase"` | No text field may contain this word or phrase (whole words, after normalisation). |
 | `e:😂`, `emoji:😂` | The item has this emoji. |
+| `e:skull`, `emoji:thumbs_up` | The item has an emoji this English name selects ([emoji names](#emoji-names)): `e:skull` is 💀, ☠️ and the others with a word starting with `skull` in their name or keywords. |
 | `set:cats`, `s:cats`, `set:"my cats"` | Set slug or set name (case- and accent-insensitive). The set id also works. |
 | `vibe:tired`, `v:tired` | Exact vibe label, case-insensitive. |
 | `tag:reaction`, `t:reaction` | Exact tag, case-insensitive. |
@@ -44,6 +45,21 @@ Rules:
   desktop popup and the Android app send them long
   (`stickpile_quick::suggest::resolve`), so a server older than the short
   keys reads them too.
+- An `e:` value made of letters (with `_` or `-` between words) is an
+  emoji name, anything else an emoji. `Query.emojis` keeps the values as
+  typed (the normalised query writes `e:skull`); `stickpile-search` turns a
+  name into the emojis it selects when it builds its filter. A name that
+  selects nothing finds nothing: it is not searched as text. A server
+  from before emoji names (0.7.0) compares the name as an emoji, so
+  `e:skull` finds nothing there.
+- While `e:` is typed, the suggestion line (`stickpile_quick::suggest`,
+  and the Android hints) offers the emojis of the viewer's items, most
+  used first, each with its English name (`Suggestions::labels`); while a
+  name is typed (`e:sk`), the emojis it selects, the viewer's own first,
+  then the others in the order of
+  [`emoji_names::by_name`](#emoji-names). Taking one puts the emoji into
+  the query (`e:💀`). `resolve` never rewrites an `e:` value: a name goes
+  to the server as typed, and the server forgives its typos itself.
 - Unknown `key:value` tokens are plain text.
 
 Examples:
@@ -58,6 +74,10 @@ Examples:
 | `😂` | Items with 😂 in their emojis (ranked first) or in their text. |
 | `laugh` | Also items tagged with 😂 or 🤣 (built-in emoji vocabulary). |
 | `e:👍` | 👍 in any skin tone. `e:👍🏽` matches only that tone. |
+| `e:skull` | Items with 💀 or ☠️, also 🩻 (x-ray: keyword skull) and 👲 (person with skullcap). Not an item that is only named "skull". |
+| `-e:skull` | Items with none of those. |
+| `e:sklul` | Items with 💀, ☠️ or 🩻: the whole word `skull` is one typo away (`skullcap` is not). |
+| `e:thumbs` | 👍 and 👎, in any skin tone. |
 | `set:cats likes>=3 sort:likes` | The cats set, items with at least 3 likes, most liked first ("hide below N likes"). |
 | `is:liked sort:recent` | Your likes, newest first. |
 | `vibe:tired -is:mine` | Tired items from other users' public sets. |
@@ -122,6 +142,44 @@ value match position by position. Each position may match by any kind, so
 `"big chun"` works while typing. A phrase's quality is that of its weakest
 position.
 
+### Emoji names
+
+An `e:` name selects emojis by their English names
+(`stickpile_search::emoji_names::by_name`). Case and accents are
+ignored; `_` and `-` separate words.
+
+- It selects every emoji with a word that starts with it, in its CLDR
+  short name or in one of its keywords: `e:skull` selects 💀 (skull), ☠️
+  (skull and crossbones), 🩻 (x-ray, keyword skull) and 👲 (person with
+  skullcap). Several words must follow each other in the name or in one
+  keyword, and the last may be cut short: `e:thumbs_u` is 👍.
+- When no word starts with it and it has 4 letters or more, whole words
+  one edit away (optimal string alignment distance 1) select instead:
+  `e:sklul` selects the emojis with the word `skull` (not `skullcap`).
+  One edit in all, also over several words.
+- An item passes when it has any of the selected emojis, compared as the
+  emoji filter compares, without variation selectors and skin tones
+  (`e:thumbs` finds 👍🏽); `-e:skull` leaves out items with any of them.
+
+The order of `by_name`, which the suggestion line uses: whole words before
+the start of one, a word of the name before one of a keyword, then the
+curated emojis of `emoji_names.rs` (the most used on stickers first), then
+Unicode's order. `emoji_names::short_name` gives the name an emoji is
+labelled with (`skull`), skin tones and variation selectors aside.
+
+The names come from one table, `crates/stickpile-search/src/emoji_names.tsv`
+(90 kB; 1,914 emojis): the emojis of Unicode `emoji-test.txt` 17.0 without
+skin-tone variants (hair-style variants included), their English CLDR 48.2
+short names and keywords, and the curated words of `emoji_names.rs`
+(`lol`, `sus`). `scripts/gen-emoji-data.py` writes it together with the web
+picker's `emoji.json`; a test fails when `emoji_names.rs` has a word the
+table lacks, so regenerate it after changing them. The table is compiled
+into the server and every client, so they all select the same emojis. It
+adds about 120 kB to a release binary (90 kB of data, 30 kB of code;
+measured on the x86_64 `stickpile` CLI) and is parsed on first use (about
+3 ms). The names are English only: the Ukrainian CLDR names and keywords
+would add about 212 kB of data (the names alone 60 kB) to every client.
+
 ## Ranking
 
 ### Lexical score
@@ -182,7 +240,8 @@ caller does. The server builds them from:
 The built-in emoji vocabulary (`src/emoji_names.rs`, about 170 common
 sticker emojis) is part of the index, not an expansion. With it, `cat`
 reaches items tagged 🐱 and `laugh` reaches 😂, labelled `emoji`. Exclusions
-(`-cat`) ignore it.
+(`-cat`) ignore it. `e:` names use the complete names table instead
+([emoji names](#emoji-names)), which has these words too.
 
 ### Vector score
 
@@ -245,11 +304,11 @@ Clients feed the same `Index` from their cache
 and public items, i.e. what search may return.
 Embeddings are not cached and no text encoder runs on the device, so
 offline search is lexical only: normalisation, squash, prefix, fuzzy,
-phrases, the emoji vocabulary and every filter work as on the server; image
-similarity and AI related terms do not. Vibe-synonym expansion works offline
-if the client ships the vibe vocabulary. When the server is reachable,
-clients use `GET /api/v1/search` (`stickpile_api::routes::SEARCH`), which
-adds the vector side.
+phrases, the emoji vocabulary, emoji names and every filter work as on the
+server; image similarity and AI related terms do not. Vibe-synonym
+expansion works offline if the client ships the vibe vocabulary. When the
+server is reachable, clients use `GET /api/v1/search`
+(`stickpile_api::routes::SEARCH`), which adds the vector side.
 
 The values the clients suggest while a `key:` filter is typed
 ([desktop.md](desktop.md#search-suggestions)) come from the same cache, so
@@ -307,7 +366,7 @@ embedding, and a vocabulary of about 25k words. Latency is the mean of 20
 runs.
 
 ```
-cd /data/stickpile && nix develop -c cargo test -p stickpile-search --release -- --ignored --nocapture perf
+cd /data/stickpile && nix develop -c cargo test -p stickpile-search --release -- --ignored --nocapture perf_synthetic
 ```
 
 | | 10k docs | 50k docs |
@@ -325,6 +384,13 @@ cd /data/stickpile && nix develop -c cargo test -p stickpile-search --release --
 | browse everything visible (18k at 50k) | 0.23 ms | 2.0 ms |
 | word + 512-dim embedding (vector scan) | 0.63 ms | 5.2 ms |
 | word + 3 expansions | 0.58 ms | 3.1 ms |
+| emoji name (`e:skull`, 1.7k hits at 50k) | 0.67 ms | 2.3 ms |
+| 1-letter emoji name (`e:s`, 747 emojis) | 0.65 ms | 2.6 ms |
+
+`perf_emoji_names`, run alone so that the names table is not loaded yet
+(`... --nocapture perf_emoji_names`): the first use parses the table in
+about 3 ms; then a name takes 0.2 to 0.3 ms, and 0.9 ms when no word
+starts with it (the typo pass); `short_name` under 1 us.
 
 The vector side is a linear scan over the visible, filtered documents. It is
 the most expensive part, and fine at this scale. If libraries grow well past
@@ -334,32 +400,6 @@ the most expensive part, and fine at this scale. If libraries grow well past
 
 Design note for the metadata round (branch `metadata`); the sections above
 are rewritten from it when the work lands, and this section then goes.
-
-**Emoji names (`e:`).** The value after `e:`/`emoji:` is an emoji (as
-before) or a *name*: a value made only of letters (Unicode alphabetic,
-plus `_` and `-`). A name selects every emoji with a name or keyword word
-that starts with it (`e:skull` selects 💀 and ☠️); when no word starts with
-it, words within one edit of it (values of 4 or more letters) select
-instead. A name that selects nothing matches nothing (no fallback to text).
-`Query.emojis` keeps the values as typed; `stickpile-search` expands names
-to emoji keys when it builds its filter, then compares keys as the emoji
-filter does today (skin tone and variation selectors ignored the same way),
-accepting an item with any of them; `-e:skull` excludes them all. The name
-data is one table embedded in `stickpile-search` (public API in
-`emoji_names`: the emojis for a name prefix, and the short name of an
-emoji for labels), so the server and every offline client agree.
-`suggest::resolve` never rewrites an emoji value: the typo forgiveness is
-in the expansion above, the same everywhere.
-
-**Emoji suggestions.** `Vocabulary` gains `emojis` (the emojis of the
-items, most used first; moved here from the Android `Words`). `Field::of`
-returns a new `Field::Emoji`. `e:` alone offers those emojis; letters
-narrow to emojis whose name matches, the viewer's own first, then others
-from the table. `Suggestions` (and the popup's `SuggestionLine`) gain
-`labels: Vec<String>` parallel to `words` (the emoji's short name, empty
-for other fields). `words` holds the glyph, so choosing an offer puts
-`e:<glyph>` into the query; `chosen()` is `None` for an emoji name (the
-search sends the name, which the server expands).
 
 **The text field.** `text` holds the words written in the picture
 (see [ai.md](ai.md#draft-ocr-and-the-text-field)). Plain query words match

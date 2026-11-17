@@ -343,7 +343,7 @@ pub fn short_name(emoji: &str) -> Option<&'static str> {
 ///   last may be cut short: `thumbs_u` selects 👍.
 /// - When that selects none and the name has 4 letters or more, words a
 ///   typo away select instead (a letter wrong, added or left out, or two
-///   swapped; one in all): `sklul` selects what `skull` does.
+///   swapped; one in all): `sklul` selects those with the word `skull`.
 ///
 /// Order: whole words before the start of one, a word of the name before
 /// one of a keyword; then the curated emojis (most used on stickers
