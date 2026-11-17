@@ -1030,6 +1030,7 @@ impl Cache {
             let Ok(entries) = std::fs::read_dir(self.abs(&dir)) else {
                 continue;
             };
+            let before = removed;
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
@@ -1047,7 +1048,9 @@ impl Cache {
                     removed += 1;
                 }
             }
-            if dir.starts_with("clip/") {
+            // A rendition's directory this left empty (only then: another
+            // process may have made one for a download just now).
+            if removed > before && dir.starts_with("clip/") {
                 let _ = std::fs::remove_dir(self.abs(&dir)); // only when empty
             }
         }
