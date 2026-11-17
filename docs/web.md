@@ -785,7 +785,13 @@ the versions. To regenerate it (for example after updating `flake.lock`, or
 after changing `emoji_names.rs`), run `python3 scripts/gen-emoji-data.py`:
 it builds `nixpkgs#unicode-emoji` and `nixpkgs#cldr-annotations` from the
 flake's nixpkgs (or takes `--emoji-test` and `--cldr` paths) and rewrites
-the file, one emoji per line.
+two files: `emoji.json`, and the names table of `e:skull` that the server
+and every client embed, `crates/stickpile-search/src/emoji_names.tsv`
+(1,914 emojis, one per line: the emoji, its English name and keywords,
+the slang included; the same Unicode notice in its header). The TSV stays
+in git as the source; `stickpile-search`'s `build.rs` deflates it into
+the binaries (about 33 kB instead of 90 kB) and the table is inflated on
+first use.
 
 ## Tests
 
