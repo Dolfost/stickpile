@@ -325,6 +325,10 @@ the same file in set memes"). It exits 1 if any file failed.
 `--text` gives the picture its text, the words written in it, as yours (one
 file only; a literal `\n` is a line break). Without it the server reads the
 words itself when it has a text reader ([ai.md](ai.md#ocr-and-the-text-field)).
+A server older than item texts (0.7.0) drops the text and keeps the file:
+the command then fails with "uploaded as ... without its text: the server
+is too old for item texts". A file already in the set keeps its own
+metadata, text included, on every server.
 
 ### `item`
 
@@ -338,7 +342,9 @@ stickpile item edit 6f3k... --name 'staring cat'
 `item show` prints the item's metadata; a value the server filled and nobody
 confirmed is marked `(AI)`, and the text keeps its lines. `item edit` changes
 the name or the text (at least one) and prints the item; what you give is
-yours ([api.md](api.md#items)). With `--json` both print the `Item`.
+yours ([api.md](api.md#items)). With `--json` both print the `Item`. On a
+server older than item texts (0.7.0) `--text` fails with "the server is
+too old for item texts" (a `--name` given with it is saved).
 
 ### `import`, `export`, `backup`
 

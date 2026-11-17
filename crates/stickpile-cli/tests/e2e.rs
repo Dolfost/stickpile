@@ -417,6 +417,73 @@ fn recheck_on_a_server_too_old_for_it() {
     }
 }
 
+/// A server older than item texts (0.7.0, here the mock told to ignore
+/// them) drops the text of an upload or a PATCH and answers as if all went
+/// well: the CLI says the server is too old instead of exiting 0.
+#[test]
+fn item_text_on_a_server_too_old_for_it() {
+    let server = MockServer::start();
+    server.state().texts_unsupported = true;
+    let env = Env::new(&server.url);
+    std::fs::write(env.path("pw"), "secret\n").unwrap();
+    env.ok(&[
+        "login",
+        "-u",
+        "alice",
+        "--password-file",
+        env.path("pw").to_str().unwrap(),
+    ]);
+    env.ok(&["sets", "create", "inbox", "--name", "Inbox"]);
+    std::fs::write(env.path("cat.png"), png(7)).unwrap();
+    let cat = env.path("cat.png");
+    let out = env.run(&["upload", "inbox", cat.to_str().unwrap(), "--text", "no thoughts"]);
+    assert!(!out.status.success(), "the text was dropped");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("cat.png: uploaded as ") && err.contains("without its text"),
+        "{err}"
+    );
+    assert!(err.contains("the server is too old for item texts"), "{err}");
+    // The file itself was uploaded (and said so).
+    assert!(String::from_utf8_lossy(&out.stdout).contains("added as"));
+    let id = server.state().items[0].item.id.clone();
+    for args in [
+        &["item", "edit", &id, "--text", "no thoughts"][..],
+        // Clearing too: the server would read the picture later.
+        &["item", "edit", &id, "--text", ""],
+        &["item", "edit", &id, "--name", "cat", "--text", "x"],
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("the server is too old for item texts"), "{args:?}: {err}");
+    }
+    let err =
+        String::from_utf8_lossy(&env.run(&["item", "edit", &id, "--name", "cat", "--text", "x"]).stderr).to_string();
+    assert!(err.contains("the name was saved, but"), "{err}");
+    // Without a text nothing is checked.
+    env.ok(&["item", "edit", &id, "--name", "grumpy"]);
+
+    // A server with item texts keeps them: no error.
+    server.state().texts_unsupported = false;
+    let edited = env.json(&["item", "edit", &id, "--text", "no thoughts"]);
+    assert_eq!(edited["text"], "no thoughts");
+    let cleared = env.json(&["item", "edit", &id, "--text", ""]);
+    assert_eq!(
+        (&cleared["text"], &cleared["text_source"]),
+        (&"".into(), &"user".into())
+    );
+    std::fs::write(env.path("dog.png"), png(9)).unwrap();
+    let up = env.json(&[
+        "upload",
+        "inbox",
+        env.path("dog.png").to_str().unwrap(),
+        "--text",
+        "woof",
+    ]);
+    assert_eq!(up[0]["item"]["text"], "woof");
+}
+
 /// `stickpile copy` through the detached clipboard helper. Needs a display, so
 /// it only runs when `STICKPILE_TEST_X11_DISPLAY` (e.g. `:99` from Xvfb) or
 /// `STICKPILE_TEST_WAYLAND_DISPLAY` (+ `XDG_RUNTIME_DIR`, e.g. headless sway)

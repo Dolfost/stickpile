@@ -7,7 +7,9 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::json;
 use stickpile_api::*;
-use stickpile_core::client::{ApiClient, PopularParams, SetArchive, UploadFile};
+use stickpile_core::client::{
+    text_ignored, ApiClient, PopularParams, SetArchive, UploadFile, SERVER_TOO_OLD_FOR_TEXTS,
+};
 use stickpile_core::clipboard::serve::spawn_detached;
 use stickpile_core::{session, token, ClientConfig, CoreError, Session};
 
@@ -473,9 +475,10 @@ async fn upload(ctx: &Ctx, set: &str, files: &[PathBuf], text: Option<&str>) -> 
     if text.is_some() && files.len() != 1 {
         bail!("--text is the text of one picture: upload one file with it");
     }
-    let meta = text.map(|t| {
+    let text = text.map(typed_text);
+    let meta = text.as_ref().map(|t| {
         vec![UploadMeta {
-            text: Some(typed_text(t)),
+            text: Some(t.clone()),
             ..Default::default()
         }]
     });
@@ -504,6 +507,19 @@ async fn upload(ctx: &Ctx, set: &str, files: &[PathBuf], text: Option<&str>) -> 
     }
     if failed > 0 {
         bail!("{failed} of {} files failed", files.len());
+    }
+    // A new item without the text it was given: the server dropped it.
+    // (An item already in the set keeps its own metadata on any server.)
+    if let Some(t) = &text {
+        for r in &all {
+            if let Some(item) = r.item.as_ref().filter(|i| !r.already_in_set && text_ignored(t, i)) {
+                bail!(
+                    "{}: uploaded as {} without its text: {SERVER_TOO_OLD_FOR_TEXTS}",
+                    r.file,
+                    item.id
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -544,7 +560,14 @@ async fn item(ctx: &Ctx, cmd: ItemCmd) -> Result<()> {
                 text: text.as_deref().map(typed_text),
                 ..Default::default()
             };
-            client.update_item(&item, &req).await?
+            let it = client.update_item(&item, &req).await?;
+            if req.text.as_deref().is_some_and(|t| text_ignored(t, &it)) {
+                if req.name.is_some() {
+                    bail!("the name was saved, but {SERVER_TOO_OLD_FOR_TEXTS}");
+                }
+                bail!(SERVER_TOO_OLD_FOR_TEXTS);
+            }
+            it
         }
     };
     if ctx.json {

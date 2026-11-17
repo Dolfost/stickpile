@@ -149,6 +149,20 @@ impl GitPackResponse {
 pub const SERVER_TOO_OLD_FOR_RECHECKS: &str =
     "the server is too old for rechecks (it has no /api/v1/rechecks); update stickpile on the server";
 
+/// The error when a server ignored the item text it was sent: servers
+/// older than item texts (0.7.0) drop the unknown `text` field.
+pub const SERVER_TOO_OLD_FOR_TEXTS: &str =
+    "the server is too old for item texts (it ignored the text); update stickpile on the server";
+
+/// Whether `item`, as a server answered a `PATCH` or an upload that gave
+/// it the text `sent` (as the user's), lacks that text: the server is too
+/// old for item texts ([`SERVER_TOO_OLD_FOR_TEXTS`]). Such a server answers
+/// without `text`, which reads as an empty `ai` text; a newer one stores
+/// the text cleaned ([`stickpile_api::text::clean_text`]) and as the user's.
+pub fn text_ignored(sent: &str, item: &Item) -> bool {
+    item.text != stickpile_api::text::clean_text(sent) || item.text_source != FieldSource::User
+}
+
 /// What [`ApiClient::start_recheck`] got back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecheckStarted {

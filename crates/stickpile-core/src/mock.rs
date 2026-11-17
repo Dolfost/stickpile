@@ -128,6 +128,9 @@ pub struct MockState {
     /// Answer the four WhatsApp routes with 404, as a server older than
     /// them does.
     pub whatsapp_unsupported: bool,
+    /// Ignore the item text of a `PATCH` or an upload's `meta`, as a
+    /// server older than item texts (0.7.0) does.
+    pub texts_unsupported: bool,
 }
 
 impl Default for MockState {
@@ -158,6 +161,7 @@ impl Default for MockState {
             whatsapp_packs: HashMap::new(),
             whatsapp_queued: false,
             whatsapp_unsupported: false,
+            texts_unsupported: false,
         }
     }
 }
@@ -1074,7 +1078,7 @@ async fn upload(
         let kw: Vec<String> = meta.keywords.clone().unwrap_or_default();
         let kw_refs: Vec<&str> = kw.iter().map(String::as_str).collect();
         let summary = st.add_item(&id, &name, &kw_refs, bytes);
-        if let Some(text) = &meta.text {
+        if let Some(text) = meta.text.as_ref().filter(|_| !st.texts_unsupported) {
             let source = if meta.ai_fields.iter().any(|f| f == "text") {
                 FieldSource::Ai
             } else {
@@ -1826,6 +1830,7 @@ async fn update_item(
         return Err(not_found());
     }
     let now = st.tick();
+    let texts = !st.texts_unsupported;
     let it = &mut st.items.iter_mut().find(|i| i.item.id == id).expect("item").item;
     if let Some(n) = req.name {
         (it.name, it.name_source) = (n, FieldSource::User);
@@ -1842,7 +1847,7 @@ async fn update_item(
     if let Some(t) = req.tags {
         it.tags = t;
     }
-    if let Some(t) = req.text {
+    if let Some(t) = req.text.filter(|_| texts) {
         (it.text, it.text_source) = (stickpile_api::text::clean_text(&t), FieldSource::User);
     }
     for field in &req.confirm {
