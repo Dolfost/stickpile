@@ -269,9 +269,15 @@ The plan for the shells, as in the brief, section 4.9:
   `offline_remove_all`); "Clear cache" says how many kept files stay. The
   resident process runs `offline_run` after each successful sync
   (`SyncPolicy`) and after a keep. Tiles not `available_offline` are dimmed
-  when the server is unreachable, and a mark shows what is available
-  offline when it is reachable (a tile mark like the others).
-  `NotOnDevice` is explained, translated.
+  when the server is unreachable (the others are drawn plain then), and a
+  mark shows what is available offline only while it is reachable (a tile
+  mark like the others), as on Android. `NotOnDevice` is explained,
+  translated; for a sticker that is kept (`offline_reasons` not empty) the
+  message names the missing rendition and the app instead of advising `K`,
+  which would release it. The estimate and the Settings block count what
+  is left out by reason, as Android does: stickers of a kind switched off,
+  files over `max_file_mb`, and the other reasons by name. Sizes are shown
+  in powers of 1024 (KiB, MiB, GiB) in every client.
 - **Android app**: keep and release in the sticker's menu and details and
   on the pack screen; a settings section that stores `OfflineOptions` and
   passes them with `set_offline_options`; `with_grid_playback(true)`; a

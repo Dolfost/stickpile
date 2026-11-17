@@ -100,10 +100,13 @@ question that says what it takes (Return or `y` yes, Escape, `n` or `q`
 no, or the card's buttons), and a right click or Control-click on a tile
 (or Shift+F10, fn+Shift+F10 on most keyboards) opens its menu: copy,
 favorite, open in the browser, keep or stop keeping, and why it is kept.
-A tile whose file is on the Mac has a small download mark (`zo`,
-`ui.show_offline`); with the server unreachable the tiles whose file is
-not here are dimmed with an "unavailable" mark, and choosing one says
-why it does not copy (hover the status for the whole line). The Settings
+While the server answers, a tile whose file is on the Mac has a small
+download mark (`zo`, `ui.show_offline`); while it does not, the tiles
+whose file is not here are dimmed with an "unavailable" mark and the
+others are drawn plain, and choosing a dimmed one says why it does not
+copy (hover the status for the whole line; a sticker that is kept
+already is told which file is missing, not sent to `K`). Sizes count in
+powers of 1024 (KiB, MiB, GiB). The Settings
 tab has the "On this device" block above the Offline group: "Keep
 everything offline", what the kept files take, the downloader with its
 bar, Pause / Resume and Cancel, "Clear cache" and "Remove kept files". The

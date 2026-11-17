@@ -200,15 +200,17 @@ the ones you like or unlike since. `zx` (`ui.show_text`) adds the words in
 the picture (the item's text, read by the server or written in the web
 UI) as one line above the tags, its lines joined with " / "; it is off by
 default, because the line covers the picture whose words it repeats.
-A small download mark at the bottom right says that the file a copy to
-the current target needs is on this device, so the sticker copies with
-the server unreachable ([keeping offline](#keeping-offline)); `zo`
-(`ui.show_offline`, on by default) hides it. With the server unreachable
-the tiles whose file is not here are dimmed with an "unavailable" mark,
-whatever `zo` says. Hovering a tile shows its name, pack, emojis and
-keywords, "Available offline" or "Not on this device, and the server is
-unreachable" when a mark says so, and, after a blank line, its text with
-its line breaks (the first 8 lines or 300 characters).
+While the server answers, a small download mark at the bottom right says
+that the file a copy to the current target needs is on this device, so
+the sticker would copy with the server unreachable ([keeping
+offline](#keeping-offline)); `zo` (`ui.show_offline`, on by default)
+hides it. While the server does not answer, the tiles whose file is not
+here are dimmed with an "unavailable" mark, whatever `zo` says, and the
+others are drawn plain, as in the Android app. Hovering a tile shows its
+name, pack, emojis and keywords, "Available offline" or "Not on this
+device, and the server is unreachable" when a mark says so, and, after a
+blank line, its text with its line breaks (the first 8 lines or 300
+characters).
 
 **Safe mode.** `S` in Normal mode (Ctrl+Shift+S in any mode, or a click on
 "safe" in the footer) hides every item tagged `nsfw`: on every tab, inside
@@ -653,10 +655,13 @@ app's. What is kept is chosen on this device and stays here.
   again stops keeping it. The status says "chat cat is kept offline" or
   "... is no longer kept offline".
 - **A pack.** On the pack list `K` first works out what the pack takes
-  and asks: "Keep Cats offline? 4 stickers, 8 files, 1.5 MB. 49.4 KB of
-  it is on this device already. Kept files would take 1.6 MB of the 1.1 GB
-  allowed." (with a warning when that is over the limit, and how many
-  files the Offline settings leave out). Enter or `y` keeps it, Escape,
+  and asks: "Keep Cats offline? 4 stickers, 8 files, 1.4 MiB. 48.2 KiB
+  of it is on this device already. Kept files would take 1.5 MiB of the
+  1.0 GiB allowed." (with a warning when that is over the limit, and what
+  the Offline settings leave out: "2 stickers are left out: their kind is
+  off in the Offline settings.", "3 files are left out: they are larger
+  than the largest file ..."). Sizes count in powers of 1024 (KiB, MiB,
+  GiB), as the options and the CLI do. Enter or `y` keeps it, Escape,
   `n` or `q` does not; the card's buttons do the same. A kept pack has the
   download mark on its cover, and `K` on it stops keeping it at once.
 - **The menu of a tile.** A right click on a tile, the Menu key or
@@ -681,13 +686,14 @@ change. It never holds up a copy: a copy you ask for goes first. The
 - the switch "Keep everything offline";
 - what the kept files take, of the limit (`offline.max_mb`), and the
   other cached files;
-- the downloader: "Downloading: 40 of 120 files, 12.0 MB of 45.2 MB",
-  "Paused", "Waiting for the server", "The limit of 1.1 GB is reached: ...
-  Nothing was deleted; raise the limit below to download the rest", "The
-  disk is full", or "Up to date", with a bar, Pause / Resume and Cancel
-  (a pause holds until resumed; a cancelled run starts afresh after the
-  next sync), how many files failed (tried again on the next run) and how
-  many the settings leave out;
+- the downloader: "Downloading: 40 of 120 files, 12.0 MiB of 45.2 MiB",
+  "Paused", "Waiting for the server", "The limit of 1.0 GiB is reached:
+  ... Nothing was deleted; raise the limit below to download the rest",
+  "The disk is full", or "Up to date", with a bar, Pause / Resume and
+  Cancel (a pause holds until resumed; a cancelled run starts afresh after
+  the next sync), how many files failed (tried again on the next run), and
+  what the settings leave out: stickers of a kind switched off and files
+  over the largest file, counted apart;
 - "Clear cache", which deletes the thumbnails and copied files that are
   not kept and says how many kept files stayed, and "Remove kept files",
   which asks first and then deletes every kept file and forgets what to
@@ -708,7 +714,13 @@ The Offline group under it holds the [options](configuration.md#keeping-stickers
   are dimmed, and choosing one says why it does not copy: "Copy failed:
   good dog is not on this device and the server is unreachable; keep it
   offline (K) to copy it without the server" (hover the footer for the
-  whole line).
+  whole line). A sticker that is kept already is not sent to `K` (which
+  would release it): "still png is kept offline, but its tg_sticker file
+  for Telegram as a sticker is not on this device: it is not downloaded
+  yet, or not kept for stickers to Telegram (offline.targets,
+  offline.sticker_renditions); the server is unreachable". The renditions
+  kept are those of the apps in `offline.targets` (by default the default
+  target and the apps in the copy history).
 - Copies are recorded locally and uploaded as usage statistics when the
   server is reachable again. The client syncs in the background every 10
   minutes and when the popup opens after a longer pause (failures retry
