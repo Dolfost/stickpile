@@ -786,7 +786,8 @@ fn unreachable_dims_what_is_not_here_and_explains_it() {
     h.pump_until("the other cat dimmed", |s| {
         let m = marks(s);
         m.len() == 2
-            && m.contains(&(kept.clone(), OfflineMark::Available))
+            // Available tiles are plain while the server is gone (as on Android).
+            && m.contains(&(kept.clone(), OfflineMark::None))
             && m.iter().any(|(_, o)| *o == OfflineMark::Unavailable)
     });
     let (other, other_name, tooltip) = {

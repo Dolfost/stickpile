@@ -8,7 +8,8 @@
 //!   ([`Command::CheckOffline`], one at a time) whenever they change, the
 //!   target app or the sticker flag changes, files arrive
 //!   ([`Event::OfflineFiles`]) or the server stops answering. A tile shows
-//!   [`OfflineMark::Available`] with `ui.show_offline` on, and
+//!   [`OfflineMark::Available`] with `ui.show_offline` on while the server
+//!   answers, and
 //!   [`OfflineMark::Unavailable`] (dimmed) while the server is unreachable.
 //! * `K` keeps or stops keeping the selected sticker at once; on the pack
 //!   list it stops keeping a kept pack, or asks for the estimate and then
@@ -574,13 +575,17 @@ impl Model {
         Vec::new()
     }
 
-    /// The tiles' marks from what is known.
+    /// The tiles' marks from what is known: while the server answers, the
+    /// mark of what is available offline (`zo`); while it does not, the
+    /// tiles whose file is not here are dimmed and the others are plain
+    /// (as on Android).
     pub(super) fn mark_offline(&mut self) {
         let mut changed = false;
+        let reachable = self.keep.reachable;
         for e in &mut self.entries {
             let mark = match self.keep.available.get(&e.item.id) {
-                Some(true) if self.tiles.offline => OfflineMark::Available,
-                Some(false) if !self.keep.reachable => OfflineMark::Unavailable,
+                Some(true) if self.tiles.offline && reachable => OfflineMark::Available,
+                Some(false) if !reachable => OfflineMark::Unavailable,
                 _ => OfflineMark::None,
             };
             if e.offline != mark {

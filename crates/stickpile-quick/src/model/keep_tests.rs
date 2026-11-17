@@ -533,6 +533,34 @@ fn marks_show_what_is_on_the_device_and_zo_hides_them() {
     assert_eq!(marks(&m)[0], OfflineMark::Available, "known still");
 }
 
+/// The mark of what is available offline is for while the server answers;
+/// without it, the tiles whose file is not here are dimmed and the others
+/// are plain (as on Android).
+#[test]
+fn the_available_mark_shows_only_while_the_server_answers() {
+    let mut m = marked();
+    m.handle(Event::QueryChanged("cat".into()));
+    let generation = m.generation();
+    let cmds = m.handle(Event::Results {
+        generation,
+        outcome: Ok(Results {
+            hits: hits(2),
+            offline: false,
+        }),
+    });
+    let (check, ..) = check_of(&cmds).unwrap();
+    m.handle(Event::OfflineChecked {
+        generation: check,
+        outcome: Ok(vec![("h0".into(), true), ("h1".into(), false)]),
+    });
+    assert_eq!(marks(&m), [OfflineMark::Available, OfflineMark::None]);
+    m.handle(Event::Reachable(false));
+    assert_eq!(marks(&m), [OfflineMark::None, OfflineMark::Unavailable]);
+    assert!(!m.entries()[0].tooltip().contains("Available offline"));
+    m.handle(Event::Reachable(true));
+    assert_eq!(marks(&m), [OfflineMark::Available, OfflineMark::None]);
+}
+
 #[test]
 fn unreachable_dims_what_is_not_on_the_device_whatever_zo_says() {
     let mut m = with_results(3);

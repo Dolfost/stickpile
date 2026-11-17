@@ -102,7 +102,8 @@ final class FakePopup: PopupControl {
             let k = i % FakePopup.names.count
             let words = text && i % 3 != 2 ? FakePopup.texts[i % FakePopup.texts.count] : ""
             let kept = i % 3 == 0 || i == 1
-            let offline: OfflineMark = kept ? .available : (unreachable ? .unavailable : OfflineMark.none)
+            // While the server is gone the kept tiles are plain, the others dimmed (as on Android).
+            let offline: OfflineMark = unreachable ? (kept ? OfflineMark.none : .unavailable) : (kept ? .available : OfflineMark.none)
             return EntryView(
                 id: "item-\(i)", name: FakePopup.names[k],
                 badge: i % 6 == 2 ? "GIF" : (i % 11 == 5 ? "WEBP" : nil),
