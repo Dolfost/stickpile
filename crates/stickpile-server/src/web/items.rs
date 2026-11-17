@@ -69,6 +69,17 @@ impl Field {
             Field::Text => "text",
         }
     }
+    /// The hidden field of the full form holding the value it showed.
+    fn was_key(self) -> &'static str {
+        match self {
+            Field::Name => "name_was",
+            Field::Keywords => "keywords_was",
+            Field::Emojis => "emojis_was",
+            Field::Vibe => "vibe_was",
+            Field::Tags => "tags_was",
+            Field::Text => "text_was",
+        }
+    }
     fn label(self) -> &'static str {
         match self {
             Field::Name => t("Name"),
@@ -145,6 +156,19 @@ impl Field {
             Field::Text => u.text = Some(value.to_string()),
         }
         u
+    }
+    /// Whether two form values of this field are the same value, read as
+    /// [`Field::update`] reads them (the text as the server cleans it).
+    fn same(self, a: &str, b: &str) -> bool {
+        let (x, y) = (self.update(a), self.update(b));
+        match self {
+            Field::Name => x.name == y.name,
+            Field::Keywords => x.keywords == y.keywords,
+            Field::Emojis => x.emojis == y.emojis,
+            Field::Vibe => x.vibe == y.vibe,
+            Field::Tags => x.tags == y.tags,
+            Field::Text => clean_text(a) == clean_text(b),
+        }
     }
 }
 
@@ -458,6 +482,9 @@ fn full_form(ctx: &Ctx, vibes: &[String], item: &Item) -> Markup {
                             data-emoji-picker=[(f == Field::Emojis).then_some("")];
                     }
                     @if !f.hint().is_empty() { p.hint { (f.hint()) } }
+                    // What the form shows, so that saving it compares with
+                    // that rather than with what the item holds by then.
+                    input type="hidden" name=(f.was_key()) value=(f.text(item));
                 }
             }
             p.hint { (t("Only fields you change are saved; AI suggestions you leave alone stay marked as AI.")) }
@@ -726,10 +753,27 @@ pub struct AllFieldsForm {
     tags: Option<String>,
     #[serde(default)]
     text: Option<String>,
+    // What the form showed ([`Field::was_key`]).
+    #[serde(default)]
+    name_was: Option<String>,
+    #[serde(default)]
+    keywords_was: Option<String>,
+    #[serde(default)]
+    emojis_was: Option<String>,
+    #[serde(default)]
+    vibe_was: Option<String>,
+    #[serde(default)]
+    tags_was: Option<String>,
+    #[serde(default)]
+    text_was: Option<String>,
 }
 
-/// The no-JS edit form: only fields whose text changed are sent, so AI
-/// values left alone stay AI-sourced.
+/// The no-JS edit form: only fields the person changed are sent, so AI
+/// values left alone stay AI-sourced. A field is changed when it differs
+/// from what the form showed (its `_was` field), not from what the item
+/// holds now: a text the computer read after the page was loaded is not
+/// replaced by the older one the form still shows. A form without the
+/// shown values (a page from before them) compares with the item.
 pub async fn update_all(
     State(state): State<AppState>,
     ctx: Ctx,
@@ -738,25 +782,26 @@ pub async fn update_all(
 ) -> AppResult<Response> {
     let current = svc::detail(&state, &ctx.user, &id).await?.item;
     let mut u = UpdateItem::default();
-    for (field, value) in [
-        (Field::Name, &f.name),
-        (Field::Keywords, &f.keywords),
-        (Field::Emojis, &f.emojis),
-        (Field::Vibe, &f.vibe),
-        (Field::Tags, &f.tags),
-        (Field::Text, &f.text),
+    for (field, value, was) in [
+        (Field::Name, &f.name, &f.name_was),
+        (Field::Keywords, &f.keywords, &f.keywords_was),
+        (Field::Emojis, &f.emojis, &f.emojis_was),
+        (Field::Vibe, &f.vibe, &f.vibe_was),
+        (Field::Tags, &f.tags, &f.tags_was),
+        (Field::Text, &f.text, &f.text_was),
     ] {
         let Some(v) = value else { continue };
         let patch = field.update(v);
-        let changed = match field {
-            Field::Name => patch.name.as_deref() != Some(current.name.as_str()),
-            Field::Keywords => patch.keywords.as_ref() != Some(&current.keywords),
-            Field::Emojis => patch.emojis.as_ref() != Some(&current.emojis),
-            Field::Vibe => patch.vibe.as_ref() != Some(&current.vibe),
-            Field::Tags => patch.tags.as_ref() != Some(&current.tags),
+        let changed = match (field, was) {
+            (_, Some(was)) => !field.same(v, was),
+            (Field::Name, None) => patch.name.as_deref() != Some(current.name.as_str()),
+            (Field::Keywords, None) => patch.keywords.as_ref() != Some(&current.keywords),
+            (Field::Emojis, None) => patch.emojis.as_ref() != Some(&current.emojis),
+            (Field::Vibe, None) => patch.vibe.as_ref() != Some(&current.vibe),
+            (Field::Tags, None) => patch.tags.as_ref() != Some(&current.tags),
             // As the server would store it: an AI text sent back unchanged
             // (line endings aside) stays the computer's.
-            Field::Text => clean_text(v) != current.text,
+            (Field::Text, None) => clean_text(v) != current.text,
         };
         if changed {
             u.name = u.name.or(patch.name);

@@ -65,12 +65,15 @@ On someone else's pack, **Propose…** offers three forms:
 - **A cover image**: a still PNG, JPEG or WebP.
 
 On someone else's sticker, **Suggest changes…** proposes a new name,
-keywords, emojis, tags or vibe (the API also takes `text`, the words in the
-picture; accepted, it is the owner's text, which the server never refills).
+keywords, emojis, tags, vibe or text (the words in the picture; accepted,
+it is the owner's text, which the server never refills).
 
-Fields with the current value are left out. A proposal that changes
-nothing is refused. A proposal shows what it would change: the stickers
-with thumbnails, or a table of the current and the proposed values.
+Fields with the current value are left out, and the web form sends only
+the fields you changed on it, so a value that changed after the page was
+loaded (a text the server read meanwhile) is not proposed back. A
+proposal that changes nothing is refused. A proposal shows what it would
+change: the stickers with thumbnails, or a table of the current and the
+proposed values.
 
 Who may propose: anyone who can read the pack (public, unlisted, or one
 they contribute to) and is not its owner. Contributors propose what their

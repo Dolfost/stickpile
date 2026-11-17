@@ -67,21 +67,23 @@ async fn the_full_form_keeps_a_text_read_after_the_page_was_loaded() {
     );
     // The reader reads the picture meanwhile.
     srv.run_jobs().await;
-    assert_eq!(text_of(&item(&srv, &u, &it.id).await), (READ.to_string(), FieldSource::Ai));
-    // The person renames the sticker and saves the form as it was shown.
-    let r = b
-        .post_form(
-            &page,
-            &[
-                ("name", "Grumpy"),
-                ("keywords", ""),
-                ("emojis", ""),
-                ("vibe", ""),
-                ("tags", ""),
-                ("text", ""),
-            ],
-        )
-        .await;
+    assert_eq!(
+        text_of(&item(&srv, &u, &it.id).await),
+        (READ.to_string(), FieldSource::Ai)
+    );
+    // The person renames the sticker and saves the form as it was shown
+    // (with the values it showed, as a browser sends them).
+    let mut fields = vec![
+        ("name", "Grumpy"),
+        ("keywords", ""),
+        ("emojis", ""),
+        ("vibe", ""),
+        ("tags", ""),
+        ("text", ""),
+    ];
+    let was = shown(&html);
+    fields.extend(was.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let r = b.post_form(&page, &fields).await;
     assert_eq!(r.status, StatusCode::SEE_OTHER);
     let after = item(&srv, &u, &it.id).await;
     assert_eq!(after.name, "Grumpy");
@@ -90,6 +92,132 @@ async fn the_full_form_keeps_a_text_read_after_the_page_was_loaded() {
         (READ.to_string(), FieldSource::Ai),
         "the person did not touch the text"
     );
+
+    // The form opened now shows the text; cleared and saved, it is the
+    // person's empty text.
+    let html = b.get(&format!("{page}?edit=1")).await.text();
+    let mut fields = vec![
+        ("name", "Grumpy"),
+        ("keywords", ""),
+        ("emojis", ""),
+        ("vibe", ""),
+        ("tags", ""),
+        ("text", ""),
+    ];
+    let was = shown(&html);
+    assert!(was.contains(&("text_was".to_string(), READ.to_string())), "{was:?}");
+    fields.extend(was.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let r = b.post_form(&page, &fields).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    let after = item(&srv, &u, &it.id).await;
+    assert_eq!(
+        text_of(&after),
+        (String::new(), FieldSource::User),
+        "cleared by the person"
+    );
+    assert_eq!(after.name_source, FieldSource::User);
+}
+
+/// Rule 6, the same in "Suggest changes": a text the reader filled after
+/// the form was shown is not proposed back as the empty text the form
+/// still holds; one the proposer changes is.
+#[tokio::test]
+async fn the_suggest_form_proposes_only_what_was_changed_on_it() {
+    let srv = ocr_server().await;
+    let alice = srv.user("alice").await;
+    let eve = srv.user("eve").await;
+    let set = srv.create_set(&alice, "public", Visibility::Public).await;
+    let cat = srv.upload_one(&alice, &set.id, "cat.png", png(1)).await;
+    let b = Browser::login(&srv, &eve).await;
+    let url = format!("/items/{}/suggest", cat.id);
+    // Opened before the picture is read: an empty text.
+    let html = b.get(&url).await.text();
+    assert!(html.contains("aria-describedby=\"s-text-hint\"></textarea>"), "{html}");
+    srv.run_jobs().await;
+    assert_eq!(
+        text_of(&item(&srv, &alice, &cat.id).await),
+        (READ.to_string(), FieldSource::Ai)
+    );
+    let post = |html: String, name: &'static str, text: &'static str| {
+        let b = &b;
+        let url = &url;
+        async move {
+            let mut fields = vec![
+                ("name", name.to_string()),
+                ("keywords", String::new()),
+                ("emojis", String::new()),
+                ("tags", String::new()),
+                ("vibe", String::new()),
+                ("text", text.to_string()),
+                ("message", String::new()),
+            ];
+            fields.extend(shown_suggest(&html));
+            let fields: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            b.post_form(url, &fields).await
+        }
+    };
+    // Only the name changed on the form: only the name is proposed.
+    let r = post(html, "Grumpy", "").await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let p = proposal_at(&srv, &eve, &r).await;
+    assert_eq!(p.changes.name.as_deref(), Some("Grumpy"));
+    assert_eq!(p.changes.text, None, "the text was not touched on the form");
+    assert_eq!(p.changes.keywords, None);
+    // Nothing changed on the form: nothing to propose.
+    let html = b.get(&url).await.text();
+    let r = post(html, "cat", READ).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    // Cleared on a form that showed the text: proposed.
+    let html = b.get(&url).await.text();
+    let r = post(html, "cat", "").await;
+    let p = proposal_at(&srv, &eve, &r).await;
+    assert_eq!(p.changes.text.as_deref(), Some(""));
+    assert_eq!(p.changes.name, None);
+}
+
+/// The `{field}_was` values of the full item form in `html`.
+fn shown(html: &str) -> Vec<(String, String)> {
+    ["name", "keywords", "emojis", "vibe", "tags", "text"]
+        .iter()
+        .map(|k| {
+            let key = format!("{k}_was");
+            let v = web_common::hidden_value(html, &key).unwrap_or_else(|| panic!("{key} in {html}"));
+            (key, v)
+        })
+        .collect()
+}
+
+/// The `{field}_was` values of the "Suggest changes" form in `html`.
+fn shown_suggest(html: &str) -> Vec<(&'static str, String)> {
+    [
+        "name_was",
+        "keywords_was",
+        "emojis_was",
+        "tags_was",
+        "vibe_was",
+        "text_was",
+    ]
+    .into_iter()
+    .map(|k| {
+        (
+            k,
+            web_common::hidden_value(html, k).unwrap_or_else(|| panic!("{k} in {html}")),
+        )
+    })
+    .collect()
+}
+
+/// The proposal a form post `r` made (it redirects to its page).
+async fn proposal_at(srv: &TestServer, u: &TestUser, r: &common::Resp) -> Proposal {
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let id = web_common::location(r)
+        .strip_prefix("/proposals/")
+        .expect("a proposal page")
+        .to_string();
+    srv.get(u, &routes::path(routes::PROPOSAL, &[&id]))
+        .await
+        .expect(200)
+        .json()
 }
 
 /// Rule 6: an import into an existing set (and a git pull, which uses the

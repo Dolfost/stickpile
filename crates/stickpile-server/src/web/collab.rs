@@ -754,6 +754,33 @@ pub struct SuggestForm {
     text: Option<String>,
     #[serde(default)]
     message: String,
+    // What the form showed: a field is proposed only when it differs from
+    // that, so a value that changed after the page was loaded (a text the
+    // computer read meanwhile) is not proposed back. `None` from a page
+    // from before them: every field is sent, and the server drops those
+    // equal to the sticker's.
+    #[serde(default)]
+    name_was: Option<String>,
+    #[serde(default)]
+    keywords_was: Option<String>,
+    #[serde(default)]
+    emojis_was: Option<String>,
+    #[serde(default)]
+    tags_was: Option<String>,
+    #[serde(default)]
+    vibe_was: Option<String>,
+    #[serde(default)]
+    text_was: Option<String>,
+}
+
+/// Whether `posted` differs from what the form showed (`was`), both read
+/// with `read`; true without `was`.
+fn edited<T: PartialEq>(posted: &str, was: Option<&str>, read: impl Fn(&str) -> T) -> bool {
+    was.is_none_or(|w| read(posted) != read(w))
+}
+
+fn vibe_value(s: &str) -> Option<String> {
+    Some(s.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 fn split_list(s: &str) -> Vec<String> {
@@ -775,6 +802,16 @@ fn suggest_form(ctx: &Ctx, item: &Item, f: &SuggestForm, error: Option<&str>) ->
         div.preview-small { (thumb(&item.id, &item.name, item.media.width, item.media.height)) }
         form.stack.narrow method="post" action=(format!("/items/{}/suggest", item.id)) {
             (ctx.csrf_input())
+            @for (key, was) in [
+                ("name_was", &f.name_was),
+                ("keywords_was", &f.keywords_was),
+                ("emojis_was", &f.emojis_was),
+                ("tags_was", &f.tags_was),
+                ("vibe_was", &f.vibe_was),
+                ("text_was", &f.text_was),
+            ] {
+                @if let Some(w) = was { input type="hidden" name=(key) value=(w); }
+            }
             div.field-row {
                 label for="s-name" { (t("Name")) }
                 input #s-name type="text" name="name" value=(f.name) maxlength="200";
@@ -812,12 +849,23 @@ fn suggest_form(ctx: &Ctx, item: &Item, f: &SuggestForm, error: Option<&str>) ->
 
 impl SuggestForm {
     fn from_item(item: &Item) -> SuggestForm {
+        let name = item.name.clone();
+        let keywords = item.keywords.join(", ");
+        let emojis = item.emojis.join(", ");
+        let tags = item.tags.join(", ");
+        let vibe = item.vibe.clone().unwrap_or_default();
         SuggestForm {
-            name: item.name.clone(),
-            keywords: item.keywords.join(", "),
-            emojis: item.emojis.join(", "),
-            tags: item.tags.join(", "),
-            vibe: item.vibe.clone().unwrap_or_default(),
+            name_was: Some(name.clone()),
+            keywords_was: Some(keywords.clone()),
+            emojis_was: Some(emojis.clone()),
+            tags_was: Some(tags.clone()),
+            vibe_was: Some(vibe.clone()),
+            text_was: Some(item.text.clone()),
+            name,
+            keywords,
+            emojis,
+            tags,
+            vibe,
             text: Some(item.text.clone()),
             message: String::new(),
         }
@@ -840,15 +888,23 @@ pub async fn suggest_submit(
     Form(f): Form<SuggestForm>,
 ) -> AppResult<Response> {
     let item = item_svc::detail(&state, &ctx.user, &id).await?.item;
-    let vibe = Some(f.vibe.trim().to_string()).filter(|v| !v.is_empty());
+    let vibe = vibe_value(&f.vibe);
+    let trimmed = |s: &str| s.trim().to_string();
+    // Only what differs from what the form showed; the server also drops
+    // what is the sticker's value already.
     let changes = ProposedChanges {
-        name: Some(f.name.trim().to_string()),
-        keywords: Some(split_list(&f.keywords)),
-        emojis: Some(split_list(&f.emojis)),
-        tags: Some(split_list(&f.tags)),
-        vibe: (vibe != item.vibe).then_some(vibe),
-        // Dropped by the server when it is the item's text already.
-        text: f.text.clone(),
+        name: edited(&f.name, f.name_was.as_deref(), trimmed).then(|| trimmed(&f.name)),
+        keywords: edited(&f.keywords, f.keywords_was.as_deref(), split_list).then(|| split_list(&f.keywords)),
+        emojis: edited(&f.emojis, f.emojis_was.as_deref(), split_list).then(|| split_list(&f.emojis)),
+        tags: edited(&f.tags, f.tags_was.as_deref(), split_list).then(|| split_list(&f.tags)),
+        vibe: match f.vibe_was.as_deref() {
+            Some(_) => edited(&f.vibe, f.vibe_was.as_deref(), vibe_value).then_some(vibe),
+            None => (vibe != item.vibe).then_some(vibe),
+        },
+        text: f
+            .text
+            .clone()
+            .filter(|t| edited(t, f.text_was.as_deref(), stickpile_api::text::clean_text)),
         ..Default::default()
     };
     let req = NewProposal {
