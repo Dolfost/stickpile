@@ -478,7 +478,7 @@ text reader reads in the image (lines joined with `\n`, `""` when none is
 confident); it is left out when the server has no text reader (or
 `ai.ocr = false`, or an older server), and when reading failed (logged).
 Text needs pixels: the 256 px rendering the tray sends for CLIP is small
-for it, so with a text reader the web tray sends 1280 px on the longest
+for it, so with a text reader the web tray sends 1024 px on the longest
 side (smaller while the PNG is over 2 MiB).
 
 - The first part with a filename is the image: PNG, JPEG, WebP or GIF (an
@@ -486,7 +486,7 @@ side (smaller while the PNG is over 2 MiB).
   At most 2 MiB (413 `too_large`) and 4096 × 4096 decoded pixels (or
   `limits.max_pixels` if smaller). CLIP looks at 224 × 224 pixels, so send
   a small rendering: the web upload tray sends a PNG with the longest side
-  256 px, like the server's thumbnails, which enrichment looks at (1280 px
+  256 px, like the server's thumbnails, which enrichment looks at (1024 px
   when the server reads text, which needs the pixels). No file
   part is 400, an unreadable file 415.
 - Any authenticated caller; cookie sessions need `X-CSRF-Token` and the

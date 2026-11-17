@@ -32,7 +32,7 @@
 // an animation's first frame, or a video frame at a tenth of its length) and
 // sent there, two at a time, in the background. When the server also reads
 // the words in pictures (data-ai-text), the rendering is larger, the longest
-// side 1280 px (smaller while the PNG is over the endpoint's 2 MiB), because
+// side 1024 px (smaller while the PNG is over the endpoint's 2 MiB), because
 // text needs pixels. The keywords, emojis, vibe and text that come back fill
 // only fields that are still empty (an empty text is no suggestion) and are
 // marked AI until approved: ✓ on a field (a toggle), "Approve all" for the
@@ -88,11 +88,11 @@
   var MAX_ZOOM = 3; // small images are shown at most this much larger
   var THUMB = 176; // edited thumbnails, device pixels
   var SUGGEST_PX = 256; // longest side of the image sent for AI suggestions
-  // ...when the server reads the words in pictures: the size at which its
-  // text reader was measured to read about as well as at 2000 px (docs/ai.md,
-  // "OCR evaluation"); its detector enlarges smaller pictures to 736 px on
-  // the short side anyway, and more pixels only cost encoding and upload time.
-  var SUGGEST_TEXT_PX = 1280;
+  // ...when the server reads the words in pictures: its reader, measured on
+  // pictures scaled down first, read about as well at 1024 px as at full
+  // size (normalised CER 4.1 % against 3.8 %; 512 px: 5.7 %, 256 px:
+  // 31.9 %), and more pixels only cost encoding and upload time.
+  var SUGGEST_TEXT_PX = 1024;
   var SUGGEST_MAX_BYTES = 2 * 1024 * 1024; // the endpoint's limit for the image
   var SUGGEST_AT_ONCE = 2; // suggestion requests in flight per tray
   var SUGGEST_TRIES = 3; // per file, when the server is busy (429 + Retry-After)

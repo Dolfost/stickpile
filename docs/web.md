@@ -456,11 +456,12 @@ enforces the `hidden` attribute); "Download" always works.
     the longest side). When the server reads the words in pictures (the
     form's `data-ai-text`: AI is ready or loading and the server has a text
     reader with `ai.ocr` on), the answer also has the text, and the PNG is
-    larger, 1280 px on the longest side, made smaller by quarters while it
-    is over the endpoint's 2 MiB: 256 px is too small to read words, and
-    1280 px is the size the text reader was measured to read about as well
-    as at 2000 px ([ai.md](ai.md#ocr-evaluation)), while the PNG stays
-    quick to encode and send. An empty text in the answer is no
+    larger, 1024 px on the longest side (its own size when it is smaller),
+    made smaller by quarters while it is over the endpoint's 2 MiB: 256 px
+    is too small to read words, and the reader, measured on pictures
+    scaled down first, read about as well at 1024 px as at full size
+    (normalised character error rate 4.1 % against 3.8 %; 512 px: 5.7 %,
+    256 px: 31.9 %), while the PNG stays quick to encode and send. An empty text in the answer is no
     suggestion. While it
     waits, the selected file shows "Suggesting keywords, emojis and vibe…"
     ("... and reading the text…" with a text reader).

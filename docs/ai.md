@@ -84,14 +84,15 @@ endpoint takes at most 2 MiB), the server only ever decodes a still, and the
 suggestions match what enrichment picks from the thumbnail after the upload.
 When the server reads the words in pictures (the upload form's
 `data-ai-text`: a text reader with `ai.ocr` on), the tray sends the same
-frame with the longest side 1280 px instead, because 256 px is too small to
-read words: 1280 px is the detector cap at which the evaluated reader read
-about as well as at 2000 px ([OCR evaluation](#ocr-evaluation)), and its
-detector enlarges smaller pictures to 736 px on the short side anyway. A
-PNG over the endpoint's 2 MiB (a photo) is made smaller by quarters until
-it fits. The suggestions then come from the larger frame (CLIP still looks
-at 224 px), and the text read from one frame fills the tray's Text field,
-marked AI like the rest ([web.md](web.md#upload-and-import)).
+frame with the longest side 1024 px instead (its own size when it is
+smaller), because 256 px is too small to read words: measured on the
+evaluation pictures scaled down first, the reader's normalised character
+error rate and word recall were 3.8 % / 89.8 % at full size, 4.1 % /
+89.3 % at 1024 px, 5.7 % / 84.2 % at 512 px and 31.9 % / 63.7 % at 256 px.
+A PNG over the endpoint's 2 MiB (a photo) is made smaller by quarters
+until it fits. The suggestions then come from the larger frame (CLIP
+still looks at 224 px), and the text read from one frame fills the tray's
+Text field, marked AI like the rest ([web.md](web.md#upload-and-import)).
 
 Approval decides the source. The tray uploads approved or edited values as
 the user's (`*_source = user`) and lists unapproved ones in
