@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::text::{emoji_base, is_pictographic, normalize, osa_within};
+use crate::text::{emoji_base, emoji_key, is_pictographic, normalize, osa_within};
 
 /// The curated vocabulary, the emojis most used on stickers first.
 /// `scripts/gen-emoji-data.py` reads it (the words of an emoji go into its
@@ -214,10 +214,14 @@ pub(crate) fn names(emoji: &str) -> Option<&'static str> {
 /// between the keywords.
 const NAMES_TSV: &str = include_str!("emoji_names.tsv");
 
-/// How a name matched an emoji in [`by_name`], best first.
-const EXACT: u8 = 0;
-const PREFIX: u8 = 1;
-const TYPO: u8 = 2;
+/// How a name matched an emoji in [`by_name`], best first: whole words of
+/// the emoji's name, of a keyword, the start of a word of the name, of a
+/// keyword, a typo.
+const EXACT_NAME: u8 = 0;
+const EXACT: u8 = 1;
+const PREFIX_NAME: u8 = 2;
+const PREFIX: u8 = 3;
+const TYPO: u8 = 4;
 
 /// A name of fewer letters selects nothing by a typo.
 const MIN_TYPO_LETTERS: usize = 4;
@@ -300,6 +304,12 @@ pub fn key(emoji: &str) -> String {
     emoji_base(emoji.trim())
 }
 
+/// [`key`] with the skin tones kept: two `e:` emojis with the same toned
+/// key are the same filter (`e:☠️` is `e:☠`, but `e:👍🏽` is not `e:👍`).
+pub fn toned_key(emoji: &str) -> String {
+    emoji_key(emoji)
+}
+
 /// Whether an `e:` value is a name (`skull`, `thumbs_up`, `t-rex`) rather
 /// than an emoji: letters only, with `_` or `-` between words.
 pub fn is_name(value: &str) -> bool {
@@ -335,8 +345,9 @@ pub fn short_name(emoji: &str) -> Option<&'static str> {
 ///   typo away select instead (a letter wrong, added or left out, or two
 ///   swapped; one in all): `sklul` selects what `skull` does.
 ///
-/// Order: a whole word before the start of one, then the curated emojis
-/// (most used on stickers first), then Unicode's order.
+/// Order: whole words before the start of one, a word of the name before
+/// one of a keyword; then the curated emojis (most used on stickers
+/// first), then Unicode's order.
 pub fn by_name(name: &str) -> Vec<&'static Emoji> {
     if !is_name(name) {
         return Vec::new();
@@ -368,35 +379,37 @@ pub fn by_name(name: &str) -> Vec<&'static Emoji> {
     found.into_iter().map(|r| &t[(r & 0xFFFF_FFFF) as usize]).collect()
 }
 
-/// [`EXACT`] when `want` are words in a row of one phrase of `words`,
-/// [`PREFIX`] when the last of them only starts a word there.
+/// How `want` are words in a row of one phrase of `words` (the first is
+/// the name): [`EXACT_NAME`] and so on; the last may only start a word.
 fn matched(words: &str, want: &[&str]) -> Option<u8> {
-    let mut best = None;
-    if let [one] = want {
-        for w in words.split([' ', '|']) {
-            if w == *one {
-                return Some(EXACT);
-            }
-            if w.starts_with(one) {
-                best = Some(PREFIX);
-            }
-        }
-        return best;
-    }
     let (last, init) = want.split_last()?;
-    for phrase in words.split('|') {
-        let ws: Vec<&str> = phrase.split(' ').collect();
-        for run in ws.windows(want.len()) {
-            if run[..init.len()] != *init {
-                continue;
-            }
-            let end = run[init.len()];
-            if end == *last {
-                return Some(EXACT);
-            }
-            if end.starts_with(last) {
-                best = Some(PREFIX);
-            }
+    let mut best: Option<u8> = None;
+    for (n, phrase) in words.split('|').enumerate() {
+        let (exact, prefix) = if n == 0 {
+            (EXACT_NAME, PREFIX_NAME)
+        } else {
+            (EXACT, PREFIX)
+        };
+        let kind = |end: &str| match end {
+            _ if end == *last => Some(exact),
+            _ if end.starts_with(last) => Some(prefix),
+            _ => None,
+        };
+        let found = if init.is_empty() {
+            phrase.split(' ').filter_map(kind).min()
+        } else {
+            let ws: Vec<&str> = phrase.split(' ').collect();
+            ws.windows(want.len())
+                .filter(|run| run[..init.len()] == *init)
+                .filter_map(|run| kind(run[init.len()]))
+                .min()
+        };
+        best = match (best, found) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        if best == Some(EXACT_NAME) {
+            break;
         }
     }
     best

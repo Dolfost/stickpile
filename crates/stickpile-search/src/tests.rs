@@ -307,6 +307,8 @@ fn emoji_short_names() {
     assert_eq!(emoji_names::short_name("word"), None);
     assert_eq!(emoji_names::find("☠").map(|e| e.glyph), Some("☠️"), "fully qualified");
     assert_eq!(emoji_names::key("👍🏽"), emoji_names::key("👍"));
+    assert_ne!(emoji_names::toned_key("👍🏽"), emoji_names::toned_key("👍"));
+    assert_eq!(emoji_names::toned_key("☠️"), emoji_names::toned_key("☠"));
 }
 
 /// The slang of the curated vocabulary names emojis too (see also
