@@ -1304,7 +1304,9 @@ pub struct UpdateItem {
     pub name: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub emojis: Option<Vec<String>>,
-    #[serde(default, with = "double_option")]
+    /// `Some(None)` clears the vibe; `None` is left out when sent, so a
+    /// PATCH without it keeps the vibe.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "double_option")]
     pub vibe: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
     /// The words in the picture; any value, `""` included, makes them the
@@ -1863,6 +1865,21 @@ mod tests {
         assert_eq!(null.vibe, Some(None));
         let set: UpdateItem = serde_json::from_str(r#"{"vibe": "tired"}"#).unwrap();
         assert_eq!(set.vibe, Some(Some("tired".into())));
+        // And back: a request that does not change the vibe does not send
+        // it (a `null` would clear it), one that clears it sends `null`.
+        let text_only = UpdateItem {
+            text: Some("hi".into()),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&text_only).unwrap();
+        assert!(v.get("vibe").is_none(), "{v}");
+        let back: UpdateItem = serde_json::from_value(v).unwrap();
+        assert_eq!(back.vibe, None);
+        let clear = UpdateItem {
+            vibe: Some(None),
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_value(&clear).unwrap()["vibe"], serde_json::Value::Null);
     }
 
     #[test]
