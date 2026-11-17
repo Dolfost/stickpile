@@ -434,16 +434,19 @@ async fn uploads_go_before_a_large_recheck() {
     jobs::run_next(&srv.state, Lane::All).await.unwrap().unwrap();
 
     let new = upload(&srv, &u, &set.id, "new.png", png(99), None).await;
-    let first = jobs::run_next(&srv.state, Lane::All).await.unwrap().unwrap();
-    let second = jobs::run_next(&srv.state, Lane::All).await.unwrap().unwrap();
+    // The upload's two jobs, in either order (queued in the same second,
+    // they are ordered by their random ids).
+    let mut claimed = Vec::new();
+    for _ in 0..2 {
+        let job = jobs::run_next(&srv.state, Lane::All).await.unwrap().unwrap();
+        claimed.push((job.kind, job.subject));
+    }
+    claimed.sort();
     assert_eq!(
+        claimed,
         [
-            (first.kind.as_str(), first.subject.as_deref()),
-            (second.kind.as_str(), second.subject.as_deref())
-        ],
-        [
-            ("variants", Some(new.media.id.as_str())),
-            ("enrich", Some(new.media.id.as_str()))
+            ("enrich".to_string(), Some(new.media.id.clone())),
+            ("variants".to_string(), Some(new.media.id.clone()))
         ]
     );
     // The worker kept for interactive work takes no recheck.
