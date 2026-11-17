@@ -67,7 +67,10 @@ Rules:
   then the others in the order of
   [`emoji_names::by_name`](#emoji-names). Taking one puts the emoji into
   the query (`e:💀`). `resolve` never rewrites an `e:` value: a name goes
-  to the server as typed, and the server forgives its typos itself.
+  to the server as typed, and the server forgives its typos itself. The
+  web UI's search fields get the same offers from the server
+  (`GET /api/v1/search/suggest`, [web.md](web.md#keyboard-and-mouse)), which runs
+  `suggest` over the values of the items the viewer can search.
 - Unknown `key:value` tokens are plain text.
 
 Examples:

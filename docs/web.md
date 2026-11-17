@@ -241,6 +241,25 @@ wins.
 - **Skip link**: the first Tab stop jumps to the main content.
 - **Search from anywhere**: the search field in the top bar. On the search page
   results refresh 0.4 s after you stop typing; Enter searches immediately.
+- **Search suggestions**: while a filter is typed in a search field (the
+  search page's and the top bar's), a list under it offers its values, as
+  the desktop popups do ([desktop.md](desktop.md#search-suggestions)): the
+  vibes, tags, sets and owners of the items you can search, most used
+  first, the words of `type:`, `is:` and `sort:`, and for `e:` emojis with
+  their English names (`e:` alone: your emojis, most used first; `e:sk`:
+  💀 skull, ☠️ skull and crossbones, ..., yours first). The server matches
+  and ranks them (`GET /api/v1/search/suggest`, the popups' Rust code);
+  suggest.js only asks, 120 ms after typing pauses, and draws the answer
+  in the `:` suggestions' list. The highlight starts on the value a
+  half-typed filter stands for (`vibe:sar`: sarcastic), none for an emoji
+  name, which the search matches itself. Up/Down move it; Tab, or Enter on
+  a highlighted value, puts it in place of what is typed (an emoji in
+  place of its name) with a space, and the results follow; a click does
+  the same. Enter without a highlight, or on the value already typed,
+  searches as before. Escape, a space, moving the caret to another word
+  and leaving the field close the list. The field is an ARIA combobox as
+  the Emojis field is. Without JavaScript the search fields work as
+  before.
 - **Inline editing** (set page and item page): activate "Edit" next to a field
   (the pencil on the set page).
   The field turns into a small form with the cursor in it. Enter saves,
@@ -744,7 +763,7 @@ errors re-render the form with your input and the message.
 ## Static assets
 
 `/static/app.css`, `/static/app.js`, `/static/prefs.js`,
-`/static/upload.js`, `/static/emoji.js`, `/static/emoji.json`,
+`/static/upload.js`, `/static/emoji.js`, `/static/suggest.js`, `/static/emoji.json`,
 `/static/htmx.min.js` and `/static/favicon.svg` are compiled into the binary and served with
 `Cache-Control: public, max-age=31536000, immutable`. Pages link them with a
 content hash (`?v=…`), so upgrades are picked up at once. emoji.js gets the

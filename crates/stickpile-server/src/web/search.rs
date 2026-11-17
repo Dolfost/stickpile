@@ -36,13 +36,17 @@ fn more_url(q: &str, offset: usize) -> String {
 }
 
 pub fn cheat_sheet() -> Markup {
-    let rows: [(&str, &str); 13] = [
+    let rows: [(&str, &str); 14] = [
         (
             "cat \"big chungus\"",
             t("words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)"),
         ),
         ("-word", t("exclude a word")),
         ("e:😂", t("has this emoji")),
+        (
+            "e:skull",
+            t("has an emoji whose English name or keyword starts so; typos are forgiven"),
+        ),
         ("set:cats", t("in a set (slug or name)")),
         ("vibe:tired", t("AI or user vibe label")),
         ("tag:reaction  -tag:nsfw", t("has / has not this tag")),
@@ -76,6 +80,12 @@ pub fn cheat_sheet() -> Markup {
                 ))
                 " " (t("Example:")) " "
                 code { "e:😂 set:cats vibe:tired q>70 type:gif tag:reaction -tag:x likes>=2 sort:likes" }
+            }
+            p.hint {
+                (rich(
+                    t("While a filter is typed, the values in use are offered under the search field, most used first; {emoji} offers emojis with their names ({example}), and taking one puts the emoji in."),
+                    &[("emoji", html! { code { "e:" } }), ("example", html! { code { "e:sk" } ": 💀 skull" })],
+                ))
             }
         }
     }
@@ -161,7 +171,7 @@ pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<Searc
             label for="search-q" { (t("Search your items and public sets")) }
             div.inline-row {
                 input #search-q type="search" name="q" value=(query) autofocus autocomplete="off"
-                    placeholder="cat e:😂 type:gif q>70";
+                    placeholder="cat e:😂 type:gif q>70" data-search-suggest;
                 button.primary type="submit" { (t("Search")) }
             }
         }

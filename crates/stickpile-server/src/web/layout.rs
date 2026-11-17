@@ -111,6 +111,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                 // data is fetched on the first open.
                 script src=(assets::url("emoji.js")) data-emoji-data=(assets::url("emoji.json")) defer {}
                 script src=(assets::url("upload.js")) defer {}
+                script src=(assets::url("suggest.js")) defer {}
                 (head)
             }
             body hx-headers=[hx_headers] data-csrf=[csrf] data-i18n=[js_strings()] {
@@ -142,7 +143,7 @@ pub fn page_with_head(user: Option<&CurrentUser>, title: &str, active: Nav, head
                         }
                         form.topsearch role="search" method="get" action="/search" {
                             label.sr-only for="topsearch-q" { (t("Search")) }
-                            input #topsearch-q type="search" name="q" placeholder=(t("Search…")) autocomplete="off";
+                            input #topsearch-q type="search" name="q" placeholder=(t("Search…")) autocomplete="off" data-search-suggest;
                         }
                     }
                     // The right-hand group: the theme switch, then a divider

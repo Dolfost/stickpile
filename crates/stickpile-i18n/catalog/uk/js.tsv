@@ -190,3 +190,8 @@ Nothing to upload yet: choose files, drop them here or paste an image.	Поки 
 Approved the AI suggestions for {n} file.|Approved the AI suggestions for {n} files.	Схвалено пропозиції ШІ для {n} файлу.|Схвалено пропозиції ШІ для {n} файлів.|Схвалено пропозиції ШІ для {n} файлів.
 The other {n} file has the keywords, emojis, vibe and tags of {name} now.|The other {n} files have the keywords, emojis, vibe and tags of {name} now.	Тепер {n} інший файл має ті самі ключові слова, емодзі, настрій і теги, що й {name}.|Тепер {n} інші файли мають ті самі ключові слова, емодзі, настрій і теги, що й {name}.|Тепер {n} інших файлів мають ті самі ключові слова, емодзі, настрій і теги, що й {name}.
 Reset {name} to the original.	Відновлено оригінал {name}.
+
+# suggest.js
+Search suggestions	Підказки для пошуку
+Up and Down choose, Tab or Enter puts it in, Esc closes	Стрілки вгору й униз вибирають, Tab або Enter вставляє, Esc закриває
+{n} suggestion|{n} suggestions	{n} підказка|{n} підказки|{n} підказок
