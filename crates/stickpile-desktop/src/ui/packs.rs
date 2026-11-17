@@ -1,13 +1,20 @@
-//! Pack list cells: a GObject per set (cover, name, item count) and the
-//! cell factory of the pack grid.
+//! Pack list cells: a GObject per set (cover, name, item count, whether it
+//! is kept offline) and the cell factory of the pack grid.
+
+use std::rc::Rc;
 
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use stickpile_api::SetSummary;
+use stickpile_i18n::global::t;
 
 use crate::pages;
+use crate::ui::item::AVAILABLE_ICON;
+
+/// A right click on a cell: its position, the cell, and where in it.
+pub type MenuHook = Rc<dyn Fn(u32, &gtk::Widget, f64, f64)>;
 
 mod imp {
     use std::cell::{Cell, RefCell};
@@ -32,6 +39,9 @@ mod imp {
         /// No cover to show (yet): the placeholder icon is drawn.
         #[property(get, set)]
         pub placeholder: Cell<bool>,
+        /// The pack is kept offline (`K`): a mark on the cover.
+        #[property(get, set)]
+        pub kept: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -49,13 +59,17 @@ glib::wrapper! {
 }
 
 impl PackObject {
-    pub fn new(set: &SetSummary, texture: Option<&gdk::Texture>) -> PackObject {
+    pub fn new(set: &SetSummary, texture: Option<&gdk::Texture>, kept: bool) -> PackObject {
         let mut tooltip = set.name.clone();
         if !set.description.is_empty() {
             tooltip.push('\n');
             tooltip.push_str(&set.description);
         }
         tooltip.push_str(&format!("\nby {}", set.owner_username));
+        if kept {
+            tooltip.push('\n');
+            tooltip.push_str(t("Kept offline"));
+        }
         glib::Object::builder()
             .property("set-id", &set.id)
             .property("name", &set.name)
@@ -63,6 +77,7 @@ impl PackObject {
             .property("tooltip", tooltip)
             .property("texture", texture)
             .property("placeholder", texture.is_none())
+            .property("kept", kept)
             .build()
     }
 
@@ -72,8 +87,9 @@ impl PackObject {
     }
 }
 
-/// Cells: cover (or a placeholder icon), the name and the item count.
-pub fn factory(thumb_px: i32) -> gtk::SignalListItemFactory {
+/// Cells: cover (or a placeholder icon) with the kept mark, the name and
+/// the item count. `menu`: a right click on a cell.
+pub fn factory(thumb_px: i32, menu: MenuHook) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(move |_, obj| {
         let Some(li) = obj.downcast_ref::<gtk::ListItem>() else {
@@ -92,9 +108,21 @@ pub fn factory(thumb_px: i32) -> gtk::SignalListItemFactory {
             .valign(gtk::Align::Center)
             .build();
         icon.add_css_class("dim-label");
+        let kept = gtk::Image::builder()
+            .icon_name(AVAILABLE_ICON)
+            .halign(gtk::Align::End)
+            .valign(gtk::Align::Start)
+            .margin_top(3)
+            .margin_end(3)
+            .can_target(false)
+            .build();
+        kept.add_css_class("osd");
+        kept.add_css_class("stickpile-pill");
+        kept.add_css_class("stickpile-offline");
         let cover = gtk::Overlay::new();
         cover.set_child(Some(&picture));
         cover.add_overlay(&icon);
+        cover.add_overlay(&kept);
         let name = gtk::Label::builder()
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .max_width_chars(1)
@@ -118,12 +146,23 @@ pub fn factory(thumb_px: i32) -> gtk::SignalListItemFactory {
             .bind(&picture, "paintable", gtk::Widget::NONE);
         item.chain_property::<PackObject>("placeholder")
             .bind(&icon, "visible", gtk::Widget::NONE);
+        item.chain_property::<PackObject>("kept")
+            .bind(&kept, "visible", gtk::Widget::NONE);
         item.chain_property::<PackObject>("name")
             .bind(&name, "label", gtk::Widget::NONE);
         item.chain_property::<PackObject>("count")
             .bind(&count, "label", gtk::Widget::NONE);
         item.chain_property::<PackObject>("tooltip")
             .bind(&cell, "tooltip-text", gtk::Widget::NONE);
+
+        let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+        let (li, menu) = (li.clone(), menu.clone());
+        click.connect_pressed(move |g, _, x, y| {
+            if let Some(w) = g.widget() {
+                menu(li.position(), &w, x, y);
+            }
+        });
+        cell.add_controller(click);
     });
     factory
 }

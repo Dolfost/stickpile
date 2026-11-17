@@ -424,3 +424,15 @@ The limit of {budget} is reached: {files}. Nothing was deleted; raise the limit 
 The disk is full: {files}. Nothing was deleted.	Диск заповнено: {files}. Нічого не видалено.
 Up to date: the {n} kept file is on this device.|Up to date: all {n} kept files are on this device.	Усе готово: {n} збережений файл є на цьому пристрої.|Усе готово: усі {n} збережені файли є на цьому пристрої.|Усе готово: усі {n} збережених файлів є на цьому пристрої.
 {files} on this device; the rest downloads after the next sync.	{files} на цьому пристрої; решта завантажиться після наступної синхронізації.
+# Keeping offline (the GTK popup)
+Kept offline	Зберігається офлайн
+On this device	На цьому пристрої
+Keep everything offline	Зберігати все офлайн
+Every sticker you can see, now and later, within the limit of the Offline settings below. Asks first, with what it takes.	Усі стікери, які ви бачите, зараз і надалі, у межах обмеження з налаштувань Офлайн нижче. Спершу запитає, показавши, скільки це займе.
+Pause	Призупинити
+Resume	Продовжити
+Cached files	Файли в кеші
+Clear cache	Очистити кеш
+Delete the thumbnails and copied files that are not kept; kept files stay	Видалити мініатюри й скопійовані файли, які не збережено; збережені файли залишаться
+Delete every kept file and forget what to keep (asks first)	Видалити всі збережені файли й забути, що зберігати (спершу запитає)
+Clearing leaves the kept files; removing them asks first.	Очищення залишає збережені файли; їх видалення спершу запитає.

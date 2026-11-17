@@ -6,6 +6,14 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::subclass::prelude::*;
 use stickpile_quick::model::{self, Entry, Tiles};
+use stickpile_quick::offline::OfflineMark;
+
+/// The icon of a tile whose file is on the device (and of a kept pack).
+pub const AVAILABLE_ICON: &str = "folder-download-symbolic";
+/// The icon of a tile whose file is not, with the server unreachable.
+pub const UNAVAILABLE_ICON: &str = "network-offline-symbolic";
+/// How much of an unavailable tile shows.
+const UNAVAILABLE_OPACITY: f64 = 0.35;
 
 mod imp {
     use std::cell::{Cell, RefCell};
@@ -53,6 +61,16 @@ mod imp {
         pub text: RefCell<String>,
         #[property(get, set)]
         pub has_text: Cell<bool>,
+        /// The offline mark: the file is on the device.
+        #[property(get, set)]
+        pub available: Cell<bool>,
+        /// The offline mark: the file is not, and the server is unreachable.
+        #[property(get, set)]
+        pub unavailable: Cell<bool>,
+        /// The picture's opacity: dimmed when its file is not on the
+        /// device and the server is unreachable.
+        #[property(get, set)]
+        pub opacity: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -89,6 +107,7 @@ impl StickerObject {
         } else {
             String::new()
         };
+        let unavailable = entry.offline == OfflineMark::Unavailable;
         glib::Object::builder()
             .property("item-id", &entry.item.id)
             .property("texture", texture)
@@ -105,6 +124,9 @@ impl StickerObject {
             .property("vibe", vibe)
             .property("has-text", !text.is_empty())
             .property("text", text)
+            .property("available", entry.offline == OfflineMark::Available)
+            .property("unavailable", unavailable)
+            .property("opacity", if unavailable { UNAVAILABLE_OPACITY } else { 1.0 })
             .build()
     }
 }

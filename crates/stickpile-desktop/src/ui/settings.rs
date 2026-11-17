@@ -1,6 +1,8 @@
 //! The Settings tab: a form generated from `settings_schema()`, grouped by
 //! `GROUPS`. Every change is written at once (`set_value`, `unset_value` for
-//! a reset); the shell then reloads the config and applies it live.
+//! a reset); the shell then reloads the config and applies it live. Above
+//! the "Offline" group, the "On this device" block: keep everything, what
+//! is kept, the downloader, clear the cache, remove the kept files.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -11,6 +13,7 @@ use stickpile_core::settings::{self, LayeredConfig, SettingKind, SettingSpec, GR
 use stickpile_i18n::global::{t, t_dyn};
 use stickpile_quick::PageKey;
 
+use crate::offline::PanelView;
 use crate::pages;
 use crate::ui::nav::{Control, PageNav, Stop};
 use crate::ui::{set_class, Handler};
@@ -21,6 +24,163 @@ pub enum SettingsAction {
     /// Remove the key from the file the page writes, so the default (or
     /// the value of a lower layer) applies again.
     Reset(&'static str),
+    /// A control of the "On this device" block.
+    Offline(OfflineAction),
+}
+
+/// The "On this device" block's controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfflineAction {
+    /// The "Keep everything offline" switch.
+    KeepLibrary(bool),
+    Pause,
+    Resume,
+    Cancel,
+    ClearCache,
+    RemoveKept,
+}
+
+/// The "On this device" block (`crate::offline::Panel`).
+struct OfflineBlock {
+    group: adw::PreferencesGroup,
+    library_row: adw::ActionRow,
+    library: gtk::Switch,
+    usage: adw::ActionRow,
+    state_row: gtk::ListBoxRow,
+    state: gtk::Label,
+    progress: gtk::ProgressBar,
+    notes: gtk::Label,
+    pause: gtk::Button,
+    resume: gtk::Button,
+    cancel: gtk::Button,
+    cache_row: adw::ActionRow,
+    clear: gtk::Button,
+    remove: gtk::Button,
+}
+
+fn text_button() -> gtk::Button {
+    let b = gtk::Button::builder().valign(gtk::Align::Center).build();
+    b.add_css_class("flat");
+    b
+}
+
+impl OfflineBlock {
+    fn new() -> OfflineBlock {
+        let group = adw::PreferencesGroup::new();
+        let library = gtk::Switch::builder().valign(gtk::Align::Center).build();
+        let library_row = adw::ActionRow::new();
+        library_row.add_suffix(&library);
+        library_row.set_activatable_widget(Some(&library));
+        group.add(&library_row);
+        let usage = adw::ActionRow::new();
+        usage.set_title_lines(2);
+        group.add(&usage);
+
+        let state = caption(&[]);
+        let progress = gtk::ProgressBar::new();
+        let notes = caption(&["dim-label", "caption"]);
+        let (pause, resume, cancel) = (text_button(), text_button(), text_button());
+        let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
+        buttons.append(&pause);
+        buttons.append(&resume);
+        buttons.append(&cancel);
+        let column = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(6)
+            .margin_top(10)
+            .margin_bottom(10)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        column.append(&state);
+        column.append(&progress);
+        column.append(&notes);
+        column.append(&buttons);
+        let state_row = gtk::ListBoxRow::builder().activatable(false).child(&column).build();
+        group.add(&state_row);
+
+        let (clear, remove) = (text_button(), text_button());
+        remove.add_css_class("destructive-action");
+        let cache_row = adw::ActionRow::new();
+        cache_row.add_suffix(&clear);
+        cache_row.add_suffix(&remove);
+        group.add(&cache_row);
+        OfflineBlock {
+            group,
+            library_row,
+            library,
+            usage,
+            state_row,
+            state,
+            progress,
+            notes,
+            pause,
+            resume,
+            cancel,
+            cache_row,
+            clear,
+            remove,
+        }
+    }
+
+    fn relabel(&self) {
+        self.group.set_title(t("On this device"));
+        self.library_row.set_title(t("Keep everything offline"));
+        self.library_row.set_subtitle(t(
+            "Every sticker you can see, now and later, within the limit of the Offline settings below. Asks first, with what it takes.",
+        ));
+        self.pause.set_label(t("Pause"));
+        self.resume.set_label(t("Resume"));
+        self.cancel.set_label(t("Cancel"));
+        self.cache_row.set_title(t("Cached files"));
+        self.clear.set_label(t("Clear cache"));
+        self.clear.set_tooltip_text(Some(t(
+            "Delete the thumbnails and copied files that are not kept; kept files stay",
+        )));
+        self.remove.set_label(t("Remove kept files"));
+        self.remove
+            .set_tooltip_text(Some(t("Delete every kept file and forget what to keep (asks first)")));
+    }
+
+    fn show(&self, v: &PanelView) {
+        if self.library.is_active() != v.library {
+            self.library.set_active(v.library);
+        }
+        self.usage.set_title(&v.kept);
+        self.usage.set_subtitle(&v.other);
+        self.usage.set_visible(!v.kept.is_empty());
+        self.state.set_label(&v.state);
+        set_class(&self.state, "warning", v.state_warning);
+        self.progress.set_visible(v.fraction.is_some());
+        self.progress.set_fraction(v.fraction.unwrap_or(0.0));
+        let notes: Vec<&str> = [v.failures.as_str(), v.skipped.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        self.notes.set_label(&notes.join("\n"));
+        self.notes.set_visible(!notes.is_empty());
+        self.pause.set_visible(v.can_pause);
+        self.resume.set_visible(v.can_resume);
+        self.cancel.set_visible(v.can_cancel);
+        self.state_row.set_visible(!v.state.is_empty() || v.can_resume);
+        self.remove.set_sensitive(v.can_remove);
+        let message = v
+            .message
+            .clone()
+            .unwrap_or_else(|| t("Clearing leaves the kept files; removing them asks first.").to_string());
+        self.cache_row.set_subtitle(&message);
+        set_class(&self.cache_row, "stickpile-error-row", v.message_error);
+    }
+
+    fn stops(&self) -> Vec<Stop> {
+        let mut stops = vec![Stop::new(&self.library_row, Control::Switch(self.library.clone()))];
+        for b in [&self.pause, &self.resume, &self.cancel] {
+            stops.push(Stop::new(&self.state_row, Control::Button(b.clone())));
+        }
+        stops.push(Stop::new(&self.cache_row, Control::Button(self.clear.clone())));
+        stops.push(Stop::new(&self.cache_row, Control::Button(self.remove.clone())));
+        stops
+    }
 }
 
 enum Input {
@@ -98,6 +258,8 @@ pub struct SettingsPage {
     shown: RefCell<Vec<Option<toml::Value>>>,
     write_path: RefCell<PathBuf>,
     on_action: RefCell<Option<Handler<SettingsAction>>>,
+    /// The "On this device" block, above the "Offline" group.
+    offline: OfflineBlock,
 }
 
 fn caption(css: &[&str]) -> gtk::Label {
@@ -132,7 +294,11 @@ impl SettingsPage {
         let schema = settings::settings_schema();
         let mut rows = Vec::new();
         let mut groups = Vec::new();
+        let offline = OfflineBlock::new();
         for group in GROUPS {
+            if *group == "Offline" {
+                column.append(&offline.group);
+            }
             let g = adw::PreferencesGroup::new();
             for spec in schema.iter().filter(|s| s.group == *group) {
                 let row = adw::ActionRow::new();
@@ -188,6 +354,7 @@ impl SettingsPage {
             shown: RefCell::new(vec![None; n]),
             write_path: RefCell::new(PathBuf::new()),
             on_action: RefCell::new(None),
+            offline,
         });
         page.relabel();
         page.connect_signals();
@@ -198,6 +365,7 @@ impl SettingsPage {
     /// [`SettingsPage::show`] adds the lock notes again.
     pub fn relabel(&self) {
         self.updating.set(true);
+        self.offline.relabel();
         for (group, g) in &self.groups {
             g.set_title(&t_dyn(group));
         }
@@ -221,6 +389,7 @@ impl SettingsPage {
     }
 
     fn connect_signals(self: &Rc<Self>) {
+        self.connect_offline();
         for (i, row) in self.rows.iter().enumerate() {
             let weak = Rc::downgrade(self);
             let changed = move || {
@@ -342,11 +511,52 @@ impl SettingsPage {
 
     fn stops(&self) -> Vec<Stop> {
         let mut stops = Vec::new();
+        let mut block = Some(self.offline.stops());
         for row in &self.rows {
+            // The block sits above the "Offline" group.
+            if row.spec.group == "Offline" {
+                stops.extend(block.take().unwrap_or_default());
+            }
             stops.push(Stop::new(&row.row, row.control()));
             stops.push(Stop::new(&row.reset, Control::Button(row.reset.clone())));
         }
+        stops.extend(block.unwrap_or_default());
         stops
+    }
+
+    /// The "On this device" block's controls ask the shell.
+    fn connect_offline(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.offline.library.connect_active_notify(move |sw| {
+            if let Some(p) = weak.upgrade() {
+                if !p.updating.get() {
+                    p.emit(SettingsAction::Offline(OfflineAction::KeepLibrary(sw.is_active())));
+                }
+            }
+        });
+        let b = &self.offline;
+        for (button, action) in [
+            (&b.pause, OfflineAction::Pause),
+            (&b.resume, OfflineAction::Resume),
+            (&b.cancel, OfflineAction::Cancel),
+            (&b.clear, OfflineAction::ClearCache),
+            (&b.remove, OfflineAction::RemoveKept),
+        ] {
+            let weak = Rc::downgrade(self);
+            button.connect_clicked(move |_| {
+                if let Some(p) = weak.upgrade() {
+                    p.emit(SettingsAction::Offline(action));
+                }
+            });
+        }
+    }
+
+    /// Draw the "On this device" block.
+    pub fn show_offline(&self, v: &PanelView) {
+        self.updating.set(true);
+        self.offline.show(v);
+        self.updating.set(false);
+        self.nav.refresh(&self.stops());
     }
 
     pub fn key(&self, key: PageKey) {

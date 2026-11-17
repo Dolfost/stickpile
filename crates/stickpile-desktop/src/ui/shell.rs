@@ -29,16 +29,20 @@ use stickpile_quick::focus::FocusEnv;
 use stickpile_quick::model::{
     self, safe_label, Command, Event, HelpPage, Level, Model, OpenInfo, StickerMode, SuggestionLine,
 };
+use stickpile_quick::offline::{Confirm, KeepScope, Menu};
 use stickpile_quick::{Mode, Tab, View};
 
 use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
 use crate::demo::DemoBackend;
 use crate::keys::{self, KeyPress, Mods};
+use crate::offline::{remove_numbers, Downloads, Panel, PanelView};
 use crate::paste::{self, PasteTarget};
 use crate::ui::drag::{self, LazyFileProvider, PreparedFuture};
 use crate::ui::item::StickerObject;
+use crate::ui::item::{AVAILABLE_ICON, UNAVAILABLE_ICON};
 use crate::ui::me::{MeAction, MePage};
 use crate::ui::packs::{self, PackObject};
+use crate::ui::settings::OfflineAction;
 use crate::ui::settings::{SettingsAction, SettingsPage};
 use crate::ui::tabbar::TabBar;
 use crate::ui::{help, set_class};
@@ -92,6 +96,13 @@ label.stickpile-heart { color: #ff5470; }
 .stickpile-help-key { font-family: monospace; font-weight: bold; }
 .stickpile-pack-name { font-weight: bold; }
 .stickpile-stat { padding: 10px 6px; }
+.stickpile-offline { color: @success_color; padding: 2px 4px; }
+.stickpile-unavailable { color: @warning_color; padding: 2px 4px; }
+.stickpile-confirm { background-color: @popover_bg_color; color: @popover_fg_color; border-radius: 12px; box-shadow: 0 2px 14px alpha(black, 0.35); padding: 18px 22px; }
+.stickpile-confirm-body { margin-top: 4px; }
+.stickpile-menu button { font-weight: normal; }
+.stickpile-menu-keys { font-family: monospace; opacity: 0.6; margin-left: 18px; }
+row.stickpile-error-row .subtitle { color: @error_color; }
 row.stickpile-cursor { background-color: alpha(@accent_bg_color, 0.14); box-shadow: inset 3px 0 @accent_bg_color; }
 button.stickpile-cursor { outline: 2px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
 window.stickpile-oled {
@@ -188,6 +199,74 @@ struct Widgets {
     /// it clips what does not fit instead of widening the window.
     suggest: gtk::ScrolledWindow,
     suggest_box: gtk::Box,
+    /// The question over the popup (`Model::confirm`).
+    confirm: ConfirmCard,
+    /// Over the grids: the parent of the menu of a tile, which points into it.
+    menu_anchor: gtk::Box,
+}
+
+/// The card of a question: title, text, the two buttons, the keys.
+struct ConfirmCard {
+    card: gtk::Box,
+    title: gtk::Label,
+    body: gtk::Label,
+    accept: gtk::Button,
+    cancel: gtk::Button,
+    hint: gtk::Label,
+}
+
+impl ConfirmCard {
+    fn build() -> ConfirmCard {
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(8)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .width_request(420)
+            .visible(false)
+            .build();
+        card.add_css_class("stickpile-confirm");
+        let title = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        title.add_css_class("title-4");
+        let body = gtk::Label::builder().xalign(0.0).wrap(true).max_width_chars(52).build();
+        body.add_css_class("stickpile-confirm-body");
+        let cancel = gtk::Button::builder().can_focus(false).build();
+        let accept = gtk::Button::builder().can_focus(false).build();
+        let buttons = gtk::Box::builder()
+            .spacing(8)
+            .halign(gtk::Align::End)
+            .margin_top(8)
+            .build();
+        buttons.append(&cancel);
+        buttons.append(&accept);
+        let hint = gtk::Label::builder().xalign(1.0).build();
+        hint.add_css_class("dim-label");
+        hint.add_css_class("caption");
+        card.append(&title);
+        card.append(&body);
+        card.append(&buttons);
+        card.append(&hint);
+        ConfirmCard {
+            card,
+            title,
+            body,
+            accept,
+            cancel,
+            hint,
+        }
+    }
+
+    fn show(&self, c: Option<&Confirm>) {
+        self.card.set_visible(c.is_some());
+        let Some(c) = c else { return };
+        self.title.set_label(&c.title);
+        self.body.set_label(&c.body);
+        self.accept.set_label(&c.accept);
+        self.cancel.set_label(&c.cancel);
+        set_class(&self.accept, "destructive-action", c.destructive);
+        set_class(&self.accept, "suggested-action", !c.destructive);
+        self.hint.set_label(&c.hint);
+    }
 }
 
 pub struct Shell {
@@ -238,6 +317,18 @@ pub struct Shell {
     paste_target: RefCell<Option<PasteTarget>>,
     /// The session the popup was last opened in can paste (`paste.auto`).
     paste_available: Cell<bool>,
+    /// Keeping offline: the downloader's runs and the Settings block.
+    downloads: RefCell<Downloads>,
+    panel: RefCell<Panel>,
+    panel_shown: RefCell<Option<PanelView>>,
+    /// The reachability last told to the model.
+    reach_told: Cell<Option<bool>>,
+    /// The menu of a tile on screen, and its popover.
+    menu: RefCell<Option<(Menu, gtk::Popover)>>,
+    /// Where the last right click was: the cell and the point in it.
+    menu_at: RefCell<Option<(gtk::Widget, f64, f64)>>,
+    /// The question on screen.
+    confirm_shown: RefCell<Option<Confirm>>,
 }
 
 /// A cover changes with the set's cover item or image.
@@ -329,6 +420,13 @@ impl Shell {
             history_path,
             paste_target: RefCell::new(None),
             paste_available: Cell::new(true),
+            downloads: RefCell::new(Downloads::default()),
+            panel: RefCell::new(Panel::default()),
+            panel_shown: RefCell::new(None),
+            reach_told: Cell::new(None),
+            menu: RefCell::new(None),
+            menu_at: RefCell::new(None),
+            confirm_shown: RefCell::new(None),
             cfg: RefCell::new(cfg),
         });
         if shell.config_error.is_none() && !shell.demo_mode {
@@ -336,8 +434,10 @@ impl Shell {
         }
         shell.connect_signals();
         shell.start_sync_timer();
+        shell.watch_offline();
         shell.render();
         shell.refresh_account_lang();
+        shell.refresh_keeps();
         shell
     }
 
@@ -489,6 +589,7 @@ impl Shell {
         let commands = self.model.borrow_mut().handle(event);
         self.render();
         self.after_render();
+        self.update_menu();
         for c in commands {
             self.execute(c);
         }
@@ -683,13 +784,360 @@ impl Shell {
                     this.dispatch(Event::KeyTimeout { seq });
                 });
             }
-            // Keeping offline: the backend does not run it yet.
-            Command::CheckOffline { .. }
-            | Command::LoadKeptReasons { .. }
-            | Command::EstimateKeep { .. }
-            | Command::SetKeep { .. }
-            | Command::RemoveKept => {}
+            Command::CheckOffline {
+                items,
+                target,
+                sticker,
+                generation,
+            } => self.answer(
+                move |b| b.offline_available(items, target, sticker),
+                move |outcome| Event::OfflineChecked { generation, outcome },
+            ),
+            Command::LoadKeptReasons { item } => {
+                let item_id = item.id.clone();
+                self.answer(
+                    move |b| b.offline_reasons(*item),
+                    move |outcome| Event::KeptReasons { item_id, outcome },
+                )
+            }
+            Command::EstimateKeep { scope } => {
+                let s = scope.clone();
+                self.answer(
+                    move |b| b.offline_estimate(s),
+                    move |outcome| Event::Estimated { scope, outcome },
+                )
+            }
+            Command::SetKeep { scope, keep } => self.set_keep(scope, keep),
+            Command::RemoveKept => {
+                let Some(b) = self.backend() else {
+                    self.dispatch(Event::KeptRemoved(Err(t("not connected").into())));
+                    return;
+                };
+                self.spawn(b.offline_remove_all(), |this, out| {
+                    let outcome = out
+                        .unwrap_or_else(|| Err(t("internal error (see log)").into()))
+                        .map(|r| (r.removed_files as u64, r.freed_bytes));
+                    this.panel.borrow_mut().message = None;
+                    this.dispatch(Event::KeptRemoved(outcome));
+                    this.refresh_usage();
+                });
+            }
         }
+    }
+
+    // -- keeping offline ----------------------------------------------------------------
+
+    /// Keep or stop keeping; after a keep the downloader runs.
+    fn set_keep(self: &Rc<Self>, scope: KeepScope, keep: bool) {
+        let Some(b) = self.backend() else {
+            self.dispatch(Event::KeepDone {
+                scope,
+                keep,
+                outcome: Err(t("not connected").into()),
+            });
+            return;
+        };
+        let s = scope.clone();
+        self.spawn(b.offline_set(s, keep), move |this, out| {
+            let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
+            let ok = outcome.is_ok();
+            this.dispatch(Event::KeepDone { scope, keep, outcome });
+            if ok && keep {
+                this.run_offline();
+            }
+            this.refresh_usage();
+        });
+    }
+
+    /// Tell the model what is kept (another process, the CLI, may keep too).
+    fn refresh_keeps(self: &Rc<Self>) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.offline_keeps(), |this, out| match out {
+            Some(Ok(keeps)) => this.dispatch(Event::OfflineKeeps(keeps)),
+            Some(Err(e)) => tracing::debug!("what is kept: {e}"),
+            None => {}
+        });
+    }
+
+    /// Run the downloader, unless one runs (then once more after it).
+    fn run_offline(self: &Rc<Self>) {
+        if self.backend().is_none() || !self.downloads.borrow_mut().want() {
+            return;
+        }
+        self.start_run();
+    }
+
+    /// One run of the downloader ([`Downloads`] says when).
+    fn start_run(self: &Rc<Self>) {
+        let Some(b) = self.backend() else {
+            self.downloads.borrow_mut().finished(None);
+            return;
+        };
+        self.panel.borrow_mut().running = true;
+        self.render_panel();
+        let control = self.downloads.borrow().control.clone();
+        self.spawn(b.offline_run(control), |this, out| {
+            let outcome = match out {
+                Some(Ok(o)) => {
+                    tracing::info!(
+                        "offline: {:?}, {} of {} files on this device",
+                        o.end,
+                        o.status.files_done,
+                        o.status.files_total
+                    );
+                    Some(o)
+                }
+                Some(Err(e)) => {
+                    tracing::warn!("offline downloads: {e}");
+                    None
+                }
+                None => None,
+            };
+            let again = this.downloads.borrow_mut().finished(outcome.as_ref());
+            {
+                let mut p = this.panel.borrow_mut();
+                p.running = again;
+                if let Some(o) = &outcome {
+                    p.status = Some(o.status.clone());
+                }
+            }
+            this.dispatch(Event::OfflineFiles);
+            this.tell_reachable();
+            this.refresh_usage();
+            if again {
+                this.start_run();
+            }
+        });
+    }
+
+    /// Follow the downloader's status: the Settings block, and the marks
+    /// as files arrive (at most a few times a second).
+    fn watch_offline(self: &Rc<Self>) {
+        let mut rx = self.downloads.borrow().control.subscribe();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let mut done = None;
+            while rx.changed().await.is_ok() {
+                let status = rx.borrow_and_update().clone();
+                let Some(this) = weak.upgrade() else { break };
+                let arrived = done != Some(status.files_done);
+                done = Some(status.files_done);
+                {
+                    let mut p = this.panel.borrow_mut();
+                    p.paused = this.downloads.borrow().control.is_paused();
+                    p.status = Some(status);
+                }
+                this.render_panel();
+                if arrived && this.model.try_borrow_mut().is_ok() {
+                    this.dispatch(Event::OfflineFiles);
+                }
+                drop(this);
+                glib::timeout_future(Duration::from_millis(400)).await;
+            }
+        });
+    }
+
+    /// Tell the model whether the server answers, when that changed.
+    fn tell_reachable(self: &Rc<Self>) {
+        let Some(r) = self.backend().and_then(|b| b.reachable()) else {
+            return;
+        };
+        if self.reach_told.replace(Some(r)) != Some(r) {
+            self.dispatch(Event::Reachable(r));
+        }
+    }
+
+    /// What the Settings block says: the usage, and between runs what the
+    /// plan says.
+    fn refresh_usage(self: &Rc<Self>) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.clone().offline_usage(), |this, out| {
+            match out {
+                Some(Ok(u)) => this.panel.borrow_mut().usage = Some(u),
+                Some(Err(e)) => tracing::debug!("offline usage: {e}"),
+                None => {}
+            }
+            this.render_panel();
+        });
+        self.spawn(b.offline_plan_status(), |this, out| {
+            match out {
+                Some(Ok(s)) => this.panel.borrow_mut().planned(s),
+                Some(Err(e)) => tracing::debug!("offline plan: {e}"),
+                None => {}
+            }
+            this.render_panel();
+        });
+    }
+
+    /// Draw the Settings page's "On this device" block, when it changed.
+    fn render_panel(&self) {
+        let Ok(m) = self.model.try_borrow() else { return };
+        let mut p = self.panel.borrow_mut();
+        p.paused = self.downloads.borrow().control.is_paused();
+        let view = p.view(m.library_kept());
+        drop(p);
+        drop(m);
+        if self.panel_shown.borrow().as_ref() != Some(&view) {
+            self.settings.show_offline(&view);
+            *self.panel_shown.borrow_mut() = Some(view);
+        }
+    }
+
+    /// A control of the "On this device" block.
+    fn offline_action(self: &Rc<Self>, action: OfflineAction) {
+        let control = self.downloads.borrow().control.clone();
+        match action {
+            OfflineAction::KeepLibrary(keep) => {
+                if keep != self.model.borrow().library_kept() {
+                    self.dispatch(Event::Keep {
+                        scope: KeepScope::Library,
+                        keep,
+                    });
+                }
+            }
+            OfflineAction::Pause => control.pause(),
+            OfflineAction::Resume => {
+                control.resume();
+                self.run_offline();
+            }
+            OfflineAction::Cancel => {
+                // A paused run waits: it has to go on to see the cancel.
+                control.cancel();
+                control.resume();
+            }
+            OfflineAction::ClearCache => {
+                let Some(b) = self.backend() else { return };
+                self.spawn(b.clear_cache(), |this, out| {
+                    match out {
+                        Some(Ok(r)) => this.panel.borrow_mut().cleared(&r),
+                        Some(Err(e)) => this.panel.borrow_mut().failed(e),
+                        None => {}
+                    }
+                    // Thumbnails decoded before stay drawn; files go.
+                    this.dispatch(Event::OfflineFiles);
+                    this.refresh_usage();
+                });
+            }
+            OfflineAction::RemoveKept => {
+                let (files, bytes) = remove_numbers(self.panel.borrow().usage.as_ref());
+                self.dispatch(Event::AskRemoveKept { files, bytes });
+            }
+        }
+        // The switch shows what is kept, whatever was clicked.
+        *self.panel_shown.borrow_mut() = None;
+        self.render_panel();
+    }
+
+    // -- the menu of a tile --------------------------------------------------------------
+
+    /// A right click on a cell of the pack list.
+    fn pack_menu_hook(self: &Rc<Self>) -> packs::MenuHook {
+        let weak = Rc::downgrade(self);
+        Rc::new(move |position, cell, x, y| {
+            if let Some(this) = weak.upgrade() {
+                this.open_menu_at(position, cell, x, y);
+            }
+        })
+    }
+
+    /// A right click on a cell of the shown grid.
+    fn open_menu_at(self: &Rc<Self>, position: u32, cell: &gtk::Widget, x: f64, y: f64) {
+        *self.menu_at.borrow_mut() = Some((cell.clone(), x, y));
+        self.dispatch(Event::OpenMenu(Some(position as usize)));
+    }
+
+    /// Show, change or close the menu as the model says. Called after a
+    /// render, with the model free.
+    fn update_menu(self: &Rc<Self>) {
+        let want = self.model.borrow().menu();
+        let same = match (&*self.menu.borrow(), &want) {
+            (Some((shown, _)), Some(m)) => shown == m,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        if let Some((_, popover)) = self.menu.borrow_mut().take() {
+            popover.popdown();
+            popover.unparent();
+        }
+        let Some(menu) = want else { return };
+        let popover = self.build_menu(&menu);
+        popover.set_parent(&self.w.menu_anchor);
+        // Point at the cell clicked, else (the Menu key) the middle.
+        let at = self.menu_at.borrow_mut().take().and_then(|(cell, x, y)| {
+            cell.compute_point(&self.w.menu_anchor, &gtk::graphene::Point::new(x as f32, y as f32))
+        });
+        let (x, y) = match at {
+            Some(p) => (p.x() as i32, p.y() as i32),
+            None => (self.w.menu_anchor.width() / 2, self.w.menu_anchor.height() / 3),
+        };
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x, y, 1, 1)));
+        *self.menu.borrow_mut() = Some((menu, popover.clone()));
+        popover.popup();
+    }
+
+    fn build_menu(self: &Rc<Self>, menu: &Menu) -> gtk::Popover {
+        let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        list.add_css_class("stickpile-menu");
+        let popover = gtk::Popover::builder()
+            .child(&list)
+            .has_arrow(false)
+            .halign(gtk::Align::Start)
+            .build();
+        popover.add_css_class("menu");
+        for entry in &menu.entries {
+            let label = gtk::Label::builder()
+                .label(&entry.label)
+                .xalign(0.0)
+                .hexpand(true)
+                .build();
+            let Some(action) = entry.action else {
+                label.add_css_class("dim-label");
+                label.set_margin_start(12);
+                label.set_margin_end(12);
+                label.set_margin_top(4);
+                label.set_margin_bottom(4);
+                list.append(&label);
+                continue;
+            };
+            let row = gtk::Box::builder().build();
+            row.append(&label);
+            if !entry.keys.is_empty() {
+                let keys = gtk::Label::new(Some(&entry.keys));
+                keys.add_css_class("stickpile-menu-keys");
+                row.append(&keys);
+            }
+            let button = gtk::Button::builder().child(&row).build();
+            button.add_css_class("flat");
+            let this = Rc::downgrade(self);
+            let pop = popover.clone();
+            button.connect_clicked(move |_| {
+                let Some(this) = this.upgrade() else { return };
+                // Chosen: the model closes the menu, so no "closed" for it.
+                this.menu.borrow_mut().take();
+                pop.popdown();
+                let this = this.clone();
+                glib::idle_add_local_once(move || this.dispatch(Event::MenuChosen(action)));
+            });
+            list.append(&button);
+        }
+        let this = Rc::downgrade(self);
+        popover.connect_closed(move |p| {
+            let p = p.clone();
+            let this = this.clone();
+            glib::idle_add_local_once(move || {
+                p.unparent();
+                let Some(this) = this.upgrade() else { return };
+                let mine = this.menu.borrow().as_ref().is_some_and(|(_, q)| *q == p);
+                if mine {
+                    this.menu.borrow_mut().take();
+                    this.dispatch(Event::CloseMenu);
+                }
+            });
+        });
+        popover
     }
 
     /// Run a backend request and hand its outcome to the model; every
@@ -706,6 +1154,7 @@ impl Shell {
         self.spawn(request(b), move |this, out| {
             let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             this.dispatch(event(outcome));
+            this.tell_reachable();
         });
     }
 
@@ -854,7 +1303,7 @@ impl Shell {
                         Some(Thumb::Ready(t)) => Some(t),
                         _ => None,
                     };
-                    PackObject::new(s, tex)
+                    PackObject::new(s, tex, m.pack_kept(&s.id))
                 })
                 .collect();
             w.pack_store.splice(0, w.pack_store.n_items(), &packs);
@@ -925,6 +1374,9 @@ impl Shell {
             .set_tooltip_text((!f.details.is_empty()).then_some(f.details.as_str()));
         // Kept when empty, so the grid above does not change height.
         w.status.set_label(&f.status);
+        // A long message (why a sticker does not copy) is cut: all of it on hover.
+        w.status
+            .set_tooltip_text((!f.status.is_empty()).then_some(f.status.as_str()));
         set_class(&w.status, "error", f.level == Level::Error);
         set_class(&w.status, "warning", f.level == Level::Warning);
         set_class(&w.status, "dim-label", matches!(f.level, Level::Info | Level::Busy));
@@ -934,9 +1386,18 @@ impl Shell {
         self.me.show_cursor(cursor && tab == Tab::Me);
         self.settings.show_cursor(cursor && tab == Tab::Settings);
 
+        let confirm = m.confirm();
+        if *self.confirm_shown.borrow() != confirm {
+            w.confirm.show(confirm.as_ref());
+            *self.confirm_shown.borrow_mut() = confirm;
+        }
+
         self.rendering.set(was_rendering);
         drop(m);
         self.update_page();
+        if tab == Tab::Settings {
+            self.render_panel();
+        }
     }
 
     /// Move the keyboard focus to match the mode. Callers set `rendering`,
@@ -1011,6 +1472,7 @@ impl Shell {
         self.apply_focus(&self.model.borrow());
         self.rendering.set(was);
         self.maybe_sync();
+        self.refresh_keeps();
     }
 
     // -- Me and Settings --------------------------------------------------------------------
@@ -1061,9 +1523,14 @@ impl Shell {
     fn account_changed(self: &Rc<Self>) {
         self.thumbs.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
         self.covers.borrow_mut().clear();
+        // What was kept and downloaded belonged to the old account.
+        self.downloads.borrow_mut().forget();
+        *self.panel.borrow_mut() = Panel::default();
+        self.reach_told.set(None);
         self.dispatch(Event::Reload);
         *self.sync.borrow_mut() = sync::SyncPolicy::default();
         self.maybe_sync();
+        self.refresh_keeps();
     }
 
     fn settings_action(self: &Rc<Self>, action: SettingsAction) {
@@ -1077,6 +1544,7 @@ impl Shell {
         let result = match action {
             SettingsAction::Set(key, value) => config_file::set_value(&path, key, value),
             SettingsAction::Reset(key) => config_file::unset_value(&path, key),
+            SettingsAction::Offline(a) => return self.offline_action(a),
         };
         if let Err(e) = &result {
             tracing::warn!("saving a setting: {e}");
@@ -1104,6 +1572,7 @@ impl Shell {
             Ok(layered) => {
                 self.settings.set_error(None);
                 self.settings.show(&layered, &self.config_path);
+                self.refresh_usage();
                 let changed = layered.config != *self.cfg.borrow();
                 if changed {
                     self.apply_config(layered.config);
@@ -1121,7 +1590,8 @@ impl Shell {
             if old.ui.thumb_px != new.ui.thumb_px {
                 let px = new.ui.thumb_px as i32;
                 w.grid.set_factory(Some(&self.item_factory(px)));
-                w.pack_grid.set_factory(Some(&packs::factory(px)));
+                w.pack_grid
+                    .set_factory(Some(&packs::factory(px, self.pack_menu_hook())));
             }
             let (width, height) = glue::window_size(&new);
             w.window.set_default_size(width, height);
@@ -1134,6 +1604,7 @@ impl Shell {
             apply_theme(&w.window, new.ui.theme);
         }
         let account = pages::account_changed(&old, &new);
+        let offline_changed = old.offline != new.offline;
         if pages::needs_new_session(&old, &new) {
             match &self.demo {
                 Some(demo) => demo.configure(&new),
@@ -1155,6 +1626,14 @@ impl Shell {
             self.account_changed();
             if self.model.borrow().tab() == Tab::Me {
                 self.load_profile();
+            }
+        }
+        // The running session takes the new options; what they want more
+        // is downloaded, what they no longer want is released.
+        if offline_changed {
+            if let Some(b) = self.backend() {
+                b.set_offline_options(new.offline.clone());
+                self.run_offline();
             }
         }
     }
@@ -1319,7 +1798,10 @@ impl Shell {
                     this.paste_after_pick();
                     this.record(item, prepared);
                 }
-                Err(error) => this.dispatch(Event::CopyFailed { item_id: id, error }),
+                Err(error) => {
+                    this.dispatch(Event::CopyFailed { item_id: id, error });
+                    this.tell_reachable();
+                }
             }
         });
     }
@@ -1454,6 +1936,12 @@ impl Shell {
                 this.dispatch(Event::LibraryChanged);
             }
             this.update_page();
+            this.tell_reachable();
+            // After each successful sync: what is kept and missing.
+            if ok {
+                this.refresh_keeps();
+                this.run_offline();
+            }
         });
     }
 
@@ -1506,6 +1994,10 @@ impl Shell {
         let this = self.clone();
         click.connect_released(move |_, _, _, _| this.dispatch(Event::ToggleHelp));
         w.help.add_controller(click);
+        for (button, yes) in [(&w.confirm.accept, true), (&w.confirm.cancel, false)] {
+            let this = self.clone();
+            button.connect_clicked(move |_| this.dispatch(Event::Confirm(yes)));
+        }
 
         for selection in [&w.selection, &w.pack_selection] {
             let this = self.clone();
@@ -1658,7 +2150,8 @@ impl Shell {
 
         let px = self.cfg.borrow().ui.thumb_px as i32;
         w.grid.set_factory(Some(&self.item_factory(px)));
-        w.pack_grid.set_factory(Some(&packs::factory(px)));
+        w.pack_grid
+            .set_factory(Some(&packs::factory(px, self.pack_menu_hook())));
     }
 
     /// Grid cells: picture + badge + warning icon, bound to the item's
@@ -1714,9 +2207,18 @@ impl Shell {
             text.add_css_class("osd");
             text.add_css_class("stickpile-pill");
             text.add_css_class("stickpile-text");
+            // On the device (ui.show_offline), or not with the server gone.
+            let available = gtk::Image::from_icon_name(AVAILABLE_ICON);
+            available.add_css_class("osd");
+            available.add_css_class("stickpile-pill");
+            available.add_css_class("stickpile-offline");
+            let unavailable = gtk::Image::from_icon_name(UNAVAILABLE_ICON);
+            unavailable.add_css_class("osd");
+            unavailable.add_css_class("stickpile-pill");
+            unavailable.add_css_class("stickpile-unavailable");
             // Emojis, the vibe and the heart along the top, the text above
-            // the warning, tags and the GIF badge along the bottom. Clicks go
-            // through to the cell.
+            // the warning, tags, the offline mark and the GIF badge along
+            // the bottom. Clicks go through to the cell.
             let row = |valign, parts: &[&gtk::Widget]| {
                 let row = gtk::Box::builder().spacing(3).valign(valign).can_target(false).build();
                 row.add_css_class("stickpile-tile-row");
@@ -1732,7 +2234,14 @@ impl Shell {
             );
             let bottom = row(
                 gtk::Align::End,
-                &[warn.upcast_ref(), tags.upcast_ref(), &spacer(), badge.upcast_ref()],
+                &[
+                    warn.upcast_ref(),
+                    tags.upcast_ref(),
+                    &spacer(),
+                    available.upcast_ref(),
+                    unavailable.upcast_ref(),
+                    badge.upcast_ref(),
+                ],
             );
             let foot = gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
@@ -1776,6 +2285,22 @@ impl Shell {
                 .bind(&text, "label", gtk::Widget::NONE);
             item.chain_property::<StickerObject>("has-text")
                 .bind(&text, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("available")
+                .bind(&available, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("unavailable")
+                .bind(&unavailable, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("opacity")
+                .bind(&picture, "opacity", gtk::Widget::NONE);
+
+            // A right click: the menu of the tile.
+            let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+            let (shell, li2) = (this.clone(), li.clone());
+            click.connect_pressed(move |g, _, x, y| {
+                if let Some(w) = g.widget() {
+                    shell.open_menu_at(li2.position(), &w, x, y);
+                }
+            });
+            cell.add_controller(click);
 
             let source = gtk::DragSource::new();
             source.set_actions(gdk::DragAction::COPY);
@@ -1924,9 +2449,14 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     content.add_named(&me.root, Some("me"));
     content.add_named(&settings.root, Some("settings"));
     let help = help::build();
+    let confirm = ConfirmCard::build();
+    // Fills the main area without taking clicks: the menu of a tile hangs on it.
+    let menu_anchor = gtk::Box::builder().can_target(false).build();
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&content));
+    overlay.add_overlay(&menu_anchor);
     overlay.add_overlay(&help);
+    overlay.add_overlay(&confirm.card);
 
     let mode = gtk::Label::new(None);
     mode.add_css_class("stickpile-mode");
@@ -2049,6 +2579,8 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         details,
         suggest,
         suggest_box,
+        confirm,
+        menu_anchor,
     };
     relabel_widgets(&w);
     w
