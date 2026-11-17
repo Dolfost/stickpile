@@ -188,6 +188,26 @@ validates the file. The home-manager module
 (`programs.stickpile.settings`, [nix.md](nix.md#home-manager)) can write it
 for you.
 
+### Older clients and newer keys
+
+A client refuses a `config.toml` with a key it does not know, as it
+refuses typos, so a client older than a key refuses the whole file
+("unknown field `show_text`"). This matters when two versions share one
+file (the CLI and the popup updated at different times) and after a
+downgrade: remove the keys the older client does not know first, or
+reset them on the newer popup's Settings tab (the arrow removes the key).
+The client keys of the last releases:
+
+| Key | First client that knows it |
+|---|---|
+| `ui.theme` | 0.7.0 |
+| `ui.show_text` (`zx`) | newer than 0.7.0 |
+
+The popup writes a key when you change it (Settings tab, `zx` and the
+other `z` toggles), not before. Keys in `settings.toml` (a read-only
+`config.toml`, below) are skipped with a warning by a client that does
+not know them, so this only concerns a writable `config.toml`.
+
 ### Popup theme
 
 ```toml

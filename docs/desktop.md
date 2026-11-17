@@ -567,6 +567,12 @@ file stays as it was.
 The arrow next to a changed value resets it: the key is removed from the
 file, so the default (or the value `config.toml` sets) applies again.
 
+A saved key that an older client does not know (`ui.show_text`, which
+`zx` also saves, is newer than 0.7.0) makes that client refuse
+`config.toml` with "unknown field". Before going back to an older
+version, or when an older CLI shares the file, reset or remove such keys
+([configuration.md](configuration.md#older-clients-and-newer-keys)).
+
 Where changes go depends on `config.toml`:
 
 - writable (or missing): the Settings tab edits `config.toml` itself;
