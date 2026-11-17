@@ -27,6 +27,7 @@ fn special(code: u16) -> Option<&'static str> {
         121 => "Page_Down",
         122 => "F1",
         120 => "F2",
+        109 => "F10",
         49 => "space",
         _ => return None,
     })
@@ -141,6 +142,14 @@ mod tests {
             map(&shift_tab, Mode::Normal, Tab::Search),
             Some(Event::CycleTab { backwards: true })
         );
+        // Shift+F10: the menu of the selected tile (a right click opens a tile's).
+        let shift_f10 = KeyInput {
+            shift: true,
+            ..key(109, "\u{f70d}")
+        };
+        for mode in [Mode::Insert, Mode::Normal] {
+            assert_eq!(map(&shift_f10, mode, Tab::Search), Some(Event::OpenMenu(None)));
+        }
     }
 
     #[test]
