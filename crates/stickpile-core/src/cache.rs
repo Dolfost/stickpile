@@ -235,40 +235,47 @@ impl Cache {
 
     // -- items ----------------------------------------------------------------
 
-    /// Upsert items and delete removed ids in one transaction.
-    pub fn apply_changes(&self, items: &[ItemSummary], removed: &[String]) -> Result<()> {
+    /// Upsert items and delete removed ids in one transaction. Returns
+    /// whether the cached items changed (an item new or different, or one
+    /// removed): only then does [`Cache::generation`] move, so an item the
+    /// server sends again as it was changes nothing.
+    pub fn apply_changes(&self, items: &[ItemSummary], removed: &[String]) -> Result<bool> {
         if items.is_empty() && removed.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let mut db = self.db();
         let tx = db.transaction()?;
+        let mut changed = 0;
         {
             let mut up = tx.prepare(
                 "INSERT INTO items(id, set_id, updated_at, json) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(id) DO UPDATE SET set_id = excluded.set_id, updated_at = excluded.updated_at, json = excluded.json",
+                 ON CONFLICT(id) DO UPDATE SET set_id = excluded.set_id, updated_at = excluded.updated_at, json = excluded.json
+                 WHERE items.json IS NOT excluded.json",
             )?;
             for it in items {
                 let json = serde_json::to_string(it).map_err(|e| CoreError::Cache(e.to_string()))?;
-                up.execute(params![it.id, it.set_id, it.updated_at, json])?;
+                changed += up.execute(params![it.id, it.set_id, it.updated_at, json])?;
             }
             let mut del = tx.prepare("DELETE FROM items WHERE id = ?1")?;
             let mut del_hist = tx.prepare("DELETE FROM history WHERE item_id = ?1")?;
             for id in removed {
-                del.execute([id])?;
+                changed += del.execute([id])?;
                 del_hist.execute([id])?;
             }
         }
-        bump_generation(&tx)?;
+        if changed > 0 {
+            bump_generation(&tx)?;
+        }
         tx.commit()?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     pub fn upsert_items(&self, items: &[ItemSummary]) -> Result<()> {
-        self.apply_changes(items, &[])
+        self.apply_changes(items, &[]).map(drop)
     }
 
     pub fn remove_items(&self, ids: &[String]) -> Result<()> {
-        self.apply_changes(&[], ids)
+        self.apply_changes(&[], ids).map(drop)
     }
 
     /// Delete every cached item whose id is not in `keep`. Returns the count.

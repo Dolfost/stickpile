@@ -73,10 +73,13 @@ async fn full_then_incremental_sync_with_pages_and_removals() {
         .count();
     assert_eq!(item_requests, 3 + r2.pages);
 
-    // Nothing changed: one cheap page.
+    // Nothing changed: one cheap page, and the items it sends again as
+    // they were leave the generation alone.
+    let gen2 = cache.generation().unwrap();
     let r3 = cache::sync(&cache, &client, 500).await.unwrap();
     assert_eq!(r3.pages, 1);
     assert_eq!(r3.removed, 0);
+    assert_eq!(cache.generation().unwrap(), gen2);
 }
 
 #[tokio::test]
