@@ -367,11 +367,12 @@ fn emojis(typed: &str, vocab: &Vocabulary) -> Vec<String> {
 }
 
 /// `query` with every filter value of a [`Field`] that is not a known value
-/// replaced by its best match, and empty filters (`vibe:`, `e:`) left out;
-/// also the replacements made, as (typed, used). An `e:` value is never
-/// replaced: the search matches an emoji name (`e:skull`) itself, typos
-/// included. The one-letter keys go out long (`v:sad` as `vibe:sad`), so
-/// a server from before them reads them too.
+/// replaced by its best match, and empty filters of any key (`vibe:`,
+/// `e:`, `x:`: the parser would read an empty `text:` as the word "text")
+/// left out; also the replacements made, as (typed, used). An `e:` value
+/// is never replaced: the search matches an emoji name (`e:skull`) itself,
+/// typos included. The one-letter keys go out long (`v:sad` as
+/// `vibe:sad`), so a server from before them reads them too.
 pub fn resolve(query: &str, vocab: &Vocabulary) -> (String, Vec<(String, String)>) {
     let mut out = String::with_capacity(query.len());
     let mut fixes = Vec::new();
@@ -418,10 +419,12 @@ fn long_key(token: &str) -> String {
 fn resolve_token<'a>(token: &'a str, vocab: &Vocabulary) -> Option<Resolved<'a>> {
     let bare = token.strip_prefix('-').unwrap_or(token);
     let (key, typed) = bare.split_once(':')?;
-    let field = Field::of(key)?;
+    // An empty filter of any key (`v:`, `e:`, `x:`) is no filter yet.
+    Key::parse(key)?;
     if typed.is_empty() {
         return Some(Resolved::Drop);
     }
+    let field = Field::of(key)?;
     if field == Field::Emoji {
         return None;
     }
@@ -798,6 +801,12 @@ mod tests {
             "known values stay"
         );
         assert_eq!(resolve("cat vibe:", &v).0, "cat", "an empty filter is left out");
+        assert_eq!(
+            resolve("cat x: -TEXT: is: by:", &v).0,
+            "cat",
+            "of every key, text: too (not the word text)"
+        );
+        assert_eq!(resolve("cat http: x:", &v).0, "cat http:", "no key: a word");
         assert_eq!(resolve("vibe:xyzzy", &v).0, "vibe:xyzzy", "no match: as typed");
         assert_eq!(
             resolve("\"vibe:sar x\" y", &v).0,

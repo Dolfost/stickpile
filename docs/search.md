@@ -45,7 +45,9 @@ Rules:
   (`Query`'s `Display`) writes the long keys, and `e:` for emojis. The
   desktop popup and the Android app send them long
   (`stickpile_quick::suggest::resolve`), so a server older than the short
-  keys reads them too.
+  keys reads them too. `resolve` also leaves out a filter with nothing
+  after its colon yet, of any key (`vibe:`, `e:`, `x:`, `text:`), so
+  `cat x:` goes out as `cat` while the value is typed.
 - `text:` values are kept lowercased in `Query.texts`; the search
   tokenizes them like the indexed text and wants the run of tokens in the
   item's text. A value whose words no item has finds nothing, and so does
@@ -71,7 +73,8 @@ Rules:
   web UI's search fields get the same offers from the server
   (`GET /api/v1/search/suggest`, [web.md](web.md#keyboard-and-mouse)), which runs
   `suggest` over the values of the items the viewer can search.
-- Unknown `key:value` tokens are plain text.
+- Unknown `key:value` tokens are plain text, and so is a key with
+  nothing after its colon: the parser reads a bare `x:` as the word `x`.
 
 Examples:
 
