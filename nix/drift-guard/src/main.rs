@@ -3,8 +3,8 @@
 //!
 //! The real config modules are compiled in with `#[path]`, so this checks the
 //! code that ships, not a copy. They must stay self-contained (std, serde,
-//! toml, thiserror, directories, stickpile_api); if one grows another
-//! dependency, add it to Cargo.toml here.
+//! toml, toml_edit, thiserror, directories, stickpile_api); if one grows
+//! another dependency, add it to Cargo.toml here.
 //!
 //! ```text
 //! stickpile-config-drift server|client <defaults.json> <defaults.toml>
@@ -17,8 +17,8 @@
 //! 1. the JSON equals `serde_json::to_value(Default::default())` exactly: the
 //!    same keys in both directions (None serialises as null, so optional keys
 //!    count too) and the same default values, and
-//! 2. the rendered TOML parses with the real loader (`deny_unknown_fields`)
-//!    back to `Default::default()`.
+//! 2. the rendered TOML parses with the real strict loader (unknown keys
+//!    refused; the clients skip them) back to `Default::default()`.
 
 #[allow(dead_code, unused_imports)]
 #[path = "../../../crates/stickpile-server/src/config.rs"]
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
             &client_config::ClientConfig::default(),
             Path::new(json),
             Path::new(toml),
-            |t| client_config::ClientConfig::from_toml(t).map_err(|e| e.to_string()),
+            |t| client_config::ClientConfig::from_toml_strict(t).map_err(|e| e.to_string()),
         ),
         _ => Err("usage: stickpile-config-drift server|client <defaults.json> <defaults.toml>\n       \
                   stickpile-config-drift dump server|client"

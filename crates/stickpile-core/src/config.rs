@@ -1,16 +1,29 @@
 //! Client configuration (`$XDG_CONFIG_HOME/stickpile/config.toml`), shared by
 //! the CLI and the desktop client. Mirrored one-to-one by the home-manager
-//! module (`programs.stickpile.settings`); unknown keys are rejected.
+//! module (`programs.stickpile.settings`).
+//!
+//! A key this version does not know is skipped, not refused, so a setting a
+//! newer popup saved never stops an older client: [`ClientConfig::parse`]
+//! lists the skipped keys, the loaders warn about them, and `stickpile config
+//! check` fails on them, so typos still show. [`ClientConfig::from_toml_strict`]
+//! refuses them, as every client up to 0.7.0 does. Anything else (a TOML
+//! error, a wrong type, an invalid value) is an error either way.
 //!
 //! The standard loader, `ClientConfig::load`, lives in [`crate::settings`]: it
 //! layers the GUI's `settings.toml` under a read-only `config.toml`. This file
-//! stays self-contained (std, serde, toml, thiserror, directories,
+//! stays self-contained (std, serde, toml, toml_edit, thiserror, directories,
 //! stickpile_api) because the Nix drift guard compiles it on its own.
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use stickpile_api::{MediaKind, TargetApp};
+use toml_edit::{ImDocument, Item, Key, Table, Value};
+
+// The structs below keep `deny_unknown_fields`: serde then names each key it
+// does not know, with its place in the text, and `ClientConfig::parse` skips
+// exactly that key (see `skip_unknown_key`).
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -566,6 +579,20 @@ pub enum ConfigError {
     Write { path: PathBuf, source: std::io::Error },
 }
 
+/// A config file read the way the clients read it ([`ClientConfig::parse`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedConfig {
+    pub config: ClientConfig,
+    /// Keys the file sets that this version does not know, skipped, in the
+    /// order they were found: dotted (`ui.show_text`), with the index of a
+    /// list entry (`paste.rules[0].wait`).
+    pub unknown_keys: Vec<String>,
+    /// The text with those keys blanked out: it parses to `config`, and
+    /// what is left keeps its line and column (in an inline table that lost
+    /// a key, the entries after it move left).
+    pub clean_text: String,
+}
+
 impl ClientConfig {
     /// `$XDG_CONFIG_HOME/stickpile/config.toml`
     pub fn default_path() -> PathBuf {
@@ -575,11 +602,12 @@ impl ClientConfig {
     }
 
     /// Exactly this file, without the `settings.toml` layer that
-    /// `ClientConfig::load` adds. Missing file = defaults.
-    pub fn load_file(path: &Path) -> Result<ClientConfig, ConfigError> {
+    /// `ClientConfig::load` adds. Missing file = defaults. Unknown keys are
+    /// skipped and listed, as by [`ClientConfig::parse`].
+    pub fn load_file(path: &Path) -> Result<ParsedConfig, ConfigError> {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ClientConfig::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ParsedConfig::default()),
             Err(source) => {
                 return Err(ConfigError::Io {
                     path: path.into(),
@@ -587,7 +615,7 @@ impl ClientConfig {
                 })
             }
         };
-        Self::from_toml(&text).map_err(|e| match e {
+        Self::parse(&text).map_err(|e| match e {
             ConfigError::Parse { source, .. } => ConfigError::Parse {
                 path: path.into(),
                 source,
@@ -596,13 +624,49 @@ impl ClientConfig {
         })
     }
 
+    /// The config in `text`; keys this version does not know are skipped
+    /// ([`ClientConfig::parse`] lists them).
     pub fn from_toml(text: &str) -> Result<ClientConfig, ConfigError> {
-        let cfg: ClientConfig = toml::from_str(text).map_err(|source| ConfigError::Parse {
-            path: PathBuf::from("<string>"),
-            source,
-        })?;
+        Ok(Self::parse(text)?.config)
+    }
+
+    /// The config in `text`, refusing a key this version does not know with
+    /// serde's "unknown field" error, as clients up to 0.7.0 load every file.
+    pub fn from_toml_strict(text: &str) -> Result<ClientConfig, ConfigError> {
+        let cfg: ClientConfig = toml::from_str(text).map_err(parse_error)?;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// The config in `text` as the clients load it: every key this version
+    /// does not know, at any depth (a typo, or a newer version's setting), is
+    /// skipped and listed in [`ParsedConfig::unknown_keys`]. Anything else (a
+    /// TOML error, a wrong type, an invalid value) is the error
+    /// [`ClientConfig::from_toml_strict`] gives without the skipped keys, at
+    /// the file's line and column (see [`ParsedConfig::clean_text`]).
+    pub fn parse(text: &str) -> Result<ParsedConfig, ConfigError> {
+        let mut clean = text.to_string();
+        let mut unknown_keys = Vec::new();
+        loop {
+            match toml::from_str::<ClientConfig>(&clean) {
+                Ok(config) => {
+                    config.validate()?;
+                    return Ok(ParsedConfig {
+                        config,
+                        unknown_keys,
+                        clean_text: clean,
+                    });
+                }
+                // Every skip blanks out text, so this ends.
+                Err(e) => match skip_unknown_key(&clean, &e) {
+                    Some((key, rest)) => {
+                        unknown_keys.push(key);
+                        clean = rest;
+                    }
+                    None => return Err(parse_error(e)),
+                },
+            }
+        }
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -707,6 +771,228 @@ impl ClientConfig {
     }
 }
 
+fn parse_error(source: toml::de::Error) -> ConfigError {
+    ConfigError::Parse {
+        path: PathBuf::from("<string>"),
+        source,
+    }
+}
+
+/// One step of a path into a TOML document.
+#[derive(Debug, Clone)]
+enum Step {
+    Key(String),
+    /// An entry of an array or an array of tables.
+    Index(usize),
+}
+
+impl Step {
+    fn get_mut<'a>(&self, item: &'a mut Item) -> Option<&'a mut Item> {
+        match self {
+            Step::Key(k) => item.get_mut(k.as_str()),
+            Step::Index(i) => item.get_mut(*i),
+        }
+    }
+}
+
+/// `ui.show_text`, `paste.rules[0].wait`, `"odd key"`.
+fn dotted(path: &[Step]) -> String {
+    let mut out = String::new();
+    for step in path {
+        match step {
+            Step::Key(k) => {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                let bare = !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                if bare {
+                    out.push_str(k);
+                } else {
+                    out.push_str(&format!("{k:?}"));
+                }
+            }
+            Step::Index(i) => out.push_str(&format!("[{i}]")),
+        }
+    }
+    out
+}
+
+/// One step of [`ClientConfig::parse`]: when `error` is serde's "unknown
+/// field" for a key of `text`, that key's dotted name and `text` without it.
+///
+/// The key is the one at the error's span, so a name known in another table,
+/// nested and inline tables, and the entries of lists are told apart. Its
+/// entry is blanked out (spaces; line breaks stay): a key/value line, or a
+/// table with everything under it. Inside an inline table, which cannot
+/// simply lose its text, that table is written again without the key and
+/// padded to its old length. Either way the rest of the text keeps its
+/// place, so a later error still names the file's line and column.
+fn skip_unknown_key(text: &str, error: &toml::de::Error) -> Option<(String, String)> {
+    let span = error.span()?;
+    let doc = ImDocument::parse(text).ok()?;
+    let mut path = Vec::new();
+    let found = find_key(doc.as_item(), &span, &mut path, None)?;
+    let Some(Step::Key(name)) = path.last() else {
+        return None;
+    };
+    if !error.message().starts_with(&format!("unknown field `{name}`")) {
+        return None;
+    }
+    let rest = match &found.inline {
+        None => {
+            let mut ranges = Vec::new();
+            entry_ranges(text, found.key, found.item, &mut ranges);
+            blank(text, &ranges)?
+        }
+        Some((depth, table_span)) => {
+            let rewritten = inline_without(text, &path, *depth)?;
+            let (before, old, after) = (
+                text.get(..table_span.start)?,
+                text.get(table_span.clone())?,
+                text.get(table_span.end..)?,
+            );
+            // Line breaks inside the key's value go after the table, so later
+            // lines keep their numbers; spaces if the text does not parse so
+            // (TOML 1.0 has no line breaks in an inline table outside values).
+            let lost = old
+                .matches('\n')
+                .count()
+                .saturating_sub(rewritten.matches('\n').count());
+            let fill = old.len().saturating_sub(rewritten.len() + lost);
+            let lines_kept = format!("{before}{rewritten}{}{}{after}", "\n".repeat(lost), " ".repeat(fill));
+            if lost == 0 || ImDocument::parse(lines_kept.as_str()).is_ok() {
+                lines_kept
+            } else {
+                format!("{before}{rewritten}{}{after}", " ".repeat(fill + lost))
+            }
+        }
+    };
+    // Something went, and what is left is still TOML.
+    let solid = |t: &str| t.bytes().filter(|b| !b.is_ascii_whitespace()).count();
+    if solid(&rest) >= solid(text) || ImDocument::parse(rest.as_str()).is_err() {
+        return None;
+    }
+    Some((dotted(&path), rest))
+}
+
+struct Found<'a> {
+    key: &'a Key,
+    item: &'a Item,
+    /// The innermost inline table the key is in (not counting dotted ones):
+    /// the length of its path, and its span.
+    inline: Option<(usize, Range<usize>)>,
+}
+
+/// The key whose text is at `span`; `path` ends with it.
+fn find_key<'a>(
+    item: &'a Item,
+    span: &Range<usize>,
+    path: &mut Vec<Step>,
+    inline: Option<(usize, Range<usize>)>,
+) -> Option<Found<'a>> {
+    if let Some(table) = item.as_table_like() {
+        let inline = match item {
+            Item::Value(Value::InlineTable(t)) if !t.is_dotted() => Some((path.len(), t.span()?)),
+            _ => inline,
+        };
+        for (name, child) in table.iter() {
+            let key = table.key(name)?;
+            path.push(Step::Key(name.to_string()));
+            if key.span().as_ref() == Some(span) {
+                return Some(Found {
+                    key,
+                    item: child,
+                    inline,
+                });
+            }
+            if let Some(found) = find_key(child, span, path, inline.clone()) {
+                return Some(found);
+            }
+            path.pop();
+        }
+        return None;
+    }
+    let len = match item {
+        Item::ArrayOfTables(a) => a.len(),
+        Item::Value(Value::Array(a)) => a.len(),
+        _ => 0,
+    };
+    for i in 0..len {
+        path.push(Step::Index(i));
+        if let Some(found) = find_key(item.get(i)?, span, path, inline.clone()) {
+            return Some(found);
+        }
+        path.pop();
+    }
+    None
+}
+
+/// The text of an entry outside inline tables: a key/value pair from the
+/// start of its line (it starts one, and a dotted key is one line) to the
+/// end of its value; a `[table]` or `[[table]]` from its header to its last
+/// value; and the same for what is under it. Dotted and implicit tables have
+/// no text of their own.
+fn entry_ranges(text: &str, key: &Key, item: &Item, out: &mut Vec<Range<usize>>) {
+    let table_ranges = |t: &Table, out: &mut Vec<Range<usize>>| {
+        out.extend(t.span());
+        for (name, child) in t.iter() {
+            if let Some(key) = t.key(name) {
+                entry_ranges(text, key, child, out);
+            }
+        }
+    };
+    match item {
+        Item::Value(v) => {
+            if let (Some(k), Some(v)) = (key.span(), v.span()) {
+                let before = text.get(..k.start).unwrap_or_default();
+                let line = before.rfind('\n').map_or(0, |i| i + 1);
+                out.push(line..v.end);
+            }
+        }
+        Item::Table(t) => table_ranges(t, out),
+        Item::ArrayOfTables(a) => {
+            for t in a.iter() {
+                table_ranges(t, out);
+            }
+        }
+        Item::None => {}
+    }
+}
+
+/// `text` with `ranges` blanked out: spaces, line breaks kept.
+fn blank(text: &str, ranges: &[Range<usize>]) -> Option<String> {
+    let mut bytes = text.as_bytes().to_vec();
+    for r in ranges {
+        for b in bytes.get_mut(r.clone())? {
+            if !matches!(*b, b'\n' | b'\r') {
+                *b = b' ';
+            }
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// The inline table at `path[..depth]` written again without the key at the
+/// end of `path` (which may sit in dotted tables inside it).
+fn inline_without(text: &str, path: &[Step], depth: usize) -> Option<String> {
+    let (last, inside) = path.split_last()?;
+    let Step::Key(name) = last else { return None };
+    let mut doc: toml_edit::DocumentMut = text.parse().ok()?;
+    let mut item = doc.as_item_mut();
+    for step in inside.get(..depth)? {
+        item = step.get_mut(item)?;
+    }
+    let mut table = Item::Value(item.as_value()?.clone());
+    let mut parent = &mut table;
+    for step in inside.get(depth..)? {
+        parent = step.get_mut(parent)?;
+    }
+    parent.as_table_like_mut()?.remove(name)?;
+    let mut value = table.into_value().ok()?;
+    value.decor_mut().clear();
+    Some(value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -730,9 +1016,188 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_mime_and_keys() {
+    fn rejects_unknown_mime_and_strict_rejects_unknown_keys() {
         assert!(ClientConfig::from_toml("[clipboard.default]\nstill = [\"image/bmp\"]").is_err());
-        assert!(ClientConfig::from_toml("serverurl = \"x\"").is_err());
+        let e = ClientConfig::from_toml_strict("serverurl = \"x\"")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("unknown field `serverurl`"), "{e}");
+        assert_eq!(
+            ClientConfig::from_toml("serverurl = \"x\"").unwrap(),
+            ClientConfig::default()
+        );
+    }
+
+    /// The keys `parse` skipped, and the config it made of the rest.
+    fn skipped(text: &str) -> (Vec<String>, ClientConfig) {
+        let p = ClientConfig::parse(text).unwrap_or_else(|e| panic!("{text}\n{e}"));
+        assert_eq!(p.clean_text.len(), text.len(), "positions kept:\n{}", p.clean_text);
+        assert_eq!(p.clean_text.lines().count(), text.lines().count());
+        assert_eq!(ClientConfig::from_toml_strict(&p.clean_text).unwrap(), p.config);
+        assert_eq!(
+            ClientConfig::from_toml_strict(text).is_err(),
+            !p.unknown_keys.is_empty(),
+            "strict refuses exactly what parse skips"
+        );
+        (p.unknown_keys, p.config)
+    }
+
+    #[test]
+    fn unknown_keys_are_skipped_at_any_depth() {
+        // A clean file: nothing skipped, optional keys (unset by default) included.
+        let (keys, c) = skipped("token_file = \"/t/token\"\ncache_dir = \"/t/cache\"\n[ui]\ncolumns = 3\n");
+        assert!(keys.is_empty(), "{keys:?}");
+        assert_eq!(c.token_file.as_deref(), Some(Path::new("/t/token")));
+        assert_eq!(c.ui.columns, 3);
+
+        // Two of them, at the top and in [ui], around known keys.
+        let (keys, c) = skipped(
+            "# my config\nnonsense = 1\nserver_url = \"https://s.example\"\n\n[ui]\ncolumns = 3\n\
+             show_nonsense = true   # from a newer popup\nmodal = false\n",
+        );
+        assert_eq!(keys, ["nonsense", "ui.show_nonsense"]);
+        assert_eq!(c.server_url, "https://s.example");
+        assert_eq!((c.ui.columns, c.ui.modal), (3, false));
+
+        // A typo is skipped like a newer key: the default stays.
+        let (keys, c) = skipped("[ui]\ncolums = 3\n");
+        assert_eq!(keys, ["ui.colums"]);
+        assert_eq!(c.ui.columns, 6);
+
+        // Nested tables.
+        let (keys, c) = skipped(
+            "[clipboard.targets.telegram]\nstill = [\"text/uri-list\"]\nhint = \"x\"\n\
+             [clipboard.default]\nsticker = []\nextra = [\"a\",\n  \"b\"]\n",
+        );
+        assert_eq!(keys, ["clipboard.targets.telegram.hint", "clipboard.default.extra"]);
+        assert_eq!(c.clipboard.offers(TargetApp::Telegram).still, ["text/uri-list"]);
+        assert!(c.clipboard.default.sticker.is_empty());
+
+        // The name of a known key in another table.
+        let (keys, c) = skipped("[copy]\ncolumns = 4\nsquare = \"white\"\n[ui]\ncolumns = 3\n");
+        assert_eq!(keys, ["copy.columns"]);
+        assert_eq!((c.ui.columns, c.copy.square), (3, SquarePad::White));
+        let (keys, c) = skipped("[ui]\nsquare = \"white\"\n");
+        assert_eq!(keys, ["ui.square"]);
+        assert_eq!(c.copy.square, SquarePad::Off);
+
+        // Dotted keys, at the top and in a table.
+        let (keys, c) = skipped("ui.show_nonsense = true\nui.columns = 2\n[paste]\nx.y = 1\nx.z = 2\nauto = false\n");
+        assert_eq!(keys, ["ui.show_nonsense", "paste.x"]);
+        assert_eq!(c.ui.columns, 2);
+        assert!(!c.paste.auto);
+    }
+
+    #[test]
+    fn unknown_tables_are_skipped_whole() {
+        let (keys, c) = skipped(
+            "[sync]\nevery = 5\nwhere = { a = 1 }\n\n[sync.more]\nx = [1, 2]\n\
+             [ui]\ncolumns = 2\n[ui.panel]\nwidth = 3\n[[hooks]]\nrun = \"a\"\n[[hooks]]\nrun = \"b\"\n\
+             [hooks.env]\nX = 1\n[later.deep]\nx = 1\n[copy]\nsquare = \"white\"\n",
+        );
+        assert_eq!(keys, ["sync", "ui.panel", "hooks", "later"]);
+        assert_eq!(c.ui.columns, 2);
+        assert_eq!(c.copy.square, SquarePad::White);
+        let (keys, _) = skipped("[ui]\nsection.a = 1\nsection.b = { c = 2 }\ncolumns = 4\n");
+        assert_eq!(keys, ["ui.section"]);
+    }
+
+    #[test]
+    fn unknown_keys_in_lists_and_inline_tables() {
+        // Arrays of tables: the entry's index.
+        let (keys, c) = skipped(
+            "[[paste.rules]]\ncontains = [\"a\"]\nshortcut = \"none\"\n\
+             [[paste.rules]]\ncontains = [\"b\"]\nwait = 1\nshortcut = \"ctrl+v\"\n",
+        );
+        assert_eq!(keys, ["paste.rules[1].wait"]);
+        assert_eq!(c.paste.rules.len(), 2);
+        assert_eq!(c.paste.rules[1].shortcut, "ctrl+v");
+
+        // Inline tables: first, middle and last entries, in lists, dotted.
+        let (keys, c) = skipped("ui = { odd = 1, columns = 3, show_nonsense = true, modal = false, end = [1] }\n");
+        assert_eq!(keys, ["ui.odd", "ui.show_nonsense", "ui.end"]);
+        assert_eq!((c.ui.columns, c.ui.modal), (3, false));
+        let (keys, c) = skipped(
+            "[focus]\nrules = [\n  { contains = [\"x\"], target = \"telegram\", why = \"chat\" },\n  \
+             { contains = [\"y\"], target = \"discord\" },\n]\n",
+        );
+        assert_eq!(keys, ["focus.rules[0].why"]);
+        assert_eq!(c.focus.rules.len(), 2);
+        assert_eq!(c.focus.rules[0].target, TargetApp::Telegram);
+        let (keys, c) = skipped("clipboard = { default.still = [\"text/plain\"], default.more = [] }\n");
+        assert_eq!(keys, ["clipboard.default.more"]);
+        assert_eq!(c.clipboard.default.still, ["text/plain"]);
+        let (keys, _) = skipped("ui = { odd = 1 }\n");
+        assert_eq!(keys, ["ui.odd"]);
+
+        // A quoted key is shown quoted.
+        let (keys, _) = skipped("\"odd key\" = 1\n[ui]\n\"a.b\" = 2\n");
+        assert_eq!(keys, ["\"odd key\"", "ui.\"a.b\""]);
+    }
+
+    #[test]
+    fn map_keys_are_values_not_settings() {
+        // `clipboard.targets` is keyed by target app: those keys are known,
+        // and one that is not a target app is a bad value, not a skipped key.
+        let (keys, c) = skipped("[clipboard.targets.discord]\nstill = []\n[clipboard.targets.slack]\nvideo = []\n");
+        assert!(keys.is_empty(), "{keys:?}");
+        assert!(c.clipboard.offers(TargetApp::Discord).still.is_empty());
+        let e = ClientConfig::parse("[clipboard.targets.telgram]\nstill = []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("unknown variant `telgram`"), "{e}");
+    }
+
+    #[test]
+    fn other_errors_stay_errors_at_their_place() {
+        for (text, needle) in [
+            ("[ui]\ncolumns = \"x\"\n", "invalid type"),
+            ("server_url = \"ftp://s.example\"\n", "server_url must be http(s)"),
+            ("[ui]\nstart_tab = \"home\"\n", "ui.start_tab must be one of"),
+            ("[ui]\ncolumns = \n", "TOML parse error"),
+            (
+                "[paste]\nwiat_ms = 1\nwait_ms = 9000\n",
+                "paste.wait_ms must be at most",
+            ),
+        ] {
+            let e = ClientConfig::parse(text).unwrap_err().to_string();
+            assert!(e.contains(needle), "{text}: {e}");
+            let strict = ClientConfig::from_toml_strict(text).unwrap_err().to_string();
+            if !text.contains("wiat") {
+                assert_eq!(e, strict, "the same error as before");
+            }
+        }
+        // Skipped keys before it do not move the error's line and column.
+        let text = "nonsense = 1\n[sync]\na = 1\n[ui]\nodd = { x = [\n 1,\n 2] }\ncolumns = \"x\"\n";
+        let e = ClientConfig::parse(text).unwrap_err().to_string();
+        assert!(e.contains("line 8, column 11"), "{e}");
+        // Also when the skipped key's value had line breaks in an inline table.
+        let text = "focus.rules = [{ contains = [], target = \"slack\", why = [\n1] }]\nui.columns = \"x\"\n";
+        let e = ClientConfig::parse(text).unwrap_err().to_string();
+        assert!(e.contains("line 3, column 14"), "{e}");
+        // In an inline table inside another one the line breaks may not stay
+        // (TOML 1.0); the error still shows the right text.
+        let text = "clipboard = { targets = { slack = { still = [], why = [\n1] } } }\n[copy]\nsquare = 1\n";
+        let e = ClientConfig::parse(text).unwrap_err().to_string();
+        assert!(e.contains("square = 1") && e.contains("wanted string or table"), "{e}");
+    }
+
+    #[test]
+    fn load_file_lists_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[ui]\r\nshow_nonsense = true # newer\r\ncolumns = 5\r\n").unwrap();
+        let p = ClientConfig::load_file(&path).unwrap();
+        assert_eq!(p.unknown_keys, ["ui.show_nonsense"]);
+        assert_eq!(p.config.ui.columns, 5);
+        std::fs::write(&path, "[ui]\ncolumns = 0\nodd = 1\n").unwrap();
+        let e = ClientConfig::load_file(&path).unwrap_err().to_string();
+        assert!(e.contains("ui.columns must be > 0"), "{e}");
+        std::fs::write(&path, "[ui]\nodd = 1\ncolumns = []\n").unwrap();
+        let e = ClientConfig::load_file(&path).unwrap_err().to_string();
+        assert!(e.starts_with(&format!("parsing {}", path.display())), "{e}");
+        let missing = dir.path().join("missing.toml");
+        assert_eq!(ClientConfig::load_file(&missing).unwrap(), ParsedConfig::default());
     }
 
     #[test]
@@ -803,7 +1268,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("background"), "{e}");
-        assert!(ClientConfig::from_toml("[copy]\nsqaure = \"off\"").is_err());
+        assert!(ClientConfig::from_toml_strict("[copy]\nsqaure = \"off\"").is_err());
     }
 
     #[test]
@@ -823,7 +1288,7 @@ mod tests {
         assert!(ClientConfig::from_toml("[paste]\nshortcut = \"ctrl+\"").is_err());
         assert!(ClientConfig::from_toml("[paste]\nwait_ms = 5001").is_err());
         assert!(ClientConfig::from_toml("[paste]\ndelay_ms = 1001").is_err());
-        assert!(ClientConfig::from_toml("[paste]\nwiat_ms = 1").is_err());
+        assert!(ClientConfig::from_toml_strict("[paste]\nwiat_ms = 1").is_err());
         let e = ClientConfig::from_toml("[[paste.rules]]\ncontains = [\"x\"]\nshortcut = \"hyper+v\"")
             .unwrap_err()
             .to_string();

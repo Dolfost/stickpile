@@ -364,11 +364,65 @@ fn broken_settings_toml_only_warns() {
     assert_eq!(l.warnings.len(), 1);
     assert!(l.warnings[0].contains("ignoring the file"), "{}", l.warnings[0]);
 
-    // config.toml keeps its strict errors, read-only or not.
-    std::fs::write(&cfg, "[ui]\ncolums = 4\n").unwrap();
+    // config.toml keeps its errors other than unknown keys, read-only or not.
+    std::fs::write(&cfg, "[ui]\ncolumns = \"4\"\n").unwrap();
     assert!(matches!(load_layered_as(&cfg, true), Err(ConfigError::Parse { .. })));
     std::fs::write(&cfg, "[ui]\nstart_tab = \"x\"\n").unwrap();
     assert!(matches!(load_layered(&cfg), Err(ConfigError::Invalid(_))));
+}
+
+#[test]
+fn unknown_config_keys_are_skipped_with_a_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    let text = "\
+server_url = \"https://s.example\"
+[ui]
+columns = 4
+show_nonsense = true
+[later]
+x = 1
+";
+    std::fs::write(&cfg, text).unwrap();
+    let l = load_layered(&cfg).unwrap();
+    assert_eq!(l.config.server_url, "https://s.example");
+    assert_eq!(l.config.ui.columns, 4);
+    assert_eq!(l.unknown_keys, ["ui.show_nonsense", "later"]);
+    assert_eq!(
+        l.warnings,
+        [
+            format!(
+                "{}: ui.show_nonsense is not a setting this stickpile knows (a typo, or a newer version's setting); ignoring it",
+                cfg.display()
+            ),
+            unknown_key_warning(&cfg, "later"),
+        ]
+    );
+    assert_eq!(ClientConfig::load(&cfg).unwrap(), l.config);
+
+    // The popup still saves into it, and keeps the keys it does not know.
+    set_value(&cfg, "ui.theme", toml::Value::String("oled".into())).unwrap();
+    assert_eq!(
+        read(&cfg),
+        text.replace("show_nonsense = true\n", "show_nonsense = true\ntheme = \"oled\"\n")
+    );
+    assert_eq!(load_layered(&cfg).unwrap().config.ui.theme, Theme::Oled);
+
+    // Read-only (home-manager): settings.toml still layers under it, and only
+    // known keys are locked.
+    std::fs::write(&cfg, "[ui]\ncolumns = 4\nshow_nonsense = true\n").unwrap();
+    std::fs::write(settings_path(&cfg), "[ui]\nmodal = false\ncolumns = 7\n").unwrap();
+    let l = load_layered_as(&cfg, true).unwrap();
+    assert_eq!(l.unknown_keys, ["ui.show_nonsense"]);
+    assert_eq!(l.warnings, [unknown_key_warning(&cfg, "ui.show_nonsense")]);
+    assert_eq!((l.config.ui.columns, l.config.ui.modal), (4, false));
+    let locked: Vec<&str> = l.locked.iter().map(String::as_str).collect();
+    assert_eq!(locked, ["ui.columns"]);
+
+    // Nothing unknown, nothing listed.
+    std::fs::write(&cfg, "[ui]\ncolumns = 4\n").unwrap();
+    let l = load_layered_as(&cfg, true).unwrap();
+    assert!(l.unknown_keys.is_empty() && l.warnings.is_empty(), "{:?}", l.warnings);
 }
 
 #[test]

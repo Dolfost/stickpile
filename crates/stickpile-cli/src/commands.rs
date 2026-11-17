@@ -139,11 +139,24 @@ pub fn config_check(path: &Path, as_json: bool) -> Result<()> {
     if !path.is_file() {
         bail!("{}: no such file", path.display());
     }
-    // The file itself is checked strictly; skipped settings.toml entries
-    // (GUI settings under a read-only config) only warn.
+    // Loaded as the clients load it, warnings included. The clients skip the
+    // file's unknown keys; the check fails on them, so typos show. Skipped
+    // settings.toml entries (GUI settings under a read-only config) only warn.
     let layered = stickpile_core::settings::load_layered(path)?;
     for w in &layered.warnings {
         eprintln!("warning: {w}");
+    }
+    let unknown = &layered.unknown_keys;
+    if !unknown.is_empty() {
+        let count = match unknown.len() {
+            1 => "1 key".to_string(),
+            n => format!("{n} keys"),
+        };
+        bail!(
+            "{}: {count} this stickpile does not know: {}",
+            path.display(),
+            unknown.join(", ")
+        );
     }
     if as_json {
         output::json(&layered.config)?;

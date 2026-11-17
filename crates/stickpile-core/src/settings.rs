@@ -10,9 +10,10 @@
 //!   which wins over the defaults, and the keys `config.toml` sets are
 //!   locked.
 //!
-//! `config.toml` keeps its strict errors. Entries of `settings.toml` that are
-//! unknown or invalid are skipped with a warning, so a stale GUI value never
-//! stops the client from starting.
+//! A key of `config.toml` this version does not know (a typo, or a newer
+//! version's setting) is skipped with a warning; its other errors stay
+//! errors. Entries of `settings.toml` that are unknown or invalid are skipped
+//! with a warning, so a stale GUI value never stops the client from starting.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::config::{
-    Background, ClientConfig, ConfigError, SquarePad, StartMode, Theme, LANGUAGES, PASTE_DELAY_MAX_MS,
+    Background, ClientConfig, ConfigError, ParsedConfig, SquarePad, StartMode, Theme, LANGUAGES, PASTE_DELAY_MAX_MS,
     PASTE_WAIT_MAX_MS, START_TABS,
 };
 
@@ -47,8 +48,20 @@ pub struct LayeredConfig {
     /// File the GUI writes with [`set_value`] / [`unset_value`]:
     /// `config.toml`, or `settings.toml` when `config.toml` is read-only.
     pub write_path: PathBuf,
-    /// Entries of `settings.toml` that were skipped, for the log or the GUI.
+    /// Keys of `config.toml` this version does not know, skipped (see
+    /// [`ClientConfig::parse`]); each also has a warning.
+    pub unknown_keys: Vec<String>,
+    /// What was skipped, in `config.toml` or `settings.toml`, for the log or
+    /// the GUI.
     pub warnings: Vec<String>,
+}
+
+/// The warning for a key of `file` this version does not know.
+fn unknown_key_warning(file: &Path, key: &str) -> String {
+    format!(
+        "{}: {key} is not a setting this stickpile knows (a typo, or a newer version's setting); ignoring it",
+        file.display()
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -442,7 +455,8 @@ fn writable(path: &Path) -> bool {
 impl ClientConfig {
     /// The standard loader of the CLI and the desktop client: `path` layered
     /// over the GUI's `settings.toml` when `path` is read-only (see
-    /// [`load_layered`]). Skipped `settings.toml` entries are logged.
+    /// [`load_layered`]). What it skipped (unknown keys of `path`, entries of
+    /// `settings.toml`) is logged as warnings.
     pub fn load(path: &Path) -> Result<ClientConfig, ConfigError> {
         let layered = load_layered(path)?;
         for w in &layered.warnings {
@@ -452,20 +466,25 @@ impl ClientConfig {
     }
 }
 
-/// Load `config_path` strictly and, when it is read-only, layer
-/// `settings.toml` under it. See the module docs for the rules.
+/// Load `config_path` (skipping, with a warning, the keys this version does
+/// not know) and, when it is read-only, layer `settings.toml` under it. See
+/// the module docs for the rules.
 pub fn load_layered(config_path: &Path) -> Result<LayeredConfig, ConfigError> {
     load_layered_as(config_path, is_read_only(config_path))
 }
 
 fn load_layered_as(config_path: &Path, read_only: bool) -> Result<LayeredConfig, ConfigError> {
-    let text = read_optional(config_path)?;
-    let base = match &text {
-        Some(t) => ClientConfig::from_toml(t).map_err(|e| with_path(e, config_path))?,
-        None => ClientConfig::default(),
+    let parsed = match read_optional(config_path)? {
+        Some(t) => ClientConfig::parse(&t).map_err(|e| with_path(e, config_path))?,
+        None => ParsedConfig::default(),
     };
+    let base = parsed.config;
+    let unknown_keys = parsed.unknown_keys;
     let settings = settings_path(config_path);
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = unknown_keys
+        .iter()
+        .map(|k| unknown_key_warning(config_path, k))
+        .collect();
 
     if !read_only {
         if settings.exists() {
@@ -479,17 +498,16 @@ fn load_layered_as(config_path: &Path, read_only: bool) -> Result<LayeredConfig,
             config: base,
             locked: BTreeSet::new(),
             write_path: config_path.to_path_buf(),
+            unknown_keys,
             warnings,
         });
     }
 
-    let mut merged: toml::Table = match &text {
-        Some(t) => toml::from_str(t).map_err(|source| ConfigError::Parse {
-            path: config_path.into(),
-            source,
-        })?,
-        None => toml::Table::new(),
-    };
+    // Without the skipped keys, so the settings.toml values merge into it.
+    let mut merged: toml::Table = toml::from_str(&parsed.clean_text).map_err(|source| ConfigError::Parse {
+        path: config_path.into(),
+        source,
+    })?;
     let mut locked = BTreeSet::new();
     let mut leaves = Vec::new();
     collect_leaves("", &merged, &mut leaves);
@@ -543,6 +561,7 @@ fn load_layered_as(config_path: &Path, read_only: bool) -> Result<LayeredConfig,
         config,
         locked,
         write_path: settings,
+        unknown_keys,
         warnings,
     })
 }

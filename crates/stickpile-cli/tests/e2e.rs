@@ -125,7 +125,11 @@ fn config_check_valid_invalid_missing() {
     assert_eq!(parsed["ui"]["thumb_px"], 128, "defaults filled in");
 
     for (name, text, expect) in [
-        ("unknown.toml", "serverurl = \"http://x\"\n", "unknown field"),
+        (
+            "unknown.toml",
+            "serverurl = \"http://x\"\n",
+            "1 key this stickpile does not know: serverurl",
+        ),
         (
             "mime.toml",
             "[clipboard.default]\nstill = [\"image/bmp\"]\n",
@@ -153,6 +157,45 @@ fn config_check_valid_invalid_missing() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no such file"));
 
     assert_eq!(env.ok(&["config", "path"]).trim(), env.config.to_str().unwrap());
+}
+
+#[test]
+fn unknown_keys_fail_the_check_and_only_warn_elsewhere() {
+    let env = Env::new("http://127.0.0.1:9");
+    assert!(env.ok(&["config", "check"]).starts_with("OK "), "a clean file passes");
+    let mut text = std::fs::read_to_string(&env.config).unwrap();
+
+    text.push_str("[ui]\ncolumns = 3\nshow_nonsense = true\n[later]\nx = 1\n");
+    std::fs::write(&env.config, &text).unwrap();
+    let out = env.run(&["--json", "config", "check"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(out.stdout.is_empty());
+    let shown = format!("{}: ui.show_nonsense is not a setting", env.config.display());
+    assert!(err.contains(&format!("warning: {shown}")), "{err}");
+    assert!(
+        err.contains(&format!(
+            "error: {}: 2 keys this stickpile does not know: ui.show_nonsense, later",
+            env.config.display()
+        )),
+        "{err}"
+    );
+
+    // Any other command loads the file, warns, and goes on (here to the
+    // dead server).
+    let out = env.run(&["whoami"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&shown) && err.contains("later is not a setting"), "{err}");
+    assert!(err.contains("server unreachable"), "{err}");
+    // A known key with a bad value still stops it.
+    text.push_str("[copy]\nsquare = \"black\"\n");
+    std::fs::write(&env.config, &text).unwrap();
+    let out = env.run(&["whoami"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("unknown variant `black`") && !err.contains("server unreachable"),
+        "{err}"
+    );
 }
 
 #[test]

@@ -17,6 +17,8 @@ license = "AGPL-3.0-or-later"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+# The client config's tolerant loader (unknown keys are skipped).
+toml_edit = "0.22"
 thiserror = "2"
 directories = "5"
 stickpile-api = { path = "../../crates/stickpile-api" }
