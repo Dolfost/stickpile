@@ -385,7 +385,7 @@ fn syntax_button_and_the_search_inside_a_pack() {
     assert!(h.last().placeholder.contains("v:tired"), "{}", h.last().placeholder);
     h.driver.toggle_syntax();
     let help = h.last().help.expect("the syntax shown");
-    assert!(help.iter().flat_map(|s| &s.keys).any(|k| k.keys == "v: t: s: b:"));
+    assert!(help.iter().flat_map(|s| &s.keys).any(|k| k.keys == "v: t: s: b: x:"));
     h.driver.toggle_syntax();
     assert!(h.last().help.is_none());
 
