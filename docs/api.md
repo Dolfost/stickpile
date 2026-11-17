@@ -628,3 +628,46 @@ days. `Job.result` is kind-specific:
 | `discord_export` | `POST /sets/{id}/publish` | `guild_id`, `guild_name`, `kind` (`sticker` or `emoji`), `url`, `added`, `removed`, `updated`, `unchanged`, `exported`, `skipped` (`[{item_id, name, reason}]`), `notes`, `slots`, `animated_slots`, `premium_tier` |
 | `signal_import` | `POST /signal/import` | `set_id`, `slug`, `title`, `author`, `imported`, `skipped` (`[{sticker_id, reason}]`), `cover`; never the link |
 | `signal_export` | `POST /sets/{id}/publish` | `url` (the new pack's `signal.art` link), `title`, `exported`, `skipped`, `notes` |
+
+## Draft: metadata round
+
+Design note for the metadata round (branch `metadata`); the sections above
+are rewritten from it when the work lands, and this section then goes.
+See [search.md](search.md#draft-emoji-names-the-text-field-and-fresh-suggestions)
+and [ai.md](ai.md#draft-ocr-and-the-text-field).
+
+**Fields** (every one `#[serde(default)]` when read, so a 0.7.0 server's
+answers still parse; no touched type has `deny_unknown_fields`, so 0.7.0
+clients ignore them):
+
+- `Item.text: String`, `Item.text_source: FieldSource`;
+- `ItemSummary.text: String` (search results, sync, client caches);
+- `UpdateItem.text: Option<String>` (sets `text_source = user`, also
+  when empty); `UpdateItem.confirm` and the upload's `ai_fields` accept
+  `text`;
+- `UploadMeta.text: Option<String>`;
+- `AiSuggestions.text: Option<String>`;
+- search hits report `text` in `matched`.
+
+A client cache written by an older client holds items without `text`:
+the core cache records an item format in its `meta` table and syncs in
+full once when it is older (no schema bump, so an older client can still
+open the cache).
+
+**Recheck** (types in `stickpile_api`, every enum with a `#[serde(other)]`
+catch-all for readers):
+
+- `POST /api/v1/rechecks` `{parts, mode, set_id}`: the caller's own
+  items (a running batch of the same scope is returned instead);
+- `POST /api/v1/admin/rechecks` `{parts, mode, set_id}`: every item,
+  admins only, audited;
+- `GET /api/v1/rechecks`: the caller's batches (an admin's include the
+  server-wide ones), newest first;
+- `GET /api/v1/rechecks/{id}`: `Recheck` {id, scope, parts, mode, set_id,
+  state, total, done, failed, changed, created_at, finished_at};
+- `GET /api/v1/rechecks/{id}/failures`: what failed and why;
+- `POST /api/v1/rechecks/{id}/cancel`.
+
+`JobKind::Recheck` is new; 0.7.0 clients read it as `Other`. A new client
+calling these routes on a 0.7.0 server gets `404` and says the server is
+too old for rechecks.

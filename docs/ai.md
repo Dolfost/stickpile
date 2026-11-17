@@ -395,3 +395,72 @@ change the embedding space. The server would store the caption as another
 AI-sourced field and could add caption words to full-text search.
 Configuration would be a new `[ai.caption]` table (endpoint, model, API key
 file, timeout). Nothing else in the crate needs to change.
+
+## Draft: OCR and the text field
+
+Design note for the metadata round (branch `metadata`); the sections above
+are rewritten from it when the work lands, and this section then goes.
+
+**The field.** Items gain `text` (the words in the picture: one string,
+line breaks kept, control characters removed, `\r\n` as `\n`, at most 2000
+characters after trimming) and `text_source` (`user` or `ai`). Column
+`items.text TEXT NOT NULL DEFAULT ''`, `items.text_source TEXT NOT NULL
+DEFAULT 'ai'` (migration `0014`, which also adds the media columns below).
+For `text`, an empty value with source `ai` means "not set": the computer
+writes `text` only while its source is `ai`, and any edit by a person,
+clearing it included, sets `user` for good. (`keywords`, `emojis`, `vibe`
+and `name` keep the rule of `service::ai::apply`: the computer fills an
+empty field or replaces an AI value, never a non-empty value a person
+gave.) Clients show the AI marker only on a non-empty AI value.
+
+**The OCR result belongs to the media.** `media.ocr_text TEXT` (NULL: never
+read; `''`: read, no confident text) and `media.ocr_model TEXT` (the id of
+the model that read it), like `embedding` and `embedding_model`. A
+media's items take `text` from it with source `ai` under the rule above.
+The same file in two sets is read once.
+
+**Reading.** A seam next to `Enricher` in `stickpile-ai` (`ocr` module: a
+reader trait, its output as lines with a confidence, `model_id()`, and a
+mock), behind a cargo feature like `clip`. The server reads the validated,
+re-encoded media (never the raw upload): a still as it is, bounded in
+pixels; an animation or video at its first, middle and last frames
+(the frame extraction the media pipeline has), lines merged without
+duplicates. Output: lines above a confidence threshold, in reading order,
+printable text only, capped at 2000 characters. It runs in the `Enrich`
+job and in `POST /api/v1/ai/suggest` (the tray), under the CLIP timeout
+and in `spawn_blocking`. Config `[ai] ocr = true|false` (default `true`);
+off with one log line, never a failure, when the model files are absent.
+Models come from `nix/models.nix` and `scripts/fetch-models.sh`. Which
+models: decided by the owner after the evaluation.
+
+## Draft: recheck
+
+**What.** A user rechecks their own items, an admin the whole server,
+optionally one set. Parts (`RecheckPart`, snake_case): `keywords`,
+`emojis`, `vibe`, `text`, `embedding`, `quality`, `renditions`
+(plus `name` if the server derives one), each chosen on its own. Modes:
+`missing` (default) computes only what is not there (no embedding from
+the current model, no OCR result from the current model, an empty field);
+`refresh` recomputes and replaces AI values. Neither changes a value a
+person gave (the rules above). A user recheck changes only that user's
+items; work on shared media (embedding, OCR, quality, renditions) is
+harmless to the other owners.
+
+**The batch.** Table `rechecks` (migration `0015`): id, scope (`user` or
+`server`), requested_by, owner_id (user scope), set_id, parts (JSON),
+mode, state (`running`, `done`, `cancelled`, `failed`), total, done,
+failed, changed, created_at, finished_at; failures in
+`recheck_failures` (recheck_id, item_id or media_id, error). The batch
+fans out to one `JobKind::Recheck` job per media in scope (payload
+`{recheck_id, media_id}`), which updates the counters when it ends. The
+same migration adds `jobs.priority INTEGER NOT NULL DEFAULT 0`; the queue
+claims by `priority DESC, run_after, created_at`, and recheck jobs have a
+negative priority, so uploads (`Variants`, `Enrich`) made during a
+server-wide recheck go first. Jobs persist, so a restart continues
+(`requeue_interrupted`). Cancel marks the batch `cancelled` and deletes
+its queued jobs. Starting the same scope (owner, set, parts, mode) while
+it runs returns the running batch. A server-wide start is audited; user
+starts are rate limited. The startup re-enrichment of media whose
+embedding is from another model (`jobs::media::enqueue_missing_enrichment`)
+becomes a server-scope recheck started by the server itself, so there is
+one mechanism.

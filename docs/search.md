@@ -313,3 +313,50 @@ cd /data/stickpile && nix develop -c cargo test -p stickpile-search --release --
 The vector side is a linear scan over the visible, filtered documents. It is
 the most expensive part, and fine at this scale. If libraries grow well past
 100k items, an ANN index would replace the scan behind the same API.
+
+## Draft: emoji names, the text field and fresh suggestions
+
+Design note for the metadata round (branch `metadata`); the sections above
+are rewritten from it when the work lands, and this section then goes.
+
+**Emoji names (`e:`).** The value after `e:`/`emoji:` is an emoji (as
+before) or a *name*: a value made only of letters (Unicode alphabetic,
+plus `_` and `-`). A name selects every emoji with a name or keyword word
+that starts with it (`e:skull` selects 💀 and ☠️); when no word starts with
+it, words within one edit of it (values of 4 or more letters) select
+instead. A name that selects nothing matches nothing (no fallback to text).
+`Query.emojis` keeps the values as typed; `stickpile-search` expands names
+to emoji keys when it builds its filter, then compares keys as the emoji
+filter does today (skin tone and variation selectors ignored the same way),
+accepting an item with any of them; `-e:skull` excludes them all. The name
+data is one table embedded in `stickpile-search` (public API in
+`emoji_names`: the emojis for a name prefix, and the short name of an
+emoji for labels), so the server and every offline client agree.
+`suggest::resolve` never rewrites an emoji value: the typo forgiveness is
+in the expansion above, the same everywhere.
+
+**Emoji suggestions.** `Vocabulary` gains `emojis` (the emojis of the
+items, most used first; moved here from the Android `Words`). `Field::of`
+returns a new `Field::Emoji`. `e:` alone offers those emojis; letters
+narrow to emojis whose name matches, the viewer's own first, then others
+from the table. `Suggestions` (and the popup's `SuggestionLine`) gain
+`labels: Vec<String>` parallel to `words` (the emoji's short name, empty
+for other fields). `words` holds the glyph, so choosing an offer puts
+`e:<glyph>` into the query; `chosen()` is `None` for an emoji name (the
+search sends the name, which the server expands).
+
+**The text field.** `text` holds the words written in the picture
+(see [ai.md](ai.md#draft-ocr-and-the-text-field)). Plain query words match
+it as one more lexical field, `TEXT`, weighted 1.5 (below name 3.0 and
+keywords 2.5), reported as `text` in `matched`. A new key `text:` with the
+short form `x:` (`Key::Text`, `Query.texts: Filter<String>`, lowercased)
+matches the text only: the value's words must appear in the text as
+consecutive words after normalisation, so `text:"no thoughts"` is a
+phrase; `-text:` excludes. Offline search reads `ItemSummary.text` from
+the cache.
+
+**Fresh suggestions (W0).** The popup model gains `Event::LibraryChanged`:
+a shell dispatches it after a sync that changed the cache, and the model
+answers with `Command::LoadVocabulary` whether it is showing or not; a
+suggestion line on screen updates in place (the query, cursor and
+selection stay). The backends' `sync` reports whether the cache changed.
