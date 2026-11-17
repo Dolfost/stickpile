@@ -366,7 +366,7 @@ good, clearing included ([api.md](api.md#items)). That is stricter than
 the rule of `keywords`, `emojis`, `vibe` and `name` (fill when empty or
 still `ai`): an empty text a person left stays empty. Every AI write of
 the text goes through `service::ai::apply_text`, whose SQL only touches
-`text_source = 'ai'` rows; an import's or a restore's text goes through
+`text_source = 'ai'` rows; an import's text goes through
 `ItemText::merged_into` (a directory without a text changes nothing, an
 AI text from a file never replaces a person's).
 
