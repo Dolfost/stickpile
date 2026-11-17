@@ -48,8 +48,8 @@ pub struct Estimate {
     pub files: u64,
     pub bytes: u64,
     pub present_bytes: u64,
-    /// Items and renditions the offline options leave out.
-    pub skipped: u64,
+    /// What is not downloaded, and why.
+    pub skips: Skips,
     /// Bytes every kept file would take with it kept too.
     pub kept_bytes_after: u64,
     /// `offline.max_mb` in bytes; `None`: no limit.
@@ -60,6 +60,63 @@ impl Estimate {
     /// Whether it fits in the budget.
     pub fn fits(&self) -> bool {
         self.budget.is_none_or(|b| self.kept_bytes_after <= b)
+    }
+}
+
+/// What is not downloaded, counted by reason
+/// (`stickpile_core::offline::SkipReason`): the core reports a sticker of
+/// a kind switched off once, and a file over the size limit once each, so
+/// the two are counted apart, as the Android app does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Skips {
+    /// Stickers of a kind switched off (`offline.stills`, `.animations`,
+    /// `.videos`), kept only with a pack, the library or a rule.
+    pub kind_off: u64,
+    /// Files larger than `offline.max_file_mb`.
+    pub too_large: u64,
+    /// Stickers kept by themselves that the offline cache does not hold yet.
+    pub not_cached: u64,
+    /// Stickers with no file a copy could use.
+    pub no_rendition: u64,
+}
+
+impl Skips {
+    pub fn is_empty(&self) -> bool {
+        *self == Skips::default()
+    }
+
+    /// One sentence per reason that has any, in the current language.
+    pub fn lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.kind_off > 0 {
+            out.push(tp(
+                self.kind_off,
+                "{n} sticker is left out: its kind is off in the Offline settings.",
+                "{n} stickers are left out: their kind is off in the Offline settings.",
+            ));
+        }
+        if self.too_large > 0 {
+            out.push(tp(
+                self.too_large,
+                "{n} file is left out: it is larger than the largest file of the Offline settings.",
+                "{n} files are left out: they are larger than the largest file of the Offline settings.",
+            ));
+        }
+        if self.not_cached > 0 {
+            out.push(tp(
+                self.not_cached,
+                "{n} sticker is not in the offline cache yet (a sync brings it).",
+                "{n} stickers are not in the offline cache yet (a sync brings them).",
+            ));
+        }
+        if self.no_rendition > 0 {
+            out.push(tp(
+                self.no_rendition,
+                "{n} sticker has no file a copy could use.",
+                "{n} stickers have no file a copy could use.",
+            ));
+        }
+        out
     }
 }
 
@@ -197,13 +254,9 @@ fn keep_view(scope: &KeepScope, name: &str, e: &Estimate) -> Confirm {
             &[("size", &human_bytes(e.present_bytes))],
         ));
     }
-    if e.skipped > 0 {
+    for line in e.skips.lines() {
         body.push(' ');
-        body.push_str(&tp(
-            e.skipped,
-            "{n} file is left out by the Offline settings (kinds, size limit).",
-            "{n} files are left out by the Offline settings (kinds, size limit).",
-        ));
+        body.push_str(&line);
     }
     body.push_str("\n\n");
     body.push_str(&match e.budget {
@@ -327,7 +380,11 @@ mod tests {
             files: 30,
             bytes: 34 * MIB / 10,
             present_bytes: 400 * 1024,
-            skipped: 2,
+            skips: Skips {
+                kind_off: 2,
+                too_large: 3,
+                ..Skips::default()
+            },
             kept_bytes_after: 5 * MIB,
             budget: Some(1024 * MIB),
         };
@@ -344,7 +401,19 @@ mod tests {
             "{}",
             c.body
         );
-        assert!(c.body.contains("2 files are left out"), "{}", c.body);
+        // Stickers of a kind switched off are stickers, not files.
+        assert!(
+            c.body
+                .contains("2 stickers are left out: their kind is off in the Offline settings."),
+            "{}",
+            c.body
+        );
+        assert!(
+            c.body
+                .contains("3 files are left out: they are larger than the largest file of the Offline settings."),
+            "{}",
+            c.body
+        );
         assert!(
             c.body
                 .ends_with("Kept files would take 5.0 MiB of the 1.0 GiB allowed."),
@@ -372,6 +441,25 @@ mod tests {
         }
         .view();
         assert!(unlimited.body.ends_with("there is no limit."), "{}", unlimited.body);
+    }
+
+    #[test]
+    fn the_other_reasons_are_named_as_such() {
+        let lines = Skips {
+            not_cached: 1,
+            no_rendition: 2,
+            ..Skips::default()
+        }
+        .lines();
+        assert_eq!(
+            lines,
+            [
+                "1 sticker is not in the offline cache yet (a sync brings it).",
+                "2 stickers have no file a copy could use.",
+            ]
+        );
+        assert!(Skips::default().lines().is_empty());
+        assert!(Skips::default().is_empty());
     }
 
     #[test]

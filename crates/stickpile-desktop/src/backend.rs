@@ -19,10 +19,10 @@ use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
 use stickpile_quick::model::Results;
-use stickpile_quick::offline::{Estimate, KeepScope, KeptFor};
+use stickpile_quick::offline::{Estimate, KeepScope, KeptFor, Skips};
 use stickpile_quick::suggest::Vocabulary;
 
-use crate::offline::{estimate_from_core, reason_from_core, scope_from_core, scope_to_core};
+use crate::offline::{estimate_from_core, reason_from_core, scope_from_core, scope_to_core, skips_from_core};
 
 pub type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -246,8 +246,9 @@ pub trait Backend: Send + Sync + 'static {
     }
     /// What the plan says now, as a status of no run (`Idle`): how much of
     /// what is wanted is on the device, skipped, failed. For the Settings
-    /// block between runs (after a keep, a release, a removal).
-    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<OfflineStatus, String>> {
+    /// block between runs (after a keep, a release, a removal), with what
+    /// it leaves out by reason.
+    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<(OfflineStatus, Skips), String>> {
         no_offline()
     }
     /// "Clear cache": the files that are not kept.
@@ -731,10 +732,10 @@ impl Backend for CoreBackend {
         self.blocking(|s| s.offline_usage())
     }
 
-    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<OfflineStatus, String>> {
+    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<(OfflineStatus, Skips), String>> {
         self.blocking(|s| {
             let plan = s.offline_plan()?;
-            Ok(OfflineStatus {
+            let status = OfflineStatus {
                 state: OfflineState::Idle,
                 files_done: plan.totals.present_files,
                 files_total: plan.totals.files,
@@ -744,7 +745,8 @@ impl Backend for CoreBackend {
                 failed: plan.failures.len() as u64,
                 scopes: Vec::new(),
                 message: None,
-            })
+            };
+            Ok((status, skips_from_core(&plan.skipped)))
         })
     }
 
@@ -1216,6 +1218,103 @@ mod tests {
                 .unwrap();
             assert_eq!(here, [(cat.id.clone(), false)]);
         });
+    }
+
+    // -- ported from the behaviour review of the offline round (f398c3e) ------------------
+
+    /// A file the mock takes for an MP4 video.
+    fn mp4_bytes(len: usize) -> Vec<u8> {
+        let mut v = b"\0\0\0\x18ftypmp42\0\0\0\0mp42isom".to_vec();
+        v.resize(len.max(v.len()), 7);
+        v
+    }
+
+    /// A file the mock takes for a WebM video.
+    fn webm_bytes(len: usize) -> Vec<u8> {
+        let mut v = vec![0x1A, 0x45, 0xDF, 0xA3];
+        v.resize(len.max(v.len()), 9);
+        v
+    }
+
+    /// alice's public pack `mixed`: a PNG still with its Telegram sticker,
+    /// a GIF, an MP4 video and a WebM video, as the server makes them.
+    fn mixed(server: &MockServer) -> (String, Vec<ItemSummary>) {
+        let mut st = server.state();
+        let set = st.add_set("alice", "mixed", "Mixed", Visibility::Public);
+        let still = st.add_item(&set.id, "still png", &["still"], encoded(20, 20, ImageFormat::Png));
+        st.add_variant(
+            &still.id,
+            stickpile_api::Variant::TgSticker,
+            "image/webp",
+            encoded(16, 16, ImageFormat::Png),
+        );
+        let gif = st.add_item(&set.id, "gif animation", &["gif"], animated_gif());
+        st.add_variant(&gif.id, stickpile_api::Variant::Mp4, "video/mp4", mp4_bytes(1500));
+        let mp4 = st.add_item(&set.id, "mp4 video", &["video"], mp4_bytes(4000));
+        st.add_variant(
+            &mp4.id,
+            stickpile_api::Variant::TgVideoSticker,
+            "video/webm",
+            webm_bytes(800),
+        );
+        let webm = st.add_item(&set.id, "webm video", &["video"], webm_bytes(3000));
+        st.add_variant(&webm.id, stickpile_api::Variant::Mp4, "video/mp4", mp4_bytes(2500));
+        let items = [still, gif, mp4, webm]
+            .iter()
+            .map(|i| {
+                let item = st.items.iter().find(|m| m.item.id == i.id).unwrap();
+                st.summary(&item.item)
+            })
+            .collect();
+        (set.id, items)
+    }
+
+    /// The question before keeping a pack counts what it leaves out by
+    /// reason: the core lists a sticker of a kind switched off once (the
+    /// two videos, videos being off by default), and the question says two
+    /// stickers, not two files.
+    #[test]
+    fn the_popup_counts_what_it_leaves_out() {
+        let server = MockServer::start();
+        let (set_id, items) = mixed(&server);
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        let (core, popup) = rt.block_on(async {
+            b.clone().sync().await.unwrap();
+            let popup = b
+                .clone()
+                .offline_estimate(KeepScope::Set(set_id.clone()))
+                .await
+                .unwrap();
+            let core = b
+                .session
+                .offline_estimate(&stickpile_core::offline::Scope::Set(set_id.clone()))
+                .unwrap();
+            (core, popup)
+        });
+        let videos = items.iter().filter(|i| i.kind == MediaKind::Video).count() as u64;
+        assert_eq!(videos, 2);
+        assert_eq!(core.skipped.len() as u64, videos, "{:?}", core.skipped);
+        assert_eq!(
+            popup.skips,
+            stickpile_quick::offline::Skips {
+                kind_off: videos,
+                ..Default::default()
+            }
+        );
+        let body = stickpile_quick::offline::Ask::Keep {
+            scope: KeepScope::Set(set_id),
+            name: "Mixed".into(),
+            estimate: popup,
+        }
+        .view()
+        .body;
+        assert!(
+            body.contains("2 stickers are left out: their kind is off in the Offline settings."),
+            "{body}"
+        );
+        assert!(!body.contains("files are left out"), "{body}");
     }
 
     #[test]

@@ -961,7 +961,7 @@ impl Shell {
         });
         self.spawn(b.offline_plan_status(), |this, out| {
             match out {
-                Some(Ok(s)) => this.panel.borrow_mut().planned(s),
+                Some(Ok((s, skips))) => this.panel.borrow_mut().planned(s, skips),
                 Some(Err(e)) => tracing::debug!("offline plan: {e}"),
                 None => {}
             }

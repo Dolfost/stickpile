@@ -149,7 +149,7 @@ final class FakePopup: PopupControl {
             other: "Other cached files: 37, 2.4 MiB (the cache size limit applies).",
             state: state, stateWarning: false, fraction: fraction ?? 1, canPause: running && !paused,
             canResume: paused, canCancel: running || paused,
-            notes: "2 files could not be downloaded; they are tried again on the next run.\n14 left out by the settings below (kinds, size limit).",
+            notes: "2 files could not be downloaded; they are tried again on the next run.\n14 stickers are left out: their kind is off in the Offline settings.",
             message: "Clearing leaves the kept files; removing them asks first.", messageError: false, canRemove: true,
             pauseLabel: "Pause", resumeLabel: "Resume", cancelLabel: "Cancel", cacheTitle: "Cached files",
             clearLabel: "Clear cache",

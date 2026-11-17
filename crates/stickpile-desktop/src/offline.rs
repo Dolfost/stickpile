@@ -7,10 +7,10 @@
 use stickpile_core::cache::EvictReport;
 use stickpile_core::offline::{
     Estimate as CoreEstimate, OfflineControl, OfflineOutcome, OfflineState, OfflineStatus, OfflineUsage, Reason,
-    RunEnd, Scope,
+    RunEnd, Scope, SkipReason, Skipped,
 };
 use stickpile_i18n::global::{tf, tp};
-use stickpile_quick::offline::{human_bytes, Estimate, KeepScope, KeptFor};
+use stickpile_quick::offline::{human_bytes, Estimate, KeepScope, KeptFor, Skips};
 
 // -- the core's types and the model's ----------------------------------------------------
 
@@ -47,10 +47,25 @@ pub fn estimate_from_core(e: &CoreEstimate) -> Estimate {
         files: e.totals.files,
         bytes: e.totals.bytes,
         present_bytes: e.totals.present_bytes,
-        skipped: e.skipped.len() as u64,
+        skips: skips_from_core(&e.skipped),
         kept_bytes_after: e.kept_bytes_after,
         budget: e.budget,
     }
+}
+
+/// What the core leaves out, counted by reason: a sticker of a kind
+/// switched off is one entry, a file over the size limit is one entry.
+pub fn skips_from_core(skipped: &[Skipped]) -> Skips {
+    let mut out = Skips::default();
+    for s in skipped {
+        match s.reason {
+            SkipReason::KindOff { .. } => out.kind_off += 1,
+            SkipReason::TooLarge { .. } => out.too_large += 1,
+            SkipReason::NotCached => out.not_cached += 1,
+            SkipReason::NoRendition => out.no_rendition += 1,
+        }
+    }
+    out
 }
 
 // -- the downloader's schedule ------------------------------------------------------------
@@ -113,6 +128,9 @@ pub struct Panel {
     pub status: Option<OfflineStatus>,
     pub running: bool,
     pub paused: bool,
+    /// What the plan leaves out, by reason (the downloader's status only
+    /// counts entries, a sticker and a file alike).
+    pub skips: Skips,
     /// What the last action of the block did, said in the language of the
     /// moment it is shown.
     pub note: Option<PanelNote>,
@@ -150,7 +168,8 @@ pub struct PanelView {
     pub can_cancel: bool,
     /// "3 files could not be downloaded...": empty when none.
     pub failures: String,
-    /// "12 left out by the settings below.": empty when none.
+    /// What is left out, one line per reason ("2 stickers are left out:
+    /// their kind is off..."): empty when nothing is.
     pub skipped: String,
     pub message: Option<String>,
     pub message_error: bool,
@@ -177,7 +196,6 @@ impl Panel {
             None => (String::new(), false, None),
         };
         let failed = self.status.as_ref().map_or(0, |s| s.failed);
-        let skipped = self.status.as_ref().map_or(0, |s| s.skipped);
         PanelView {
             library,
             kept,
@@ -197,14 +215,7 @@ impl Panel {
                     "{n} files could not be downloaded; they are tried again on the next run.",
                 )
             },
-            skipped: if skipped == 0 {
-                String::new()
-            } else {
-                tf(
-                    "{n} left out by the settings below (kinds, size limit).",
-                    &[("n", &skipped)],
-                )
-            },
+            skipped: self.skips.lines().join("\n"),
             message: self.note.as_ref().map(|n| match n {
                 PanelNote::Cleared(r) => tp(
                     r.removed_files as u64,
@@ -222,8 +233,10 @@ impl Panel {
 
     /// What the plan says between runs (after a keep, a release, a
     /// removal): its numbers replace the last run's, whose stop (the limit,
-    /// the disk, the network) still holds while the plan is not complete.
-    pub fn planned(&mut self, mut s: OfflineStatus) {
+    /// the disk, the network) still holds while the plan is not complete;
+    /// what it leaves out holds during a run too.
+    pub fn planned(&mut self, mut s: OfflineStatus, skips: Skips) {
+        self.skips = skips;
         if self.running {
             return;
         }
@@ -375,6 +388,36 @@ mod tests {
     }
 
     #[test]
+    fn skips_are_counted_by_reason() {
+        let skip = |reason| Skipped {
+            item_id: "a".into(),
+            name: "a".into(),
+            variant: None,
+            reason,
+        };
+        let skips = skips_from_core(&[
+            skip(SkipReason::KindOff {
+                kind: stickpile_api::MediaKind::Video,
+            }),
+            skip(SkipReason::KindOff {
+                kind: stickpile_api::MediaKind::Video,
+            }),
+            skip(SkipReason::TooLarge { size: 9, limit: 1 }),
+            skip(SkipReason::NotCached),
+            skip(SkipReason::NoRendition),
+        ]);
+        assert_eq!(
+            skips,
+            Skips {
+                kind_off: 2,
+                too_large: 1,
+                not_cached: 1,
+                no_rendition: 1,
+            }
+        );
+    }
+
+    #[test]
     fn one_run_at_a_time_and_one_more_when_asked_meanwhile() {
         let mut d = Downloads::default();
         assert!(d.want());
@@ -421,9 +464,15 @@ mod tests {
         p.running = false;
         p.status = Some(OfflineStatus {
             failed: 3,
+            // Entries: two stickers of a kind off and ten files too large.
             skipped: 12,
             ..status(OfflineState::LimitReached, 100, 120)
         });
+        p.skips = Skips {
+            kind_off: 2,
+            too_large: 10,
+            ..Skips::default()
+        };
         let v = p.view(true);
         assert!(v.library);
         assert!(v.state_warning);
@@ -437,7 +486,11 @@ mod tests {
             "{}",
             v.failures
         );
-        assert!(v.skipped.starts_with("12 left out"), "{}", v.skipped);
+        assert_eq!(
+            v.skipped,
+            "2 stickers are left out: their kind is off in the Offline settings.\n\
+             10 files are left out: they are larger than the largest file of the Offline settings."
+        );
         assert!(!v.can_cancel);
 
         p.status = Some(status(OfflineState::Idle, 120, 120));
@@ -461,20 +514,31 @@ mod tests {
             ..Panel::default()
         };
         // The kept files removed: the thumbnails are wanted again.
-        p.planned(status(OfflineState::Idle, 0, 14));
+        let kind_off = Skips {
+            kind_off: 1,
+            ..Skips::default()
+        };
+        p.planned(status(OfflineState::Idle, 0, 14), kind_off);
+        let v = p.view(false);
         assert_eq!(
-            p.view(false).state,
+            v.state,
             "0 of 14 files, 0 B of 14.0 MiB on this device; the rest downloads after the next sync."
         );
+        assert_eq!(
+            v.skipped,
+            "1 sticker is left out: its kind is off in the Offline settings."
+        );
         p.status = Some(status(OfflineState::LimitReached, 10, 20));
-        p.planned(status(OfflineState::Idle, 11, 20));
+        p.planned(status(OfflineState::Idle, 11, 20), Skips::default());
         assert!(p.view(false).state.starts_with("The limit of ? is reached: 11 of 20"));
-        p.planned(status(OfflineState::Idle, 20, 20));
+        p.planned(status(OfflineState::Idle, 20, 20), Skips::default());
         assert!(p.view(false).state.starts_with("Up to date"), "complete: no stop");
-        // A run publishes its own.
+        // A run publishes its own numbers; what is left out still comes from the plan.
         p.running = true;
-        p.planned(status(OfflineState::Idle, 0, 1));
-        assert!(p.view(false).state.starts_with("Up to date"));
+        p.planned(status(OfflineState::Idle, 0, 1), kind_off);
+        let v = p.view(false);
+        assert!(v.state.starts_with("Up to date"));
+        assert!(v.skipped.starts_with("1 sticker is left out"));
     }
 
     #[test]

@@ -892,7 +892,7 @@ impl Driver {
         });
         self.spawn(b.offline_plan_status(), |d, out| {
             match out {
-                Some(Ok(s)) => d.lock().panel.planned(s),
+                Some(Ok((s, skips))) => d.lock().panel.planned(s, skips),
                 Some(Err(e)) => tracing::debug!("offline plan: {e}"),
                 None => {}
             }

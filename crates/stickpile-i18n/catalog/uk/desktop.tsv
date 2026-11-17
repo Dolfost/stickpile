@@ -364,7 +364,6 @@ Keep the whole library offline?	Зберігати всю бібліотеку �
 Keep {name} offline?	Зберігати {name} офлайн?
 {n} sticker, {files} files, {size}.|{n} stickers, {files} files, {size}.	{n} стікер, файлів: {files}, {size}.|{n} стікери, файлів: {files}, {size}.|{n} стікерів, файлів: {files}, {size}.
 {size} of it is on this device already.	{size} із цього вже є на пристрої.
-{n} file is left out by the Offline settings (kinds, size limit).|{n} files are left out by the Offline settings (kinds, size limit).	{n} файл пропущено через налаштування Офлайн (типи, обмеження розміру).|{n} файли пропущено через налаштування Офлайн (типи, обмеження розміру).|{n} файлів пропущено через налаштування Офлайн (типи, обмеження розміру).
 Kept files would take {after} of the {budget} allowed.	Збережені файли займатимуть {after} із дозволених {budget}.
 Kept files would take {after}, over the {budget} allowed: downloads stop at the limit, and nothing is deleted to make room.	Збережені файли займатимуть {after}, більше за дозволені {budget}: завантаження зупиниться на межі, і нічого не буде видалено, щоб звільнити місце.
 Kept files would take {after}; there is no limit.	Збережені файли займатимуть {after}; обмеження немає.
@@ -407,7 +406,6 @@ Keeping offline needs a server (not in demo mode)	Зберігання офла�
 {name} is not on this device and the server is unreachable; keep it offline (K) to copy it without the server	{name} немає на цьому пристрої, а сервер недоступний; збережіть його офлайн (K), щоб копіювати без сервера
 Other cached files: {n}, {size} (the cache size limit applies).	Інші файли в кеші: {n}, {size} (на них діє обмеження розміру кешу).
 {n} file could not be downloaded; it is tried again on the next run.|{n} files could not be downloaded; they are tried again on the next run.	Не вдалося завантажити {n} файл; його спробують знову наступного разу.|Не вдалося завантажити {n} файли; їх спробують знову наступного разу.|Не вдалося завантажити {n} файлів; їх спробують знову наступного разу.
-{n} left out by the settings below (kinds, size limit).	Пропущено через налаштування нижче (типи, обмеження розміру): {n}.
 Cleared {n} file ({size}); {kept} kept files stayed.|Cleared {n} files ({size}); {kept} kept files stayed.	Очищено {n} файл ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файли ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файлів ({size}); збережених файлів залишилося: {kept}.
 Kept offline: {n} file, {size}|Kept offline: {n} files, {size}	Збережено офлайн: {n} файл, {size}|Збережено офлайн: {n} файли, {size}|Збережено офлайн: {n} файлів, {size}
 {kept} of {budget} allowed.	{kept} із дозволених {budget}.
@@ -432,3 +430,8 @@ Clear cache	Очистити кеш
 Delete the thumbnails and copied files that are not kept; kept files stay	Видалити мініатюри й скопійовані файли, які не збережено; збережені файли залишаться
 Delete every kept file and forget what to keep (asks first)	Видалити всі збережені файли й забути, що зберігати (спершу запитає)
 Clearing leaves the kept files; removing them asks first.	Очищення залишає збережені файли; їх видалення спершу запитає.
+# Keeping offline: what is left out, by reason
+{n} sticker is left out: its kind is off in the Offline settings.|{n} stickers are left out: their kind is off in the Offline settings.	{n} стікер пропущено: його тип вимкнено в налаштуваннях Офлайн.|{n} стікери пропущено: їхній тип вимкнено в налаштуваннях Офлайн.|{n} стікерів пропущено: їхній тип вимкнено в налаштуваннях Офлайн.
+{n} file is left out: it is larger than the largest file of the Offline settings.|{n} files are left out: they are larger than the largest file of the Offline settings.	{n} файл пропущено: він більший за найбільший файл із налаштувань Офлайн.|{n} файли пропущено: вони більші за найбільший файл із налаштувань Офлайн.|{n} файлів пропущено: вони більші за найбільший файл із налаштувань Офлайн.
+{n} sticker is not in the offline cache yet (a sync brings it).|{n} stickers are not in the offline cache yet (a sync brings them).	{n} стікера ще немає в офлайн-кеші (його принесе синхронізація).|{n} стікерів ще немає в офлайн-кеші (їх принесе синхронізація).|{n} стікерів ще немає в офлайн-кеші (їх принесе синхронізація).
+{n} sticker has no file a copy could use.|{n} stickers have no file a copy could use.	{n} стікер не має файлу, придатного для копіювання.|{n} стікери не мають файлу, придатного для копіювання.|{n} стікерів не мають файлу, придатного для копіювання.
