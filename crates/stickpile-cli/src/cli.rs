@@ -94,6 +94,14 @@ pub enum Command {
     Copy(CopyArgs),
     /// Update the offline cache and upload queued usage events
     Sync,
+    /// Keep stickers, packs or the whole library on this device, so that
+    /// they copy with the server unreachable: keep, release, status, sync,
+    /// remove-all
+    #[command(subcommand)]
+    Offline(OfflineCmd),
+    /// The offline cache's files: clear
+    #[command(subcommand)]
+    Cache(CacheCmd),
     /// Upload queued usage events now
     Flush,
     /// Like an item (one like per user)
@@ -345,6 +353,132 @@ pub struct CopyArgs {
     /// Print the path of the materialised file instead of using the clipboard
     #[arg(long)]
     pub print_path: bool,
+}
+
+/// The exit status of `offline sync`, in its help and docs/cli.md.
+pub const OFFLINE_SYNC_EXIT: &str = "\
+Exit status:
+  0  everything kept is on this device
+  2  incomplete: the budget (offline.max_mb) is reached, the server is
+     unreachable, the run was cancelled (Ctrl-C), the disk is full, or
+     files failed; stderr says which, with the numbers
+  1  an error (not logged in, the token rejected, ...)";
+
+#[derive(Subcommand, Debug)]
+pub enum OfflineCmd {
+    /// Keep a sticker, a pack (--set) or the whole library (--all) on this
+    /// device; `offline sync` downloads the files
+    ///
+    /// A pack or the library shows the estimate first (files, size, what is
+    /// on this device already, what the [offline] options skip, the budget)
+    /// and asks; --yes does not ask, and is required when stdin is not a
+    /// terminal. A sticker is kept without asking.
+    Keep {
+        #[command(flatten)]
+        scope: ScopeArgs,
+        /// Do not ask for confirmation
+        #[arg(long, short)]
+        yes: bool,
+        /// Only show the estimate; keep nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Stop keeping a sticker, a pack (--set) or the library (--all)
+    ///
+    /// Its files go back to the ordinary cache (evicted least recently used
+    /// beyond cache_max_mb); they are not deleted now. Files another kept
+    /// scope or an automatic rule wants stay kept.
+    Release {
+        #[command(flatten)]
+        scope: ScopeArgs,
+    },
+    /// What is kept, the space it takes, what is still to download, what
+    /// was skipped and what failed
+    ///
+    /// With --dry-run and a scope (an item, --set or --all): what keeping it
+    /// would take, without keeping it.
+    Status(OfflineStatusArgs),
+    /// Sync, then download what is kept and not on this device yet, with
+    /// the progress on stderr (Ctrl-C cancels)
+    #[command(after_help = OFFLINE_SYNC_EXIT)]
+    Sync,
+    /// Delete every kept file and forget what is kept (asks first)
+    ///
+    /// The automatic rules ([offline.auto] in the config) are options, not
+    /// choices: they keep their files again at the next `offline sync`
+    /// unless turned off.
+    RemoveAll {
+        /// Do not ask for confirmation
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
+/// One sticker, a pack or the library.
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("scope").required(true).args(["item", "set", "all"])))]
+pub struct ScopeArgs {
+    /// Item id: one sticker
+    pub item: Option<String>,
+    /// A pack: set id or slug (of the packs in the offline cache; yours
+    /// first when two have the slug)
+    #[arg(long, value_name = "SET")]
+    pub set: Option<String>,
+    /// The whole library: every item the offline cache lists, now and later
+    #[arg(long)]
+    pub all: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("scope").args(["item", "set", "all"]).requires("dry_run")))]
+pub struct OfflineStatusArgs {
+    /// Show what keeping the scope given would take, without keeping it
+    #[arg(long, requires = "scope")]
+    pub dry_run: bool,
+    /// Item id: one sticker (with --dry-run)
+    pub item: Option<String>,
+    /// A pack: set id or slug (with --dry-run)
+    #[arg(long, value_name = "SET")]
+    pub set: Option<String>,
+    /// The whole library (with --dry-run)
+    #[arg(long)]
+    pub all: bool,
+}
+
+/// What a scope argument names, before it is looked up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopeRef {
+    Item(String),
+    Set(String),
+    Library,
+}
+
+fn scope_ref(item: &Option<String>, set: &Option<String>, all: bool) -> Option<ScopeRef> {
+    match (item, set, all) {
+        (Some(id), _, _) => Some(ScopeRef::Item(id.clone())),
+        (_, Some(set), _) => Some(ScopeRef::Set(set.clone())),
+        (_, _, true) => Some(ScopeRef::Library),
+        _ => None,
+    }
+}
+
+impl ScopeArgs {
+    pub fn scope(&self) -> ScopeRef {
+        scope_ref(&self.item, &self.set, self.all).expect("clap requires one")
+    }
+}
+
+impl OfflineStatusArgs {
+    pub fn scope(&self) -> Option<ScopeRef> {
+        scope_ref(&self.item, &self.set, self.all)
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CacheCmd {
+    /// Delete the cached thumbnails and copied files, except the kept ones
+    /// (`offline remove-all` deletes those)
+    Clear,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -934,6 +1068,87 @@ mod tests {
             .contains("unknown part"));
         assert!(parse(&["recheck", "--all-parts", "--mode", "deep"]).is_err());
         assert!(parse(&["recheck", "list", "--all-parts"]).is_err());
+    }
+
+    #[test]
+    fn offline_scopes() {
+        for (args, want) in [
+            (&["offline", "keep", "abc"][..], ScopeRef::Item("abc".into())),
+            (
+                &["offline", "keep", "--set", "cats", "--yes"],
+                ScopeRef::Set("cats".into()),
+            ),
+            (&["offline", "keep", "--all", "-y"], ScopeRef::Library),
+            (&["offline", "keep", "--all", "--dry-run"], ScopeRef::Library),
+            (&["offline", "release", "--set", "cats"], ScopeRef::Set("cats".into())),
+        ] {
+            let cli = parse(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            let got = match cli.command {
+                Command::Offline(OfflineCmd::Keep { scope, .. }) | Command::Offline(OfflineCmd::Release { scope }) => {
+                    scope.scope()
+                }
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(got, want, "{args:?}");
+        }
+        // Exactly one scope.
+        assert!(parse(&["offline", "keep"]).is_err());
+        assert!(parse(&["offline", "keep", "abc", "--set", "cats"]).is_err());
+        assert!(parse(&["offline", "release", "--set", "cats", "--all"]).is_err());
+        assert!(
+            parse(&["offline", "release", "--all", "--yes"]).is_err(),
+            "release does not ask"
+        );
+
+        // status: a scope only with --dry-run, and --dry-run only with one.
+        let cli = parse(&["offline", "status"]).unwrap();
+        let Command::Offline(OfflineCmd::Status(a)) = cli.command else {
+            panic!()
+        };
+        assert_eq!(a.scope(), None);
+        let cli = parse(&["offline", "status", "--dry-run", "--set", "cats"]).unwrap();
+        let Command::Offline(OfflineCmd::Status(a)) = cli.command else {
+            panic!()
+        };
+        assert_eq!(a.scope(), Some(ScopeRef::Set("cats".into())));
+        let cli = parse(&["--json", "offline", "status", "--dry-run", "abc"]).unwrap();
+        let Command::Offline(OfflineCmd::Status(a)) = cli.command else {
+            panic!()
+        };
+        assert_eq!(a.scope(), Some(ScopeRef::Item("abc".into())));
+        assert!(
+            parse(&["offline", "status", "--all"]).is_err(),
+            "a scope needs --dry-run"
+        );
+        assert!(
+            parse(&["offline", "status", "--dry-run"]).is_err(),
+            "--dry-run needs a scope"
+        );
+        assert!(parse(&["offline", "status", "--dry-run", "--all", "--set", "x"]).is_err());
+
+        for args in [
+            &["offline", "sync"][..],
+            &["offline", "remove-all"],
+            &["offline", "remove-all", "--yes"],
+            &["cache", "clear"],
+        ] {
+            parse(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+    }
+
+    /// `offline sync --help` documents the exit status.
+    #[test]
+    fn offline_sync_help_has_the_exit_codes() {
+        let mut cli = Cli::command();
+        let help = cli
+            .find_subcommand_mut("offline")
+            .unwrap()
+            .find_subcommand_mut("sync")
+            .unwrap()
+            .render_help()
+            .to_string();
+        assert!(help.contains("Exit status:"), "{help}");
+        assert!(help.contains("2  incomplete"), "{help}");
     }
 
     #[test]

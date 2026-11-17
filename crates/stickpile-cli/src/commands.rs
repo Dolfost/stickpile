@@ -52,20 +52,58 @@ impl Ctx {
         Ok(ApiClient::from_config(&self.config)?.with_token(self.token()?))
     }
 
-    async fn session(&self) -> Result<Session> {
+    pub(crate) async fn session(&self) -> Result<Session> {
         Ok(Session::open(self.config.clone()).await?.with_client_name(CLIENT_NAME))
     }
 }
 
-/// Make core errors actionable on the command line.
-pub fn explain(e: &anyhow::Error) -> Option<&'static str> {
-    let core = e.downcast_ref::<CoreError>()?;
-    match core {
-        CoreError::Api { status: 401, .. } => Some("the server rejected the token; run `stickpile login`"),
-        CoreError::Api { status: 403, .. } => Some("your account is not allowed to do this"),
-        CoreError::Offline(_) => Some("check `server_url` in the config, or that the server is running"),
-        _ => None,
+/// An error with the command's own hint (printed as `hint:`).
+#[derive(Debug)]
+pub struct Hinted {
+    pub message: String,
+    pub hint: String,
+}
+
+impl std::fmt::Display for Hinted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
     }
+}
+
+impl std::error::Error for Hinted {}
+
+/// The command did its work, but not all of it (`offline sync` with files
+/// still missing): printed as `incomplete:`, exit status 2.
+#[derive(Debug)]
+pub struct Incomplete {
+    pub reason: String,
+    pub hint: Option<String>,
+}
+
+impl std::fmt::Display for Incomplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+impl std::error::Error for Incomplete {}
+
+/// Make core errors actionable on the command line.
+pub fn explain(e: &anyhow::Error) -> Option<String> {
+    if let Some(h) = e.downcast_ref::<Hinted>() {
+        return Some(h.hint.clone());
+    }
+    let core = e.downcast_ref::<CoreError>()?;
+    let hint = match core {
+        CoreError::Api { status: 401, .. } => "the server rejected the token; run `stickpile login`",
+        CoreError::Api { status: 403, .. } => "your account is not allowed to do this",
+        CoreError::Offline(_) => "check `server_url` in the config, or that the server is running",
+        CoreError::NotOnDevice { .. } => {
+            "this sticker is not on this device; keep it offline with `stickpile offline keep <item>` while online"
+        }
+        _ => return None,
+    };
+    Some(hint.to_string())
 }
 
 pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
@@ -92,6 +130,8 @@ pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
         Command::Search(a) => search(ctx, a).await,
         Command::Copy(a) => copy(ctx, a).await,
         Command::Sync => sync(ctx).await,
+        Command::Offline(c) => crate::offline::offline(ctx, c).await,
+        Command::Cache(c) => crate::offline::cache(ctx, c).await,
         Command::Flush => flush(ctx).await,
         Command::Like { item } => like(ctx, &item, true).await,
         Command::Unlike { item } => like(ctx, &item, false).await,
@@ -170,7 +210,7 @@ pub fn config_check(path: &Path, as_json: bool) -> Result<()> {
 // auth
 // ---------------------------------------------------------------------------
 
-fn prompt_line(prompt: &str) -> Result<String> {
+pub(crate) fn prompt_line(prompt: &str) -> Result<String> {
     eprint!("{prompt}");
     std::io::stderr().flush()?;
     let mut line = String::new();
@@ -929,7 +969,21 @@ async fn copy(ctx: &Ctx, a: CopyArgs) -> Result<()> {
             (hit.item, out.offline)
         }
     };
-    let prepared = session.prepare_copy(&item, target, sticker).await?;
+    let prepared = match session.prepare_copy(&item, target, sticker).await {
+        Ok(p) => p,
+        // The server is unreachable and the file is not kept: say what to do.
+        Err(e) if e.is_not_on_device() => {
+            return Err(Hinted {
+                message: e.to_string(),
+                hint: format!(
+                    "this sticker is not on this device; keep it offline with `stickpile offline keep {}` while online",
+                    item.id
+                ),
+            }
+            .into())
+        }
+        Err(e) => return Err(e.into()),
+    };
     if let Some(w) = &prepared.warning {
         eprintln!("warning: {w}");
     }

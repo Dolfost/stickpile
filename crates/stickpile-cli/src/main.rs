@@ -2,6 +2,7 @@
 
 mod cli;
 mod commands;
+mod offline;
 mod output;
 
 use std::io::IsTerminal;
@@ -81,6 +82,13 @@ fn report(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            if let Some(i) = e.downcast_ref::<commands::Incomplete>() {
+                eprintln!("incomplete: {i}");
+                if let Some(hint) = &i.hint {
+                    eprintln!("hint: {hint}");
+                }
+                return ExitCode::from(2);
+            }
             eprintln!("error: {e:#}");
             if let Some(hint) = commands::explain(&e) {
                 eprintln!("hint: {hint}");
