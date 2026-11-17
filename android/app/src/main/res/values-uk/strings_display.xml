@@ -53,14 +53,15 @@
     <string name="display_pack_by">%1$s від %2$s</string>
 
     <string name="display_syntax">Синтаксис пошуку</string>
-    <string name="display_syntax_words">слова й фрази в назві, ключових словах, емодзі, настрої, тегах і наборі; друкарські помилки не заважають</string>
+    <string name="display_syntax_words">слова й фрази в назві, ключових словах, емодзі, настрої, тегах, наборі й тексті на картинці; друкарські помилки не заважають</string>
     <string name="display_syntax_emoji">має це емодзі</string>
     <string name="display_syntax_emoji_name">має емодзі, чия англійська назва або ключове слово так починається; друкарські помилки не заважають</string>
     <string name="display_syntax_vibe">має цей настрій</string>
     <string name="display_syntax_tag">має цей тег</string>
     <string name="display_syntax_set">у цьому наборі (його slug або назва)</string>
     <string name="display_syntax_by">у наборі цього користувача</string>
-    <string name="display_syntax_short">скорочено vibe: tag: set: by:</string>
+    <string name="display_syntax_text">має ці слова на картинці, одне за одним</string>
+    <string name="display_syntax_short">скорочено vibe: tag: set: by: text:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)</string>
     <string name="display_syntax_is">ваші, вподобані вами, публічні</string>
     <string name="display_syntax_numbers">якість, вподобання, копіювання (&gt; &gt;= &lt; &lt;= =)</string>

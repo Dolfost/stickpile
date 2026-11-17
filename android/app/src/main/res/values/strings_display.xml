@@ -52,14 +52,15 @@
     <string name="display_pack_by">%1$s by %2$s</string>
 
     <string name="display_syntax">Search syntax</string>
-    <string name="display_syntax_words">words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven</string>
+    <string name="display_syntax_words">words and phrases in the name, keywords, emojis, vibe, tags, pack and the words in the picture; typos are forgiven</string>
     <string name="display_syntax_emoji">has this emoji</string>
     <string name="display_syntax_emoji_name">has an emoji whose English name or keyword starts so; typos are forgiven</string>
     <string name="display_syntax_vibe">has this vibe</string>
     <string name="display_syntax_tag">has this tag</string>
     <string name="display_syntax_set">in this pack (its slug or name)</string>
     <string name="display_syntax_by">in a pack of this user</string>
-    <string name="display_syntax_short">short for vibe: tag: set: by:</string>
+    <string name="display_syntax_text">has these words in the picture, one after another</string>
+    <string name="display_syntax_short">short for vibe: tag: set: by: text:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still, animated, video</string>
     <string name="display_syntax_is">yours, liked by you, public</string>
     <string name="display_syntax_numbers">quality, likes, copies (&gt; &gt;= &lt; &lt;= =)</string>
