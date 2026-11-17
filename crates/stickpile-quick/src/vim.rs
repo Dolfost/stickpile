@@ -380,6 +380,10 @@ pub const SYNTAX: &[HelpSection] = &[
                 "words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven",
             ),
             ("e:😂", "has this emoji"),
+            (
+                "e:skull",
+                "has an emoji whose English name or keyword starts so; typos are forgiven",
+            ),
             ("vibe:tired", "has this vibe"),
             ("tag:reaction", "has this tag"),
             ("set:cats", "in this pack (its slug or name)"),
@@ -403,6 +407,10 @@ pub const SYNTAX: &[HelpSection] = &[
             (
                 "vibe: tag: set: by:",
                 "the values in use are offered under the field, most used first",
+            ),
+            (
+                "e:, e:sk",
+                "emojis with their names: yours, then those named so; one puts the emoji in",
             ),
             ("Tab / Shift+Tab", "put in the next / previous offered value"),
             (

@@ -281,10 +281,14 @@ the item stats row	рядок статистики стікера
 g/, F2	g/, F2
 search syntax	синтаксис пошуку
 put in the next / previous offered value	вставити наступне / попереднє запропоноване значення
+e:, e:sk	e:, e:sk
+emojis with their names: yours, then those named so; one puts the emoji in	емодзі з назвами: ваші, потім ті, що так звуться; вибране вставляє емодзі
 Suggestions	Підказки
 cat "big chungus"	cat "big chungus"
 words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven	слова й фрази в назві, ключових словах, емодзі, настрої, тегах і наборі; друкарські помилки не заважають
 e:😂	e:😂
+e:skull	e:skull
+has an emoji whose English name or keyword starts so; typos are forgiven	має емодзі, чия англійська назва або ключове слово так починається; друкарські помилки не заважають
 vibe:tired	vibe:tired
 has this vibe	має цей настрій
 tag:reaction	tag:reaction
