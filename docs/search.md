@@ -251,6 +251,22 @@ if the client ships the vibe vocabulary. When the server is reachable,
 clients use `GET /api/v1/search` (`stickpile_api::routes::SEARCH`), which
 adds the vector side.
 
+The values the clients suggest while a `key:` filter is typed
+([desktop.md](desktop.md#search-suggestions)) come from the same cache, so
+they follow the sync. `Session::sync` tells whether the cached items
+changed (an item new, changed or removed, or another account's dropped; an
+item the server sends again as it was is no change), and a client reads
+its suggestions again after such a sync, showing or not. The popup model
+takes `Event::LibraryChanged`, which the desktop and Mac shells dispatch
+after such a sync, and answers it with `Command::LoadVocabulary`; a
+suggestion line on screen takes the new values in place (the query, the
+cursor and the selection stay). The search goes out again when the cache
+answered it, or when a typed value now resolves to another one; results
+the server gave stay. On Android the sync calls
+return `SyncState.cache_changed`, and the app and the keyboard then ask
+for the offers on screen again. So the first opening after a start, while
+the cache is still empty, gets the values as soon as its sync is over.
+
 ## Inside a pack
 
 With a pack open, the clients search its items by themselves, online and
@@ -354,9 +370,3 @@ matches the text only: the value's words must appear in the text as
 consecutive words after normalisation, so `text:"no thoughts"` is a
 phrase; `-text:` excludes. Offline search reads `ItemSummary.text` from
 the cache.
-
-**Fresh suggestions (W0).** The popup model gains `Event::LibraryChanged`:
-a shell dispatches it after a sync that changed the cache, and the model
-answers with `Command::LoadVocabulary` whether it is showing or not; a
-suggestion line on screen updates in place (the query, cursor and
-selection stay). The backends' `sync` reports whether the cache changed.
