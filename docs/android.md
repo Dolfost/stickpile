@@ -83,15 +83,18 @@ cover image, else its first sticker).
 - **Sticker info** (the eye) shows or hides the information over each
   tile: an icon for a GIF, another animation or a video and one for NSFW,
   a heart on the ones you liked, the name, the emojis and vibe, the tags,
-  and a line with the format and resolution, times copied, likes and the
+  the words in the picture on one line (its lines joined with " / "), and
+  a line with the format and resolution, times copied, likes and the
   quality score. Nothing has a box or a band behind it: the icons and the
   letters have a dark outline, so they show on any sticker. The
   menu's "Sticker info" (also in Settings) turns each piece on or off and
   sets the stickers in a row, 2 to 8, with a slider (with the phone
-  upright; held sideways, more of the same size fit). A small tile shows
-  only the lines that fit: the name first, then the stats line, the tags,
-  and the emojis and vibe. Safe mode and these choices are shared with the
-  keyboard.
+  upright; held sideways, more of the same size fit). "Text in the
+  picture" is the one piece that starts off, also after an update, as it
+  is drawn over the picture whose words it repeats; the others start on. A
+  small tile shows only the lines that fit: the name first, then the stats
+  line, the tags, the emojis and vibe, and the text last. Safe mode and
+  these choices are shared with the keyboard.
 - **GIFs and videos play** in the grid and the details, looping and
   without sound, instead of showing their first frame. Each one's file is
   downloaded the first time it plays and kept in the offline cache. "Play
@@ -99,21 +102,26 @@ cover image, else its first sticker).
   (on mobile data only the ones already downloaded play) or Never.
 - **Tap** a sticker to share it; **long press** for its details: the
   pack and owner, the numbers, the vibe, emojis, tags and keywords (a tap
-  on one searches for it), and Share, Like or Unlike, and Open in browser
-  (its page in the web UI).
+  on one searches for it), the words in the picture as they are, line
+  breaks kept (when it has any), and Share, Like or Unlike, and Open in
+  browser (its page in the web UI). The app shows no AI mark on the text:
+  the items it gets (`ItemSummary`) do not say who wrote it.
 - The menu also has the search syntax, Sync now and Settings; pulling the
   grid down syncs too.
 
 ### Search syntax
 
-`cat "big chungus"` (words and phrases; typos are forgiven), `e:😂`,
+`cat "big chungus"` (words and phrases, also in the words in the picture;
+typos are forgiven), `e:😂`,
 `e:skull` (an emoji whose English name or keyword starts so, typos
-forgiven), `vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`, `type:gif` (gif,
+forgiven), `vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`,
+`text:"no thoughts"` (these words in the picture, one after another),
+`type:gif` (gif,
 png, webp, jpeg, mp4, webm, still, animated, video), `is:mine`,
 `is:liked`, `is:public`, `q>70`, `likes>=2`, `copies<5`, `sort:likes`
 (relevance, recent, likes, copies, quality); `tag:a tag:b` is either; a
-leading `-` leaves out (`-tag:nsfw`). `v:`, `t:`, `s:` and `b:` are short
-for `vibe:`, `tag:`, `set:` and `by:` (`v:tired -t:nsfw`). A misspelled
+leading `-` leaves out (`-tag:nsfw`). `v:`, `t:`, `s:`, `b:` and `x:` are
+short for `vibe:`, `tag:`, `set:`, `by:` and `text:` (`v:tired -t:nsfw`). A misspelled
 or half-typed filter value searches for the closest one. With a pack (in
 the keyboard: a set) open, the search looks only inside it, with all of
 this. Under the field, `e:` offers emojis with their names (`e:` alone:
@@ -155,9 +163,9 @@ Using it:
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
-- Long press: the sticker's details (pack, numbers, vibe, emojis and tags;
-  a tap on one searches for it) with Send, Send as a sticker (Telegram),
-  Like or Unlike, and Share.
+- Long press: the sticker's details (pack, numbers, vibe, emojis and tags,
+  a tap on one searches for it; the words in the picture, line breaks
+  kept) with Send, Send as a sticker (Telegram), Like or Unlike, and Share.
 - The keyboard button at the top goes back to your keyboard at any time.
 
 Its settings (in the app's settings): the keyboard height (the sticker
@@ -180,9 +188,14 @@ app's window drawn over it.
 
 Share a picture or a video from a gallery or any app to "stickpile", pick
 one of your sets, change the name, keywords and emojis if you like, and
-upload. Several files upload one after another with their progress; a file
-that fails says why and can be retried. Files larger than 1 GB are left
-out.
+upload. "Text in the picture" (several lines, at most 2000 characters)
+takes the words written in it, for search: typed, it is yours and the
+server never replaces it; left empty, nothing is sent and the server reads
+the words itself when it can (OCR, see [ai.md](ai.md#ocr-and-the-text-field)).
+"Apply to all" copies keywords and emojis, never the text: each picture
+has its own words. Several files upload one after another with their
+progress; a file that fails says why and can be retried. Files larger
+than 1 GB are left out.
 
 ## Settings
 
@@ -332,6 +345,9 @@ Rules for the interface:
 - Interface drift fails the tests: `crates/stickpile-android/tests/interface.rs`
   checks the exported metadata against this list in every test run, and
   `tests/kotlin.rs` (with `--features bindgen`) checks the generated Kotlin.
+- A field added to a record goes last with `#[uniffi(default)]`, so that
+  Kotlin written before it still builds (`Suggestions.labels`,
+  `Item.text`, `UploadFile.text`).
 - Paths are absolute strings inside the app's private storage.
 - The constructor is synchronous (UniFFI cannot generate async primary
   constructors for Kotlin).
@@ -422,7 +438,9 @@ record Item        { id: String, name: String, set_id: String, set_name: String,
                      format: MediaFormat, width: u32, height: u32, quality: u32?,
                      likes: u64, copies: u64,
                      nsfw: Boolean,     // tagged nsfw, any case: safe mode hides it
-                     liked: Boolean }   // by the account, as the saved favorites say
+                     liked: Boolean,    // by the account, as the saved favorites say
+                     text: String }     // the words in the picture, "\n" between lines;
+                                        // "" for none and from a 0.7.0 server (default "")
 record ItemList    { items: List<Item>, offline: Boolean }
 record Pack        { id: String, slug: String, name: String, owner: String,
                      item_count: u32, mine: Boolean }
@@ -437,7 +455,9 @@ record PairingLink { server_url: String, code: String }
 record Prepared    { path: String, mime_type: String, display_name: String,
                      target: Target, variant: String, sticker: Boolean }
 record UploadFile  { path: String, name: String?, keywords: List<String>,
-                     emojis: List<String> }
+                     emojis: List<String>,
+                     text: String? }    // the user's words in the picture; null or blank:
+                                        // not sent, the server reads them (default null)
 record SyncState   { last_sync: i64?, last_error: LibraryErrorKind?,
                      pending_usage: u32, due: Boolean, cache_changed: Boolean }
 
@@ -603,7 +623,11 @@ Behaviour the signatures do not show:
 - **Upload.** The file is streamed from disk, never held in memory whole.
   With `name = null` the server names the item after the file
   name (the path's last part), so the app names its temporary copy after
-  the shared file.
+  the shared file. A `text` that is not blank goes in the upload's `meta`
+  as the user's (`text_source: user`, the server cleans it and refuses
+  more than 2000 characters, `InvalidInput` on `file`); a null or blank
+  one is left out, so the server's OCR fills it. A 0.7.0 server ignores
+  it.
 
 ### Choosing what to insert
 
@@ -663,7 +687,10 @@ is one process; these pieces are shared by its parts:
   clear (settings), after a sign-in as another account or on another
   server, and when onboarding saved another server address (launcher).
 - `display.DisplaySettings`: what the grids show and the theme
-  (`display.AppTheme`), shared by the app and the keyboard. Every
+  (`display.AppTheme`), shared by the app and the keyboard. The tile
+  fields are kept as two sets (`TileField.stored`): those that start on
+  and were turned off, and those that start off (`TEXT`) and were turned
+  on, so that a field added later starts as it should for everyone. Every
   activity is a `ui.theme.ThemedActivity`: it lays a night or day
   `uiMode` over its configuration as the theme says (`AppThemes.override`,
   nothing for System), so the window, the system bars and
