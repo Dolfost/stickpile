@@ -16,9 +16,11 @@ It also feeds search expansion. `Vocabulary::vibes_for_word` maps slang to
 vibes without a model (`naahh` → dismissive), and `ZeroShot::related_terms`
 maps a query embedding to nearby keywords and vibes.
 
-It also has the seam for reading the words written in a picture (OCR)
-into the item text ([OCR and the text field](#ocr-and-the-text-field)); no
-reader ships yet.
+It also reads the words written in a picture (OCR) into the item text,
+in Latin and Cyrillic script (English and Ukrainian), with PaddleOCR
+PP-OCRv5: a 4.8 MB text detector and an 8.1 MB recogniser through the same
+ONNX Runtime ([OCR and the text field](#ocr-and-the-text-field), [the
+reader](#the-reader)).
 
 What it does **not** do: captions, face recognition, NSFW classification,
 or any training or fine-tuning on your library. A caption backend can be
@@ -106,6 +108,8 @@ inference per staged file in the tray (about 50 ms on the CPU with
   multilingual/model.onnx         text_encoder = "multilingual"
   multilingual/tokenizer.json     text_encoder = "multilingual"
   multilingual/dense.safetensors  text_encoder = "multilingual"
+  ocr/det.onnx                    OCR (ai.ocr), text detector
+  ocr/rec.onnx                    OCR (ai.ocr), recogniser
 ```
 
 | File | Source (pinned revision) | Size | sha256 |
@@ -116,10 +120,19 @@ inference per staged file in the tray (about 50 ms on the CPU with
 | `multilingual/model.onnx` | [sentence-transformers/clip-ViT-B-32-multilingual-v1](https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1) `onnx/model_qint8_avx512.onnx`, rev `58edf8ca` | 135.3 MB | `3bed77e8…a8a7` |
 | `multilingual/tokenizer.json` | same repo, `tokenizer.json` | 2.0 MB | `5b4e1a81…df81` |
 | `multilingual/dense.safetensors` | same repo, `2_Dense/model.safetensors` | 1.6 MB | `d12568dc…4f74` |
+| `ocr/det.onnx` | [RapidAI/RapidOCR](https://www.modelscope.cn/models/RapidAI/RapidOCR) on ModelScope, `onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx`, tag `v3.8.0` | 4.8 MB | `4d97c44a...78ae` |
+| `ocr/rec.onnx` | same repo, `onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx` | 8.1 MB | `90f761b4...2711` |
 
 The full hashes and URLs are in `scripts/fetch-models.sh`, `nix/models.nix`
 and `stickpile_ai::MODEL_FILES`; a unit test keeps the three in sync.
-Download size: `clip` ≈ 608 MB, `multilingual` ≈ 490 MB, both ≈ 745 MB.
+Download size, OCR included: `clip` about 621 MB, `multilingual` about
+503 MB, both about 760 MB (the OCR files are 12.9 MB of it).
+
+Licences: the CLIP weights are OpenAI's (MIT), the multilingual model
+sentence-transformers' (Apache-2.0). The OCR weights are PaddleOCR's
+(Apache-2.0; Hugging Face `PaddlePaddle/PP-OCRv5_mobile_det` and
+`PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec`), converted to ONNX by
+RapidOCR (Apache-2.0). None of them is vendored in the repository.
 
 - **Vision**: CLIP ViT-B/32 `CLIPVisionModelWithProjection`. Input
   `pixel_values` [N,3,224,224]; output `image_embeds` [N,512] (projected).
@@ -134,6 +147,14 @@ Download size: `clip` ≈ 608 MB, `multilingual` ≈ 490 MB, both ≈ 745 MB.
   [512,768], per `2_Dense/config.json`). It was distilled onto the CLIP text
   tower for 50+ languages, so it shares the image space.
 - All embeddings are L2-normalised, so cosine = dot product.
+- **OCR detector**: PP-OCRv5 mobile DB. Input `x` [1,3,H,W] (BGR,
+  `(v / 255 - 0.5) / 0.5`, sides multiples of 32); output a text
+  probability map [1,1,H,W].
+- **OCR recogniser**: PP-OCRv5 mobile `cyrillic` CTC. Input `x`
+  [N,3,48,W]; output [N,W/8,852] class probabilities. Its dictionary is in
+  the model metadata (`character`, 850 characters: full Latin, Cyrillic
+  with all Ukrainian letters, digits, punctuation, both `'` and U+2019),
+  plus the CTC blank and a space.
 
 ### Why these files
 
@@ -168,7 +189,7 @@ Correctness checks:
 ## Fetching
 
 Script (curl plus sha256 verification; keeps files that are already
-correct):
+correct). Every set includes the OCR files:
 
 ```sh
 scripts/fetch-models.sh --english      /var/lib/stickpile/models   # default
@@ -183,7 +204,7 @@ let models = import ./nix/models.nix { inherit pkgs; };
 in {
   services.stickpile.settings.ai = {
     enabled = true;
-    model_dir = "${models.all}";        # or models.english / models.multilingual
+    model_dir = "${models.all}";        # or models.english / models.multilingual (OCR files in each)
     onnxruntime_library = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
   };
 }
@@ -192,12 +213,15 @@ in {
 A downloader inside the server can use `stickpile_ai::MODEL_FILES` (path,
 URL, sha256, size) and `TextEncoderKind::model_files()`.
 `stickpile_ai::missing_model_files(dir, encoder)` lists what is absent, for
-`check-config` and startup errors.
+`check-config` and startup errors; `stickpile_ai::missing_ocr_files(dir)`
+does the same for the OCR files (`stickpile_ai::OCR_FILES`), which are
+optional: without them the server reads no text and says so once.
 
 ### Runtime dependency: ONNX Runtime
 
 `ort` is built with `load-dynamic`, so the binary has no link-time
-dependency. `libonnxruntime.so` is loaded at runtime from the first of:
+dependency. `libonnxruntime.so` is loaded at runtime, once for CLIP and OCR
+together (`stickpile_ai::init_runtime`), from the first of:
 
 1. `[ai] onnxruntime_library`,
 2. the `ORT_DYLIB_PATH` environment variable (the dev shell sets it to
@@ -224,12 +248,13 @@ threads = 2                               # intra-op threads per inference; 0 = 
 # vocabulary_file = "/etc/stickpile/vocabulary.toml"
 max_keywords = 5                          # upper bound; fewer when the model is unsure
 max_emojis = 3
-ocr = true                                # read the words in pictures, when a text reader is there
+ocr = true                                # read the words in pictures (needs ocr/ in model_dir)
 ```
 
 The server maps these to `ClipOptions { model_dir, text_encoder,
 onnxruntime_library, threads }`, `Vocabulary::load` / `Vocabulary::builtin()`
-and `ZeroShot::suggest(embedding, max_keywords, max_emojis)`.
+and `ZeroShot::suggest(embedding, max_keywords, max_emojis)`; with `ocr`,
+to `PaddleOcr::load(model_dir, threads)`.
 
 Threads and concurrency: `ort` 2.0 runs a session through `&mut Session`,
 so each tower (vision and text) sits behind its own `Mutex`. Concurrent
@@ -352,6 +377,8 @@ To reproduce:
 cargo run --release -p stickpile-ai --example probe -- --models models --encoder clip --threads 2 [image.png…] [--query "text"]
 ```
 
+OCR timings and memory: [the reader](#the-reader).
+
 ## OCR and the text field
 
 **The field.** Items have `text`, the words written in the picture: one
@@ -393,14 +420,16 @@ pub struct TextLine { pub text: String, pub confidence: f32, pub bounds: Option<
 found through `ocr::clean_lines`, the rules every reader shares:
 
 - lines below `MIN_CONFIDENCE` (0.5) are dropped;
-- reading order: rows top to bottom (a line joins a row when its vertical
-  centre is within half a line height of the row's first line), left to
-  right inside a row; lines without boxes keep the reader's order;
+- rows: a piece joins a row when its vertical centre is less than half
+  the smaller height away from the centre of the row's first piece; the
+  pieces of a row left to right, joined with a space (a detector finds a
+  caption word by word); rows top to bottom. Without boxes every piece is
+  a line, in the reader's order;
 - printable text only: `clean_text`, private-use and replacement
   characters removed, whitespace runs as one space, a line without a
   letter or digit (frames, borders, specks) dropped;
-- a line already read in an earlier frame (case and spacing aside) is not
-  repeated; the same line twice in one frame stays;
+- a row already read in an earlier frame (case and spacing aside) is not
+  repeated; the same row twice in one frame stays;
 - the lines joined with `\n`, cut at 2000 characters.
 
 The frames are `stickpile_media::text_frames` of the stored, sanitised
@@ -426,13 +455,93 @@ frame grab as the representative frame).
   re-enrichment (`POST /api/v1/items/{id}/enrich`) reads a media that was
   never read.
 
-**Configuration.** `[ai] ocr = true` (the default) reads with a text reader
-when `ai.enabled`; `false` reads nothing. The server builds no reader yet
-(`app::text_reader_from_config` returns none): with `ocr = true` it logs
-once at startup ("ai.ocr is on, but this server has no text reader: the
-words in pictures are not read") and goes on. Tests give a reader through
-`StartOptions::text_reader` (`TextReaderSource::Provided`), which still
-obeys `ai.ocr`.
+**Configuration.** `[ai] ocr = true` (the default) reads with
+[the reader](#the-reader) when `ai.enabled`; `false` reads nothing. At
+startup `app::text_reader_from_config` loads it from `<model_dir>/ocr/`
+with `threads` (it takes well under a second, so startup waits for it and
+the first `Enrich` job already has it). It loads the ONNX Runtime first,
+with `onnxruntime_library`, because CLIP loads later, in the background.
+Without the files the server logs once ("ai.ocr is on, but the OCR models
+are missing (...): the words in pictures are not read") and goes on;
+`check-config` warns about them. A failed load is logged the same way and
+never stops the server; a build without the cargo feature `ocr` logs that.
+Tests give a reader through `StartOptions::text_reader`
+(`TextReaderSource::Provided`), which still obeys `ai.ocr`.
+
+No timeout around a read, as for CLIP: a timeout around `spawn_blocking`
+would stop the waiting, not the work, and the work per frame is bounded
+(next section).
+
+### The reader
+
+`stickpile_ai::paddle::PaddleOcr` (cargo feature `ocr`, on by default in
+`stickpile-ai` and the server) implements `TextReader` with the two models
+of [Models and layout](#models-and-layout): PaddleOCR PP-OCRv5 mobile
+detection and the PP-OCRv5 mobile `cyrillic` recogniser, chosen by the
+[evaluation](#ocr-evaluation). Pre- and post-processing are RapidOCR
+3.8.1's, ported to pure Rust in `paddle::{det, rec, geometry}` (no OpenCV,
+no polygon clipper; [what it implements](#what-the-rust-side-implements)).
+It returns every recognised box (often a word) with its score and its
+bounds in frame pixels; `ocr::clean_lines` keeps those at or above 0.5 with
+a letter or digit and puts them into rows.
+
+On top of RapidOCR it
+
+- caps the detector input at 2000 px on the long side (RapidOCR scales
+  the short side up to 736 px, so a 72 x 1080 strip became 736 x 11040);
+- repairs Latin/Cyrillic look-alikes word by word
+  (`paddle::fix_lookalikes`): the letters that look the same in both
+  scripts (А В С Е Н І К М О Р Т Х У, а с е і о р х у, Ї ї ё) go into the
+  script of the word's other letters, else the line's, else the one most
+  of the word's look-alikes already have; a tie stays. `GLORY ТО UКRАINE`
+  with Cyrillic Т, О, К, А becomes `GLORY TO UKRAINE`, `КIТ` with a Latin I
+  becomes `КІТ`. It runs in the reader, not in `clean_lines`, because it
+  repairs how this recogniser errs: text that mixes scripts on purpose
+  (the logo "Wікі") may lose that;
+- opens both sessions without ONNX Runtime's CPU memory arena and memory
+  pattern: input sizes vary from picture to picture and the arena keeps
+  the largest activations (peak RSS 861 vs 470 MB over the test set in the
+  evaluation's check);
+- bounds the work: the working picture at most 2000 px on the long side
+  (RapidOCR's `max_side_len`; a strip under 30 px high is scaled up and
+  padded, and one that would then exceed 16 MP is not read), at most 1000
+  contours, at most 300 recognised boxes per frame, a recogniser input at
+  most 7680 px wide. It runs synchronously on the calling thread.
+
+`model_id()` is `ppocrv5-mobile-det+cyrillic-rec@2000` for the shipped
+files (checked by sha256 when loading), `ppocr-det-<8 hex>+rec-<8 hex>@2000`
+for others, so other models or a changed cap count as "not read".
+
+**Quality**, measured on the evaluation's 56 pictures with its scorer
+(CER: edits per reference character, normalised as described there), for
+the text the server stores (`read_frames`): CER 3.8 % normalised (4.3 %
+raw); English 3.4 %, Ukrainian 4.3 %, mixed 2.7 %, real pictures 2.7 %;
+89.8 % of the reference words found; no text at all on the 11 pictures
+without text. It reads printed captions well: memes in Impact (outlined
+or plain) and other fonts, screenshots of chats, tweets and web pages
+(light and dark), subtitles, printed stickers. It
+reads badly: handwriting and handwriting fonts, curved or stylised
+lettering, `і` in Impact capitals (read as `и`), and apostrophes and
+spaces between Impact capitals (`КОЛИВ ПЯТНИЦЮ`). The worst pictures are
+those of the evaluation's table, read the same way.
+
+Small renderings lose text. The same pictures scaled down first (long
+side, normalised CER / words found): 1024 px 4.1 % / 89.3 %, 512 px
+5.7 % / 84.2 %, 256 px 31.9 % / 63.7 %. A client sending a picture for
+suggestions should send at least about 1024 px on the long side, or the
+original when it is smaller.
+
+**Time and memory** (release build, 2 threads, Intel i7-14700HX shared
+with other jobs at load average 17 to 45, so rough; fastest of three runs
+per picture, decoding not included): median 358 ms and p95 1037 ms over
+the 56 pictures (slowest 1712 ms, a 1080 px screenshot full of text),
+median 224 ms and p95 656 ms over the 23 of at most 640 px. An animation
+is read at three frames, so about three times that (computed, not
+measured). Loading takes about 0.1 s, the sha256 of both files included.
+The probe process peaked at 504 MB RSS over the 56 pictures (OCR only,
+no CLIP); a throwaway server with the multilingual CLIP model and OCR
+peaked at 1065 MB after four uploads and one suggestion. In that server a
+picture's text was on its item 1.1 to 1.3 s after the upload.
 
 **Set directories and older servers.** `set.toml` carries `text` and
 `text_source` ([set-format.md](set-format.md)). A 0.7.0 server keeps them
@@ -449,8 +558,15 @@ upgrade, the server moves such keys into the item text at startup
   the model file table against the script and the Nix file, vocabulary
   loading and validation, `vibes_for_word`, `ZeroShot` with `MockEnricher`,
   a broken ONNX Runtime library giving an error rather than a panic, and
-  the OCR cleaning (confidence, reading order, merging frames, the cap,
-  frame bounding) with `MockTextReader`.
+  the OCR cleaning (confidence, rows, merging frames, the cap, frame
+  bounding) with `MockTextReader`. With the feature `ocr` (default) it also
+  covers the reader's model-free parts: convex hull, minimum-area
+  rectangle, the Clipper-style unclip, contours with holes, polygon fill
+  and box score, the perspective crop (upright, turned, replicated border),
+  bilinear resizing, the detector input cap, the working picture (bounds,
+  padding, transparency), boxes from a probability map and their order,
+  recogniser batching, CTC decoding with a tiny dictionary, the look-alike
+  repair, the model id and missing-file errors.
 - `MockTextReader::new(&lines)` returns the same lines for every frame and
   records the size of each frame it read (`frames()`, `reads()`); the
   server tests (`tests/text.rs`) inject it to check what is read, how
@@ -465,6 +581,15 @@ upgrade, the server moves such keys into the item text at startup
   - concurrent use;
   - zero-shot on drawn stickers;
   - query expansion.
+
+  With `ocr/` in that dir, `tests/ocr_model.rs` reads
+  `tests/fixtures/ocr-en-uk.png` (2.5 KB, "Hello, world" and "Привіт,
+  світе" in DejaVu Sans on transparency) word by word, through
+  `read_frames` (with a frame above `MAX_READ_PIXELS`), checks that blank
+  and striped pictures and degenerate sizes give no text, and that
+  concurrent reads agree. `cargo run --release -p stickpile-ai --example
+  ocr -- --models models picture.png` prints what the reader finds, the
+  stored text, the time and the peak memory (`--json` for scripts).
 - `MockEnricher` (dim ≥ 16) is deterministic. Text is a hashed bag of words
   in which colour words ("red", "blue", …) land on dedicated dimensions.
   Images are colour histograms over the same named colours, so "red" is close
@@ -654,6 +779,7 @@ Apache-2.0.
 
 ### What the Rust side implements
 
+`stickpile_ai::paddle` implements these steps ([the reader](#the-reader)).
 Reference: RapidOCR 3.8.1 `ch_ppocr_det/utils.py` (`DetPreProcess`,
 `DBPostProcess`), `ch_ppocr_det/main.py` (`sorted_boxes`),
 `utils/process_img.py` (`get_rotate_crop_image`), `ch_ppocr_rec/main.py`
@@ -688,6 +814,46 @@ Reference: RapidOCR 3.8.1 `ch_ppocr_det/utils.py` (`DetPreProcess`,
    i - 1. The line score is the mean of the kept steps' maximum
    probabilities.
 8. Filter, repair and join the lines as above.
+
+How the Rust code stands in for OpenCV and Clipper (`paddle::geometry`):
+
+- `cv2.findContours` (`RETR_LIST`): the outer border of each 8-connected
+  component and the border of each hole (a 4-connected background region
+  not reaching the edge), reduced to each row's outermost pixels, which
+  span the same convex hull; in the order OpenCV's scan starts them.
+- `cv2.minAreaRect`: convex hull (monotone chain) and the best rectangle
+  over the hull's edges.
+- The unclip: pyclipper truncates the corners to integers and offsets with
+  round joins (arc tolerance 0.25); `offset_round` reproduces Clipper's
+  `OffsetPoint`/`DoRound` for the convex box, so the arc points and their
+  rounding are the same (for `[[10.7, 20.6], [50.2, 20.6], [50.2, 30.9],
+  [10.7, 30.9]]` and distance 2 both give x 8..52, y 18..32).
+- `cv2.fillPoly` for the box score: the outline as 8-connected lines plus
+  the pixels whose centres lie inside.
+- `cv2.resize` (`INTER_LINEAR`): half-pixel centres, two taps, no
+  antialiasing, rounded to 8 bits.
+- `cv2.warpPerspective` (`INTER_CUBIC`, `BORDER_REPLICATE`): the
+  homography from the 4 corner pairs (Gaussian elimination), source
+  positions in 1/32 px steps, OpenCV's cubic weights (A = -0.75).
+- Python's `round` and `np.round` round half to even, `int()` truncates;
+  the code does the same where the reference does.
+
+**Rust against the Python pipeline** (same 56 pictures, threshold 0.5,
+look-alike repair and letter-or-digit rule, scored with the same scorer;
+CER normalised unless marked raw):
+
+| Pipeline | CER all raw / norm | en | uk | mixed | real pictures | word recall % | false text (chars / pictures) |
+|---|---|---|---|---|---|---|---|
+| Python, RapidOCR 3.8.1 (third row of the results table) | 4.2 / 3.6 | 3.0 | 4.3 | 2.7 | 2.5 | 89.9 | 0 / 0 |
+| Rust, `stickpile_ai::paddle`, text as stored | 4.3 / 3.8 | 3.4 | 4.3 | 2.7 | 2.7 | 89.8 | 0 / 0 |
+
+52 of the 56 pictures come out the same. In two screenshots a box lies 1
+to 8 px apart (where two word boxes meet, or at an edge), so one more
+character is read (`pineapple e on pizza`, `520 2 4.4к`); one word
+differs in case (`один` for `Один`) and one handwritten line by a few
+characters. The cause was not isolated further; most likely the
+probability map differs slightly near the 0.3 threshold because the 8-bit
+resizing rounds differently from OpenCV's fixed-point code.
 
 **Runs through `ort`.** A scratch program with `ort = "=2.0.0-rc.15"`
 (`load-dynamic`, `std`) and `image` 0.25, built in this repo's dev shell,

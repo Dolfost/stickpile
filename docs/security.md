@@ -184,6 +184,32 @@ All rules live in `authz.rs` and implement the visibility table of
   nosniff`, `Content-Disposition: inline` with a sanitised filename, and the
   global CSP, so an upload can never run as a page.
 
+### Reading the words in pictures (OCR)
+
+- The input is the stored, already validated and re-encoded media
+  (`stickpile_media::text_frames` of the sanitised original), never the
+  raw upload; at most three frames per file (first, middle, last). The
+  upload tray's `POST /api/v1/ai/suggest` reads its posted image under the
+  same limits as its other suggestions (2 MiB, its pixel bound, the
+  per-user rate limit).
+- Pixels are bounded before any model runs: frames above 2048 x 2048 px
+  are scaled down; the reader works on at most 2000 px on the long side
+  (thin strips are scaled up and padded, and not read when that would
+  exceed 16 MP), the detector input is at most 2000 px, and at most 1000
+  contours and 300 boxes per frame are processed. All of this is pure
+  Rust; the two ONNX models run in the same ONNX Runtime as CLIP.
+- It runs in-process on the blocking pool, without network access. The
+  model files are fetched ahead of time with pinned sha256 hashes
+  (`scripts/fetch-models.sh`, `nix/models.nix`); the server never
+  downloads anything. Missing or broken models turn OCR off with a log
+  line; they never stop the server. There is no timeout (as for CLIP),
+  because the work is bounded as above.
+- The output is untrusted text: it is cleaned like any text a user types
+  (control characters removed, at most 2000 characters), stored as data,
+  escaped by maud in the web UI like every other field, and written to
+  `set.toml` as a TOML string. Clients must show it as plain text, never
+  as markup.
+
 ### No directory traversal
 
 - Media files live at `media/<sha[0..2]>/<sha>/<variant>.<ext>`: every path
