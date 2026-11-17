@@ -91,6 +91,15 @@ fn config_warnings(cfg: &stickpile_server::Config) -> Vec<String> {
                 list.join("\n")
             ));
         }
+        let missing = stickpile_ai::missing_ocr_files(&cfg.ai.model_dir);
+        if cfg.ai.ocr && !missing.is_empty() {
+            let list: Vec<String> = missing.iter().map(|p| format!("  {}", p.display())).collect();
+            out.push(format!(
+                "ai.ocr = true but the OCR model files are missing (the words in pictures are not read \
+                 until they exist; see docs/ai.md, `scripts/fetch-models.sh`):\n{}",
+                list.join("\n")
+            ));
+        }
     }
     let unreadable = |what: &str, p: &std::path::Path| -> Option<String> {
         match stickpile_server::config::read_secret(p) {

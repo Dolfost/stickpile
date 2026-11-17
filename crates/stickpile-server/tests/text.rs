@@ -488,7 +488,7 @@ async fn without_a_reader_it_says_so_once_and_goes_on() {
         .with_max_level(tracing::Level::INFO)
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
-    // `ai.ocr` is on by default; this build has no real reader yet.
+    // `ai.ocr` is on by default; the test server's model dir has no OCR models.
     let srv = TestServer::start_with(
         Opts {
             ai: true,
@@ -497,6 +497,7 @@ async fn without_a_reader_it_says_so_once_and_goes_on() {
         },
         |c| {
             c.ai.enabled = true;
+            c.ai.model_dir = "/nonexistent/stickpile-test-models".into();
             assert!(c.ai.ocr);
         },
     )
@@ -514,7 +515,11 @@ async fn without_a_reader_it_says_so_once_and_goes_on() {
     let jobs: Vec<Job> = srv.get(&admin, routes::ADMIN_JOBS).await.expect(200).json();
     assert!(jobs.iter().all(|j| j.status == JobStatus::Done), "{jobs:?}");
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    assert_eq!(text.matches("no text reader").count(), 1, "{text}");
+    assert_eq!(
+        text.matches("ai.ocr is on, but the OCR models are missing").count(),
+        1,
+        "{text}"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -13,8 +13,9 @@ name = "stickpile-server"
 path = "src/main.rs"
 
 [features]
-default = ["clip"]
+default = ["clip", "ocr"]
 clip = ["stickpile-ai/clip"]
+ocr = ["stickpile-ai/ocr"]
 
 [dependencies]
 stickpile-api = { workspace = true, features = ["openapi"] }

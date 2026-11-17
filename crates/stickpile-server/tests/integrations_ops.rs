@@ -144,6 +144,12 @@ async fn check_config_warns_about_missing_models_and_secrets() {
         "{err}"
     );
     assert!(
+        err.contains("warning: ai.ocr = true but the OCR model files are missing")
+            && err.contains(stickpile_ai::layout::OCR_DET)
+            && err.contains(stickpile_ai::layout::OCR_REC),
+        "{err}"
+    );
+    assert!(
         !err.contains(stickpile_ai::layout::VISION),
         "present files are not listed: {err}"
     );

@@ -401,8 +401,8 @@ in
             max_emojis = opt u32 3 "Emojis suggested per item.";
             ocr = opt types.bool true ''
               Read the words written in pictures (OCR) into the item text, when
-              AI is enabled and a text reader is available; without one the
-              server logs it once and goes on (docs/ai.md).
+              AI is enabled, with the OCR models in `model_dir/ocr/`; without
+              them the server logs it once and goes on (docs/ai.md).
             '';
           };
 

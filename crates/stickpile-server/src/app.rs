@@ -131,13 +131,7 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
         _ if !state.config.ai.ocr => None,
         TextReaderSource::Provided(r) => Some(r),
         TextReaderSource::FromConfig if !state.config.ai.enabled => None,
-        TextReaderSource::FromConfig => {
-            let r = text_reader_from_config(&state.config);
-            if r.is_none() {
-                tracing::info!("ai.ocr is on, but this server has no text reader: the words in pictures are not read");
-            }
-            r
-        }
+        TextReaderSource::FromConfig => text_reader_from_config(&state.config).await,
     };
     if let Some(r) = reader {
         tracing::info!("OCR ready: model {}", r.model_id());
@@ -209,11 +203,51 @@ async fn finish_ai(state: &AppState, enricher: anyhow::Result<Arc<dyn Enricher>>
     }
 }
 
-/// The OCR backend `ai.ocr` asks for, when `ai.enabled`. None yet: the
-/// text reader seam (`stickpile_ai::ocr`) has no real model behind it, so
-/// OCR is skipped with one log line (docs/ai.md).
-fn text_reader_from_config(config: &Config) -> Option<Arc<dyn TextReader>> {
+/// The OCR backend `ai.ocr` asks for, when `ai.enabled`: PaddleOCR from
+/// `<ai.model_dir>/ocr/` (docs/ai.md). Loading takes well under a second, so
+/// it is awaited here: the reader is there before the first `Enrich` job.
+/// Missing model files or a failed load leave OCR off with one log line;
+/// the server never fails for it.
+#[cfg(feature = "ocr")]
+async fn text_reader_from_config(config: &Config) -> Option<Arc<dyn TextReader>> {
+    let ai = config.ai.clone();
+    let missing = stickpile_ai::missing_ocr_files(&ai.model_dir);
+    if !missing.is_empty() {
+        let list: Vec<String> = missing.iter().map(|p| p.display().to_string()).collect();
+        tracing::info!(
+            "ai.ocr is on, but the OCR models are missing ({}): the words in pictures are not read \
+             (fetch them with scripts/fetch-models.sh, see docs/ai.md)",
+            list.join(", ")
+        );
+        return None;
+    }
+    let loaded = tokio::task::spawn_blocking(move || {
+        // CLIP loads later, in the background: pick the configured runtime first.
+        stickpile_ai::init_runtime(ai.onnxruntime_library.as_deref())?;
+        stickpile_ai::paddle::PaddleOcr::load(&ai.model_dir, ai.threads.max(1))
+    })
+    .await;
+    match loaded {
+        Ok(Ok(r)) => Some(Arc::new(r)),
+        Ok(Err(e)) => {
+            tracing::warn!(
+                "ai.ocr is on, but the OCR models could not be loaded: {e}; the words in pictures are not read"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!("ai.ocr is on, but loading the OCR models failed: {e}; the words in pictures are not read");
+            None
+        }
+    }
+}
+
+#[cfg(not(feature = "ocr"))]
+async fn text_reader_from_config(config: &Config) -> Option<Arc<dyn TextReader>> {
     let _ = config;
+    tracing::info!(
+        "ai.ocr is on, but this build has no OCR (feature `ocr` disabled): the words in pictures are not read"
+    );
     None
 }
 

@@ -108,7 +108,7 @@ for enrichment.
 | `vocabulary_file` | path | unset | TOML replacing (parts of) the built-in zero-shot vocabulary. Also used for vibe-synonym query expansion, even without a model. Startup fails if it is invalid. |
 | `max_keywords` | integer | `5` | AI keywords suggested per item. |
 | `max_emojis` | integer | `3` | AI emojis suggested per item. |
-| `ocr` | bool | `true` | Read the words written in pictures (OCR) into the item text, with `enabled` and a text reader ([ai.md](ai.md#ocr-and-the-text-field)). No reader ships yet: the server logs that once at startup and goes on. |
+| `ocr` | bool | `true` | Read the words written in pictures (OCR) into the item text, with `enabled`, using the OCR models in `model_dir/ocr/` ([ai.md](ai.md#the-reader)). Without them the server logs that once at startup and goes on. |
 
 ## `[telegram]`
 
