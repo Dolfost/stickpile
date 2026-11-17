@@ -420,6 +420,8 @@ struct RunState {
     deferred: Vec<(usize, Instant)>,
     /// Bytes of the downloads running (reserved against the budget).
     reserved: u64,
+    /// Which files hold a reservation.
+    holds: Vec<bool>,
     /// Bytes of the wanted files on the device.
     kept_bytes: u64,
     done: Vec<bool>,
@@ -486,6 +488,7 @@ impl<'a> Run<'a> {
                 queue,
                 deferred: Vec::new(),
                 reserved: 0,
+                holds: vec![false; n],
                 kept_bytes,
                 done,
                 failed_now: HashSet::new(),
@@ -657,7 +660,15 @@ impl<'a> Run<'a> {
             }
         }
         st.reserved += size;
+        st.holds[ix] = true;
         Next::File(ix)
+    }
+
+    /// Give back the budget a file reserved (once).
+    fn release(&self, st: &mut RunState, ix: usize) {
+        if std::mem::take(&mut st.holds[ix]) {
+            st.reserved = st.reserved.saturating_sub(self.plan.files[ix].file.size);
+        }
     }
 
     /// Drive the workers until the run ends.
@@ -701,9 +712,8 @@ impl<'a> Run<'a> {
                 }
                 Next::File(ix) => {
                     self.file(ix).await;
-                    let size = self.plan.files[ix].file.size;
                     let mut st = self.state();
-                    st.reserved = st.reserved.saturating_sub(size);
+                    self.release(&mut st, ix);
                     drop(st);
                     self.publish();
                 }
@@ -715,6 +725,8 @@ impl<'a> Run<'a> {
     fn done(&self, ix: usize) {
         let f = &self.plan.files[ix];
         let mut st = self.state();
+        // Counted as kept from now on, so no longer as reserved.
+        self.release(&mut st, ix);
         if st.done[ix] {
             return;
         }
@@ -755,7 +767,10 @@ impl<'a> Run<'a> {
             match cache.register_kept_file(&file.rel, self.epoch) {
                 Ok(true) => self.done(ix),
                 Ok(false) => self.stop(RunEnd::Cancelled, Some("the offline data was reset".into())),
-                Err(e) => self.give_up(ix, core_fail(e), 1),
+                Err(e) => match core_fail(e) {
+                    Fail::DiskFull(msg) => self.stop(RunEnd::DiskFull, Some(msg)),
+                    fail => self.give_up(ix, fail, 1),
+                },
             }
             return;
         }
