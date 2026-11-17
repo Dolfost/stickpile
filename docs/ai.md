@@ -396,6 +396,210 @@ AI-sourced field and could add caption words to full-text search.
 Configuration would be a new `[ai.caption]` table (endpoint, model, API key
 file, timeout). Nothing else in the crate needs to change.
 
+## OCR evaluation
+
+Measured in November 2026 to choose the models behind the `text` field
+(next section). The harness, pictures and raw results stayed in a scratch
+directory; none of it is in the repo.
+
+**Setup.** Python onnxruntime 1.24.4 from nixpkgs, 2 intra-op threads, 1
+inter-op thread, full graph optimisation. Reference pre- and
+post-processing: RapidOCR 3.8.1 (nixpkgs) for the PaddleOCR models, EasyOCR
+1.7.2 (nixpkgs) for EasyOCR, whose networks were exported to ONNX for this
+(opset 17, fp32; largest difference to PyTorch 5e-8 for the detector, 3e-5
+for the recogniser). Transparency is flattened as RapidOCR does it: on
+white when the opaque pixels are dark on average, else on black. Lines at
+or above the score threshold are kept, sorted top to bottom, and boxes on
+the same row are joined with a space. Intel i7-14700HX shared with other
+jobs.
+
+**Test set.** 56 pictures. 29 real: 26 from Wikimedia Commons (CC0, public
+domain, CC BY, CC BY-SA) and 3 OpenMoji emoji (CC BY-SA). 27 rendered with
+known text in Impact, Oswald, Comic Sans, Arial, Times New Roman, Roboto,
+Caveat, Bad Script, Neucha and xkcd Script. Kinds: memes with outlined or
+plain captions (12), stickers on transparency or photographed (10), chat,
+tweet and web screenshots, light and dark, some with 11 px text (11),
+handwriting and handwriting fonts (6), subtitles, a demotivator, a 320 px
+JPEG at quality 30, and 11 pictures without text (photos, a brick wall,
+emoji, a LEGO face). Languages: English 20, Ukrainian 17 (13 of them
+rendered), mixed 6, Russian 2 (only in "all"), none 11. Ground truth was
+transcribed by hand, one line per visual line, without incidental text
+such as a brand on a collar tag.
+
+**Metrics.** CER is edits divided by reference characters, summed over a
+group. "raw" compares the text as it is, lines joined with newlines;
+"norm" folds case, maps apostrophe variants to `'` and collapses
+whitespace. Word recall is the share of reference words (normalised) found
+in the output. False text: characters and pictures with output among the
+11 textless pictures. Time: the whole pipeline per picture without
+decoding, fastest warm run, then median and p95 over the 56 pictures. Peak
+RSS: VmHWM of the Python process, 158 MB of which is the interpreter,
+OpenCV and ONNX Runtime before any model is loaded.
+
+### Candidates
+
+| Candidate | Licence code / weights | ONNX | Download | Latin + Cyrillic | Verdict |
+|---|---|---|---|---|---|
+| PaddleOCR PP-OCRv5 mobile: DB detector, CTC recogniser per script (RapidOCR exports) | Apache-2.0 / Apache-2.0 | yes, dictionary in the model metadata | det 4.8 MB, rec 7.9 to 8.1 MB | `cyrillic` and `eslav`: full Latin plus Cyrillic incl. і ї є ґ | measured |
+| PP-OCRv5 server detector | Apache-2.0 / Apache-2.0 | yes | 88.1 MB | - | measured |
+| PP-OCRv4 detector + `cyrillic_PP-OCRv3` recogniser | Apache-2.0 / Apache-2.0 | yes | 4.7 + 9.0 MB | dictionary lacks ї and Ї | measured |
+| PaddleOCR 0/180 degree line classifier (v2.0) | Apache-2.0 / Apache-2.0 | yes | 0.6 MB | - | measured |
+| EasyOCR: CRAFT detector + `cyrillic_g2` CRNN | Apache-2.0 / Apache-2.0 (CRAFT: MIT) | no official export, exported here | 83.1 + 15.3 MB | yes | measured |
+| docTR / OnnxTR | Apache-2.0 / Apache-2.0 | yes | multilingual PARSeq 96.7 MB | no: that model's 195-character vocabulary has no Cyrillic | discarded |
+| Tesseract | Apache-2.0 | no | - | yes | discarded: native library |
+| ocrs | MIT, Apache-2.0 | ONNX-derived RTen models | - | Latin only | discarded |
+| TrOCR | MIT code | yes | small: 61M parameters (model card) | printed English lines, needs a detector | discarded |
+| Surya | Apache-2.0 / modified AI Pubs OpenRAIL-M, wider commercial use paid | no | - | yes | discarded: weights licence |
+| VLMs (Florence-2, GOT-OCR2, PaddleOCR-VL) | various | partly | large (not measured) | varies | discarded: size, CPU time |
+
+### Results
+
+Threshold 0.5 unless noted. CER in %, normalised unless marked raw.
+
+| Detector + recogniser | CER all raw / norm | en | uk | mixed | real pictures | word recall % | false text (chars / pictures) | median / p95 ms | peak RSS MB |
+|---|---|---|---|---|---|---|---|---|---|
+| v5 mobile + `cyrillic` v5 | 5.0 / 4.2 | 3.2 | 4.4 | 4.5 | 3.6 | 88.5 | 1 / 1 | 329 / 918 | 1108 |
+| same, detector input capped at 2000 px | 4.5 / 4.0 | 3.2 | 4.0 | 4.2 | 3.1 | 89.3 | 1 / 1 | 370 / 1077 (b) | 895 |
+| same, cap 2000, look-alike repair, lines without letters or digits dropped | 4.2 / 3.6 | 3.0 | 4.3 | 2.7 | 2.5 | 89.9 | 0 / 0 | as above | as above |
+| v5 mobile + `cyrillic` v5, detector input capped at 1280 px | 4.3 / 4.1 | 5.0 | 3.5 | 3.7 | 3.8 | 89.9 | 1 / 1 | 339 / 1298 (b) | 684 |
+| v5 mobile + `eslav` v5 | 5.6 / 4.9 | 3.9 | 5.0 | 5.3 | 4.0 | 85.6 | 0 / 0 | 331 / 935 | 1114 |
+| v5 mobile + `eslav` + `latin`, higher score per line | 11.9 / 11.6 | 4.3 | 11.1 | 23.8 | 10.7 | 81.8 | 1 / 1 | (a) | 1178 |
+| v5 mobile + `eslav` + `en`, higher score per line | 10.0 / 9.6 | 3.6 | 11.4 | 12.5 | 5.8 | 83.4 | 3 / 2 | (a) | 1195 |
+| v5 mobile + `cyrillic` + `en`, `en` only for lines read without Cyrillic | 5.1 / 4.4 | 3.5 | 4.6 | 4.5 | 3.5 | 88.2 | 3 / 2 | (a) | 1010 |
+| v5 mobile + line classifier + `cyrillic` v5 | 7.9 / 7.2 | 4.3 | 9.5 | 5.1 | 7.1 | 85.9 | 1 / 1 | (a) | 947 |
+| v5 mobile + `latin` v5 only | 57.5 / 57.9 | 4.3 | 85.7 | 69.9 | 65.9 | 44.2 | 1 / 1 | (a) | 1095 |
+| v5 server + `cyrillic` v5 | 5.6 / 4.8 | 5.1 | 4.6 | 4.0 | 4.0 | 88.6 | 2 / 1 | 5749 / 14861 (a) | 2440 |
+| v4 mobile + `cyrillic` v3 | 44.6 / 40.7 | 13.8 | 50.9 | 64.0 | 49.7 | 29.8 | 11 / 6 | (a) | 1124 |
+| EasyOCR CRAFT + `cyrillic_g2`, threshold 0.3 | 28.8 / 27.7 | 26.7 | 19.6 | 57.6 | 26.7 | 61.3 | 0 / 0 | 1349 / 10175 (a) | 4077 |
+
+Rows without a note were timed at load average 4 to 6. (b) load average 10
+to 35, so these times are rough. (a) load average 8 to 55, times not
+comparable; the server detector and EasyOCR are slow regardless (their
+model time alone: 5.7 s and 1.3 s median). Repeated runs of the first two
+rows gave medians of 329 to 363 and 370 to 467 ms, p95 of 918 to 1232 and
+1077 to 1169 ms, and peak RSS of 1079 to 1108 and 835 to 895 MB: the other
+load on the machine moves the times by up to a third, and the cap only
+ever removes work.
+
+Findings:
+
+- `cyrillic_PP-OCRv5_mobile_rec` is the best single recogniser. Its
+  dictionary (850 characters) has the full Latin alphabet, all Ukrainian
+  letters and both `'` and U+2019, so one model reads English, Ukrainian
+  and mixed lines. `eslav` is 0.7 points worse and reads Ukrainian `і` as
+  `и` 22 times on the Ukrainian and mixed pictures (`cyrillic`: 8).
+- A second recogniser does not pay. Taking the higher-scoring reading per
+  line hurts, because the Latin models read Cyrillic as Latin with high
+  scores. Running `en` only on lines the Cyrillic model read without
+  Cyrillic letters does not help either (4.4 % vs 4.2 %).
+- The 0/180 degree line classifier makes every group worse.
+- The 88 MB server detector is no better than the 4.8 MB mobile one.
+- EasyOCR's grayscale recogniser reads most outlined captions as junk,
+  though it is good on the Russian pictures (3.5 %).
+- RapidOCR scales the detector input until its short side is 736 px. A 72
+  x 1080 strip of screenshot text becomes 736 x 11040; such strips were
+  the slowest pictures and set the peak memory. Capping the long side at
+  2000 px lowered peak RSS and CER.
+- Remaining errors: Latin and Cyrillic look-alikes mixed in a line ("GLORY
+  ТО UКRАINE" with Cyrillic Т, О, К, А); `і` read as `и` in Impact
+  capitals; apostrophes and spaces dropped in Impact ("КОЛИВ ПЯТНИЦЮ" for
+  "КОЛИ В П'ЯТНИЦЮ"); curved or stylised lettering; cursive fonts.
+
+Worst pictures of the recommended setup (cap 2000, repair, threshold 0.5):
+
+| Picture | Reference | Read |
+|---|---|---|
+| marker on a round lid, curved (real) | NO SHEEP OUT | NO |
+| logo sticker "Wiki любить Музику" (real) | Wікі / любить / Музику | iki / любить / y3uky |
+| Bad Script font on ruled paper | Не забудь купити / хліб і молоко, / а ще яйця та сир | X zadygb / xλiδi МОЛОКО, / awe. яйцята сир |
+| Bad Script sticker | Доброго ранку, / сонечко | Доброго ранку |
+| 320 px JPEG, quality 30, Impact | Є ПИТАННЯ / ҐРУНТОВНЕ, ЯК / ЗАВЖДИ | СПИТАННЯ / ГРУНТОВНЕ, AK / ЗАВЖДИ |
+| hand-painted sign (real) | MAHALO ... cellphone ... wireless ... peace & | MAMALC ... ellphane ... Wineless ... peale |
+| Impact meme | МІЙ ҐАЗДІВСЬКИЙ / НАСТРІЙ О СЬОМІЙ РАНКУ | МИЙГАЗДІВСЬКИЙ / НАСТРИЙ О СЬОМИЙ РАНКУ |
+
+### Recommendation
+
+One detector and one recogniser, 12.9 MB together, no classifier:
+
+| File | URL | Bytes | sha256 |
+|---|---|---|---|
+| `ocr/det.onnx` | https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx | 4819576 | `4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae` |
+| `ocr/rec.onnx` | https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx | 8074092 | `90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711` |
+
+The hashes are those in RapidOCR 3.8.1's `default_models.yaml`. Weights:
+PaddleOCR, Apache-2.0 (Hugging Face `PaddlePaddle/PP-OCRv5_mobile_det`,
+`PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec`); ONNX conversion: RapidOCR,
+Apache-2.0.
+
+- Keep lines with score >= 0.5 that contain a letter or a digit; with
+  that, none of the textless pictures produced text.
+- Cap the detector input at 2000 px on the long side.
+- Repair look-alikes per word: put the letters that look the same in both
+  scripts (А В С Е Н І К М О Р Т Х У, а с е і о р х у, Ї ї ё) into the
+  script of the word's other letters, else of the line's; leave the word
+  when both are undecided.
+- Open the OCR sessions without ONNX Runtime's CPU memory arena (RapidOCR
+  does the same): the input sizes vary, and the arena keeps the largest
+  activations. In the Rust check below, over the 56 pictures with the
+  2000 px cap, peak RSS was 861 MB with ort's defaults and 470 MB with the
+  arena and the memory pattern off (333 MB with a 1280 px cap); median
+  time 331 vs 374 ms at load average 35 to 42, so rough.
+- Expected time on 2 threads: 0.33 to 0.47 s per still (median over the
+  set), 0.9 to 1.2 s p95. Stickers of 512 to 618 px: 153 to 182 ms median
+  in the quieter runs, so an animation read at 3 frames takes about 0.5
+  s (3 x 153 to 182 ms, computed, not measured).
+- Search may want to treat `і`/`и` and Latin/Cyrillic look-alikes as close
+  matches in OCR text; most remaining confusions are of that kind.
+
+### What the Rust side implements
+
+Reference: RapidOCR 3.8.1 `ch_ppocr_det/utils.py` (`DetPreProcess`,
+`DBPostProcess`), `ch_ppocr_det/main.py` (`sorted_boxes`),
+`utils/process_img.py` (`get_rotate_crop_image`), `ch_ppocr_rec/main.py`
+(`resize_norm_img`) and `ch_ppocr_rec/utils.py` (`CTCLabelDecode`).
+
+1. Input: the decoded picture, alpha flattened as above, in BGR order.
+   RapidOCR scales pictures over 2000 px down and under 30 px up, and pads
+   very wide (width / height > 8) or very low (<= 30 px) ones above and
+   below.
+2. Detector input: scale up until the short side is 736 px, cap the long
+   side at 2000 px, round both sides to multiples of 32,
+   `(x / 255 - 0.5) / 0.5`, NCHW float32, input `x`.
+3. Detector output: probability map [1, 1, H, W]. Binarise at 0.3,
+   dilate with a 2 x 2 kernel, find contours (at most 1000), take each
+   contour's minimum-area rectangle, drop it if its short side is under 3
+   px, score it by the mean probability inside it and drop it under 0.5,
+   expand it by `area * 1.6 / perimeter` (polygon offset, round joins),
+   take the minimum-area rectangle again, drop it if its short side is
+   under 5 px, scale to the picture, order the corners clockwise from top
+   left, clip, drop boxes with a side of 3 px or less.
+4. Order: by top edge; boxes within 10 px of the previous one form a row,
+   left to right.
+5. Crop: perspective-warp each quadrilateral to a rectangle (width and
+   height from its longer opposite edges, cubic, replicated border);
+   rotate by 90 degrees when height / width >= 1.5.
+6. Recogniser input: height 48, width `ceil(48 * w / h)`, batches of 6
+   sorted by aspect ratio, zero-padded on the right to the widest (at
+   least 320 px), `(x / 255 - 0.5) / 0.5`, NCHW, input `x`.
+7. Recogniser output [N, T, 852]: greedy CTC. Arg-max per step, collapse
+   repeats, drop index 0 (blank). The dictionary is the model metadata key
+   `character` (850 lines) plus a space at the end; index i is entry
+   i - 1. The line score is the mean of the kept steps' maximum
+   probabilities.
+8. Filter, repair and join the lines as above.
+
+**Runs through `ort`.** A scratch program with `ort = "=2.0.0-rc.15"`
+(`load-dynamic`, `std`) and `image` 0.25, built in this repo's dev shell,
+loaded nixpkgs `onnxruntime` 1.24.4 with `ort::init_from`, opened both
+models with `Session::builder(&env)` (level 3, intra 2, inter 1), read the
+dictionary from the model metadata and printed, for the rendered Ukrainian
+chat: `Мама`, `в мережі`, `Ти поїла? Не забудь шапку, бо`, `холодно`,
+`09:14`, `Так, мамо, все гаразд`, `09:20`, `Привези ввечері ґудзики й
+нитки`, `09:21`, `Добре, з'їжджу після роботи`, `09:25` (scores 0.82 to
+1.00). Its post-processing was simplified (connected components instead of
+contours and polygon offsets), so it proves loading and running, not
+accuracy.
+
 ## Draft: OCR and the text field
 
 Design note for the metadata round (branch `metadata`); the sections above
