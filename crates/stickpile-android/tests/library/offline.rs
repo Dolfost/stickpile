@@ -248,11 +248,14 @@ async fn a_run_with_the_server_stopped_waits_for_the_network() {
     assert_eq!(lib.offline_status().state, OfflineState::WaitingForNetwork);
     assert!(lib.offline_status().message.is_some());
 
-    // Believed away for a while: the next run, too, until a sync finds it.
+    // The lists believe it away for a while; a run tries it all the same
+    // (the app runs one when the platform says a network is there).
     server.restart();
-    assert_eq!(lib.offline_run().await.unwrap().end, OfflineEnd::WaitingForNetwork);
-    assert!(lib.sync_now().await.unwrap().synced);
-    assert!(lib.offline_run().await.unwrap().complete, "goes on after a sync");
+    assert!(lib.server_unreachable());
+    assert!(
+        lib.offline_run().await.unwrap().complete,
+        "goes on once the server is back"
+    );
 }
 
 #[tokio::test]

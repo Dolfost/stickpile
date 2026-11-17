@@ -740,8 +740,8 @@ Behaviour the signatures do not show:
   only) and flag or release what is on the phone at once; `offline_run`
   downloads the rest, in the core's order, four at a time, and is what
   the app's WorkManager job calls. It ends when everything was tried,
-  the server is unreachable (`WaitingForNetwork`: the next run after a
-  sync goes on), the budget or the storage is full, the sign-in is
+  the server is unreachable (`WaitingForNetwork`; a run tries the server
+  even while the lists believe it away), the budget or the storage is full, the sign-in is
   refused, or it is cancelled: by `cancel_offline`, an account or server
   change, "Remove kept files", or the calling coroutine (WorkManager
   stopping the job); a dropped run leaves no partial file. Runs never

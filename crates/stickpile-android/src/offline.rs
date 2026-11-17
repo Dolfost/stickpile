@@ -184,11 +184,14 @@ impl StickpileLibrary {
     /// cancelled), the server is unreachable, the budget is reached or the
     /// storage is full; while paused it waits. Lists the liked stickers and
     /// the packs' covers on the server first. Progress: `offline_status`.
-    /// One run at a time: a second call waits for the first.
+    /// One run at a time: a second call waits for the first. The server is
+    /// tried even if it was found away a moment ago: the app runs this when
+    /// the platform says a network is there.
     pub async fn offline_run(&self) -> Result<OfflineOutcome, LibraryError> {
         self.read(|inner| async move {
             let _one = inner.offline_one.lock().await;
             let session = inner.session();
+            session.client().forget_unreachable();
             let outcome = {
                 let _running = Running::start(&inner);
                 session.offline_run(&inner.offline).await?
