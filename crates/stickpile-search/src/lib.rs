@@ -24,9 +24,9 @@
 
 pub mod emoji_names;
 mod rank;
-mod store;
 #[cfg(test)]
 mod review_tests;
+mod store;
 #[cfg(test)]
 mod tests;
 mod text;

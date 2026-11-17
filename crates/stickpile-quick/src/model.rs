@@ -3915,10 +3915,10 @@ mod tiles_tests;
 #[cfg(test)]
 mod pack_search_tests;
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod safe_tests;
 #[cfg(test)]
 mod suggest_tests;
 #[cfg(test)]
 mod sync_tests;
-#[cfg(test)]
-mod review_tests;
