@@ -7,15 +7,20 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats};
+use stickpile_core::cache::EvictReport;
+use stickpile_core::offline::{OfflineControl, OfflineOptions, OfflineOutcome, OfflineUsage, RunEnd};
 use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
-use stickpile_i18n::global::t;
+use stickpile_i18n::global::{t, tf};
 use stickpile_quick::model::Results;
+use stickpile_quick::offline::{Estimate, KeepScope, KeptFor};
 use stickpile_quick::suggest::Vocabulary;
+
+use crate::offline::{estimate_from_core, reason_from_core, scope_from_core, scope_to_core};
 
 pub type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -195,7 +200,68 @@ pub trait Backend: Send + Sync + 'static {
     /// The values the search suggests: the vibes, tags, packs and owners of
     /// the items the viewer can see (the offline cache).
     fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary>;
+
+    // -- keeping offline (docs/offline.md); the demo has none ------------------------
+
+    /// Whether the server answered the last request that tried it; `None`
+    /// before one did.
+    fn reachable(&self) -> Option<bool> {
+        None
+    }
+    /// What the user keeps on this device.
+    fn offline_keeps(self: Arc<Self>) -> BoxFut<Result<Vec<KeepScope>, String>> {
+        no_offline()
+    }
+    /// Per item id, whether the file a copy to `target` needs is on the device.
+    fn offline_available(
+        self: Arc<Self>,
+        _items: Vec<ItemSummary>,
+        _target: TargetApp,
+        _sticker: bool,
+    ) -> BoxFut<Result<Vec<(String, bool)>, String>> {
+        no_offline()
+    }
+    /// Why the item is kept (empty: it is not).
+    fn offline_reasons(self: Arc<Self>, _item: ItemSummary) -> BoxFut<Result<Vec<KeptFor>, String>> {
+        no_offline()
+    }
+    /// What keeping `scope` would take.
+    fn offline_estimate(self: Arc<Self>, _scope: KeepScope) -> BoxFut<Result<Estimate, String>> {
+        no_offline()
+    }
+    /// Keep `scope` (`keep`) or stop keeping it.
+    fn offline_set(self: Arc<Self>, _scope: KeepScope, _keep: bool) -> BoxFut<Result<(), String>> {
+        no_offline()
+    }
+    /// Download what is kept and missing, until done, cancelled, the
+    /// server unreachable, the limit reached or the disk full.
+    fn offline_run(self: Arc<Self>, _control: OfflineControl) -> BoxFut<Result<OfflineOutcome, String>> {
+        no_offline()
+    }
+    /// Kept files and the others on the device.
+    fn offline_usage(self: Arc<Self>) -> BoxFut<Result<OfflineUsage, String>> {
+        no_offline()
+    }
+    /// "Clear cache": the files that are not kept.
+    fn clear_cache(self: Arc<Self>) -> BoxFut<Result<EvictReport, String>> {
+        no_offline()
+    }
+    /// "Remove kept files": every kept file, and what to keep.
+    fn offline_remove_all(self: Arc<Self>) -> BoxFut<Result<EvictReport, String>> {
+        no_offline()
+    }
+    /// The `[offline]` options changed on the Settings page.
+    fn set_offline_options(&self, _opts: OfflineOptions) {}
 }
+
+fn no_offline<T: Send + 'static>() -> BoxFut<Result<T, String>> {
+    Box::pin(async { Err(t("Keeping offline needs a server (not in demo mode)").to_string()) })
+}
+
+/// [`Backend::reachable`], kept in an atomic.
+const REACH_UNKNOWN: u8 = 0;
+const REACH_YES: u8 = 1;
+const REACH_NO: u8 = 2;
 
 /// The item's page in the web UI of the server at `server_url`.
 pub fn item_page_url(server_url: &str, item_id: &str) -> Option<String> {
@@ -216,6 +282,11 @@ pub fn describe(e: &CoreError) -> String {
 fn describe_with(e: &CoreError, offline: &str) -> String {
     match e {
         CoreError::NotLoggedIn => NOT_LOGGED_IN().into(),
+        // Not a network error to the user: the sticker is not kept here.
+        CoreError::NotOnDevice { item, .. } => tf(
+            "{name} is not on this device and the server is unreachable; keep it offline (K) to copy it without the server",
+            &[("name", item)],
+        ),
         CoreError::Offline(_) => offline.into(),
         e if e.is_unauthorized() => REJECTED().into(),
         other => other.to_string(),
@@ -268,6 +339,8 @@ pub fn client_name() -> String {
 pub struct CoreBackend {
     session: Session,
     login_required: AtomicBool,
+    /// [`Backend::reachable`]: `REACH_*`.
+    reach: AtomicU8,
 }
 
 impl CoreBackend {
@@ -277,6 +350,7 @@ impl CoreBackend {
         CoreBackend {
             session: session.with_client_name(client_name()),
             login_required: AtomicBool::new(login_required),
+            reach: AtomicU8::new(REACH_UNKNOWN),
         }
     }
 
@@ -284,8 +358,14 @@ impl CoreBackend {
         self.session.is_logged_in()
     }
 
-    /// Track authorisation from a result: a rejection sets the flag, an
-    /// answer from the server (`reached_server`) clears it. Errors become
+    fn reached(&self, yes: bool) {
+        self.reach
+            .store(if yes { REACH_YES } else { REACH_NO }, Ordering::Relaxed);
+    }
+
+    /// Track authorisation and reachability from a result: a rejection
+    /// sets the login flag, an answer from the server (`reached_server`)
+    /// clears it, and an unreachable server is noted. Errors become
     /// user-facing text, `offline` for an unreachable server.
     fn track<T>(
         &self,
@@ -297,12 +377,18 @@ impl CoreBackend {
             Ok(v) => {
                 if reached_server(&v) {
                     self.login_required.store(false, Ordering::Relaxed);
+                    self.reached(true);
                 }
                 Ok(v)
             }
             Err(e) => {
                 if e.is_unauthorized() {
                     self.login_required.store(true, Ordering::Relaxed);
+                }
+                if e.is_offline() {
+                    self.reached(false);
+                } else if e.status().is_some() {
+                    self.reached(true);
                 }
                 Err(describe_with(&e, offline))
             }
@@ -311,7 +397,22 @@ impl CoreBackend {
 
     /// [`CoreBackend::track`] for a list that may come from the offline cache.
     fn listing<T>(&self, r: Result<Listing<T>, CoreError>, offline: &str) -> Result<Vec<T>, String> {
+        if r.as_ref().is_ok_and(|l| l.offline) {
+            self.reached(false);
+        }
         self.track(r, |l| !l.offline, offline).map(|l| l.items)
+    }
+
+    /// Run blocking cache work off the async workers.
+    fn blocking<T: Send + 'static>(
+        self: Arc<Self>,
+        f: impl FnOnce(&Session) -> Result<T, CoreError> + Send + 'static,
+    ) -> BoxFut<Result<T, String>> {
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || f(&self.session).map_err(|e| describe(&e)))
+                .await
+                .map_err(|e| e.to_string())?
+        })
     }
 }
 
@@ -323,6 +424,9 @@ impl Backend for CoreBackend {
     fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Results, String>> {
         Box::pin(async move {
             let r = self.session.search(&query, Some(target), limit).await;
+            if r.as_ref().is_ok_and(|o| o.offline) {
+                self.reached(false);
+            }
             let out = self.track(r, |o| !o.offline, ITEM_NOT_CACHED())?;
             Ok(Results {
                 hits: out.hits,
@@ -558,6 +662,77 @@ impl Backend for CoreBackend {
                 .map(|_| ())
                 .map_err(|e| describe_with(&e, UNREACHABLE()))
         })
+    }
+
+    fn reachable(&self) -> Option<bool> {
+        match self.reach.load(Ordering::Relaxed) {
+            REACH_YES => Some(true),
+            REACH_NO => Some(false),
+            _ => None,
+        }
+    }
+
+    fn offline_keeps(self: Arc<Self>) -> BoxFut<Result<Vec<KeepScope>, String>> {
+        self.blocking(|s| Ok(s.offline_keeps()?.iter().map(scope_from_core).collect()))
+    }
+
+    fn offline_available(
+        self: Arc<Self>,
+        items: Vec<ItemSummary>,
+        target: TargetApp,
+        sticker: bool,
+    ) -> BoxFut<Result<Vec<(String, bool)>, String>> {
+        self.blocking(move |s| {
+            let here = s.available_offline(&items, target, sticker);
+            Ok(items.into_iter().map(|i| i.id).zip(here).collect())
+        })
+    }
+
+    fn offline_reasons(self: Arc<Self>, item: ItemSummary) -> BoxFut<Result<Vec<KeptFor>, String>> {
+        self.blocking(move |s| Ok(s.offline_reasons(&item)?.into_iter().map(reason_from_core).collect()))
+    }
+
+    fn offline_estimate(self: Arc<Self>, scope: KeepScope) -> BoxFut<Result<Estimate, String>> {
+        self.blocking(move |s| Ok(estimate_from_core(&s.offline_estimate(&scope_to_core(&scope))?)))
+    }
+
+    fn offline_set(self: Arc<Self>, scope: KeepScope, keep: bool) -> BoxFut<Result<(), String>> {
+        self.blocking(move |s| {
+            let scope = scope_to_core(&scope);
+            if keep {
+                s.offline_keep(&scope)
+            } else {
+                s.offline_release(&scope)
+            }
+        })
+    }
+
+    fn offline_run(self: Arc<Self>, control: OfflineControl) -> BoxFut<Result<OfflineOutcome, String>> {
+        Box::pin(async move {
+            let out = self.session.offline_run(&control).await.map_err(|e| describe(&e))?;
+            match out.end {
+                RunEnd::WaitingForNetwork => self.reached(false),
+                RunEnd::Unauthorized => self.login_required.store(true, Ordering::Relaxed),
+                _ => {}
+            }
+            Ok(out)
+        })
+    }
+
+    fn offline_usage(self: Arc<Self>) -> BoxFut<Result<OfflineUsage, String>> {
+        self.blocking(|s| s.offline_usage())
+    }
+
+    fn clear_cache(self: Arc<Self>) -> BoxFut<Result<EvictReport, String>> {
+        self.blocking(|s| s.clear_cache())
+    }
+
+    fn offline_remove_all(self: Arc<Self>) -> BoxFut<Result<EvictReport, String>> {
+        self.blocking(|s| s.offline_remove_all())
+    }
+
+    fn set_offline_options(&self, opts: OfflineOptions) {
+        self.session.set_offline_options(opts);
     }
 }
 
@@ -946,6 +1121,87 @@ mod tests {
             b.clone().logout().await.unwrap();
             assert!(!b.login_required());
         });
+    }
+
+    /// Keep a pack, run the downloader, then with the server gone: the kept
+    /// sticker copies, another one says why it does not.
+    #[test]
+    fn keeping_offline_through_the_backend() {
+        let (mut server, items) = world();
+        let (cat, dog) = (items[0].clone(), items[3].clone());
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        assert_eq!(b.reachable(), None);
+        let cats = KeepScope::Set(cat.set_id.clone());
+        rt.block_on(async {
+            b.clone().sync().await.unwrap();
+            assert_eq!(b.reachable(), Some(true));
+            assert!(b.clone().offline_keeps().await.unwrap().is_empty());
+            let e = b.clone().offline_estimate(cats.clone()).await.unwrap();
+            assert_eq!(e.items, 3);
+            assert!(e.files >= 3 && e.bytes > 0, "{e:?}");
+            assert!(e.fits());
+            b.clone().offline_set(cats.clone(), true).await.unwrap();
+            assert_eq!(b.clone().offline_keeps().await.unwrap(), [cats.clone()]);
+            assert_eq!(b.clone().offline_reasons(cat.clone()).await.unwrap(), [KeptFor::Set]);
+            assert!(b.clone().offline_reasons(dog.clone()).await.unwrap().is_empty());
+
+            let control = OfflineControl::new();
+            let out = b.clone().offline_run(control.clone()).await.unwrap();
+            assert!(out.is_complete(), "{out:?}");
+            assert_eq!(control.status().files_done, control.status().files_total);
+            let here = b
+                .clone()
+                .offline_available(vec![cat.clone(), dog.clone()], TargetApp::Generic, false)
+                .await
+                .unwrap();
+            assert_eq!(here, [(cat.id.clone(), true), (dog.id.clone(), false)]);
+            let usage = b.clone().offline_usage().await.unwrap();
+            assert!(usage.kept_files >= 3, "{usage:?}");
+            assert_eq!(usage.budget, Some(1024 * 1024 * 1024));
+        });
+
+        server.stop();
+        rt.block_on(async {
+            let copied = b.clone().prepare_copy(cat.clone(), TargetApp::Generic, false).await;
+            assert!(copied.is_ok(), "{copied:?}");
+            let err = b
+                .clone()
+                .prepare_copy(dog.clone(), TargetApp::Generic, false)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err,
+                "good dog is not on this device and the server is unreachable; keep it offline (K) to copy it without the server"
+            );
+            assert_eq!(b.reachable(), Some(false));
+            let out = b.clone().offline_run(OfflineControl::new()).await.unwrap();
+            assert_eq!(out.end, RunEnd::WaitingForNetwork);
+
+            let cleared = b.clone().clear_cache().await.unwrap();
+            assert!(cleared.kept_files >= 3, "{cleared:?}");
+            let removed = b.clone().offline_remove_all().await.unwrap();
+            assert!(removed.removed_files >= 3, "{removed:?}");
+            assert!(b.clone().offline_keeps().await.unwrap().is_empty());
+            let here = b
+                .clone()
+                .offline_available(vec![cat.clone()], TargetApp::Generic, false)
+                .await
+                .unwrap();
+            assert_eq!(here, [(cat.id.clone(), false)]);
+        });
+    }
+
+    #[test]
+    fn the_demo_keeps_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.png"), encoded(8, 8, ImageFormat::Png)).unwrap();
+        let demo = Arc::new(crate::demo::DemoBackend::scan(dir.path(), &ClientConfig::default()).unwrap());
+        let rt = rt();
+        assert_eq!(demo.reachable(), None);
+        let err = rt.block_on(demo.offline_keeps()).unwrap_err();
+        assert!(err.contains("demo"), "{err}");
     }
 
     #[test]

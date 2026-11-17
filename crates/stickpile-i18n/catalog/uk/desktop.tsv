@@ -406,3 +406,21 @@ the menu of the selected tile	меню вибраної плитки
 zo	zo
 the marks of what is available offline	позначки того, що доступно офлайн
 keep the pack offline (asks first) / stop keeping it	зберігати набір офлайн (спершу запитає) / більше не зберігати
+# Keeping offline (stickpile-desktop: messages, the Settings page's block)
+Keeping offline needs a server (not in demo mode)	Зберігання офлайн потребує сервера (не в демо-режимі)
+{name} is not on this device and the server is unreachable; keep it offline (K) to copy it without the server	{name} немає на цьому пристрої, а сервер недоступний; збережіть його офлайн (K), щоб копіювати без сервера
+Other cached files: {n}, {size} (the cache size limit applies).	Інші файли в кеші: {n}, {size} (на них діє обмеження розміру кешу).
+{n} file could not be downloaded; it is tried again on the next run.|{n} files could not be downloaded; they are tried again on the next run.	Не вдалося завантажити {n} файл; його спробують знову наступного разу.|Не вдалося завантажити {n} файли; їх спробують знову наступного разу.|Не вдалося завантажити {n} файлів; їх спробують знову наступного разу.
+{n} left out by the settings below (kinds, size limit).	Пропущено через налаштування нижче (типи, обмеження розміру): {n}.
+Cleared {n} file ({size}); {kept} kept files stayed.|Cleared {n} files ({size}); {kept} kept files stayed.	Очищено {n} файл ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файли ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файлів ({size}); збережених файлів залишилося: {kept}.
+Kept offline: {n} file, {size}|Kept offline: {n} files, {size}	Збережено офлайн: {n} файл, {size}|Збережено офлайн: {n} файли, {size}|Збережено офлайн: {n} файлів, {size}
+{kept} of {budget} allowed.	{kept} із дозволених {budget}.
+{kept}, no limit.	{kept}, без обмеження.
+{done} of {total} files, {bytes_done} of {bytes_total}	{done} з {total} файлів, {bytes_done} з {bytes_total}
+Downloading: {files}.	Завантаження: {files}.
+Paused: {files}.	Призупинено: {files}.
+Waiting for the server: {files} on this device.	Очікування сервера: {files} на цьому пристрої.
+The limit of {budget} is reached: {files}. Nothing was deleted; raise the limit below to download the rest.	Досягнуто обмеження {budget}: {files}. Нічого не видалено; щоб завантажити решту, збільште обмеження нижче.
+The disk is full: {files}. Nothing was deleted.	Диск заповнено: {files}. Нічого не видалено.
+Up to date: the {n} kept file is on this device.|Up to date: all {n} kept files are on this device.	Усе готово: {n} збережений файл є на цьому пристрої.|Усе готово: усі {n} збережені файли є на цьому пристрої.|Усе готово: усі {n} збережених файлів є на цьому пристрої.
+{files} on this device; the rest downloads after the next sync.	{files} на цьому пристрої; решта завантажиться після наступної синхронізації.

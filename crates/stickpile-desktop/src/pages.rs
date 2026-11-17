@@ -13,25 +13,7 @@ use stickpile_quick::{HelpSection, Tab};
 
 use crate::backend::{AuthKind, Profile};
 
-/// "512 B", "1.5 KB", "12.3 MB", in the current language.
-pub fn human_bytes(n: u64) -> String {
-    if n < 1000 {
-        return tf("{n} B", &[("n", &n)]);
-    }
-    let mut v = n as f64 / 1000.0;
-    let mut unit = 0;
-    while v >= 999.95 && unit < 3 {
-        v /= 1000.0;
-        unit += 1;
-    }
-    let v = format!("{v:.1}");
-    match unit {
-        0 => tf("{n} KB", &[("n", &v)]),
-        1 => tf("{n} MB", &[("n", &v)]),
-        2 => tf("{n} GB", &[("n", &v)]),
-        _ => tf("{n} TB", &[("n", &v)]),
-    }
-}
+pub use stickpile_quick::offline::human_bytes;
 
 /// Heading of the Me page.
 pub fn who(p: &Profile) -> String {
@@ -155,8 +137,11 @@ pub fn save_note(config_path: &Path, write_path: &Path, home: Option<&Path>) -> 
 /// timeout, cache, token file, copy and clipboard settings): the session
 /// must be opened again. Popup-only keys apply to the running one.
 pub fn needs_new_session(old: &ClientConfig, new: &ClientConfig) -> bool {
+    // The offline options apply to the running session
+    // (`Session::set_offline_options`), so its downloads go on.
     let session_part = |c: &ClientConfig| ClientConfig {
         ui: Default::default(),
+        offline: Default::default(),
         focus: Default::default(),
         paste: Default::default(),
         default_target: TargetApp::Generic,

@@ -11,6 +11,8 @@
 //! * [`backend`] — the `Backend` trait over `stickpile_core::Session`
 //! * [`demo`] — `--demo DIR` backend serving a directory of files
 //! * [`pages`]: texts and decisions of the Me and Settings tabs
+//! * [`offline`]: keeping offline: the downloader's schedule, the Settings
+//!   block in words, the core's types for the model
 //! * [`paste`]: pressing the paste shortcut after a pick (Hyprland, Sway, X11)
 //!
 //! GTK modules, with the `gtk` feature (on by default): [`app`] (resident
@@ -25,6 +27,7 @@ pub mod demo;
 pub mod glue;
 pub mod keys;
 pub mod offers;
+pub mod offline;
 pub mod pages;
 pub mod paste;
 pub mod sync;
