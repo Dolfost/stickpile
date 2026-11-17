@@ -2,8 +2,8 @@
 
 `stickpile` talks to a stickpile server over its REST API. It handles login,
 sets, import and export of set directories, search, copying to the clipboard,
-usage statistics, git packs, Telegram packs, rechecks of metadata and admin
-tasks. It shares its
+usage statistics, git packs, Telegram packs, rechecks of metadata, keeping
+stickers offline and admin tasks. It shares its
 configuration file, token and offline cache with the desktop client
 (`stickpile-desktop`). Both are built on the `stickpile-core` crate.
 
@@ -48,6 +48,8 @@ stickpile search cat type:gif           # search your library and public sets
 stickpile copy naahh --target discord   # best match onto the clipboard
 stickpile export my-cats ./my-cats      # write the set back out as a directory
 stickpile sync                          # fill the offline cache
+stickpile offline keep --set my-cats    # keep a pack on this device (shows the estimate, asks)
+stickpile offline sync                  # download what is kept; then it copies with the server down
 ```
 
 ## Configuration (`config.toml`)
@@ -162,6 +164,22 @@ still = ["image/png", "text/uri-list"]
 animation = ["text/uri-list"]
 video = ["text/uri-list"]
 sticker = ["text/uri-list"]
+
+[offline]               # what `offline keep` keeps (see "Keeping stickers offline")
+targets = []            # chat apps whose renditions are kept; [] = default_target + the apps in the copy history
+sticker_renditions = true  # also keep the rendition a copy as a sticker uses (Telegram)
+stills = true           # kinds downloaded for packs, the library and automatic keeping
+animations = true
+videos = false
+max_file_mb = 0         # skip a single file larger than this (packs, library, automatic); 0: no limit
+max_mb = 1024           # the most kept files may take; 0: no limit
+
+[offline.auto]
+thumbnails = true       # keep every item's thumbnail (fetched by `offline sync`)
+used = false            # keep the most recently copied stickers...
+used_count = 200        # ...this many (1-2000)
+liked = false           # keep the stickers you liked
+own_packs = false       # keep the packs you own
 ```
 
 | key | default | meaning |
@@ -202,6 +220,16 @@ sticker = ["text/uri-list"]
 | `paste.rules` | see above | window class → shortcut rules (terminals: `ctrl+shift+v`) |
 | `clipboard.default.{still,animation,video,sticker}` | see above | offers per kind |
 | `clipboard.targets.<target>.*` | none | per-target override of the four lists |
+| `offline.targets` | `[]` | chat apps whose renditions a kept sticker keeps; empty: `default_target` plus the targets in the copy history |
+| `offline.sticker_renditions` | `true` | also keep the rendition a copy with `--sticker` uses |
+| `offline.stills`, `.animations`, `.videos` | `true`, `true`, `false` | kinds downloaded for kept packs, the library and the automatic rules (a sticker kept by itself is always downloaded) |
+| `offline.max_file_mb` | `0` | skip a single rendition larger than this for packs, the library and the automatic rules (0: no limit) |
+| `offline.max_mb` | `1024` | budget for kept files; `offline sync` stops there and deletes nothing (0: no limit) |
+| `offline.auto.thumbnails` | `true` | keep every item's thumbnail |
+| `offline.auto.used`, `.used_count` | `false`, `200` | keep the most recently copied stickers of this device, this many (1-2000) |
+| `offline.auto.liked` | `false` | keep the stickers the account liked |
+| `offline.auto.own_packs` | `false` | keep the packs the account owns |
+| `offline.mobile_data` | `false` | Android only |
 
 These clipboard defaults are **provisional**. The phase 0 clipboard spike and
 the manual paste matrix in [docs/clipboard.md](clipboard.md) decide what each
@@ -254,7 +282,8 @@ group or others can read** and says how to fix it (`chmod 600 <file>`).
 
 `stickpile logout` uploads queued usage events, revokes this client's token on
 the server (found by its prefix), deletes the token file and clears the
-account data in the offline cache.
+account data in the offline cache, the files kept offline and the list of
+what is kept included.
 
 ## Global options
 
@@ -272,7 +301,9 @@ and queued usage.
 
 Exit status: 0 on success, 1 on any error. Errors go to stderr as
 `error: …`, with a `hint:` for common causes (expired token, server
-unreachable).
+unreachable, a sticker not kept offline). `offline sync` also exits 2 when
+it ended before everything kept was on this device (`incomplete: ...` on
+stderr; see [`offline`](#offline)).
 
 Set arguments (`<set>`) take a set id or the slug of one of your own sets.
 Item arguments take an item id (shown in `search` and `sets show`).
@@ -438,6 +469,144 @@ as the padded WebP.
 stickpile sync     # refresh the offline cache (incremental) and upload queued usage
 stickpile flush    # upload queued usage events now
 ```
+
+### `offline`
+
+Keeps stickers on this device, so that `copy` works with the server
+unreachable: one sticker, a pack (its items now and what a sync adds
+later) or the whole library (every item the offline cache lists). What is
+kept is stored in the cache, on this device only (not on the server, not
+synced); the files are ordinary cache files, protected from eviction
+([offline.md](offline.md)).
+
+```sh
+stickpile offline keep <item>              # one sticker: kept at once
+stickpile offline keep --set cats          # a pack: the estimate, then [y/N]
+stickpile offline keep --all --yes         # the library, without asking
+stickpile offline keep --set cats --dry-run   # the estimate only
+stickpile offline sync                     # sync, then download what is kept (exit 0, 2 or 1)
+stickpile offline status                   # what is kept, sizes, to download, skipped, failed
+stickpile offline status --dry-run --set cats # what keeping it would take, without keeping it
+stickpile offline release --set cats       # stop keeping it; its files stay until evicted
+stickpile offline remove-all [--yes]       # delete the kept files and forget what is kept
+stickpile cache clear                      # delete the other cached files; kept ones stay
+```
+
+A scope is an item id, `--set` with a set id or slug (looked up in the
+offline cache; when two packs share a slug, yours wins, else give the id)
+or `--all`. `keep` looks a scope the cache does not know up after a sync
+(an own pack with no items yet: on the server).
+
+**`keep`** stores the choice; `offline sync` downloads the files. For a
+pack or the library it first prints the estimate and asks:
+
+```
+Keeping pack "Cats" (cats) offline takes:
+  items:        4
+  files:        12 (291.2 KiB)
+  on device:    0 (0 B)
+  to download:  12 (291.2 KiB)
+  kept files afterwards: 301.7 KiB of the 1.0 GiB budget (offline.max_mb)
+Keep pack "Cats" (cats) offline? [y/N] y
+Kept pack "Cats" (cats) offline: 12 files (291.2 KiB), 0 of them on this device; `stickpile offline sync` downloads the rest.
+```
+
+What the options leave out gets a line per reason, such as
+`skipped:      1 item: videos are not kept with packs, the library or automatic rules`.
+"Kept files afterwards" counts every kept file (here the automatic
+thumbnails of the other packs too), against `offline.max_mb`; over it,
+the line says so and keeping goes on only when confirmed, with a warning.
+
+The files are the thumbnail and, for each chat app of
+`offline.targets`, the rendition `copy` would use (as a sticker too with
+`offline.sticker_renditions`). A pack or the library leaves out what the
+per-kind options (`offline.stills`, `.animations`, `.videos`) and
+`offline.max_file_mb` exclude, reported as skipped with the reason; a
+sticker kept by itself is always downloaded whole. `--yes` does not ask,
+and is required when stdin is not a terminal (`refusing to keep ...
+without confirmation; pass --yes`, exit 1). A sticker is kept without
+asking. Keeping what is kept already says so and changes nothing.
+
+**`release`** stops keeping a scope. Its files go back to the ordinary
+cache: evicted least recently used beyond `cache_max_mb`, not deleted now.
+A file another kept scope or an automatic rule wants stays kept.
+
+**`status`** prints a table of what is kept (each kept sticker, pack or
+the library, and the automatic rules that are on, with their items and
+how many of their files and bytes are on this device), the kept files
+against the budget, the other cached files, what is still to download,
+the skipped items with their reasons and the downloads that failed with
+theirs (the attempts and when). `--json`: `keeps` (each with `scope`, `id`,
+`name`, a pack's `slug`), `usage` (`kept_files`, `kept_bytes`,
+`other_files`, `other_bytes`, `budget`), `totals`, `missing_files`,
+`missing_bytes`, `complete`, `over_budget`, `scopes`, `skipped`,
+`failures`. With `--dry-run` and a scope it prints the estimate instead
+(`--json`: `scope`, `estimate`, `missing_files`, `missing_bytes`, `fits`),
+like `keep --dry-run`.
+
+**`sync`** syncs the cache, then runs the downloader until it ends: four
+files at a time, each written to a part file and renamed into place once
+its size and checksum match. The progress goes to stderr (in place on a
+terminal: `offline: downloading: 8/18 files, 278.5 KiB/676.3 KiB`), then a
+line on stdout:
+
+```
+Synced: 0 updated, 0 removed, 6 items cached.
+offline: downloading: 0/14 files, 0 B/301.7 KiB
+offline: done: 14/14 files, 301.7 KiB/301.7 KiB
+Downloaded 14 files (301.7 KiB); 14 of 14 kept files are on this device (301.7 KiB of 301.7 KiB).
+```
+
+(the two `offline:` lines are the progress on stderr; on a terminal it is
+one line, updated in place).
+
+Ctrl-C cancels the run cleanly (the downloads stop and their part files
+go; a second Ctrl-C stops at once); the next `offline sync` goes on.
+Exit status:
+
+| status | when | stderr |
+|---|---|---|
+| 0 | everything kept is on this device | |
+| 2 | the budget is reached: no download starts that would pass `offline.max_mb`, and nothing is deleted | `incomplete: the offline budget is reached: kept files take 600.1 KiB and offline.max_mb is 1.0 MiB; 3 files (1.2 MiB) not on this device; nothing was deleted` |
+| 2 | the server is unreachable (the sync failed, or it went away during the run), also when everything kept as of the last sync is here | `incomplete: server unreachable: error sending request ... Connection refused (os error 111); 2 files (70.1 KiB) not on this device` |
+| 2 | cancelled (Ctrl-C) | `incomplete: cancelled; ...` |
+| 2 | the disk is full; nothing is deleted | `incomplete: the disk is full (...); ...` |
+| 2 | files failed after the downloader's retries ([offline.md](offline.md#the-downloader)) | `incomplete: 1 file failed; ...`; `status` lists the reasons |
+| 1 | an error: not logged in, the token rejected, a broken config | `error: ...` |
+
+Each `incomplete:` line is followed by a `hint:`. `--json` prints `sync`
+(the sync report, `null` when the server was unreachable), `end`
+(`complete`, `limit_reached`, `waiting_for_network`, `cancelled`,
+`disk_full`, `unauthorized`), `complete`, `downloaded_files`,
+`downloaded_bytes`, `budget` and the downloader's last `status` (`state`,
+`files_done`, `files_total`, `bytes_done`, `bytes_total`, `skipped`,
+`failed`, `scopes`, `message`), and exits as above. `stickpile sync` does
+not download kept files: the CLI is not resident, so `offline sync` is its
+run of the downloader ([offline.md](offline.md#clients) for the other
+clients).
+
+**`remove-all`** deletes every kept file and forgets every kept scope, the
+failures included. It asks first (`--yes` does not; required when stdin is
+not a terminal). The automatic rules of `[offline.auto]` are options, not
+choices: the ones that are on keep their files again at the next
+`offline sync` (the command says which) until they are turned off.
+
+### `cache clear`
+
+```sh
+stickpile cache clear
+```
+
+Deletes the cached thumbnails and copied files that are not kept offline,
+and says how many kept files stay:
+
+```
+Deleted 1 cached file (235.4 KiB). 14 files (301.7 KiB) kept offline stay: `stickpile offline remove-all` deletes them.
+```
+
+`--json`: `removed_files`, `freed_bytes`, `other_bytes` (what is left of
+the other files), `kept_files`, `kept_bytes`. Item metadata, the copy
+history and queued usage stay.
 
 ### `like`, `unlike`, `popular`
 
@@ -613,7 +782,10 @@ The cache (`cache_dir`) keeps:
   that became private. The first sync is a full listing that also drops stale
   entries. The desktop client syncs periodically.
 - **Files**: thumbnails and the files you copied, evicted least recently used
-  beyond `cache_max_mb`.
+  beyond `cache_max_mb`; and the files kept offline
+  ([`offline`](#offline)), which are never evicted and count against
+  `offline.max_mb` instead.
+- **What is kept offline**: the stickers, packs and library you keep.
 - **Copy history**: the "recently used" list.
 - **Usage queue**: copy events not yet uploaded.
 
@@ -623,9 +795,11 @@ When the server is unreachable (connection refused, timeout after
 | command | offline |
 |---|---|
 | `search` | answered from the cache with the same query syntax and ranking code. Metadata only: no image-content matches, and `is:liked` matches nothing. A note says so on stderr; `--json` has `"offline": true`. |
-| `copy` | works for items whose variant file is cached (copied before). The usage event is queued. |
+| `copy` | works for items whose variant file is on this device: kept offline, or copied before and not evicted yet. The usage event is queued. For another item it fails (exit 1) with `<name>: the <rendition> file is not on this device and the server is unreachable (...)` and a `hint:` naming the `stickpile offline keep <item>` to run while online. |
 | `copy --id` | uses the cached metadata. |
 | `sync`, `flush` | fail. Queued events stay and go out on the next `copy`, `sync`, `flush` or desktop sync. |
+| `offline sync` | exits 2: `incomplete: server unreachable: ...`, with how much is on this device. |
+| `offline keep`, `release`, `status`, `remove-all`, `cache clear` | work (`keep` of something the cache does not list needs the server). |
 | everything else | needs the server |
 
 Usage events carry a client-generated id, so uploads can be repeated safely.
@@ -639,9 +813,11 @@ longer visible) are dropped.
 | `$XDG_CONFIG_HOME/stickpile/config.toml` | configuration (shared with the desktop client) |
 | `$XDG_CONFIG_HOME/stickpile/settings.toml` | popup settings, used only when `config.toml` is read-only |
 | `$XDG_STATE_HOME/stickpile/token` | API token, mode 0600 |
-| `$XDG_CACHE_HOME/stickpile/cache.sqlite3` | metadata, sync cursor, history, usage queue (SQLite, WAL; safe to share between the CLI and the desktop client) |
+| `$XDG_CACHE_HOME/stickpile/cache.sqlite3` | metadata, sync cursor, history, usage queue, what is kept offline and which files are (SQLite, WAL; safe to share between the CLI and the desktop client) |
 | `$XDG_CACHE_HOME/stickpile/files/thumb/` | thumbnails |
-| `$XDG_CACHE_HOME/stickpile/clip/<media>.<variant>/<name>.<ext>` | files put on the clipboard |
+| `$XDG_CACHE_HOME/stickpile/files/cover/` | the cover images of kept packs |
+| `$XDG_CACHE_HOME/stickpile/clip/<media>.<variant>/<name>.<ext>` | files put on the clipboard, and the renditions kept offline |
 
 Deleting the cache directory is always safe, except that queued usage events
-would be lost. Run `stickpile flush` first.
+would be lost (run `stickpile flush` first), and so would what is kept
+offline (`stickpile cache clear` leaves it).
