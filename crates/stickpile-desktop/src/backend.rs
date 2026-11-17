@@ -523,6 +523,13 @@ impl Backend for CoreBackend {
                     return Err(kept_not_here(name, *variant, target, sticker));
                 }
             }
+            // The core copies another kept file only when the server did not
+            // answer, so the tiles dim as after a failed copy.
+            if r.as_ref()
+                .is_ok_and(|p| p.warning.as_deref() == Some(stickpile_core::session::COPIED_ANOTHER_FILE))
+            {
+                self.reached(false);
+            }
             self.track(r, |_| false, ITEM_NOT_CACHED())
         })
     }
