@@ -894,8 +894,9 @@ example after a model change or a new vocabulary. A user rechecks their
 own items (the items of the sets they own), an admin every item on the
 server, either optionally one set (`POST /api/v1/rechecks`,
 `POST /api/v1/admin/rechecks`, [api.md](api.md#rechecks); `stickpile
-recheck`, [cli.md](cli.md#recheck)). Code: `service::recheck` (the
-batch) and `jobs::recheck` (one picture).
+recheck`, [cli.md](cli.md#recheck); in the web UI Settings, "Recheck my
+stickers", and the admin panel's Rechecks tab, [web.md](web.md#rechecks)).
+Code: `service::recheck` (the batch) and `jobs::recheck` (one picture).
 
 **Parts** (`RecheckPart`), each chosen on its own; the server derives no
 item name, so there is no `name` part:

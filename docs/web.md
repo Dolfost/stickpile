@@ -26,7 +26,7 @@ more than the API allows.
 | `/` | Search box, items you copied recently (the set page's cards, read-only, each with its set, and a "View" control of their own), your sets with covers (with the set lists' "View" control). |
 | `/sets` | Tabs **Mine** and **Public**. Unlisted sets are never listed; they are reachable only by their link. Links to "Add a git pack" and "Import a Telegram pack" appear when those integrations are enabled. Each card shows the cover, name, description, item count, visibility and source labels, owner and slug; the "View" control arranges them (see [Display options and themes](#display-options-and-themes)). |
 | `/sets/new` | Name, slug (derived from the name when empty), description, visibility, recommended aspect ratio (`W:H`) and size in pixels. |
-| `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, "Edit pack" for contributors who may, "Propose…" on others' packs, Export (the [export page](#export-and-publish)), popular in this set, pull now, publish to Telegram), the upload form (for the owner and contributors who may add), "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
+| `/sets/{id}` | Set header (the cover image when the set has one, owner, visibility, version, git binding), actions (settings, "Edit pack" for contributors who may, "Propose…" on others' packs, Export (the [export page](#export-and-publish)), popular in this set, "Recheck this set" for the owner ([Rechecks](#rechecks)), pull now, publish to Telegram), the upload form (for the owner and contributors who may add), "Replace from a set directory", the filter "hide below N likes" with sorting (set order, likes, copies, quality, recent) and the "View" control (style and shown fields), and the item editor grid (see [Set page](#set-page)). |
 | `/collaboration` | Proposals waiting for you (with Accept and Decline and a note), the ones you sent (Withdraw), the packs you contribute to, and the decided proposals. The nav link shows how many wait for you. See [collaboration.md](collaboration.md). |
 | `/proposals/{id}` | One proposal: the stickers with thumbnails, or a table of the current and the proposed values, with the same buttons. |
 | `/sets/{id}/propose` | On someone else's pack: propose new stickers, a new name, description or cover, or a cover image. |
@@ -39,7 +39,8 @@ more than the API allows.
 | `/popular` | Most copied, most liked and trending side by side, never blended. Scope: whole server, your items, or one set (`?scope=set&set=…`, linked from the set page). The window (day, week, month, all) applies to "most copied". |
 | `/stats` | Your totals, a bar chart of copies per day for 30 days (inline SVG with a hover title per bar and a screen-reader table), your most copied items and the apps you paste into. |
 | `/problems` | Problems in all your sets, grouped by set, with filters by severity and kind; admins also get "Whole server". The set page has the same list for one set at its bottom (`/sets/{id}/problems` without JavaScript). See [Problems](#problems). |
-| `/settings` | Username (shown as the owner of your sets and matched by `by:`; renaming keeps you signed in), display name and Telegram user id, the theme (System, Light, Dark), password change (current password required if you have one, except when you are signed in through the tailnet; at least `auth.min_password_length` characters), two-step verification setup (QR code and key, confirm with a code) and disabling, **Add a device** (a one-time pairing code for five minutes, shown as a QR code for the phone app and as text with the server's address for typing in or `stickpile login --code`; see [api.md](api.md#pairing)), API tokens (create, the secret is shown once, revoke). |
+| `/settings` | Username (shown as the owner of your sets and matched by `by:`; renaming keeps you signed in), display name and Telegram user id, the theme (System, Light, Dark), password change (current password required if you have one, except when you are signed in through the tailnet; at least `auth.min_password_length` characters), two-step verification setup (QR code and key, confirm with a code) and disabling, **Recheck my stickers** ([Rechecks](#rechecks)), **Add a device** (a one-time pairing code for five minutes, shown as a QR code for the phone app and as text with the server's address for typing in or `stickpile login --code`; see [api.md](api.md#pairing)), API tokens (create, the secret is shown once, revoke). |
+| `/rechecks/{id}` | One recheck: what it covers, its progress (updating itself), Cancel while it runs, the result and the pictures that failed. Its owner, or an admin. See [Rechecks](#rechecks). |
 | `/admin` | Admins only. See [Admin panel](#admin-panel). |
 | `/jobs/{id}` | Status of a background job (yours, or any job for admins). |
 
@@ -549,10 +550,48 @@ of the UI.
 | Overview | Media and database size, media and item counts, waiting jobs, the registration policy (read-only, it comes from the configuration), AI status, storage per user, the job queue by kind and status, and the latest failed jobs with their errors. |
 | Users | Every user with role, status (disabled, TOTP, no password), tailnet login, last sign-in, sets/items and storage. "Manage" per user: rename, set the role, disable or enable, reset the password, reset TOTP (lost device), bind or unbind a tailnet login, delete (with a confirmation page listing what is deleted). Plus "Create a user". The server refuses to demote, disable or delete the last active admin and to delete yourself; the message is shown on the page. |
 | Invitations | Create an invitation (role, validity). The link with the one-time code is shown **once**. The list shows who created each invitation and whether it is open, used (by whom) or expired; open ones can be revoked. Invitations only work while `auth.registration = "invite"`. |
+| Rechecks | **Recheck every sticker** on the server (or of one set, by its id) and every server-wide recheck, the server's own included ("the server" started them, after a change of the AI model or for pictures its text reader never read). See [Rechecks](#rechecks). |
 | Audit log | Newest first, 50 per page ("Older entries"): time, actor, action, target, IP, details. |
 
 Every admin action goes through `service::admin` and is written to the audit
-log.
+log; a server-wide recheck through `service::recheck`, which writes
+`recheck.start` and `recheck.cancel`.
+
+## Rechecks
+
+A recheck lets the computer look at stickers again in the background
+([ai.md](ai.md#recheck), [api.md](api.md#rechecks)).
+
+**Recheck my stickers** (Settings, `#recheck`) covers the stickers of your
+own sets, or of one of them. "Recheck this set" on a set page (its owner)
+opens the same form with the set chosen (`/settings?recheck_set=<id>`).
+The form ticks every part this server can recompute now: keywords, emojis,
+vibe and search by meaning with a loaded AI model, the text in the picture
+with a text reader, the quality score and the renditions always. A line
+says why a part is missing (AI off, the model still loading, no text
+reader). The mode is "Only what is missing" (the default) or "Everything
+again", each with a line on what it does; neither changes what you wrote
+or confirmed. Errors come back in the form with what was sent: nothing
+ticked (400), a set of someone else (403), too many rechecks
+(`limits.recheck_per_hour`, 429 with `Retry-After`), a part the server
+cannot do now (503). Starting one opens its page; asking for one that is
+running opens that one. Your five latest rechecks are listed below the
+form.
+
+**A recheck's page** (`/rechecks/{id}`) says what it covers, which parts,
+how, who started it and when, and shows a progress box: a bar and the
+counts of pictures, checked, changed and failed. While it runs the box
+asks for itself every 2 s with htmx (a `<noscript>` meta refresh every 3 s
+without JavaScript) and offers "Cancel the recheck" (a plain form, or htmx
+replacing the box). When it is over the box says how it ended, that new
+keywords, emojis, vibes and texts are AI suggestions with the AI mark and
+Confirm on each sticker, and lists the failed pictures with their errors:
+a link to your sticker for your rechecks, the picture's id for
+server-wide ones.
+
+**Recheck every sticker** (admin panel, Rechecks tab) is the same form for
+every sticker on the server, with an optional set id; its page links back
+to the tab.
 
 ## Integrations
 
@@ -824,7 +863,11 @@ first use.
 ## Tests
 
 `crates/stickpile-server/tests/web_auth.rs`, `web_pages.rs` and
-`web_flows.rs` (helpers in `tests/web_common/`), the export page's tests
+`web_flows.rs` (helpers in `tests/web_common/`), the rechecks' tests in
+`web_recheck.rs` (the settings form and its errors keeping what was sent,
+the page and the fragment it polls, cancel with and without htmx, the
+failed pictures linking to the items, "Recheck this set", the admin tab:
+403 for users, the server's own rechecks listed, the audit entry), the export page's tests
 in `export.rs` (downloads for readers, publishing only for the owner, form
 errors keeping the input, the publish and WhatsApp jobs, Telegram, Discord
 and Signal published together with Discord's options prefilled), and the

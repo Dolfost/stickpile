@@ -626,7 +626,8 @@ A recheck recomputes metadata of many items in the background: a user's
 items (the items of the sets they own), or every item on the server for an
 admin, either optionally of one set. What each part does and the rules it
 keeps are in [ai.md](ai.md#recheck); it never changes a value a person
-gave. Types in `stickpile_api` (`StartRecheck`, `Recheck`,
+gave. The web UI's pages for it are in [web.md](web.md#rechecks). Types in
+`stickpile_api` (`StartRecheck`, `Recheck`,
 `RecheckFailure`, `RecheckPart`, `RecheckMode`, `RecheckScope`,
 `RecheckState`).
 
