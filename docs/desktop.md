@@ -568,11 +568,13 @@ file stays as it was.
 The arrow next to a changed value resets it: the key is removed from the
 file, so the default (or the value `config.toml` sets) applies again.
 
-A saved key that an older client does not know (`ui.show_text`, which
-`zx` also saves, is newer than 0.7.0) makes that client refuse
-`config.toml` with "unknown field". Before going back to an older
-version, or when an older CLI shares the file, reset or remove such keys
-([configuration.md](configuration.md#older-clients-and-newer-keys)).
+A key in `config.toml` that this version does not know (a typo, or a key
+a newer popup saved) is skipped with a warning, listed at the top of the
+page; `stickpile config check` fails on it. Clients up to 0.7.0 refuse
+such a key instead, with "unknown field": before going back to 0.7.0, or
+when a 0.7.0 CLI shares the file, reset or remove the keys it does not
+know (`ui.show_text`, which `zx` also saves, is newer than 0.7.0;
+[configuration.md](configuration.md#older-clients-and-newer-keys)).
 
 Where changes go depends on `config.toml`:
 

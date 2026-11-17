@@ -54,8 +54,11 @@ stickpile sync                          # fill the offline cache
 
 Default location: `$XDG_CONFIG_HOME/stickpile/config.toml`
 (`~/.config/stickpile/config.toml`). A missing file means all defaults.
-Unknown keys are rejected, so typos fail loudly. `stickpile config check`
-validates a file without contacting the server.
+A key this version does not know (a typo, or a newer version's setting)
+is skipped with a warning, so a key a newer popup saved never stops the
+CLI; `stickpile config check` validates a file without contacting the
+server and fails on such keys
+([configuration.md](configuration.md#older-clients-and-newer-keys)).
 
 The desktop client reads the same file. The `ui`, `focus` and `paste`
 sections only affect the desktop popup. When the file is read-only (home-manager), the
@@ -295,12 +298,21 @@ stickpile config path
 ```
 
 `config check` runs the real loader and validation. It fails on a missing
-file, a TOML error, unknown keys, a non-http(s) `server_url`, an unknown
-`ui.start_tab` or `[copy]` value, or unsupported clipboard MIME types. When
-the file is read-only, the popup's `settings.toml` next to it is layered in
-as the clients do it: its skipped entries are printed as `warning:` lines,
-and `--json` shows the result. It never contacts the server, reads the token
-or opens the cache.
+file, a TOML error, a non-http(s) `server_url`, an unknown `ui.start_tab`
+or `[copy]` value, unsupported clipboard MIME types, or keys this version
+does not know. Those keys only get a warning from the other commands and
+the popup, which skip them; the check prints the same warnings and then
+fails, naming every such key:
+
+```
+warning: /home/me/.config/stickpile/config.toml: ui.show_nonsense is not a setting this stickpile knows (a typo, or a newer version's setting); ignoring it
+error: /home/me/.config/stickpile/config.toml: 1 key this stickpile does not know: ui.show_nonsense
+```
+
+When the file is read-only, the popup's `settings.toml` next to it is
+layered in as the clients do it: its skipped entries are printed as
+`warning:` lines, and `--json` shows the result. It never contacts the
+server, reads the token or opens the cache.
 
 ### `sets`
 

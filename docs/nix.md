@@ -119,17 +119,18 @@ the two must never drift. Three layers enforce this, and each fails loudly.
      - media.thumb_px: default differs: Nix 255, Rust 256
    ```
 
-   It also feeds the module's rendered default TOML through the real
-   `from_toml` loader (`deny_unknown_fields`) and requires the result to
-   equal the default. This catches type mismatches between the module and
-   Rust, and keys that the TOML rendering would mangle. For the client that
-   file must also be empty: with nothing set, nothing is written.
+   It also feeds the module's rendered default TOML through the real strict
+   loader (`from_toml`, and `from_toml_strict` for the client, which refuse
+   unknown keys) and requires the result to equal the default. This catches
+   type mismatches between the module and Rust, and keys that the TOML
+   rendering would mangle. For the client that file must also be empty:
+   with nothing set, nothing is written.
 
    The program builds against the workspace `Cargo.lock` and its vendored
    crates. The included config modules must stay self-contained: they may use
-   std, serde, toml, thiserror, directories and `stickpile_api`. If one of
-   them grows another dependency, add it to `nix/drift-guard/Cargo.toml`;
-   otherwise this check fails to compile.
+   std, serde, toml, toml_edit, thiserror, directories and `stickpile_api`.
+   If one of them grows another dependency, add it to
+   `nix/drift-guard/Cargo.toml`; otherwise this check fails to compile.
 
 2. **`checks.nixos-module` / `checks.home-manager-module`**: the example
    configurations set *every* option to a non-null value. The real binaries'

@@ -190,23 +190,40 @@ for you.
 
 ### Older clients and newer keys
 
-A client refuses a `config.toml` with a key it does not know, as it
-refuses typos, so a client older than a key refuses the whole file
-("unknown field `show_text`"). This matters when two versions share one
+A client newer than 0.7.0 skips a key of `config.toml` it does not know,
+at any depth, with a warning, so a setting a newer popup saved never
+stops it. The CLI prints the warning; the popup logs it and lists it at
+the top of its Settings tab:
+
+```
+/home/me/.config/stickpile/config.toml: ui.show_nonsense is not a setting this stickpile knows (a typo, or a newer version's setting); ignoring it
+```
+
+Typos are skipped the same way, so they show as that warning, and
+`stickpile config check` fails on every unknown key, naming it
+(`2 keys this stickpile does not know: ui.show_nonsense, later`). A known
+key with a wrong type or value (`ui.columns = "x"`,
+`server_url = "ftp://..."`) is still an error that stops the client.
+
+Clients up to 0.7.0 refuse a `config.toml` with a key they do not know
+("unknown field `show_text`"). This matters when such a client shares the
 file (the CLI and the popup updated at different times) and after a
-downgrade: remove the keys the older client does not know first, or
-reset them on the newer popup's Settings tab (the arrow removes the key).
-The client keys of the last releases:
+downgrade to it: remove the keys it does not know first, or reset them on
+the newer popup's Settings tab (the arrow removes the key). The client
+keys of the last releases:
 
 | Key | First client that knows it |
 |---|---|
 | `ui.theme` | 0.7.0 |
 | `ui.show_text` (`zx`) | newer than 0.7.0 |
 
+So going back to 0.7.0 needs `ui.show_text` removed, and going back
+further `ui.theme` too.
+
 The popup writes a key when you change it (Settings tab, `zx` and the
 other `z` toggles), not before. Keys in `settings.toml` (a read-only
-`config.toml`, below) are skipped with a warning by a client that does
-not know them, so this only concerns a writable `config.toml`.
+`config.toml`, below) are skipped with a warning by every version, so
+this only concerns a writable `config.toml`.
 
 ### Popup theme
 
@@ -339,8 +356,10 @@ Where the changes go depends on whether `config.toml` can be written:
 With a read-only `config.toml` the client layers the two files:
 `config.toml` wins over `settings.toml`, which wins over the defaults.
 
-- `config.toml` keeps its strict errors: unknown keys and invalid values
-  fail as always.
+- In `config.toml`, invalid values fail as always; unknown keys are
+  skipped with a warning
+  ([above](#older-clients-and-newer-keys)), and `config check` fails on
+  them.
 - In `settings.toml`, unknown keys, keys the Settings tab does not manage
   and invalid values are skipped with a warning (logged by the popup,
   printed by the CLI), so a stale value never stops the client from
