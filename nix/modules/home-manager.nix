@@ -304,6 +304,20 @@ in
                   (the web UI's setting), else the system's locale. Choosing
                   one in the popup sets the account's language too.
                 '';
+            theme =
+              setting
+                (types.enum [
+                  "system"
+                  "dark"
+                  "oled"
+                  "white"
+                ])
+                "system"
+                ''
+                  The popup's colours: `system` follows the desktop's light or
+                  dark style, `dark` and `white` keep it dark or light, and
+                  `oled` is the dark style on pure black.
+                '';
           };
 
           copy = section "Copy-time image adjustments (popup and `stickpile copy`)." {
