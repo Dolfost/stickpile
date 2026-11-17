@@ -378,11 +378,13 @@ dump is `stickpile-server backup`.
 ```sh
 stickpile search cat
 stickpile search 'e:😂 set:cats vibe:tired q>70 type:gif -tag:nsfw' --target telegram -n 10
+stickpile search e:skull                     # stickers with a skull emoji (💀, ☠️, ...)
 stickpile --json search naahh
 ```
 
 The query uses the search syntax from the plan: bare words, `"phrases"`,
-`e:`, `set:`, `vibe:`, `tag:`, `type:`, `by:`, `is:mine|liked|public`,
+`e:` (an emoji, `e:😂`, or its English name, `e:skull`, typos forgiven:
+any emoji whose name or keyword starts so), `set:`, `vibe:`, `tag:`, `type:`, `by:`, `is:mine|liked|public`,
 `q>70`, `likes>=2`, `copies>5`, `sort:recent|likes|copies|quality`, and `-` to
 negate. Words starting with a single dash after `search`/`copy` are query
 negations, not options (`-tag:nsfw`, `-naahh`). `-t`, `-n` and `-v` keep their

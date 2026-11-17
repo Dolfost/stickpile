@@ -238,7 +238,8 @@ pub enum SetsCmd {
 
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Query words and filters (`e:😂 set:cats vibe:tired q>70 type:gif -tag:nsfw`)
+    /// Query words and filters (`e:😂 set:cats vibe:tired q>70 type:gif -tag:nsfw`);
+    /// `e:` takes an emoji or its English name (`e:skull`, typos forgiven)
     #[arg(required = true, num_args = 1..)]
     pub query: Vec<String>,
     /// Mark results that cannot be sent to this app
@@ -823,5 +824,18 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(!help.contains("__serve-clipboard"));
         assert!(help.contains("copy"));
+    }
+
+    /// `search --help` shows an emoji filter by name too.
+    #[test]
+    fn search_help_names_emojis() {
+        let mut cli = Cli::command();
+        let help = cli
+            .find_subcommand_mut("search")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("e:😂"), "{help}");
+        assert!(help.contains("e:skull"), "{help}");
     }
 }
