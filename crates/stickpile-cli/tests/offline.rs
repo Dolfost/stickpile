@@ -377,10 +377,22 @@ fn ctrl_c_cancels_the_download_cleanly() {
             break;
         }
     }
-    // The download is under way (its part file exists), then Ctrl-C.
+    // The slow clip is under way (its part file exists) and the thumbnail,
+    // downloaded beside it, has arrived; then Ctrl-C.
     let started = Instant::now();
-    while !env.files().keys().any(|p| p.contains(".part")) {
-        assert!(started.elapsed() < Duration::from_secs(5), "no part file");
+    loop {
+        let files = env.files();
+        let clip_started = files.keys().any(|p| p.contains(".part"));
+        let thumb_in = files
+            .keys()
+            .any(|p| p.starts_with("files/thumb/") && !p.contains(".part"));
+        if clip_started && thumb_in {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "no part file or no thumbnail: {files:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     let interrupted = Instant::now();
