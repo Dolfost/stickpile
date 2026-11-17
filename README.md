@@ -202,7 +202,8 @@ brew install --cask stickpile
 
 | | |
 |---|---|
-| `cat sigh` | words: name, keywords, emojis, vibe, tags, set name, image content |
+| `cat sigh` | words: name, keywords, emojis, vibe, tags, set name, the words in the picture, image content |
+| `text:"no thoughts"` `x:кіт` | the words written in the picture, in that order |
 | `e:😂` | has this emoji |
 | `set:cats` | in a set (slug or name) |
 | `vibe:tired` `tag:reaction` | exact vibe / tag |
@@ -235,6 +236,7 @@ recommended_px = 512
 keywords = ["nah", "refuse"]
 keywords_source = "ai"   # until you edit or confirm it
 emojis = ["🙅"]
+text = "NAAHH"           # the words in the picture
 ```
 
 Full reference in [docs/set-format.md](docs/set-format.md). Git packs are

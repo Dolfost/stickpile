@@ -26,7 +26,7 @@ The owner adds a contributor by username on the pack page, under
 |---|---|
 | Add stickers | upload stickers to the pack, or move one in from another pack |
 | Edit their stickers | edit and remove the stickers they added |
-| Edit all stickers | edit everyone's stickers: name, keywords, emojis, tags, vibe |
+| Edit all stickers | edit everyone's stickers: name, keywords, emojis, tags, vibe, text |
 | Remove any sticker | remove everyone's stickers |
 | Edit the pack | the pack's name, description, cover and sticker order |
 | Review proposals | accept or decline proposals for the pack |
@@ -65,7 +65,8 @@ On someone else's pack, **Propose…** offers three forms:
 - **A cover image**: a still PNG, JPEG or WebP.
 
 On someone else's sticker, **Suggest changes…** proposes a new name,
-keywords, emojis, tags or vibe.
+keywords, emojis, tags or vibe (the API also takes `text`, the words in the
+picture; accepted, it is the owner's text, which the server never refills).
 
 Fields with the current value are left out. A proposal that changes
 nothing is refused. A proposal shows what it would change: the stickers

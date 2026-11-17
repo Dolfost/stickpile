@@ -16,10 +16,13 @@ It also feeds search expansion. `Vocabulary::vibes_for_word` maps slang to
 vibes without a model (`naahh` → dismissive), and `ZeroShot::related_terms`
 maps a query embedding to nearby keywords and vibes.
 
-What it does **not** do: captions, OCR of text in memes, face recognition,
-NSFW classification, or any training or fine-tuning on your library. A
-caption backend can be added later behind the same trait (see the last
-section).
+It also has the seam for reading the words written in a picture (OCR)
+into the item text ([OCR and the text field](#ocr-and-the-text-field)); no
+reader ships yet.
+
+What it does **not** do: captions, face recognition, NSFW classification,
+or any training or fine-tuning on your library. A caption backend can be
+added later behind the same trait (see the last section).
 
 ## How results are marked AI-generated
 
@@ -28,7 +31,8 @@ plan's data model, the server stores them with `keywords_source`,
 `emojis_source` and `vibe_source` set to `ai`. They become `user` when
 someone edits or confirms them in the web UI, and `set.toml` export carries
 the same `*_source = "ai"` fields. Re-enrichment must only replace fields
-whose source is still `ai`.
+whose source is still `ai`. The item text (`text_source`) has a stricter
+rule, below.
 
 Next to every embedding the server stores `Enricher::model_id()`; a different
 id triggers re-embedding. `Enricher::image_model_id()` is `clip-vit-b32` for
@@ -48,7 +52,9 @@ The web upload tray asks for keywords, emojis and a vibe while files are
 staged, so they can be reviewed before anything is uploaded
 ([web.md](web.md#upload-and-import)). The endpoint is
 `POST /api/v1/ai/suggest` ([api.md](api.md#ai-suggestions)): one small
-image in, `{keywords, emojis, vibe}` out, nothing stored. It runs the same
+image in, `{keywords, emojis, vibe}` out, nothing stored. With a text
+reader it also reads the words in the image (`text`; the image is one
+frame). It runs the same
 code as the `Enrich` job (`service::ai::embed_and_suggest`: embed the image,
 then `ZeroShot::suggest` with `max_keywords`, `max_emojis` and the default
 thresholds), on the blocking thread pool, rate limited per user
@@ -218,6 +224,7 @@ threads = 2                               # intra-op threads per inference; 0 = 
 # vocabulary_file = "/etc/stickpile/vocabulary.toml"
 max_keywords = 5                          # upper bound; fewer when the model is unsure
 max_emojis = 3
+ocr = true                                # read the words in pictures, when a text reader is there
 ```
 
 The server maps these to `ClipOptions { model_dir, text_encoder,
@@ -345,6 +352,94 @@ To reproduce:
 cargo run --release -p stickpile-ai --example probe -- --models models --encoder clip --threads 2 [image.png…] [--query "text"]
 ```
 
+## OCR and the text field
+
+**The field.** Items have `text`, the words written in the picture: one
+string, line breaks kept, at most 2000 characters
+(`stickpile_api::text::clean_text`: `\r\n` and a lone `\r` become `\n`,
+tabs spaces, other control characters go, the ends are trimmed), and
+`text_source` (`user` or `ai`) in `items.text` / `items.text_source`
+(migration `0014`; existing items get `''` and `ai`). For the text, an
+empty value with source `ai` means "not set". The computer writes the text
+only while its source is `ai`; any edit by a person makes it `user` for
+good, clearing included ([api.md](api.md#items)). That is stricter than
+the rule of `keywords`, `emojis`, `vibe` and `name` (fill when empty or
+still `ai`): an empty text a person left stays empty. Every AI write of
+the text goes through `service::ai::apply_text`, whose SQL only touches
+`text_source = 'ai'` rows; an import's or a restore's text goes through
+`ItemText::merged_into` (a directory without a text changes nothing, an
+AI text from a file never replaces a person's).
+
+**The result belongs to the media.** `media.ocr_text` (`NULL`: never read,
+`''`: read, nothing confident) and `media.ocr_model` (the reader's
+`model_id`), like `embedding` and `embedding_model`. A file is read once,
+however many items and sets it is in: a new item of media that the
+current reader has read gets the text at once. A result of another model
+counts as not read.
+
+**Reading.** The seam is `stickpile_ai::ocr`, next to `Enricher` (no cargo
+feature; `MockTextReader` is always there, like `MockEnricher`):
+
+```rust
+pub trait TextReader: Send + Sync {
+    fn model_id(&self) -> &str;
+    fn read(&self, frame: &image::RgbaImage) -> Result<Vec<TextLine>, AiError>;
+}
+pub struct TextLine { pub text: String, pub confidence: f32, pub bounds: Option<LineBox> }
+```
+
+`ocr::read_frames(reader, frames)` scales each frame down to at most
+`MAX_READ_PIXELS` (2048 x 2048, aspect kept), reads it, and passes what was
+found through `ocr::clean_lines`, the rules every reader shares:
+
+- lines below `MIN_CONFIDENCE` (0.5) are dropped;
+- reading order: rows top to bottom (a line joins a row when its vertical
+  centre is within half a line height of the row's first line), left to
+  right inside a row; lines without boxes keep the reader's order;
+- printable text only: `clean_text`, private-use and replacement
+  characters removed, whitespace runs as one space, a line without a
+  letter or digit (frames, borders, specks) dropped;
+- a line already read in an earlier frame (case and spacing aside) is not
+  repeated; the same line twice in one frame stays;
+- the lines joined with `\n`, cut at 2000 characters.
+
+The frames are `stickpile_media::text_frames` of the stored, sanitised
+original (never the raw upload): a still as it is stored; an animation's
+first, middle and last frames (fewer when it has fewer); a video's frames
+at its start, its middle and one frame before its end (ffmpeg, the same
+frame grab as the representative frame).
+
+**Where it runs.**
+
+- The `Enrich` job: after CLIP, or alone when there is a reader but no
+  CLIP model. When the media has no result from the reader's model it
+  reads it on the blocking pool (no timeout, as for CLIP) and stores
+  `ocr_text` and `ocr_model`, then gives the text to the media's items
+  whose text is still `ai`. The job result adds `ocr_model`, `text` and
+  `text_items_updated`. A failed read fails nothing: it is logged, the
+  result says `ocr_error`, and the media stays unread for a later run.
+- Uploads queue `Enrich` when the embedding or the OCR result from the
+  current reader is missing.
+- `POST /api/v1/ai/suggest` reads the posted image and returns `text`
+  (nothing stored; a failed read leaves `text` out).
+- Startup does not queue reading of media stored before; a manual
+  re-enrichment (`POST /api/v1/items/{id}/enrich`) reads a media that was
+  never read.
+
+**Configuration.** `[ai] ocr = true` (the default) reads with a text reader
+when `ai.enabled`; `false` reads nothing. The server builds no reader yet
+(`app::text_reader_from_config` returns none): with `ocr = true` it logs
+once at startup ("ai.ocr is on, but this server has no text reader: the
+words in pictures are not read") and goes on. Tests give a reader through
+`StartOptions::text_reader` (`TextReaderSource::Provided`), which still
+obeys `ai.ocr`.
+
+**Set directories and older servers.** `set.toml` carries `text` and
+`text_source` ([set-format.md](set-format.md)). A 0.7.0 server keeps them
+as unknown keys (`items.extra_toml`) and writes them back; after an
+upgrade, the server moves such keys into the item text at startup
+(`transfer::lift_text_from_extra`), unless the item has a person's text.
+
 ## Tests
 
 - `cargo test -p stickpile-ai` needs neither network nor model files. It
@@ -353,7 +448,13 @@ cargo run --release -p stickpile-ai --example probe -- --models models --encoder
   tokenizer, mean pooling, the dense layer from safetensors, blob round-trip,
   the model file table against the script and the Nix file, vocabulary
   loading and validation, `vibes_for_word`, `ZeroShot` with `MockEnricher`,
-  and a broken ONNX Runtime library giving an error rather than a panic.
+  a broken ONNX Runtime library giving an error rather than a panic, and
+  the OCR cleaning (confidence, reading order, merging frames, the cap,
+  frame bounding) with `MockTextReader`.
+- `MockTextReader::new(&lines)` returns the same lines for every frame and
+  records the size of each frame it read (`frames()`, `reads()`); the
+  server tests (`tests/text.rs`) inject it to check what is read, how
+  often, and that a person's text is never overwritten.
 - `STICKPILE_TEST_MODEL_DIR=$PWD/models cargo test -p stickpile-ai --release`
   adds the real-model tests (`tests/real_model.rs`):
   - red square vs "a red square" / "a blue square", also in Ukrainian;
@@ -599,43 +700,6 @@ chat: `Мама`, `в мережі`, `Ти поїла? Не забудь шап�
 1.00). Its post-processing was simplified (connected components instead of
 contours and polygon offsets), so it proves loading and running, not
 accuracy.
-
-## Draft: OCR and the text field
-
-Design note for the metadata round (branch `metadata`); the sections above
-are rewritten from it when the work lands, and this section then goes.
-
-**The field.** Items gain `text` (the words in the picture: one string,
-line breaks kept, control characters removed, `\r\n` as `\n`, at most 2000
-characters after trimming) and `text_source` (`user` or `ai`). Column
-`items.text TEXT NOT NULL DEFAULT ''`, `items.text_source TEXT NOT NULL
-DEFAULT 'ai'` (migration `0014`, which also adds the media columns below).
-For `text`, an empty value with source `ai` means "not set": the computer
-writes `text` only while its source is `ai`, and any edit by a person,
-clearing it included, sets `user` for good. (`keywords`, `emojis`, `vibe`
-and `name` keep the rule of `service::ai::apply`: the computer fills an
-empty field or replaces an AI value, never a non-empty value a person
-gave.) Clients show the AI marker only on a non-empty AI value.
-
-**The OCR result belongs to the media.** `media.ocr_text TEXT` (NULL: never
-read; `''`: read, no confident text) and `media.ocr_model TEXT` (the id of
-the model that read it), like `embedding` and `embedding_model`. A
-media's items take `text` from it with source `ai` under the rule above.
-The same file in two sets is read once.
-
-**Reading.** A seam next to `Enricher` in `stickpile-ai` (`ocr` module: a
-reader trait, its output as lines with a confidence, `model_id()`, and a
-mock), behind a cargo feature like `clip`. The server reads the validated,
-re-encoded media (never the raw upload): a still as it is, bounded in
-pixels; an animation or video at its first, middle and last frames
-(the frame extraction the media pipeline has), lines merged without
-duplicates. Output: lines above a confidence threshold, in reading order,
-printable text only, capped at 2000 characters. It runs in the `Enrich`
-job and in `POST /api/v1/ai/suggest` (the tray), under the CLIP timeout
-and in `spawn_blocking`. Config `[ai] ocr = true|false` (default `true`);
-off with one log line, never a failure, when the model files are absent.
-Models come from `nix/models.nix` and `scripts/fetch-models.sh`. Which
-models: decided by the owner after the evaluation.
 
 ## Draft: recheck
 

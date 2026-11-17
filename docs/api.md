@@ -238,16 +238,19 @@ push. Read-only git packs refuse every edit with `403` (`editable: false`).
 
 - Every multipart part with a filename is a file. An optional part named
   `meta` holds a JSON array of `UploadMeta` (`name`, `keywords`, `emojis`,
-  `vibe`, `tags`, `source_url`, `ai_fields`, all optional), matched to the
-  files by index. Given values are the user's (`*_source: user`), so AI
+  `vibe`, `tags`, `text`, `source_url`, `ai_fields`, all optional), matched
+  to the files by index. Given values are the user's (`*_source: user`), so AI
   enrichment never replaces them, except the fields listed in `ai_fields`:
-  any of `keywords`, `emojis`, `vibe` holding [AI suggestions](#ai-suggestions)
+  any of `keywords`, `emojis`, `vibe`, `text` holding [AI suggestions](#ai-suggestions)
   the user has not approved. Those are stored with `*_source: ai`, exactly
   like enrichment results (the item page offers to confirm them, and a later
   enrichment may replace them). `name`, `tags` or unknown names in
   `ai_fields` are 400; a listed field without a value is ignored. Old
-  clients that never send `ai_fields` are unaffected. The web upload form
-  sends the same field:
+  clients that never send `ai_fields` are unaffected. A given `text`, even
+  `""`, is the user's (an empty one: cleared, never filled); without it,
+  or empty and listed in `ai_fields`, the server reads the text itself
+  (see [Items](#items)). A text over 2000 characters is 400. The web
+  upload form sends the same field:
 
   ```json
   [{"name": "cat stare", "keywords": ["cat", "stare"], "emojis": ["😾"],
@@ -431,7 +434,7 @@ picture uploaded for the set that is not one of its items: it is never in
 |---|---|---|
 | `GET /api/v1/items?updated_since=&cursor=&limit=` | -> `ItemPage` | Own, contributed and public items, never others' unlisted. See [Pagination](#pagination). |
 | `GET /api/v1/items/{id}` | -> `ItemDetail` | Quality report, near-duplicates from the caller's library, apps that cannot take any current variant. |
-| `PATCH /api/v1/items/{id}` | `UpdateItem` -> `Item` | The owner, or a contributor who may edit the item (`edit_all`, or `edit_own` for items they added). Edited fields become `user`-sourced; `confirm` (`name`, `keywords`, `emojis`, `vibe`) marks AI values as confirmed without changing them; `set_id` moves the item to the end of another set: it needs the right to remove the item here and the `add` permission there (409 if that set has the same media). `Item.added_by_username` is who added it. |
+| `PATCH /api/v1/items/{id}` | `UpdateItem` -> `Item` | The owner, or a contributor who may edit the item (`edit_all`, or `edit_own` for items they added). Edited fields become `user`-sourced (`text` too when it is set to `""`); `confirm` (`name`, `keywords`, `emojis`, `vibe`, `text`) marks AI values as confirmed without changing them; `set_id` moves the item to the end of another set: it needs the right to remove the item here and the `add` permission there (409 if that set has the same media). `Item.added_by_username` is who added it. |
 | `DELETE /api/v1/items/{id}` | -> 204 | The owner, or a contributor who may remove the item (`remove_all`, or `edit_own` for items they added). |
 | `GET /api/v1/items/{id}/file/{variant}` | -> bytes | See below. |
 | `PUT /api/v1/items/{id}/like` | -> `LikeState` | Idempotent; allowed on every item the caller can read. |
@@ -439,18 +442,43 @@ picture uploaded for the set that is not one of its items: it is never in
 | `GET /api/v1/items/{id}/better` | -> `[ItemSummary]` | Searchable items (own + public) with a pHash within the near-duplicate distance and a higher quality score, best first. |
 | `POST /api/v1/items/{id}/enrich` | -> `Job` | Anyone who may edit the item; re-runs AI enrichment. 503 `unavailable` when AI is off, `ai_loading` (with `Retry-After`) while the model loads. |
 
+**The item text.** `Item.text` (and `ItemSummary.text`) holds the words
+written in the picture: one string, line breaks kept as `\n`, at most 2000
+characters (`stickpile_api::text`: `\r\n` and a lone `\r` become `\n`,
+tabs spaces, other control characters go, the ends are trimmed).
+`Item.text_source` says who wrote it, with a stricter rule than the other
+fields: an empty `ai` text means "not set", and the server writes the text
+only while the source is `ai`, from the OCR result of the item's file
+([ai.md](ai.md#ocr-and-the-text-field)). Any edit by a person makes it
+`user` for good, clearing included: `PATCH` with `text` (`""` too),
+`confirm: ["text"]`, a `text` in the upload's `meta`, an accepted
+proposal, a set.toml `text` without `text_source`
+([set-format.md](set-format.md)). A client shows the AI marker only on a
+non-empty `ai` text. Search matches the text as a field and with `text:`
+([search.md](search.md#query-syntax)).
+
+Every field of the text is optional when read: a server before it (0.7.0)
+answers without `text` and `text_source`, which read as `""` and `ai`, and
+it ignores the `text` a newer client sends (no DTO refuses unknown fields).
+A 0.7.0 client ignores the fields.
+
 ### AI suggestions
 
 | Method and path | Body -> response | Notes |
 |---|---|---|
 | `POST /api/v1/ai/suggest` | multipart, one file part -> `AiSuggestions` | Keywords, emojis and a vibe for an image that is not uploaded yet. Nothing is stored. |
 
-`AiSuggestions` is `{"keywords": [...], "emojis": [...], "vibe": "smug" | null}`,
-best first. The image goes through the same path as the `enrich` job (CLIP
-image embedding, then zero-shot over the vocabulary with
+`AiSuggestions` is `{"keywords": [...], "emojis": [...], "vibe": "smug" | null,
+"text": "..."}`, best first. The image goes through the same path as the
+`enrich` job (CLIP image embedding, then zero-shot over the vocabulary with
 `ai.max_keywords`, `ai.max_emojis` and the same thresholds), so a picture
 gets the suggestions enrichment would store for it. Lists can be empty and
-the vibe `null` when the model is unsure.
+the vibe `null` when the model is unsure. `text` is the words the server's
+text reader reads in the image (lines joined with `\n`, `""` when none is
+confident); it is left out when the server has no text reader (or
+`ai.ocr = false`, or an older server), and when reading failed (logged).
+Text needs pixels: the 256 px rendering the tray sends for CLIP is small
+for it.
 
 - The first part with a filename is the image: PNG, JPEG, WebP or GIF (an
   animation gives its first frame; videos are 415, send a frame instead).
@@ -483,7 +511,7 @@ supported.
 
 | Method and path | Body -> response | Notes |
 |---|---|---|
-| `GET /api/v1/search?q=&limit=&offset=&target=` | -> `SearchResults` | Syntax in [search.md](search.md). Searches own and public items only. `limit` default 50, capped at 200; `q` at most 1000 bytes. With `target` (`telegram`, `discord`, `signal`, `whatsapp`, `slack`, `generic`) each hit gets `incompatible` when no current variant fits that app; unknown targets are 400. `semantic` is false when AI is off or not loaded yet. |
+| `GET /api/v1/search?q=&limit=&offset=&target=` | -> `SearchResults` | Syntax in [search.md](search.md). Searches own and public items only. A hit's `matched` names what matched ([search.md](search.md#fusion-and-order)), `text` for the words in the picture. `limit` default 50, capped at 200; `q` at most 1000 bytes. With `target` (`telegram`, `discord`, `signal`, `whatsapp`, `slack`, `generic`) each hit gets `incompatible` when no current variant fits that app; unknown targets are 400. `semantic` is false when AI is off or not loaded yet. |
 | `POST /api/v1/usage` | `UsageBatch` -> `UsageAck` | At most 1000 events. Idempotent by event `id` (1-64 of `A-Za-z0-9_-`); repeats count as `duplicates`. Events for unknown items, items the caller cannot read, or malformed ids are listed in `rejected`. `copied_at` is clamped to [now - 1 year, now + 1 day]. `client` names the reporter (`desktop/<version>`, `cli/<version>`, `web` for the web UI; 64 characters kept), `target` the profile the copy was prepared for (`generic` when the app is unknown) and `variant` the file it was made from. The web UI posts one event per image copy with its session cookie and `X-CSRF-Token`. |
 | `GET /api/v1/popular?scope=&set=&window=&limit=` | -> `Popular` | See below. |
 | `GET /api/v1/stats/me` | -> `UserStats` | The caller's own numbers. `likes_received` excludes own likes; `daily_copies` has 30 UTC days, oldest first. |
@@ -618,7 +646,7 @@ days. `Job.result` is kind-specific:
 | Kind | Queued by | `result` |
 |---|---|---|
 | `variants` | uploads, imports, restores | `{"variants": [...]}` |
-| `enrich` | uploads, `POST /items/{id}/enrich`, AI start-up | model, keywords, emojis, vibe, items updated |
+| `enrich` | uploads, `POST /items/{id}/enrich`, AI start-up | `model`, `keywords`, `emojis`, `vibe`, `items_updated` (CLIP); with a text reader also `ocr_model` and `text`, `text_items_updated`, or `ocr_error` when reading failed (the job still succeeds) |
 | `git_pull` | binding, `POST /sets/{id}/pull`, webhook, scheduler | `commit`, `changed`; after an import also `version`, `created`, `updated`, `unchanged`, `removed`, `errors`; `pushed` when local edits were pushed instead |
 | `git_push` | every change of a push-mode pack (debounced 5 s) | `pushed`, `committed`, `commit`, `version`, or `skipped` |
 | `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
@@ -633,26 +661,8 @@ days. `Job.result` is kind-specific:
 
 Design note for the metadata round (branch `metadata`); the sections above
 are rewritten from it when the work lands, and this section then goes.
-See [search.md](search.md#draft-emoji-names-the-text-field-and-fresh-suggestions)
-and [ai.md](ai.md#draft-ocr-and-the-text-field).
-
-**Fields** (every one `#[serde(default)]` when read, so a 0.7.0 server's
-answers still parse; no touched type has `deny_unknown_fields`, so 0.7.0
-clients ignore them):
-
-- `Item.text: String`, `Item.text_source: FieldSource`;
-- `ItemSummary.text: String` (search results, sync, client caches);
-- `UpdateItem.text: Option<String>` (sets `text_source = user`, also
-  when empty); `UpdateItem.confirm` and the upload's `ai_fields` accept
-  `text`;
-- `UploadMeta.text: Option<String>`;
-- `AiSuggestions.text: Option<String>`;
-- search hits report `text` in `matched`.
-
-A client cache written by an older client holds items without `text`:
-the core cache records an item format in its `meta` table and syncs in
-full once when it is older (no schema bump, so an older client can still
-open the cache).
+The text field landed: see [Items](#items),
+[search.md](search.md#query-syntax) and [ai.md](ai.md#ocr-and-the-text-field).
 
 **Recheck** (types in `stickpile_api`, every enum with a `#[serde(other)]`
 catch-all for readers):

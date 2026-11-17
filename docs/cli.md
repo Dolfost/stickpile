@@ -312,11 +312,30 @@ stickpile sets rm cats [--yes]       # asks for confirmation unless --yes (requi
 
 ```sh
 stickpile upload cats ~/Downloads/cat.png ~/Downloads/naahh.gif
+stickpile upload cats ~/Downloads/stare.png --text 'NO THOUGHTS\nhead empty'
 ```
 
 Uploads in batches of 16 files. For each file it prints the new item, "already
 in this set", or the error. It also notes near-duplicates ("you already have
 the same file in set memes"). It exits 1 if any file failed.
+
+`--text` gives the picture its text, the words written in it, as yours (one
+file only; a literal `\n` is a line break). Without it the server reads the
+words itself when it has a text reader ([ai.md](ai.md#ocr-and-the-text-field)).
+
+### `item`
+
+```sh
+stickpile item show 6f3k...                       # name, keywords, emojis, vibe, tags, text
+stickpile item edit 6f3k... --text 'no thoughts'  # the text becomes yours
+stickpile item edit 6f3k... --text ''             # clear it; the server no longer fills it
+stickpile item edit 6f3k... --name 'staring cat'
+```
+
+`item show` prints the item's metadata; a value the server filled and nobody
+confirmed is marked `(AI)`, and the text keeps its lines. `item edit` changes
+the name or the text (at least one) and prints the item; what you give is
+yours ([api.md](api.md#items)). With `--json` both print the `Item`.
 
 ### `import`, `export`, `backup`
 

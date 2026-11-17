@@ -62,10 +62,15 @@ emojis = ["😼"]
 vibe = "smug"
 vibe_source = "ai"
 tags = ["reaction"]
+text = """
+NO THOUGHTS
+head empty"""
+text_source = "ai"
 
 [items."002-naahh.gif"]
 name = "naahh"
 emojis = ["🙅"]
+text = "naahh"
 ```
 
 | Key | Type | Default | Notes |
@@ -90,7 +95,9 @@ Item keys:
 | `emojis` | array of strings | |
 | `vibe` | string | One label from the vibe vocabulary. |
 | `tags` | array of strings | Always user-set, never AI. |
+| `text` | string | The words written in the picture, line breaks kept (a multi-line string), at most 2000 characters. Not written when empty. |
 | `name_source`, `keywords_source`, `emojis_source`, `vibe_source` | `"user"` / `"ai"` | See below. |
+| `text_source` | `"user"` / `"ai"` | Who wrote `text`; written only when it is not what the keys imply. See [The text](#the-text). |
 
 ### Cover image
 
@@ -123,6 +130,29 @@ when someone edits or confirms it. `"user"` is the default, so it is not
 written. A marker missing from `set.toml` therefore means user data. Markers
 survive every round trip, so exporting a set and importing it on another
 server keeps track of which values a human has checked.
+
+### The text
+
+`text` follows a stricter rule than the other fields: the server writes a
+text only while its source is `ai`, and any text a person gave, an empty
+one too, is theirs for good ([api.md](api.md#items)). So the keys mean:
+
+| Keys | The text |
+|---|---|
+| neither | Not set: the server reads the picture (OCR) and fills it. |
+| `text = "..."` | The user's text. |
+| `text = "..."`, `text_source = "ai"` | Read by the computer, not confirmed. |
+| `text_source = "user"` | Cleared by a person: stays empty. |
+
+An export writes the shortest of these, so the files of items without a
+text do not change. On import into an existing set (and every git pull) a
+directory that says nothing about an item's text leaves it as it is, and
+an AI text from a file never replaces a person's.
+
+Older servers (0.7.0) keep `text` and `text_source` as unknown keys (see
+below) and write them back unchanged, so a git pack shared between an
+older and a newer server loses no text. After such a server is upgraded it
+takes the keys over into the item text at startup.
 
 ### Unknown keys are preserved
 

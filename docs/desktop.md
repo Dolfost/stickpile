@@ -354,8 +354,9 @@ Mouse: hovering selects, a click copies (in the pack list: opens the
 pack), and dragging an item drops the file itself into the target (useful
 for Telegram stickers and when an app ignores pasted file references).
 The search syntax of the server works in
-the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`, and the
-short keys `v:tired`, `t:reaction`, `s:cats`, `b:alice`
+the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`,
+`text:"no thoughts"` (the words in the picture), and the short keys
+`v:tired`, `t:reaction`, `s:cats`, `b:alice`, `x:кіт`
 ([search.md](search.md#query-syntax)).
 
 The footer shows the selected item's stats (see above), the target app and

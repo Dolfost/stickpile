@@ -19,7 +19,7 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | Syntax | Meaning |
 |---|---|
 | `word`, `"a phrase"` | Soft text term, ranked. A phrase (or a term with inner punctuation such as `big-chungus`) must match consecutive words. |
-| `-word`, `-"a phrase"` | No text field may contain this word or phrase (whole words, after normalisation). |
+| `-word`, `-"a phrase"` | No text field (the item text included) may contain this word or phrase (whole words, after normalisation). |
 | `e:😂`, `emoji:😂` | The item has this emoji. |
 | `e:skull`, `emoji:thumbs_up` | The item has an emoji this English name selects ([emoji names](#emoji-names)): `e:skull` is 💀, ☠️ and the others with a word starting with `skull` in their name or keywords. |
 | `set:cats`, `s:cats`, `set:"my cats"` | Set slug or set name (case- and accent-insensitive). The set id also works. |
@@ -27,6 +27,7 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | `tag:reaction`, `t:reaction` | Exact tag, case-insensitive. |
 | `type:gif` | `still`/`image`, `animated`/`animation`, `video`, or a format: `png jpeg jpg webp gif mp4 webm`. |
 | `by:alice`, `b:alice`, `user:alice` | Owner username, case-insensitive. |
+| `text:"no thoughts"`, `x:thoughts` | The item text (the words written in the picture) has these words, one after another, after normalisation: whole words (`text:thought` does not find `thoughts`), no typos. Only the text: a name with the words does not count. |
 | `is:mine`, `is:liked`, `is:public` | Own items, items you liked, items in public sets. |
 | `q>70`, `likes>=2`, `copies<5` | Comparisons with `> >= < <= =`. Several are ANDed: `q>=50 q<90`. Items without a quality score never pass a `q` filter. |
 | `sort:relevance` (default), `sort:recent`/`new`, `sort:likes`, `sort:copies`/`used`/`popular`, `sort:quality` | Result order. |
@@ -37,14 +38,21 @@ Rules:
 - A leading `-` negates any filter (`-tag:nsfw`, `-e:😂`, `-is:mine`). Every
   negation must hold.
 - Different filters are ANDed.
-- Keys are case-insensitive. `e:`, `s:`, `v:`, `t:` and `b:` are the
-  one-letter forms of `emoji:`, `set:`, `vibe:`, `tag:` and `by:`
-  (`stickpile_api::query::Key`): `-v:tired`, `t:"two words"` and the
-  suggestions work as with the long keys. The normalised query
+- Keys are case-insensitive. `e:`, `s:`, `v:`, `t:`, `b:` and `x:` are
+  the one-letter forms of `emoji:`, `set:`, `vibe:`, `tag:`, `by:` and
+  `text:` (`stickpile_api::query::Key`): `-v:tired`, `t:"two words"` and
+  the suggestions work as with the long keys. The normalised query
   (`Query`'s `Display`) writes the long keys, and `e:` for emojis. The
   desktop popup and the Android app send them long
   (`stickpile_quick::suggest::resolve`), so a server older than the short
   keys reads them too.
+- `text:` values are kept lowercased in `Query.texts`; the search
+  tokenizes them like the indexed text and wants the run of tokens in the
+  item's text. A value whose words no item has finds nothing, and so does
+  a value without a word (`text:!!!`). Nothing is offered while a `text:`
+  value is typed (`stickpile_quick::suggest::Field::of` gives `None`): the
+  words are free. A server from before the text field (0.7.0) reads
+  `text:hi` as the plain words `text:hi`.
 - An `e:` value made of letters (with `_` or `-` between words) is an
   emoji name, anything else an emoji. `Query.emojis` keeps the values as
   typed (the normalised query writes `e:skull`); `stickpile-search` turns a
@@ -70,6 +78,9 @@ Examples:
 | `chungs` | `Big Chungus` (one typo). |
 | `"big chungus" type:gif` | GIFs whose name, keyword, tag, … contains the words `big chungus` in that order. |
 | `кіт -tag:nsfw` | Ukrainian `Кіт` in any field, without the `nsfw` tag. |
+| `thoughts` | Also items with "no thoughts" written in the picture, below those with it in their name or keywords. |
+| `text:"no thoughts"` | Items whose picture says "no thoughts" (or "NO THOUGHTS", across a line break too), not "thoughts? no". |
+| `x:кіт -tag:nsfw` | Items with `Кіт` written on them, without the `nsfw` tag. |
 | `cafe` | Also `Café`, and the other way round. |
 | `😂` | Items with 😂 in their emojis (ranked first) or in their text. |
 | `laugh` | Also items tagged with 😂 or 🤣 (built-in emoji vocabulary). |
@@ -142,6 +153,11 @@ value match position by position. Each position may match by any kind, so
 `"big chun"` works while typing. A phrase's quality is that of its weakest
 position.
 
+**The item text** (`Doc::text`, the words written in the picture, read by
+OCR or typed; see [ai.md](ai.md#ocr-and-the-text-field)) is indexed as one
+value, so a phrase may run over a line break. Plain words and phrases
+match it like any field; `text:` matches it alone, exact tokens in a row.
+
 ### Emoji names
 
 An `e:` name selects emojis by their English names
@@ -195,6 +211,12 @@ Fields and weights:
 | vibe | 1.5 | 0 | `vibe` |
 | set name + slug | 1.0 | 0.5 | `set` |
 | emoji vocabulary (😂 → joy laugh lol tears…) | 1.0 | 0.3 | `emoji` |
+| text (the words in the picture) | 1.5 | 0.75 | `text` |
+
+The text weighs less than the name and the keywords: it is often long,
+OCR makes it noisy, and a word in a caption says less about the sticker
+than its name. Its `b` is the prose value, so a word in a long text counts
+less than in a short one.
 
 For each query term `t` and each document:
 
@@ -217,6 +239,7 @@ What this gives, and what the tests check:
 
 - An exact name match beats a keyword substring match.
 - name > keyword > tag > vibe > set for the same word.
+- name > keyword > text for the same word.
 - exact > squashed > prefix > fuzzy > substring for the same field.
 - Rare words outweigh common ones.
 
@@ -277,7 +300,8 @@ it to about 0.2–0.25 for ViT-B/32, in line with
 `Hit::matched` lists, in this order, whichever apply: `name`, `keyword`,
 `emoji`, `vibe`, `tag`, `set` (fields where a user term matched); `fuzzy`
 (the best match for some user term was fuzzy or squashed); `expansion`;
-`image`.
+`image`; `text` (a user term matched the item text; last, so the order of
+the older labels stays).
 
 ## Keeping the index current
 
@@ -301,7 +325,13 @@ like one rebuilt from scratch.
 
 Clients feed the same `Index` from their cache
 (`stickpile_core::cache::OfflineIndex`). The cache holds the user's own items
-and public items, i.e. what search may return.
+and public items, i.e. what search may return, as `ItemSummary`, whose
+`text` is the item text: plain words and `text:` find it offline as on the
+server. A cache an older client wrote holds items without `text`
+(`cache::ITEM_FORMAT` 1, recorded as `item_format` in its `meta` table):
+the next sync lists everything again, once, and records format 2. The
+schema stays, so an older client still opens the cache; items it syncs
+afterwards have no text until they change on the server.
 Embeddings are not cached and no text encoder runs on the device, so
 offline search is lexical only: normalisation, squash, prefix, fuzzy,
 phrases, the emoji vocabulary, emoji names and every filter work as on the
@@ -340,7 +370,8 @@ their own and searches it with the whole syntax:
   cache), `is:liked` uses the likes the client knows.
 - The pack's name and slug are not indexed as words (every item has
   them, so `cats` would find the whole Cats pack); `set:` compares them
-  (and the pack's id) itself.
+  (and the pack's id) itself. The item text is indexed, so words and
+  `text:` find it.
 - Words are ranked as above. As the pack's old substring filter did, a
   word also finds the items with it anywhere in the name, a keyword, an
   emoji or a tag (`c`, `at` while `cat` is typed); those come after the
@@ -395,18 +426,3 @@ starts with it (the typo pass); `short_name` under 1 us.
 The vector side is a linear scan over the visible, filtered documents. It is
 the most expensive part, and fine at this scale. If libraries grow well past
 100k items, an ANN index would replace the scan behind the same API.
-
-## Draft: emoji names, the text field and fresh suggestions
-
-Design note for the metadata round (branch `metadata`); the sections above
-are rewritten from it when the work lands, and this section then goes.
-
-**The text field.** `text` holds the words written in the picture
-(see [ai.md](ai.md#draft-ocr-and-the-text-field)). Plain query words match
-it as one more lexical field, `TEXT`, weighted 1.5 (below name 3.0 and
-keywords 2.5), reported as `text` in `matched`. A new key `text:` with the
-short form `x:` (`Key::Text`, `Query.texts: Filter<String>`, lowercased)
-matches the text only: the value's words must appear in the text as
-consecutive words after normalisation, so `text:"no thoughts"` is a
-phrase; `-text:` excludes. Offline search reads `ItemSummary.text` from
-the cache.
