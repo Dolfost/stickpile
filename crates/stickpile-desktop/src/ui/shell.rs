@@ -81,6 +81,8 @@ label.stickpile-heart { color: #ff5470; }
 .stickpile-suggest button { min-height: 0; padding: 1px 7px; font-weight: normal; }
 .stickpile-suggest button.stickpile-chosen { background-color: alpha(@accent_bg_color, 0.2); color: @accent_color; font-weight: bold; }
 .stickpile-suggest-key { font-family: monospace; }
+.stickpile-suggest-glyph { font-size: 1.3em; }
+.stickpile-suggest-name { font-size: 0.85em; opacity: 0.7; }
 .stickpile-mode { font-size: 0.75em; font-weight: bold; padding: 1px 6px; border-radius: 4px; }
 .stickpile-mode.insert { background-color: @accent_bg_color; color: @accent_fg_color; }
 .stickpile-mode.normal { background-color: alpha(currentColor, 0.12); }
@@ -734,11 +736,26 @@ impl Shell {
         row.append(&key);
         for (i, word) in line.words.iter().enumerate() {
             let b = gtk::Button::builder()
-                .label(word)
                 .can_focus(false)
                 .action_name("win.suggest")
                 .action_target(&(i as u32).to_variant())
                 .build();
+            match line.labels.get(i).filter(|l| !l.is_empty()) {
+                // An emoji of `e:` with its name: the glyph, then the name,
+                // smaller and dimmer. No font is set, so fontconfig falls
+                // back to a colour emoji font for the glyph.
+                Some(name) => {
+                    let content = gtk::Box::builder().spacing(4).build();
+                    let glyph = gtk::Label::new(Some(word));
+                    glyph.add_css_class("stickpile-suggest-glyph");
+                    content.append(&glyph);
+                    let label = gtk::Label::new(Some(name));
+                    label.add_css_class("stickpile-suggest-name");
+                    content.append(&label);
+                    b.set_child(Some(&content));
+                }
+                None => b.set_label(word),
+            }
             b.add_css_class("flat");
             b.add_css_class("caption");
             if line.chosen == Some(i) {

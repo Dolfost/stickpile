@@ -210,7 +210,7 @@ Pack covers on the pack list are not filtered.
 ### Search suggestions
 
 While a filter is typed in the search field (`vibe:`, `tag:`, `-tag:`,
-`set:`, `by:`, `type:`, `is:`, `sort:`, or the short `v:`, `t:`, `s:`,
+`set:`, `by:`, `type:`, `is:`, `sort:`, `e:`, or the short `v:`, `t:`, `s:`,
 `b:`), a line under the field offers its
 values: the vibes, tags, packs and owners of the items you can see (from
 the offline cache), most used first, and the fixed words of `type:`, `is:`
@@ -224,6 +224,18 @@ every sync that changed the cache, so the first opening after a start
 offers them too once its sync is over (before, the cache is still
 empty): a line already shown takes them in place, with the text as
 typed.
+
+`e:` (or `emoji:`) offers emojis, each followed by its English name,
+smaller and dimmer (💀 skull): `e:` alone offers the emojis of your items,
+most used first, and letters narrow it to the emojis whose name or
+keyword starts so, yours first, then the others, best match first
+(`e:sk` offers 💀 skull, ☠️ skull and crossbones, 👲 person with
+skullcap, ...; the order is [search.md](search.md#emoji-names)'s). Taking
+one puts the emoji into the query in place of the name (`e:💀`). While a
+name is typed nothing is highlighted: the search matches the name itself,
+typos included, so `e:skull` alone finds the stickers with any skull
+emoji. The line sets no font of its own, so fontconfig draws the emoji
+with a colour emoji font (Noto Color Emoji, say) when one is installed.
 
 The search does not wait for the value to be finished: a half-typed or
 misspelled value is searched as its best match (the highlighted one), so
