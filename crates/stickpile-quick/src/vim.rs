@@ -377,7 +377,7 @@ pub const SYNTAX: &[HelpSection] = &[
         keys: &[
             (
                 "cat \"big chungus\"",
-                "words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven",
+                "words and phrases in the name, keywords, emojis, vibe, tags, pack and the words in the picture; typos are forgiven",
             ),
             ("e:😂", "has this emoji"),
             (
@@ -388,7 +388,11 @@ pub const SYNTAX: &[HelpSection] = &[
             ("tag:reaction", "has this tag"),
             ("set:cats", "in this pack (its slug or name)"),
             ("by:alice", "in a pack of this user"),
-            ("v: t: s: b:", "short for vibe: tag: set: by:"),
+            (
+                "text:\"no thoughts\"",
+                "has these words in the picture, one after another",
+            ),
+            ("v: t: s: b: x:", "short for vibe: tag: set: by: text:"),
             ("type:gif", "gif, png, webp, jpeg, mp4, webm, still, animated, video"),
             ("is:mine, is:liked, is:public", "yours, liked by you, public"),
             ("q>70, likes>=2, copies<5", "quality, likes, copies (> >= < <= =)"),
