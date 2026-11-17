@@ -50,6 +50,8 @@ libc = "0.2"
 stickpile-core = { workspace = true, features = ["mock"] }
 tempfile.workspace = true
 image.workspace = true
+# src/hints/review_tests.rs reads the search review's fixture.
+serde_json.workspace = true
 # tests/interface.rs reads the interface from the built library as
 # uniffi-bindgen does: its symbols (goblin) and UniFFI's metadata
 # (uniffi_meta). Both are uniffi_bindgen's own dependencies.

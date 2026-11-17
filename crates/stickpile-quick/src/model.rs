@@ -3920,3 +3920,5 @@ mod safe_tests;
 mod suggest_tests;
 #[cfg(test)]
 mod sync_tests;
+#[cfg(test)]
+mod review_tests;

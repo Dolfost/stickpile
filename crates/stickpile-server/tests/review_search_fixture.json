@@ -1,0 +1,41 @@
+{
+  "sets": [
+    {"key": "mine", "owner": "alice", "slug": "mine", "name": "Мої коти", "visibility": "private"},
+    {"key": "apub", "owner": "alice", "slug": "apub", "name": "apub", "visibility": "public"},
+    {"key": "bobs", "owner": "bob", "slug": "bobs", "name": "Bob's memes", "visibility": "public"},
+    {"key": "secret", "owner": "bob", "slug": "secret", "name": "secret", "visibility": "private"}
+  ],
+  "items": [
+    {"label": "skull", "set": "mine", "meta": {"name": "spooky", "emojis": ["💀"], "vibe": "dead", "tags": ["reaction"]}},
+    {"label": "bones", "set": "mine", "meta": {"name": "pirate flag", "emojis": ["☠️"], "tags": ["pirate"]}},
+    {"label": "bones_plain", "set": "mine", "meta": {"name": "danger", "emojis": ["☠"], "text": "DANGER\nkeep out"}},
+    {"label": "xray", "set": "mine", "meta": {"name": "doctor visit", "emojis": ["🩻"], "text": "x-ray"}},
+    {"label": "cap", "set": "mine", "meta": {"name": "hat guy", "emojis": ["👲"]}},
+    {"label": "joy", "set": "mine", "meta": {"name": "lmao", "emojis": ["😂"], "vibe": "happy", "tags": ["reaction"]}},
+    {"label": "thumb_tone", "set": "mine", "meta": {"name": "approve", "emojis": ["👍🏽"], "vibe": "happy"}},
+    {"label": "thumb", "set": "mine", "meta": {"name": "ok boomer", "emojis": ["👍"], "vibe": "sarcastic"}},
+    {"label": "thumbdown", "set": "mine", "meta": {"name": "nope", "emojis": ["👎🏿"], "vibe": "salty"}},
+    {"label": "heart_vs", "set": "mine", "meta": {"name": "love", "emojis": ["❤️"]}},
+    {"label": "heart", "set": "mine", "meta": {"name": "love too", "emojis": ["❤"]}},
+    {"label": "heartfire", "set": "mine", "meta": {"name": "burning love", "emojis": ["❤️‍🔥"]}},
+    {"label": "named_skull", "set": "mine", "meta": {"name": "Skull", "keywords": ["skull", "sklul"], "emojis": ["🐱"]}},
+    {"label": "text_thoughts", "set": "mine", "meta": {"name": "cat stare", "emojis": ["🐱"], "text": "NO THOUGHTS\nhead empty"}},
+    {"label": "name_thoughts", "set": "mine", "meta": {"name": "thoughts", "vibe": "sad"}},
+    {"label": "kw_thoughts", "set": "mine", "meta": {"name": "blank", "keywords": ["thoughts"]}},
+    {"label": "reversed", "set": "mine", "meta": {"name": "question", "text": "thoughts? no"}},
+    {"label": "ukr", "set": "mine", "meta": {"name": "кіт", "tags": ["кіт"], "text": "Кіт у мішку"}},
+    {"label": "apos_ascii", "set": "mine", "meta": {"name": "weekend one", "text": "п'ятниця"}},
+    {"label": "apos_2019", "set": "mine", "meta": {"name": "weekend two", "text": "п’ятниця"}},
+    {"label": "apos_02bc", "set": "mine", "meta": {"name": "weekend three", "text": "пʼятниця"}},
+    {"label": "mixed", "set": "mine", "meta": {"name": "bilingual", "text": "cat кіт meow\nмяу 😂"}},
+    {"label": "frog", "set": "mine", "meta": {"name": "frog", "emojis": ["🐸"], "vibe": "sad"}},
+    {"label": "fire", "set": "mine", "meta": {"name": "lit", "emojis": ["🔥"], "vibe": "sad"}},
+    {"label": "moai", "set": "mine", "meta": {"name": "stone face", "emojis": ["🗿"], "vibe": "sarcastic"}},
+    {"label": "long_text", "set": "mine", "meta": {"name": "wall", "text": "this is a very long caption about many things\nand somewhere deep in the middle of it there are\nsome thoughts about cats dogs frogs and ducks\nthat go on and on for a while longer still"}},
+    {"label": "emoji_text", "set": "mine", "meta": {"name": "caption", "text": "😂😂 lol"}},
+    {"label": "pub_skull", "set": "apub", "meta": {"name": "public skull", "emojis": ["💀"], "tags": ["reaction"], "text": "NO\nTHOUGHTS"}},
+    {"label": "gif", "set": "bobs", "gif": true, "meta": {"name": "dancing", "emojis": ["💀", "😂"], "vibe": "tired", "tags": ["nsfw"], "text": "when the code works"}},
+    {"label": "duck", "set": "bobs", "meta": {"name": "duck", "emojis": ["🦆"], "vibe": "happy", "text": "quack кря"}},
+    {"label": "secret", "set": "secret", "meta": {"name": "secret thoughts", "emojis": ["💀", "🦄"], "vibe": "hush", "tags": ["hidden"], "text": "no thoughts"}}
+  ]
+}
