@@ -3,6 +3,14 @@
 //! by polling. Failures are retried with exponential backoff up to
 //! [`MAX_ATTEMPTS`]; [`JobError::Fatal`] fails immediately.
 //!
+//! Order: higher `priority` first, then `run_after`, then age. Everything
+//! is queued at priority 0 except `recheck` jobs ([`RECHECK_PRIORITY`]),
+//! so an upload made during a large recheck goes ahead of it. With two or
+//! more workers, worker 0 only takes jobs of priority 0 and up
+//! ([`Lane::Interactive`]): a recheck never occupies every worker, so new
+//! uploads, imports and publishing start at once instead of waiting for a
+//! long recheck job to end.
+//!
 //! Adding a job kind: add a handler and a match arm in [`dispatch`]. Git,
 //! Telegram, Discord, Signal and WhatsApp job bodies live next to their
 //! services ([`crate::service::gitpack`], [`crate::service::telegram`],
@@ -17,7 +25,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use stickpile_api::{Job, JobKind, JobStatus};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -30,6 +38,8 @@ use crate::state::AppState;
 pub const MAX_ATTEMPTS: i64 = 3;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const BASE_BACKOFF_SECS: i64 = 10;
+/// Priority of `recheck` jobs, below every other kind (0).
+pub const RECHECK_PRIORITY: i64 = -10;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct JobRow {
@@ -42,14 +52,16 @@ pub struct JobRow {
     pub error: Option<String>,
     pub result: Option<String>,
     pub owner_id: Option<String>,
+    /// Higher first; see the module docs.
+    pub priority: i64,
     pub run_after: i64,
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
 }
 
-pub const JOB_COLUMNS: &str =
-    "id, kind, payload, subject, status, attempts, error, result, owner_id, run_after, created_at, started_at, finished_at";
+pub const JOB_COLUMNS: &str = "id, kind, payload, subject, status, attempts, error, result, owner_id, priority, \
+     run_after, created_at, started_at, finished_at";
 
 impl JobRow {
     pub fn kind(&self) -> Option<JobKind> {
@@ -134,22 +146,39 @@ pub async fn insert(
     subject: Option<String>,
     owner_id: Option<&str>,
 ) -> AppResult<JobRow> {
+    let mut conn = db.acquire().await?;
+    let id = insert_with(&mut conn, kind, &payload, subject.as_deref(), owner_id, 0).await?;
+    drop(conn);
+    Ok(get(db, &id).await?.expect("just inserted"))
+}
+
+/// Queue a job of `priority` on `conn` (inside a transaction, too); its id.
+/// Does not wake the workers.
+pub async fn insert_with(
+    conn: &mut SqliteConnection,
+    kind: JobKind,
+    payload: &Value,
+    subject: Option<&str>,
+    owner_id: Option<&str>,
+    priority: i64,
+) -> AppResult<String> {
     let id = new_id();
     let t = now();
     sqlx::query(
-        "INSERT INTO jobs (id, kind, payload, subject, status, owner_id, run_after, created_at) \
-         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)",
+        "INSERT INTO jobs (id, kind, payload, subject, status, owner_id, priority, run_after, created_at) \
+         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(enum_str(&kind))
     .bind(payload.to_string())
-    .bind(&subject)
+    .bind(subject)
     .bind(owner_id)
+    .bind(priority)
     .bind(t)
     .bind(t)
-    .execute(db)
+    .execute(&mut *conn)
     .await?;
-    Ok(get(db, &id).await?.expect("just inserted"))
+    Ok(id)
 }
 
 pub async fn get(db: &SqlitePool, id: &str) -> AppResult<Option<JobRow>> {
@@ -218,15 +247,46 @@ pub async fn purge_finished(db: &SqlitePool, max_age_secs: i64) -> AppResult<u64
     )
 }
 
-async fn claim(db: &SqlitePool) -> AppResult<Option<JobRow>> {
+/// Which jobs a worker takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    /// Every job, the highest priority first.
+    All,
+    /// Only jobs of priority 0 and up: uploads, imports, integrations, a
+    /// single item's re-enrichment. Never a recheck.
+    Interactive,
+}
+
+impl Lane {
+    /// The lane of worker `n` of `workers`: with two or more workers,
+    /// worker 0 is kept for interactive work; a single worker takes all.
+    pub fn for_worker(n: u32, workers: u32) -> Lane {
+        if n == 0 && workers > 1 {
+            Lane::Interactive
+        } else {
+            Lane::All
+        }
+    }
+
+    fn min_priority(self) -> i64 {
+        match self {
+            Lane::All => i64::MIN,
+            Lane::Interactive => 0,
+        }
+    }
+}
+
+async fn claim(db: &SqlitePool, lane: Lane) -> AppResult<Option<JobRow>> {
     let t = now();
     Ok(sqlx::query_as::<_, JobRow>(&format!(
         "UPDATE jobs SET status = 'running', started_at = ?, attempts = attempts + 1, error = NULL \
-         WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND run_after <= ? ORDER BY run_after, created_at, id LIMIT 1) \
+         WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND run_after <= ? AND priority >= ? \
+                     ORDER BY priority DESC, run_after, created_at, id LIMIT 1) \
          RETURNING {JOB_COLUMNS}"
     ))
     .bind(t)
     .bind(t)
+    .bind(lane.min_priority())
     .fetch_optional(db)
     .await?)
 }
@@ -320,21 +380,31 @@ async fn note_publish(db: &SqlitePool, job: &JobRow, status: JobStatus, result: 
 /// the queue deterministically). Returns how many jobs ran.
 pub async fn run_pending(state: &AppState) -> AppResult<usize> {
     let mut n = 0;
-    while let Some(job) = claim(&state.db).await? {
-        let outcome = dispatch(state, &job).await;
-        finish(&state.db, &job, outcome).await?;
+    while run_next(state, Lane::All).await?.is_some() {
         n += 1;
     }
     Ok(n)
 }
 
+/// Claim the next runnable job of `lane`, run it and record the outcome,
+/// as a worker would; the job as claimed, or `None` when there is none.
+pub async fn run_next(state: &AppState, lane: Lane) -> AppResult<Option<JobRow>> {
+    let Some(job) = claim(&state.db, lane).await? else {
+        return Ok(None);
+    };
+    let outcome = dispatch(state, &job).await;
+    finish(&state.db, &job, outcome).await?;
+    Ok(Some(job))
+}
+
 async fn worker(state: AppState, cancel: CancellationToken, n: u32) {
-    tracing::debug!("job worker {n} started");
+    let lane = Lane::for_worker(n, state.config.media.workers);
+    tracing::debug!("job worker {n} started ({lane:?})");
     loop {
         let notified = state.jobs_notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        match claim(&state.db).await {
+        match claim(&state.db, lane).await {
             Ok(Some(job)) => {
                 let outcome = tokio::select! {
                     o = dispatch(&state, &job) => o,
