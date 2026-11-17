@@ -192,6 +192,157 @@ pub struct EntryView {
     /// when [`Tiles::text`] is on).
     #[uniffi(default)]
     pub text: String,
+    /// Whether its file is on the device: [`OfflineMark::Available`] draws
+    /// a small mark, [`OfflineMark::Unavailable`] draws the tile dimmed
+    /// with a mark (the server is unreachable and the file is not here).
+    pub offline: OfflineMark,
+}
+
+/// What a tile shows about its file being on the device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OfflineMark {
+    None,
+    Available,
+    Unavailable,
+}
+
+impl From<stickpile_quick::offline::OfflineMark> for OfflineMark {
+    fn from(m: stickpile_quick::offline::OfflineMark) -> Self {
+        use stickpile_quick::offline::OfflineMark as M;
+        match m {
+            M::None => OfflineMark::None,
+            M::Available => OfflineMark::Available,
+            M::Unavailable => OfflineMark::Unavailable,
+        }
+    }
+}
+
+/// What an entry of the menu of a tile does ([`Popup::menu_choose`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MenuChoice {
+    Copy,
+    CopyFlipped,
+    Favorite,
+    Browser,
+    Keep,
+    Release,
+    OpenPack,
+    KeepPack,
+    ReleasePack,
+}
+
+impl From<stickpile_quick::offline::MenuAction> for MenuChoice {
+    fn from(a: stickpile_quick::offline::MenuAction) -> Self {
+        use stickpile_quick::offline::MenuAction as A;
+        match a {
+            A::Copy => MenuChoice::Copy,
+            A::CopyFlipped => MenuChoice::CopyFlipped,
+            A::Favorite => MenuChoice::Favorite,
+            A::Browser => MenuChoice::Browser,
+            A::Keep => MenuChoice::Keep,
+            A::Release => MenuChoice::Release,
+            A::OpenPack => MenuChoice::OpenPack,
+            A::KeepPack => MenuChoice::KeepPack,
+            A::ReleasePack => MenuChoice::ReleasePack,
+        }
+    }
+}
+
+impl From<MenuChoice> for stickpile_quick::offline::MenuAction {
+    fn from(c: MenuChoice) -> Self {
+        use stickpile_quick::offline::MenuAction as A;
+        match c {
+            MenuChoice::Copy => A::Copy,
+            MenuChoice::CopyFlipped => A::CopyFlipped,
+            MenuChoice::Favorite => A::Favorite,
+            MenuChoice::Browser => A::Browser,
+            MenuChoice::Keep => A::Keep,
+            MenuChoice::Release => A::Release,
+            MenuChoice::OpenPack => A::OpenPack,
+            MenuChoice::KeepPack => A::KeepPack,
+            MenuChoice::ReleasePack => A::ReleasePack,
+        }
+    }
+}
+
+/// One line of the menu of a tile.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct MenuEntryView {
+    pub label: String,
+    /// The key that does the same ("K", "gx"), drawn on the right; empty
+    /// for none.
+    pub keys: String,
+    /// `None`: a line that only says something (disabled).
+    pub action: Option<MenuChoice>,
+}
+
+/// The menu of a tile (a right click, Control-click or the Menu key): show
+/// it as an `NSMenu` at the cell, then [`Popup::menu_choose`] or
+/// [`Popup::menu_closed`].
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct MenuView {
+    /// The cell (of the grid shown) it belongs to.
+    pub index: u32,
+    pub entries: Vec<MenuEntryView>,
+}
+
+/// A question over the popup: a card with a title, a text and two buttons
+/// ([`Popup::confirm`]). While it is shown, Return or `y` answers yes and
+/// Escape, `n` or `q` no (the keys go to [`Popup::key`] as always).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ConfirmView {
+    pub title: String,
+    /// Paragraphs, "\n\n" between them.
+    pub body: String,
+    pub accept: String,
+    pub cancel: String,
+    /// The yes button deletes something: draw it red.
+    pub destructive: bool,
+    /// The keys, under the buttons.
+    pub hint: String,
+}
+
+/// The "On this device" block of the Settings page, drawn before the group
+/// [`SettingsView::offline_before`] names.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct OfflineView {
+    pub title: String,
+    /// The "Keep everything offline" switch ([`Popup::offline_keep_library`]).
+    pub library: bool,
+    pub library_label: String,
+    pub library_help: String,
+    /// "Kept offline: 120 files, 45.2 MB of 1.0 GB allowed."; empty before
+    /// it is known.
+    pub kept: String,
+    /// "Other cached files: 300, 12.1 MB (the cache size limit applies)."
+    pub other: String,
+    /// The downloader: "Downloading: 40 of 120 files, ..."; empty before its
+    /// first run (hide the line, the bar and its buttons).
+    pub state: String,
+    /// Draw the state as a problem (the limit reached, the disk full).
+    pub state_warning: bool,
+    /// The progress bar, 0..=1; `None`: no bar.
+    pub fraction: Option<f64>,
+    /// Show Pause ([`Popup::offline_pause`]), Resume, Cancel.
+    pub can_pause: bool,
+    pub can_resume: bool,
+    pub can_cancel: bool,
+    /// Failures and what the settings leave out, one per line; empty: none.
+    pub notes: String,
+    /// The last action's answer ("Cleared 12 files..."), or what the two
+    /// cache buttons do.
+    pub message: String,
+    pub message_error: bool,
+    /// "Remove kept files" has something to remove (else disabled).
+    pub can_remove: bool,
+    pub pause_label: String,
+    pub resume_label: String,
+    pub cancel_label: String,
+    pub cache_title: String,
+    pub clear_label: String,
+    pub clear_help: String,
+    pub remove_label: String,
+    pub remove_help: String,
 }
 
 /// One cell of the pack list.
@@ -203,6 +354,9 @@ pub struct PackView {
     pub name: String,
     /// "12 items · alice", translated.
     pub detail: String,
+    /// The pack is kept offline: a mark on its cover.
+    #[uniffi(default)]
+    pub kept: bool,
 }
 
 /// What the item tiles show besides the thumbnail.
@@ -215,6 +369,10 @@ pub struct Tiles {
     /// The words in the picture (`ui.show_text`, `zx`; off by default).
     #[uniffi(default)]
     pub text: bool,
+    /// The mark of what is on the device (`ui.show_offline`, `zo`); the
+    /// entries carry it already ([`EntryView::offline`]).
+    #[uniffi(default)]
+    pub offline: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -356,6 +514,13 @@ pub struct SettingsView {
     pub groups: Vec<SettingsGroup>,
     /// The last change could not be saved.
     pub save_error: Option<String>,
+    /// The "On this device" block; `None`: none (no session).
+    #[uniffi(default)]
+    pub offline: Option<OfflineView>,
+    /// The index in `groups` of the group the block goes before (the
+    /// "Offline" group); `None`: after the last.
+    #[uniffi(default)]
+    pub offline_before: Option<u32>,
 }
 
 /// Everything the window shows. Sent whole on every change, except the two
@@ -412,6 +577,12 @@ pub struct ViewState {
     pub footer: Footer,
     pub me: MeView,
     pub settings: SettingsView,
+    /// The menu of a tile to show; `None`: none (close one that is open).
+    #[uniffi(default)]
+    pub menu: Option<MenuView>,
+    /// The question to draw over the popup; `None`: none.
+    #[uniffi(default)]
+    pub confirm: Option<ConfirmView>,
 }
 
 /// Padding around a thumbnail in a grid cell, in points.
@@ -716,6 +887,58 @@ impl Popup {
 
     pub fn reset_setting(&self, key: String) {
         self.driver.reset_setting(key);
+    }
+
+    // -- keeping offline (docs/offline.md) ----------------------------------------
+
+    /// A right click (or Control-click) on a grid cell, or the Menu key
+    /// (`None`: the selected cell). The menu comes in a render
+    /// ([`ViewState::menu`]).
+    pub fn open_menu(&self, index: Option<u32>) {
+        self.driver.open_menu(index);
+    }
+
+    /// An entry of [`ViewState::menu`] was chosen.
+    pub fn menu_choose(&self, action: MenuChoice) {
+        self.driver.menu_choose(action);
+    }
+
+    /// The menu closed without a choice.
+    pub fn menu_closed(&self) {
+        self.driver.menu_closed();
+    }
+
+    /// A button of [`ViewState::confirm`]: `true` yes.
+    pub fn confirm(&self, yes: bool) {
+        self.driver.confirm(yes);
+    }
+
+    /// The "Keep everything offline" switch of the Settings page (keeping
+    /// asks first; the switch follows [`OfflineView::library`]).
+    pub fn offline_keep_library(&self, keep: bool) {
+        self.driver.offline_keep_library(keep);
+    }
+
+    pub fn offline_pause(&self) {
+        self.driver.offline_pause();
+    }
+
+    pub fn offline_resume(&self) {
+        self.driver.offline_resume();
+    }
+
+    pub fn offline_cancel(&self) {
+        self.driver.offline_cancel();
+    }
+
+    /// "Clear cache": the files that are not kept.
+    pub fn clear_cache(&self) {
+        self.driver.clear_cache();
+    }
+
+    /// "Remove kept files" (asks first).
+    pub fn remove_kept_files(&self) {
+        self.driver.remove_kept_files();
     }
 }
 

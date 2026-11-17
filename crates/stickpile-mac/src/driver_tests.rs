@@ -587,3 +587,246 @@ fn emoji_offers_carry_their_names() {
     assert_eq!(line.labels.len(), line.words.len());
     assert_eq!(line.chosen, None, "a name is searched as typed");
 }
+
+// -- keeping offline (docs/offline.md) ------------------------------------------------
+
+fn png_bytes(rgb: [u8; 3]) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(8, 8, image::Rgba([rgb[0], rgb[1], rgb[2], 255]))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+/// alice's "Cats" (grumpy cat, sleepy cat) and "Dogs" (good dog).
+fn kennel() -> MockServer {
+    let server = MockServer::start();
+    {
+        let mut st = server.state();
+        let cats = st.add_set("alice", "cats", "Cats", Visibility::Public);
+        st.add_item(&cats.id, "grumpy cat", &["cat"], png_bytes([1, 2, 3]));
+        st.add_item(&cats.id, "sleepy cat", &["cat"], png_bytes([4, 5, 6]));
+        let dogs = st.add_set("alice", "dogs", "Dogs", Visibility::Public);
+        st.add_item(&dogs.id, "good dog", &["dog"], png_bytes([7, 8, 9]));
+    }
+    server
+}
+
+fn shift_key(code: u16, chars: &str) -> KeyInput {
+    KeyInput {
+        key_code: code,
+        characters: chars.into(),
+        latin: None,
+        command: false,
+        control: false,
+        option: false,
+        shift: true,
+    }
+}
+
+fn status(h: &Harness) -> String {
+    h.last().footer.status
+}
+
+fn marks(s: &Seen) -> Vec<(String, OfflineMark)> {
+    s.entries.iter().map(|e| (e.name.clone(), e.offline)).collect()
+}
+
+fn block(s: &Seen) -> Option<&OfflineView> {
+    s.renders.last().and_then(|v| v.settings.offline.as_ref())
+}
+
+/// `K` keeps the selected sticker, the downloader fetches it, and its
+/// tile gets the mark; the menu says why it is kept and releases it.
+#[test]
+fn k_keeps_a_sticker_and_the_menu_releases_it() {
+    let server = kennel();
+    let h = Harness::against(&server);
+    h.driver.toggle(None, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("the cats", |s| s.entries.len() == 2);
+    assert!(h.last().tiles.offline, "the marks are on by default");
+    assert!(h.key(53, "\u{1b}"));
+    assert!(h.driver.key(shift_key(40, "K")));
+    h.pump_until("the keep", |s| {
+        s.renders
+            .last()
+            .is_some_and(|v| v.footer.status.ends_with("is kept offline"))
+    });
+    let kept = h.last().selected.unwrap() as usize;
+    let name = h.ui.seen.lock().unwrap().entries[kept].name.clone();
+    assert_eq!(status(&h), format!("{name} is kept offline"));
+    h.pump_until("its file on the device, marked", |s| {
+        s.entries
+            .iter()
+            .any(|e| e.name == name && e.offline == OfflineMark::Available)
+    });
+
+    h.driver.open_menu(None);
+    h.pump_until("the menu", |s| s.renders.last().is_some_and(|v| v.menu.is_some()));
+    let menu = h.last().menu.unwrap();
+    assert_eq!(menu.index as usize, kept);
+    let labels: Vec<(&str, Option<MenuChoice>)> = menu.entries.iter().map(|e| (e.label.as_str(), e.action)).collect();
+    assert!(labels.contains(&("Copy", Some(MenuChoice::Copy))), "{labels:?}");
+    assert!(
+        labels.contains(&("Stop keeping offline", Some(MenuChoice::Release))),
+        "{labels:?}"
+    );
+    assert!(labels.contains(&("Available offline", None)), "{labels:?}");
+    let release = menu
+        .entries
+        .iter()
+        .find(|e| e.action == Some(MenuChoice::Release))
+        .unwrap();
+    assert_eq!(release.keys, "K");
+    h.driver.menu_choose(MenuChoice::Release);
+    assert!(h.last().menu.is_none());
+    h.pump_until("the release", |s| {
+        s.renders
+            .last()
+            .is_some_and(|v| v.footer.status.ends_with("is no longer kept offline"))
+    });
+
+    // zo hides the marks and saves ui.show_offline.
+    assert!(h.key(6, "z"));
+    assert!(h.key(31, "o"));
+    assert!(!h.last().tiles.offline);
+    h.pump_until("the marks gone", |s| {
+        s.entries.iter().all(|e| e.offline == OfflineMark::None)
+    });
+    let config = std::fs::read_to_string(&h.config).unwrap();
+    assert!(config.contains("show_offline = false"), "{config}");
+}
+
+/// The Settings page's block: usage and the downloader, the library switch
+/// (after the question), clear cache, "Remove kept files" (after the
+/// question).
+#[test]
+fn the_settings_block_keeps_the_library_and_removes_the_kept_files() {
+    let server = kennel();
+    let h = Harness::against(&server);
+    h.driver.open(None, Some(TabId::Settings));
+    h.pump_until("the block with the usage", |s| {
+        block(s).is_some_and(|o| !o.kept.is_empty())
+    });
+    let v = h.last();
+    let before = v.settings.offline_before.unwrap() as usize;
+    assert_eq!(v.settings.groups[before].title, "Offline");
+    let o = v.settings.offline.unwrap();
+    assert!(!o.library);
+    assert_eq!(o.library_label, "Keep everything offline");
+    assert!(o.kept.ends_with("of 1.1 GB allowed."), "{}", o.kept);
+
+    // The sync on opening ran the downloader: the thumbnails are kept.
+    h.pump_until("a run of the downloader", |s| {
+        block(s).is_some_and(|o| o.state.starts_with("Up to date"))
+    });
+
+    h.driver.offline_keep_library(true);
+    h.pump_until("the question", |s| {
+        s.renders.last().is_some_and(|v| v.confirm.is_some())
+    });
+    let c = h.last().confirm.unwrap();
+    assert_eq!(c.title, "Keep the whole library offline?");
+    assert!(c.body.starts_with("3 stickers, "), "{}", c.body);
+    assert!(!c.destructive);
+    assert!(!h.last().settings.offline.unwrap().library, "not before the yes");
+    h.driver.confirm(true);
+    h.pump_until("the library kept", |s| {
+        s.renders.last().is_some_and(|v| {
+            v.footer.status == "The whole library is kept offline"
+                && v.settings.offline.as_ref().is_some_and(|o| o.library)
+        })
+    });
+    h.pump_until("everything downloaded", |s| {
+        block(s).is_some_and(|o| o.state.starts_with("Up to date") && o.kept.starts_with("Kept offline: 6 files"))
+    });
+
+    // Clear cache leaves the kept files and says so.
+    h.driver.clear_cache();
+    h.pump_until("the cache cleared", |s| {
+        block(s).is_some_and(|o| o.message.starts_with("Cleared ") && o.message.ends_with("6 kept files stayed."))
+    });
+
+    h.driver.remove_kept_files();
+    let c = h.last().confirm.expect("asked first");
+    assert!(c.destructive);
+    assert!(c.body.starts_with("6 kept files"), "{}", c.body);
+    h.driver.confirm(true);
+    h.pump_until("the kept files removed", |s| {
+        s.renders
+            .last()
+            .is_some_and(|v| v.footer.status.starts_with("Removed 6 kept files"))
+    });
+    assert!(!h.last().settings.offline.unwrap().library);
+}
+
+/// With the server gone, a tile whose file is not on the device is
+/// dimmed, and choosing it says why it does not copy; a kept one copies.
+#[test]
+fn unreachable_dims_what_is_not_here_and_explains_it() {
+    let mut server = kennel();
+    let h = Harness::against(&server);
+    h.driver.toggle(None, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("the cats", |s| s.entries.len() == 2);
+    assert!(h.key(53, "\u{1b}"));
+    assert!(h.driver.key(shift_key(40, "K")));
+    let kept = h.ui.seen.lock().unwrap().entries[0].name.clone();
+    h.pump_until("the kept cat on the device", |s| {
+        s.entries
+            .iter()
+            .any(|e| e.name == kept && e.offline == OfflineMark::Available)
+    });
+    h.driver.hide();
+
+    server.kill();
+    h.driver.toggle(None, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("the other cat dimmed", |s| {
+        let m = marks(s);
+        m.len() == 2
+            && m.contains(&(kept.clone(), OfflineMark::Available))
+            && m.iter().any(|(_, o)| *o == OfflineMark::Unavailable)
+    });
+    let (other, other_name, tooltip) = {
+        let s = h.ui.seen.lock().unwrap();
+        let i = s
+            .entries
+            .iter()
+            .position(|e| e.offline == OfflineMark::Unavailable)
+            .unwrap();
+        (i, s.entries[i].name.clone(), s.entries[i].tooltip.clone())
+    };
+    assert!(
+        tooltip.contains("Not on this device, and the server is unreachable"),
+        "{tooltip}"
+    );
+
+    let copies = h.ui.seen.lock().unwrap().clipboard.len();
+    h.driver.activate(other as u32);
+    h.pump_until("why it does not copy", |s| {
+        s.renders
+            .last()
+            .is_some_and(|v| v.footer.status.contains("is not on this device"))
+    });
+    assert_eq!(
+        status(&h),
+        format!(
+            "Copy failed: {other_name} is not on this device and the server is unreachable; keep it offline (K) to copy it without the server"
+        )
+    );
+    assert_eq!(h.last().footer.level, Level::Error);
+    assert_eq!(h.ui.seen.lock().unwrap().clipboard.len(), copies);
+
+    let kept_at =
+        h.ui.seen
+            .lock()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == kept)
+            .unwrap();
+    h.driver.activate(kept_at as u32);
+    h.pump_until("the kept cat copied", |s| s.clipboard.len() == copies + 1);
+}

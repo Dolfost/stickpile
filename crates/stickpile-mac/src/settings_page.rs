@@ -52,12 +52,14 @@ impl SettingsPage {
                 warnings: Vec::new(),
                 groups: Vec::new(),
                 save_error: self.save_error.clone(),
+                offline: None,
+                offline_before: None,
             };
         };
         let home = std::env::var_os("HOME").map(PathBuf::from);
         let reason = pages::lock_reason(config_path);
         let schema = settings::settings_schema();
-        let groups = GROUPS
+        let groups: Vec<(&str, SettingsGroup)> = GROUPS
             .iter()
             .map(|group| SettingsGroup {
                 title: t_dyn(group),
@@ -97,15 +99,21 @@ impl SettingsPage {
                     })
                     .collect(),
             })
-            .filter(|g| !g.rows.is_empty())
+            .zip(GROUPS.iter().copied())
+            .map(|(g, key)| (key, g))
+            .filter(|(_, g)| !g.rows.is_empty())
             .collect();
+        // The "On this device" block goes before the "Offline" group.
+        let offline_before = groups.iter().position(|(key, _)| *key == "Offline").map(|i| i as u32);
         SettingsView {
             error: self.error.clone(),
             note: pages::save_note(config_path, &layered.write_path, home.as_deref()),
             path: layered.write_path.display().to_string(),
             warnings: layered.warnings.clone(),
-            groups,
+            groups: groups.into_iter().map(|(_, g)| g).collect(),
             save_error: self.save_error.clone(),
+            offline: None,
+            offline_before,
         }
     }
 }
@@ -153,5 +161,9 @@ mod tests {
         assert!(rows
             .iter()
             .any(|r| matches!(&r.kind, SettingKind::Choice { options } if !options.is_empty())));
+        // The "On this device" block goes before the "Offline" group.
+        let before = v.offline_before.expect("an Offline group") as usize;
+        assert_eq!(v.groups[before].title, "Offline");
+        assert!(v.groups[before].rows.iter().any(|r| r.key == "offline.max_mb"));
     }
 }

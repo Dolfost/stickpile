@@ -18,11 +18,13 @@ use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_desktop::backend::{self, Backend, BoxFut, CoreBackend, Credentials, LoginError, Profile};
 use stickpile_desktop::demo::DemoBackend;
+use stickpile_desktop::offline::{remove_numbers, Downloads, Panel, PanelView};
 use stickpile_desktop::{glue, pages, paste, sync};
 use stickpile_i18n::global::{t, tf, tp};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::{FocusBackend, WindowInfo};
 use stickpile_quick::model::{self, Command, Event, HelpPage, Model, OpenInfo, StickerMode};
+use stickpile_quick::offline::KeepScope;
 use stickpile_quick::{Mode, Tab, View, HELP, SYNTAX};
 
 use crate::bridge::*;
@@ -85,6 +87,11 @@ struct State {
     /// The app the popup was last opened over (its bundle id), to paste
     /// into after a pick.
     opened_over: Option<String>,
+    /// Keeping offline: the downloader's runs and the Settings block.
+    downloads: Downloads,
+    panel: Panel,
+    /// The reachability last told to the model.
+    reach_told: Option<bool>,
 }
 
 pub struct Driver {
@@ -188,6 +195,9 @@ impl Driver {
             settings: SettingsPage::default(),
             sent_revision: None,
             opened_over: None,
+            downloads: Downloads::default(),
+            panel: Panel::default(),
+            reach_told: None,
             cfg,
         };
         Arc::new_cyclic(|weak| Driver {
@@ -212,8 +222,10 @@ impl Driver {
             self.open_session(false);
         }
         self.start_sync_timer();
+        self.watch_offline();
         self.render();
         self.refresh_account_lang();
+        self.refresh_keeps();
     }
 
     // -- background work ------------------------------------------------------------
@@ -303,6 +315,7 @@ impl Driver {
         self.spawn(request(b), move |d, out| {
             let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             d.dispatch(event(outcome));
+            d.tell_reachable();
         });
     }
 
@@ -553,7 +566,10 @@ impl Driver {
         };
         match shown {
             Some(Tab::Me) => self.load_profile(),
-            Some(Tab::Settings) => self.reload_settings(),
+            Some(Tab::Settings) => {
+                self.reload_settings();
+                self.refresh_usage();
+            }
             _ => {}
         }
     }
@@ -682,13 +698,273 @@ impl Driver {
                     d.dispatch(Event::KeyTimeout { seq })
                 });
             }
-            // Keeping offline: the backend does not run it yet.
-            Command::CheckOffline { .. }
-            | Command::LoadKeptReasons { .. }
-            | Command::EstimateKeep { .. }
-            | Command::SetKeep { .. }
-            | Command::RemoveKept => {}
+            Command::CheckOffline {
+                items,
+                target,
+                sticker,
+                generation,
+            } => self.answer(
+                move |b| b.offline_available(items, target, sticker),
+                move |outcome| Event::OfflineChecked { generation, outcome },
+            ),
+            Command::LoadKeptReasons { item } => {
+                let item_id = item.id.clone();
+                self.answer(
+                    move |b| b.offline_reasons(*item),
+                    move |outcome| Event::KeptReasons { item_id, outcome },
+                )
+            }
+            Command::EstimateKeep { scope } => {
+                let s = scope.clone();
+                self.answer(
+                    move |b| b.offline_estimate(s),
+                    move |outcome| Event::Estimated { scope, outcome },
+                )
+            }
+            Command::SetKeep { scope, keep } => self.set_keep(scope, keep),
+            Command::RemoveKept => {
+                let Some(b) = self.backend() else {
+                    self.dispatch(Event::KeptRemoved(Err(t("not connected").into())));
+                    return;
+                };
+                self.spawn(b.offline_remove_all(), |d, out| {
+                    let outcome = out
+                        .unwrap_or_else(|| Err(t("internal error (see log)").into()))
+                        .map(|r| (r.removed_files as u64, r.freed_bytes));
+                    d.lock().panel.message = None;
+                    d.dispatch(Event::KeptRemoved(outcome));
+                    d.refresh_usage();
+                });
+            }
         }
+    }
+
+    // -- keeping offline -------------------------------------------------------------------
+
+    /// Keep or stop keeping; after a keep the downloader runs.
+    fn set_keep(&self, scope: KeepScope, keep: bool) {
+        let Some(b) = self.backend() else {
+            self.dispatch(Event::KeepDone {
+                scope,
+                keep,
+                outcome: Err(t("not connected").into()),
+            });
+            return;
+        };
+        let s = scope.clone();
+        self.spawn(b.offline_set(s, keep), move |d, out| {
+            let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
+            let ok = outcome.is_ok();
+            d.dispatch(Event::KeepDone { scope, keep, outcome });
+            if ok && keep {
+                d.run_offline();
+            }
+            d.refresh_usage();
+        });
+    }
+
+    /// Tell the model what is kept (another process, the CLI, may keep too).
+    fn refresh_keeps(&self) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.offline_keeps(), |d, out| match out {
+            Some(Ok(keeps)) => d.dispatch(Event::OfflineKeeps(keeps)),
+            Some(Err(e)) => tracing::debug!("what is kept: {e}"),
+            None => {}
+        });
+    }
+
+    /// Run the downloader, unless one runs (then once more after it).
+    fn run_offline(&self) {
+        if self.backend().is_none() || !self.lock().downloads.want() {
+            return;
+        }
+        self.start_run();
+    }
+
+    /// One run of the downloader ([`Downloads`] says when).
+    fn start_run(&self) {
+        let Some(b) = self.backend() else {
+            self.lock().downloads.finished(None);
+            return;
+        };
+        let control = {
+            let mut s = self.lock();
+            s.panel.running = true;
+            s.downloads.control.clone()
+        };
+        self.render();
+        self.spawn(b.offline_run(control), |d, out| {
+            let outcome = match out {
+                Some(Ok(o)) => {
+                    tracing::info!(
+                        "offline: {:?}, {} of {} files on this device",
+                        o.end,
+                        o.status.files_done,
+                        o.status.files_total
+                    );
+                    Some(o)
+                }
+                Some(Err(e)) => {
+                    tracing::warn!("offline downloads: {e}");
+                    None
+                }
+                None => None,
+            };
+            let again = {
+                let mut s = d.lock();
+                let again = s.downloads.finished(outcome.as_ref());
+                s.panel.running = again;
+                if let Some(o) = &outcome {
+                    s.panel.status = Some(o.status.clone());
+                }
+                again
+            };
+            d.dispatch(Event::OfflineFiles);
+            d.tell_reachable();
+            d.refresh_usage();
+            if again {
+                d.start_run();
+            }
+        });
+    }
+
+    /// Follow the downloader's status on the main thread: the Settings
+    /// block, and the marks as files arrive (a few times a second at most).
+    fn watch_offline(&self) {
+        let mut rx = self.lock().downloads.control.subscribe();
+        let weak = self.weak.clone();
+        let ui = self.ui.clone();
+        self.rt.spawn(async move {
+            while rx.changed().await.is_ok() {
+                let status = rx.borrow_and_update().clone();
+                let weak = weak.clone();
+                ui.post(MainTask::new(move || {
+                    if let Some(d) = weak.upgrade() {
+                        d.offline_status(status);
+                    }
+                }));
+                tokio::time::sleep(Duration::from_millis(400)).await;
+            }
+        });
+    }
+
+    fn offline_status(&self, status: stickpile_core::offline::OfflineStatus) {
+        let arrived = {
+            let mut s = self.lock();
+            let arrived = s
+                .panel
+                .status
+                .as_ref()
+                .is_none_or(|old| old.files_done != status.files_done);
+            s.panel.paused = s.downloads.control.is_paused();
+            s.panel.status = Some(status);
+            arrived
+        };
+        if arrived {
+            self.dispatch(Event::OfflineFiles);
+        } else {
+            self.render();
+        }
+    }
+
+    /// Tell the model whether the server answers, when that changed.
+    fn tell_reachable(&self) {
+        let Some(r) = self.backend().and_then(|b| b.reachable()) else {
+            return;
+        };
+        let changed = self.lock().reach_told.replace(r) != Some(r);
+        if changed {
+            self.dispatch(Event::Reachable(r));
+        }
+    }
+
+    /// What the Settings block says: the usage, and between runs what the
+    /// plan says.
+    fn refresh_usage(&self) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.clone().offline_usage(), |d, out| {
+            match out {
+                Some(Ok(u)) => d.lock().panel.usage = Some(u),
+                Some(Err(e)) => tracing::debug!("offline usage: {e}"),
+                None => {}
+            }
+            d.render();
+        });
+        self.spawn(b.offline_plan_status(), |d, out| {
+            match out {
+                Some(Ok(s)) => d.lock().panel.planned(s),
+                Some(Err(e)) => tracing::debug!("offline plan: {e}"),
+                None => {}
+            }
+            d.render();
+        });
+    }
+
+    pub fn open_menu(&self, index: Option<u32>) {
+        self.dispatch(Event::OpenMenu(index.map(|i| i as usize)));
+    }
+
+    pub fn menu_choose(&self, action: MenuChoice) {
+        self.dispatch(Event::MenuChosen(action.into()));
+    }
+
+    pub fn menu_closed(&self) {
+        if self.lock().model.menu().is_some() {
+            self.dispatch(Event::CloseMenu);
+        }
+    }
+
+    pub fn confirm(&self, yes: bool) {
+        self.dispatch(Event::Confirm(yes));
+    }
+
+    pub fn offline_keep_library(&self, keep: bool) {
+        if keep != self.lock().model.library_kept() {
+            self.dispatch(Event::Keep {
+                scope: KeepScope::Library,
+                keep,
+            });
+        } else {
+            self.render();
+        }
+    }
+
+    pub fn offline_pause(&self) {
+        self.lock().downloads.control.pause();
+        self.render();
+    }
+
+    pub fn offline_resume(&self) {
+        self.lock().downloads.control.resume();
+        self.run_offline();
+        self.render();
+    }
+
+    pub fn offline_cancel(&self) {
+        let control = self.lock().downloads.control.clone();
+        // A paused run waits: it has to go on to see the cancel.
+        control.cancel();
+        control.resume();
+        self.render();
+    }
+
+    pub fn clear_cache(&self) {
+        let Some(b) = self.backend() else { return };
+        self.spawn(b.clear_cache(), |d, out| {
+            match out {
+                Some(Ok(r)) => d.lock().panel.cleared(&r),
+                Some(Err(e)) => d.lock().panel.failed(e),
+                None => {}
+            }
+            d.lock().thumbs.retain(|_, t| *t == Thumb::Loading);
+            d.dispatch(Event::OfflineFiles);
+            d.refresh_usage();
+        });
+    }
+
+    pub fn remove_kept_files(&self) {
+        let (files, bytes) = remove_numbers(self.lock().panel.usage.as_ref());
+        self.dispatch(Event::AskRemoveKept { files, bytes });
     }
 
     fn present(&self) {
@@ -710,6 +986,7 @@ impl Driver {
         }
         self.ui.present();
         self.maybe_sync();
+        self.refresh_keeps();
     }
 
     // -- rendering -------------------------------------------------------------------------
@@ -765,6 +1042,7 @@ impl Driver {
                     } else {
                         String::new()
                     },
+                    offline: e.offline.into(),
                 })
                 .collect()
         });
@@ -776,6 +1054,7 @@ impl Driver {
                     cover_key: cover_key(set),
                     name: set.name.clone(),
                     detail: pages::item_count(set.item_count),
+                    kept: m.pack_kept(&set.id),
                 })
                 .collect()
         });
@@ -866,6 +1145,7 @@ impl Driver {
                 tags: tiles.tags,
                 vibe: tiles.vibe,
                 text: tiles.text,
+                offline: tiles.offline,
             },
             help: m.help_page().map(|page| help(page, m.config().counts)),
             help_hint: match m.help_page() {
@@ -881,7 +1161,34 @@ impl Driver {
             }),
             footer,
             me: s.me.view(),
-            settings: s.settings.view(&s.config_path),
+            settings: {
+                let mut v = s.settings.view(&s.config_path);
+                if s.backend.is_some() {
+                    s.panel.paused = s.downloads.control.is_paused();
+                    v.offline = Some(offline_view(&s.panel.view(m.library_kept())));
+                }
+                v
+            },
+            menu: m.menu().map(|menu| MenuView {
+                index: menu.index as u32,
+                entries: menu
+                    .entries
+                    .into_iter()
+                    .map(|e| MenuEntryView {
+                        label: e.label,
+                        keys: mac_key_names(&e.keys),
+                        action: e.action.map(MenuChoice::from),
+                    })
+                    .collect(),
+            }),
+            confirm: m.confirm().map(|c| ConfirmView {
+                title: c.title,
+                body: c.body,
+                accept: c.accept,
+                cancel: c.cancel,
+                destructive: c.destructive,
+                hint: mac_key_names(&c.hint),
+            }),
         }
     }
 
@@ -985,9 +1292,14 @@ impl Driver {
             s.thumbs.retain(|_, t| *t != Thumb::Failed);
             s.covers.clear();
             s.sync = sync::SyncPolicy::default();
+            // What was kept and downloaded belonged to the old account.
+            s.downloads.forget();
+            s.panel = Panel::default();
+            s.reach_told = None;
         }
         self.dispatch(Event::Reload);
         self.maybe_sync();
+        self.refresh_keeps();
     }
 
     pub fn set_setting(&self, key: String, value: SettingValue) {
@@ -1096,6 +1408,14 @@ impl Driver {
             self.account_changed();
             if self.lock().model.tab() == Tab::Me {
                 self.load_profile();
+            }
+        }
+        // The running session takes the new options; what they want more
+        // is downloaded, what they no longer want is released.
+        if old.offline != new.offline {
+            if let Some(b) = self.backend() {
+                b.set_offline_options(new.offline.clone());
+                self.run_offline();
             }
         }
     }
@@ -1212,7 +1532,10 @@ impl Driver {
                     d.paste_after_pick();
                     d.record(item, prepared);
                 }
-                Err(error) => d.dispatch(Event::CopyFailed { item_id: id, error }),
+                Err(error) => {
+                    d.dispatch(Event::CopyFailed { item_id: id, error });
+                    d.tell_reachable();
+                }
             }
         });
     }
@@ -1279,6 +1602,12 @@ impl Driver {
             if matches!(out, Some(Ok(true))) {
                 d.dispatch(Event::LibraryChanged);
             }
+            d.tell_reachable();
+            // After each successful sync: what is kept and missing.
+            if ok {
+                d.refresh_keeps();
+                d.run_offline();
+            }
         });
     }
 
@@ -1299,6 +1628,46 @@ fn effective_lang(cfg: &ClientConfig, account: Option<Lang>, system: &[String]) 
             .ok()
             .or_else(|| (k == "LANGUAGE" && !preferred.is_empty()).then(|| preferred.clone()))
     })
+}
+
+/// The "On this device" block of the Settings page, with its labels.
+fn offline_view(v: &PanelView) -> OfflineView {
+    let notes: Vec<&str> = [v.failures.as_str(), v.skipped.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
+    OfflineView {
+        title: t("On this device").into(),
+        library: v.library,
+        library_label: t("Keep everything offline").into(),
+        library_help: t(
+            "Every sticker you can see, now and later, within the limit of the Offline settings below. Asks first, with what it takes.",
+        )
+        .into(),
+        kept: v.kept.clone(),
+        other: v.other.clone(),
+        state: v.state.clone(),
+        state_warning: v.state_warning,
+        fraction: v.fraction,
+        can_pause: v.can_pause,
+        can_resume: v.can_resume,
+        can_cancel: v.can_cancel,
+        notes: notes.join("\n"),
+        message: v
+            .message
+            .clone()
+            .unwrap_or_else(|| t("Clearing leaves the kept files; removing them asks first.").into()),
+        message_error: v.message_error,
+        can_remove: v.can_remove,
+        pause_label: t("Pause").into(),
+        resume_label: t("Resume").into(),
+        cancel_label: t("Cancel").into(),
+        cache_title: t("Cached files").into(),
+        clear_label: t("Clear cache").into(),
+        clear_help: t("Delete the thumbnails and copied files that are not kept; kept files stay").into(),
+        remove_label: t("Remove kept files").into(),
+        remove_help: t("Delete every kept file and forget what to keep (asks first)").into(),
+    }
 }
 
 /// The key help, translated, with Mac key names.
