@@ -253,6 +253,129 @@ fn emoji_names_lookup() {
     assert!(emoji_names::names("🦖").is_none());
 }
 
+fn glyphs(name: &str) -> Vec<&'static str> {
+    emoji_names::by_name(name).into_iter().map(|e| e.glyph).collect()
+}
+
+#[test]
+fn emoji_names_select_emojis() {
+    assert_eq!(
+        glyphs("skull"),
+        ["💀", "☠️", "🩻", "👲"],
+        "whole words first (x-ray has the keyword skull), then skullcap"
+    );
+    assert_eq!(glyphs("SKULL"), glyphs("skull"), "case is ignored");
+    assert_eq!(
+        glyphs("skul"),
+        ["💀", "☠️", "👲", "🩻"],
+        "the start of a word: the curated emojis first, then Unicode's order"
+    );
+    assert_eq!(glyphs("sklul"), ["💀", "☠️", "🩻"], "a typo selects whole words");
+    assert_eq!(glyphs("skulll"), ["💀", "☠️", "🩻"]);
+    assert!(glyphs("skl").is_empty(), "no typo below 4 letters");
+    assert!(glyphs("xqzv").is_empty());
+    assert!(glyphs("череп").is_empty(), "English names only");
+    assert_eq!(glyphs("lol")[0], "😂", "the curated words, most used first");
+    assert_eq!(glyphs("thumbs_up"), ["👍"], "words in a row");
+    assert_eq!(glyphs("thumbs-u"), ["👍"], "the last one cut short");
+    assert_eq!(glyphs("thumbs"), ["👍", "👎"]);
+    assert_eq!(glyphs("thumbs_pu"), ["👍"], "a typo in one of the words");
+    assert!(glyphs("t-rex").contains(&"🦖"));
+    assert!(glyphs("pinata").contains(&"🪅"), "accents are ignored (piñata)");
+    assert!(glyphs("ukraine").contains(&"🇺🇦"));
+    for v in ["😂", "", "-", "_", "100", "Ⓜ", "a1", "cat!"] {
+        assert!(!emoji_names::is_name(v), "{v:?}");
+        assert!(glyphs(v).is_empty(), "{v:?}");
+    }
+    for v in ["skull", "Skull", "thumbs_up", "t-rex", "череп", "ç"] {
+        assert!(emoji_names::is_name(v), "{v:?}");
+    }
+}
+
+#[test]
+fn emoji_short_names() {
+    assert_eq!(emoji_names::short_name("💀"), Some("skull"));
+    assert_eq!(emoji_names::short_name("☠️"), Some("skull and crossbones"));
+    assert_eq!(
+        emoji_names::short_name("☠"),
+        Some("skull and crossbones"),
+        "no selector"
+    );
+    assert_eq!(emoji_names::short_name("👍🏽"), Some("thumbs up"), "any skin tone");
+    assert_eq!(emoji_names::short_name("👨🏽\u{200d}💻"), Some("man technologist"));
+    assert_eq!(emoji_names::short_name("👩\u{200d}🦰"), Some("woman: red hair"));
+    assert_eq!(emoji_names::short_name("word"), None);
+    assert_eq!(emoji_names::find("☠").map(|e| e.glyph), Some("☠️"), "fully qualified");
+    assert_eq!(emoji_names::key("👍🏽"), emoji_names::key("👍"));
+}
+
+/// The slang of the curated vocabulary names emojis too (see also
+/// `emoji_names::tests`).
+#[test]
+fn emoji_names_know_the_slang() {
+    assert!(glyphs("sus").contains(&"🤨"));
+    assert!(glyphs("idk").contains(&"🤷"));
+    assert!(
+        glyphs("idk").contains(&"🤷\u{200d}♂\u{fe0f}"),
+        "a ZWJ sequence gets its first emoji's"
+    );
+    assert_eq!(glyphs("yeehaw"), ["🤠"]);
+}
+
+#[test]
+fn emoji_names_filter() {
+    let ix = index([
+        with("skull", |d| d.emojis = strs(&["💀"])),
+        with("bones", |d| d.emojis = strs(&["☠️"])),
+        with("bones-plain", |d| d.emojis = strs(&["☠"])),
+        with("joy", |d| d.emojis = strs(&["😂"])),
+        with("thumb", |d| d.emojis = strs(&["👍🏽"])),
+        with("named-skull", |d| {
+            d.name = "Skull".into();
+            d.keywords = strs(&["skull", "sklul"]);
+            d.emojis = strs(&["🐱"]);
+        }),
+    ]);
+    let v = alice();
+    let skulls = ["bones", "bones-plain", "skull"];
+    let cases: &[(&str, &[&str])] = &[
+        ("e:skull", &skulls),
+        ("e:SKULL", &skulls),
+        ("emoji:Skull", &skulls),
+        ("e:sklul", &skulls),
+        ("e:skul", &skulls),
+        ("-e:skull", &["joy", "named-skull", "thumb"]),
+        ("-e:SKULL", &["joy", "named-skull", "thumb"]),
+        ("e:skull e:joy", &["bones", "bones-plain", "joy", "skull"]),
+        ("e:skull -e:☠", &["skull"]),
+        ("e:skull -e:☠️", &["skull"]),
+        ("e:thumbs_up", &["thumb"]),
+        ("e:thumbs", &["thumb"]),
+        ("e:lol", &["joy"]),
+        // a name that selects nothing finds nothing (not the item named so)
+        ("e:xqzv", &[]),
+        ("e:череп", &[]),
+        (
+            "-e:xqzv",
+            &["bones", "bones-plain", "joy", "named-skull", "skull", "thumb"],
+        ),
+        ("skull e:skull", &skulls),
+        // the emoji form as before
+        ("e:💀", &["skull"]),
+        ("e:☠", &["bones", "bones-plain"]),
+        ("e:👍", &["thumb"]),
+        ("e:👍🏿", &[]),
+    ];
+    for (q, want) in cases {
+        assert_eq!(sorted_ids(&ix, q, &v), strs(want), "query {q:?}");
+    }
+    assert_eq!(
+        Query::parse("e:Skull -e:sklul").to_string(),
+        "e:Skull -e:sklul",
+        "the name stays"
+    );
+}
+
 // ---------------------------------------------------------------- visibility
 
 #[test]
@@ -1284,7 +1407,27 @@ fn synthetic_library(n: usize, dim: usize, rng: &mut Rng) -> (Vec<Doc>, Vec<Stri
     (docs, words)
 }
 
-/// `cargo test -p stickpile-search --release -- --ignored --nocapture perf`
+/// The emoji names table: its first use (parsing it), and names looked up.
+/// Alone, so the table is not loaded yet:
+/// `cargo test -p stickpile-search --release -- --ignored --nocapture perf_emoji_names`
+#[test]
+#[ignore]
+fn perf_emoji_names() {
+    let start = Instant::now();
+    let n = emoji_names::by_name("skull").len();
+    println!("first use (loads the table): {:.2?}, skull: {n}", start.elapsed());
+    for name in ["s", "sk", "skull", "thumbs_up", "sklul", "xqzvw"] {
+        let runs = 200;
+        let start = Instant::now();
+        let mut n = 0;
+        for _ in 0..runs {
+            n = emoji_names::by_name(name).len();
+        }
+        println!("  {name:<10} {:>10.2?}  emojis={n}", start.elapsed() / runs);
+    }
+}
+
+/// `cargo test -p stickpile-search --release -- --ignored --nocapture perf_synthetic`
 #[test]
 #[ignore]
 fn perf_synthetic_library() {
@@ -1328,6 +1471,8 @@ fn perf_synthetic_library() {
             ("word + filters", format!("{w0} vibe:happy q>30 -tag:{w1}")),
             ("filter-only", "type:gif q>50".to_string()),
             ("browse all", String::new()),
+            ("emoji name", "e:skull".to_string()),
+            ("emoji name, 1 letter", "e:s".to_string()),
         ];
         let mut qv: Vec<f32> = (0..dim).map(|_| rng.unit()).collect();
         let norm = qv.iter().map(|x| x * x).sum::<f32>().sqrt();

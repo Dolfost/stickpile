@@ -6,7 +6,9 @@
 //!
 //! 1. Filters from [`Query`] (`e:`, `set:`, `vibe:`, `tag:`, `type:`, `q>`,
 //!    `likes>`, `by:`, `is:`) and visibility (own items + public sets; unlisted
-//!    sets are never searchable by non-owners) cut the candidate set.
+//!    sets are never searchable by non-owners) cut the candidate set. An
+//!    `e:` value is an emoji or a name ([`emoji_names::by_name`]: `e:skull`
+//!    is 💀 or ☠️, ...).
 //! 2. Lexical score: per-field weighted BM25-style scoring over name,
 //!    keywords, emojis (plus a small built-in emoji vocabulary, 😂 -> laugh),
 //!    vibe, tags and set name, with exact > squashed (`naahh` == `nah`) >
@@ -18,7 +20,7 @@
 //! 4. Reciprocal-rank fusion of the two rankings (k = 60); ties broken by
 //!    copies, then recency. `sort:` other than relevance overrides the order.
 
-mod emoji_names;
+pub mod emoji_names;
 mod rank;
 mod store;
 #[cfg(test)]

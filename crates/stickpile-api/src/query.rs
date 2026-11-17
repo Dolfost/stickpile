@@ -6,7 +6,8 @@
 //!
 //! * bare words / `"quoted phrases"`: soft text terms, ranked (name, keywords,
 //!   emojis, vibe, tags, set name, image content)
-//! * `e:` / `emoji:` - item has this emoji
+//! * `e:` / `emoji:` - item has this emoji, or one that a name selects
+//!   (`e:skull`: letters only; matched in `stickpile_search::emoji_names`)
 //! * `set:` / `s:` - set slug (or name, case-insensitive); repeat for OR
 //! * `vibe:` / `v:`, `tag:` / `t:` - exact (case-insensitive); repeat for OR
 //! * `type:` - `still|image`, `animated|animation`, `video`, or a format
@@ -210,6 +211,8 @@ pub struct Query {
     pub text: Vec<String>,
     /// Words that must not appear in any text field.
     pub exclude_text: Vec<String>,
+    /// The `e:` values as typed: emojis (`😂`) or emoji names (`skull`),
+    /// which the search turns into the emojis they select.
     pub emojis: Filter<String>,
     /// Lowercased set slugs/names.
     pub sets: Filter<String>,
@@ -506,6 +509,15 @@ mod tests {
         let q = Query::parse(src);
         let again = Query::parse(&q.to_string());
         assert_eq!(q, again);
+    }
+
+    #[test]
+    fn emoji_names_stay_as_typed() {
+        let q = Query::parse("emoji:Skull -e:thumbs_up e:😂");
+        assert_eq!(q.emojis.any, vec!["Skull", "😂"]);
+        assert_eq!(q.emojis.none, vec!["thumbs_up"]);
+        assert_eq!(q.to_string(), "e:Skull e:😂 -e:thumbs_up");
+        assert_eq!(Query::parse(&q.to_string()), q);
     }
 
     #[test]

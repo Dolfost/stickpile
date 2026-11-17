@@ -1,6 +1,7 @@
 //! Query evaluation: filters, lexical scoring, vector scoring, fusion, ordering.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::ops::Bound;
 
 use stickpile_api::query::{Filter, Is, Query, Sort};
@@ -10,7 +11,7 @@ use crate::store::{IntMap, Slot, Store, EMOJI_NAME, FIELD_B, FIELD_LABEL, FIELD_
 use crate::text::{
     dot, emoji_key, is_skin_tone, normalize, osa_within, padded_trigrams, squash_key, tokenize, tri_is_padded,
 };
-use crate::{Doc, Hit, Outcome, SearchOptions, Viewer};
+use crate::{emoji_names, Doc, Hit, Outcome, SearchOptions, Viewer};
 
 /// Page size used when [`SearchOptions::limit`] is 0.
 pub const DEFAULT_LIMIT: usize = 50;
@@ -118,12 +119,41 @@ struct Row {
     labels: u16,
 }
 
+/// One `e:` value.
+#[derive(PartialEq)]
+enum EmojiValue {
+    /// An emoji: its key without variation selectors, and whether it has a
+    /// skin tone (then only that tone matches, else any).
+    Glyph(String, bool),
+    /// A name: the keys ([`emoji_names::key`]) of the emojis it selects;
+    /// none for a name that selects nothing.
+    Name(HashSet<&'static str>),
+}
+
+impl EmojiValue {
+    fn new(value: &str) -> EmojiValue {
+        if emoji_names::is_name(value) {
+            return EmojiValue::Name(emoji_names::by_name(value).into_iter().map(|e| e.key()).collect());
+        }
+        let k = emoji_key(value);
+        let toned = k.chars().any(is_skin_tone);
+        EmojiValue::Glyph(k, toned)
+    }
+
+    fn in_doc(&self, s: &Slot) -> bool {
+        match self {
+            EmojiValue::Glyph(k, true) => s.emoji_keys.iter().any(|e| e == k),
+            EmojiValue::Glyph(k, false) => s.emoji_bases.iter().any(|e| e == k),
+            EmojiValue::Name(keys) => s.emoji_bases.iter().any(|e| keys.contains(e.as_str())),
+        }
+    }
+}
+
 /// Filters and visibility, prepared once per query.
 struct Filters<'a> {
     q: &'a Query,
     viewer: &'a Viewer,
-    /// (key without variation selectors, query has a skin tone)
-    emojis: Filter<(String, bool)>,
+    emojis: Filter<EmojiValue>,
     sets: Filter<String>,
     vibes: Filter<String>,
     tags: Filter<String>,
@@ -159,11 +189,7 @@ impl<'a> Filters<'a> {
         Filters {
             q,
             viewer,
-            emojis: map_filter(&q.emojis, |e| {
-                let k = emoji_key(e);
-                let toned = k.chars().any(is_skin_tone);
-                (k, toned)
-            }),
+            emojis: map_filter(&q.emojis, |e| EmojiValue::new(e)),
             sets: map_filter(&q.sets, norm),
             vibes: map_filter(&q.vibes, norm),
             tags: map_filter(&q.tags, norm),
@@ -191,13 +217,7 @@ impl<'a> Filters<'a> {
                 Is::Liked => self.viewer.liked.contains(&d.item_id),
                 Is::Public => d.visibility == Visibility::Public,
             })
-            && self.emojis.accepts(|(k, toned)| {
-                if *toned {
-                    s.emoji_keys.iter().any(|e| e == k)
-                } else {
-                    s.emoji_bases.iter().any(|e| e == k)
-                }
-            })
+            && self.emojis.accepts(|e| e.in_doc(s))
             && self
                 .sets
                 .accepts(|v| s.set_slug == *v || s.set_name == *v || d.set_id == *v)
