@@ -129,6 +129,8 @@ Show vibe	Показувати настрій
 An item's vibe (sarcastic, tired, ...) on its tile (zv in Normal mode).	Настрій стікера (sarcastic, tired, ...) на його плитці (zv у звичайному режимі).
 Show text	Показувати текст
 The words in an item's picture on its tile, one line (zx in Normal mode).	Текст на картинці стікера на його плитці, одним рядком (zx у звичайному режимі).
+Mark what is offline	Позначати, що є офлайн
+A mark on the tiles whose file is on this device, so they copy without the server (zo in Normal mode).	Позначка на плитках, чий файл є на цьому пристрої, тож вони копіюються й без сервера (zo у звичайному режимі).
 Counts	Лічильники
 Digits in Normal mode start a count (3j, 5G). A lone 1-7 then switches tabs after a short wait; off, it switches at once.	Цифри у звичайному режимі починають лічильник (3j, 5G). Тоді окрема цифра 1-7 перемикає вкладку після короткої паузи; якщо вимкнено, перемикає одразу.
 Recent items	Нещодавні стікери

@@ -290,6 +290,12 @@ in
               Normal mode). Off by default: the line covers the picture
               whose words it repeats.
             '';
+            show_offline = setting types.bool true ''
+              A mark on the tiles whose file is on this device, so they copy
+              with the server unreachable (`zo` in Normal mode). With the
+              server unreachable, the tiles whose file is not here are
+              dimmed whatever this says.
+            '';
             show_details = setting types.bool true ''
               The selected item's pack, format, size, copies, likes and
               quality in a row above the footer (`zi` in Normal mode).

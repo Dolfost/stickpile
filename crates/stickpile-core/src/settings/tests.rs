@@ -37,6 +37,7 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "ui.show_tags",
         "ui.show_vibe",
         "ui.show_text",
+        "ui.show_offline",
         "ui.show_details",
         "ui.counts",
         "ui.safe_mode",

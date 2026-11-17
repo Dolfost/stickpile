@@ -192,6 +192,9 @@ pub struct UiConfig {
     /// The words in an item's picture on its tile, one line. Off by
     /// default: the line covers the picture whose words it repeats.
     pub show_text: bool,
+    /// A mark on the tiles whose file is on this device, so they copy with
+    /// the server unreachable (`docs/offline.md`).
+    pub show_offline: bool,
     /// The selection's stats (name, pack, format, copies, likes, quality)
     /// in a row above the footer.
     pub show_details: bool,
@@ -291,6 +294,7 @@ impl Default for UiConfig {
             show_tags: true,
             show_vibe: true,
             show_text: false,
+            show_offline: true,
             show_details: true,
             counts: false,
             safe_mode: false,
@@ -1298,14 +1302,14 @@ mod tests {
     fn ui_and_copy_keys() {
         let c = ClientConfig::from_toml(
             "[ui]\nmodal = false\nstart_tab = \"most_used\"\nstart_mode = \"insert\"\nmark_favorites = false\n\
-             show_emojis = false\nshow_tags = false\nshow_vibe = false\nshow_text = true\nshow_details = false\ncounts = true\nsafe_mode = true\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
+             show_emojis = false\nshow_tags = false\nshow_vibe = false\nshow_text = true\nshow_offline = false\nshow_details = false\ncounts = true\nsafe_mode = true\n[copy]\nsquare = \"white\"\nbackground = \"white\"\n",
         )
         .unwrap();
         assert!(!c.ui.modal);
         assert_eq!(c.ui.start_tab, "most_used");
         assert_eq!(c.ui.start_mode, StartMode::Insert);
         assert!(!c.ui.mark_favorites && !c.ui.show_emojis && !c.ui.show_tags && !c.ui.show_vibe);
-        assert!(c.ui.show_text);
+        assert!(c.ui.show_text && !c.ui.show_offline);
         assert!(c.ui.counts && !c.ui.show_details);
         assert!(c.ui.safe_mode);
         assert_eq!(c.copy.square, SquarePad::White);
@@ -1316,6 +1320,7 @@ mod tests {
         assert_eq!(d.ui.start_mode, StartMode::Normal);
         assert!(d.ui.mark_favorites && d.ui.show_emojis && d.ui.show_tags && d.ui.show_vibe);
         assert!(!d.ui.show_text, "the text line is off by default");
+        assert!(d.ui.show_offline);
         assert!(!d.ui.counts && d.ui.show_details);
         assert!(!d.ui.safe_mode);
         assert_eq!(d.ui.language, "auto");

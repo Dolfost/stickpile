@@ -241,6 +241,14 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             b(false),
         ),
         spec(
+            "ui.show_offline",
+            "Popup",
+            "Mark what is offline",
+            "A mark on the tiles whose file is on this device, so they copy without the server (zo in Normal mode).",
+            Bool,
+            b(true),
+        ),
+        spec(
             "ui.show_details",
             "Popup",
             "Show item stats",
