@@ -351,6 +351,7 @@ pub(crate) mod tests {
             emojis: vec![],
             vibe: None,
             tags: vec![],
+            text: String::new(),
             kind: stickpile_api::MediaKind::Still,
             format: stickpile_api::MediaFormat::Png,
             width: 1,

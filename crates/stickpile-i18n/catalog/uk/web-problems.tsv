@@ -95,3 +95,5 @@ The set has {n} sticker; a Telegram pack holds at most {max}, so publishing fail
 The set changed after its last publish to Telegram; publish again to update the pack.	Набір змінився після останньої публікації в Telegram; опублікуйте його знову, щоб оновити набір у Telegram.
 The Telegram pack is out of date: {changes}. Publish again to update it.	Набір у Telegram застарів: {changes}. Опублікуйте знову, щоб оновити його.
 The last git pull or push failed: {error}	Остання синхронізація з git (pull або push) не вдалася: {error}
+# The field name in "AI suggestions nobody confirmed yet" (the words in the picture).
+text	текст

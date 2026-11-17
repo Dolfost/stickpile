@@ -14,7 +14,7 @@ use crate::ids::now;
 use crate::index;
 use crate::jobs;
 use crate::service::sets::{self, Audience};
-use crate::service::upload::{clean_list, clean_name, clean_vibe, own_hashes, stem_for};
+use crate::service::upload::{clean_item_text, clean_list, clean_name, clean_vibe, own_hashes, stem_for};
 use crate::service::{hydrate, upload};
 use crate::state::AppState;
 
@@ -56,18 +56,21 @@ pub async fn get_item(state: &AppState, viewer: &str, item_id: &str) -> AppResul
         .expect("one item"))
 }
 
-const CONFIRMABLE: [&str; 4] = ["name", "keywords", "emojis", "vibe"];
+const CONFIRMABLE: [&str; 5] = ["name", "keywords", "emojis", "vibe", "text"];
 
-/// PATCH an item: edited fields become `user`-sourced; `confirm` flips the
-/// listed fields to `user` without changing values; `set_id` moves the item
-/// to the end of another set. Field changes need the right to edit the
-/// item, a move the right to remove it here and to add stickers there.
+/// PATCH an item: edited fields become `user`-sourced (the text too when
+/// it is set to `""`, so the computer never fills it again); `confirm`
+/// flips the listed fields to `user` without changing values; `set_id`
+/// moves the item to the end of another set. Field changes need the right
+/// to edit the item, a move the right to remove it here and to add
+/// stickers there.
 pub async fn update(state: &AppState, viewer: &CurrentUser, item_id: &str, req: UpdateItem) -> AppResult<Item> {
     let edits = req.name.is_some()
         || req.keywords.is_some()
         || req.emojis.is_some()
         || req.vibe.is_some()
         || req.tags.is_some()
+        || req.text.is_some()
         || !req.confirm.is_empty();
     let r = if edits {
         authz::editable_item(state, viewer.id(), item_id).await?
@@ -115,6 +118,7 @@ pub(crate) async fn apply_update(
         None => None,
         Some(v) => Some(clean_vibe(v.as_deref())?),
     };
+    let text = req.text.as_deref().map(clean_item_text).transpose()?;
 
     let mut tx = sets::begin(&state.db).await?;
     #[derive(sqlx::FromRow)]
@@ -170,6 +174,14 @@ pub(crate) async fn apply_update(
     if let Some(tg) = &tags {
         sqlx::query("UPDATE items SET tags = ? WHERE id = ?")
             .bind(to_json_list(tg))
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await?;
+        changed = true;
+    }
+    if let Some(words) = &text {
+        sqlx::query("UPDATE items SET text = ?, text_source = 'user' WHERE id = ?")
+            .bind(words)
             .bind(item_id)
             .execute(&mut *tx)
             .await?;

@@ -24,6 +24,7 @@ fn item(kind: MediaKind, format: MediaFormat, variants: &[(Variant, u64)]) -> It
         emojis: vec![],
         vibe: None,
         tags: vec![],
+        text: String::new(),
         kind,
         format,
         width: 512,

@@ -23,6 +23,7 @@ fn doc(id: &str) -> Doc {
         emojis: vec![],
         vibe: None,
         tags: vec![],
+        text: String::new(),
         kind: MediaKind::Still,
         format: MediaFormat::Png,
         quality: None,
@@ -905,6 +906,110 @@ fn ranking_sanity() {
     assert!(o.hits.windows(2).all(|w| w[0].score >= w[1].score));
 }
 
+// ---------------------------------------------------------------- the text field
+
+/// Docs with words in the picture (`Doc::text`).
+fn texts() -> Index {
+    index([
+        with("phrase", |d| d.text = "NO THOUGHTS\nhead empty".into()),
+        with("apart", |d| d.text = "thoughts? no.".into()),
+        with("between", |d| d.text = "no more thoughts".into()),
+        with("named", |d| d.name = "no thoughts".into()),
+        with("kit", |d| d.text = "Кіт у мішку".into()),
+        with("meow", |d| {
+            d.name = "meow".into();
+            d.text = "purr".into()
+        }),
+    ])
+}
+
+#[test]
+fn plain_words_match_the_text() {
+    let ix = texts();
+    let o = run(&ix, "empty", &alice(), &SearchOptions::default());
+    assert_eq!(o.hits.len(), 1);
+    assert_eq!(hit(&o, "phrase").matched, vec!["text"]);
+    // A phrase may run over a line break; prefixes and typos work as anywhere.
+    assert_eq!(ids(&ix, "\"thoughts head\""), strs(&["phrase"]));
+    assert_eq!(ids(&ix, "purrr"), strs(&["meow"]));
+    assert_eq!(ids(&ix, "мішк"), strs(&["kit"]));
+    // A word in the name and in the text reports both.
+    let ix = index([with("both", |d| {
+        d.name = "cat".into();
+        d.text = "cat".into()
+    })]);
+    let o = run(&ix, "cat", &alice(), &SearchOptions::default());
+    assert_eq!(hit(&o, "both").matched, vec!["name", "text"]);
+}
+
+#[test]
+fn text_filter_wants_consecutive_words() {
+    let ix = texts();
+    assert_eq!(sorted_ids(&ix, "text:\"no thoughts\"", &alice()), strs(&["phrase"]));
+    assert_eq!(
+        sorted_ids(&ix, "x:thoughts", &alice()),
+        strs(&["apart", "between", "phrase"]),
+        "one word: anywhere in the text"
+    );
+    assert!(sorted_ids(&ix, "text:\"thoughts no more\"", &alice()).is_empty());
+    assert_eq!(
+        sorted_ids(&ix, "text:no text:purr", &alice()),
+        strs(&["apart", "between", "meow", "phrase"]),
+        "repeated: either"
+    );
+    // Only the text: the name "no thoughts" is not enough, nor a prefix.
+    assert!(!sorted_ids(&ix, "text:\"no thoughts\"", &alice()).contains(&"named".to_string()));
+    assert!(sorted_ids(&ix, "text:thought", &alice()).is_empty(), "whole words");
+    assert!(sorted_ids(&ix, "text:nowhere", &alice()).is_empty(), "unknown word");
+    assert!(sorted_ids(&ix, "text:!!!", &alice()).is_empty(), "no word at all");
+    // With soft terms the filter cuts, the words rank.
+    assert_eq!(ids(&ix, "head x:thoughts"), strs(&["phrase"]));
+}
+
+#[test]
+fn text_filter_excludes() {
+    let ix = texts();
+    let all = sorted_ids(&ix, "", &alice());
+    let without = |q: &str| {
+        let got = sorted_ids(&ix, q, &alice());
+        all.iter().filter(|id| !got.contains(id)).cloned().collect::<Vec<_>>()
+    };
+    assert_eq!(without("-text:\"no thoughts\""), strs(&["phrase"]));
+    assert_eq!(without("-x:thoughts"), strs(&["apart", "between", "phrase"]));
+    assert!(without("-text:meow").is_empty(), "the name is not the text");
+    assert!(without("-text:nowhere").is_empty());
+    // A plain -word leaves out a word in the text too.
+    assert_eq!(without("-purr"), strs(&["meow"]));
+}
+
+#[test]
+fn ukrainian_text() {
+    let ix = texts();
+    assert_eq!(sorted_ids(&ix, "text:кіт", &alice()), strs(&["kit"]));
+    assert_eq!(sorted_ids(&ix, "x:КІТ", &alice()), strs(&["kit"]));
+    assert_eq!(sorted_ids(&ix, "text:\"кіт у мішку\"", &alice()), strs(&["kit"]));
+    let o = run(&ix, "кіт", &alice(), &SearchOptions::default());
+    assert_eq!(hit(&o, "kit").matched, vec!["text"]);
+}
+
+#[test]
+fn text_weighs_less_than_name_and_keywords() {
+    let ix = index([
+        with("text", |d| d.text = "wow".into()),
+        with("kw", |d| d.keywords = strs(&["wow"])),
+        named("name", "wow"),
+    ]);
+    assert_eq!(ids(&ix, "wow"), strs(&["name", "kw", "text"]));
+    // In a long text the word counts less than in a short one.
+    let ix = index([
+        with("long", |d| {
+            d.text = "wow such a long caption with many many words in it".into()
+        }),
+        with("short", |d| d.text = "wow".into()),
+    ]);
+    assert_eq!(ids(&ix, "wow"), strs(&["short", "long"]));
+}
+
 #[test]
 fn text_ties_break_by_copies_then_recency_then_id() {
     let ix = index([
@@ -1256,8 +1361,11 @@ fn random_doc(rng: &mut Rng, id: usize, words: &[&str]) -> Doc {
     };
     let likes = rng.below(5) as u64;
     let updated_at = rng.below(1000) as i64;
+    let n = [0, 0, 3, 6][rng.below(4)];
+    let text = pick(n, rng).join(if rng.below(2) == 0 { " " } else { "\n" });
     with(&format!("d{id}"), |d| {
         d.name = name;
+        d.text = text;
         d.keywords = keywords;
         d.tags = tags;
         (d.set_id, d.set_slug, d.set_name) = (format!("s{set}"), format!("set-{set}"), format!("Set {}", words[set]));
@@ -1327,6 +1435,9 @@ fn incremental_index_equals_fresh_rebuild() {
         "",
         "-cat",
         "e:❤ cat",
+        "text:cat",
+        "x:\"big chungus\" -text:dog",
+        "sleepy -x:cat",
     ];
     for q in queries {
         for v in [alice(), viewer("bob")] {
@@ -1395,6 +1506,7 @@ fn synthetic_library(n: usize, dim: usize, rng: &mut Rng) -> (Vec<Doc>, Vec<Stri
                 emojis: (0..rng.below(3)).map(|_| rng.pick(&emojis).to_string()).collect(),
                 vibe: Some(rng.pick(&vibes).to_string()),
                 tags,
+                text: String::new(),
                 kind: MediaKind::Animation,
                 format: MediaFormat::Gif,
                 quality: Some(rng.below(101) as u8),

@@ -161,10 +161,69 @@ pub struct ItemInput {
     pub vibe: Option<String>,
     pub vibe_source: FieldSource,
     pub tags: Vec<String>,
+    /// The words in the picture; the default is "not set" (OCR fills it).
+    pub text: ItemText,
     pub source_url: Option<String>,
     /// Export filename stem (no numeric prefix, no extension).
     pub stem: String,
     pub extra_toml: Option<String>,
+}
+
+/// The item text with its source. [`Default`] is "not set" (empty, `ai`):
+/// the computer fills it from the media's OCR result. Unlike the other
+/// fields, an empty text a person gave (`user`) stays empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemText {
+    pub text: String,
+    pub source: FieldSource,
+}
+
+impl Default for ItemText {
+    fn default() -> Self {
+        ItemText {
+            text: String::new(),
+            source: FieldSource::Ai,
+        }
+    }
+}
+
+impl ItemText {
+    /// A text a person gave (empty included).
+    pub fn user(text: String) -> ItemText {
+        ItemText {
+            text,
+            source: FieldSource::User,
+        }
+    }
+
+    /// Empty and the computer's: OCR may fill it.
+    pub fn is_unset(&self) -> bool {
+        self.text.is_empty() && self.source == FieldSource::Ai
+    }
+
+    /// What an item with text `cur` gets from `self` (an import, a restore):
+    /// nothing changes for "not set", and an AI text never replaces a
+    /// person's (the rule of [`crate::service::ai::apply_text`]).
+    pub fn merged_into(self, cur: ItemText) -> ItemText {
+        if self.is_unset() || (self.source == FieldSource::Ai && cur.source == FieldSource::User) {
+            cur
+        } else {
+            self
+        }
+    }
+}
+
+/// An item text as a person or a file gave it: [`stickpile_api::text::clean_text`],
+/// at most [`stickpile_api::text::MAX_TEXT_CHARS`] characters.
+pub fn clean_item_text(text: &str) -> AppResult<String> {
+    let t = stickpile_api::text::clean_text(text);
+    if t.chars().count() > stickpile_api::text::MAX_TEXT_CHARS {
+        return Err(AppError::bad_request(format!(
+            "text must be at most {} characters",
+            stickpile_api::text::MAX_TEXT_CHARS
+        )));
+    }
+    Ok(t)
 }
 
 pub fn clean_list(v: &[String], what: &str) -> AppResult<Vec<String>> {
@@ -254,6 +313,17 @@ impl ItemInput {
         let keywords = clean_list(meta.and_then(|m| m.keywords.as_deref()).unwrap_or(&[]), "keywords")?;
         let emojis = clean_list(meta.and_then(|m| m.emojis.as_deref()).unwrap_or(&[]), "emojis")?;
         let vibe = clean_vibe(meta.and_then(|m| m.vibe.as_deref()))?;
+        // Given, the text is the user's (an empty one too: they cleared it),
+        // unless it is an unapproved suggestion; an empty suggestion is no
+        // text at all, which OCR fills.
+        let text = match meta.and_then(|m| m.text.as_deref()).map(clean_item_text).transpose()? {
+            None => ItemText::default(),
+            Some(t) if ai_fields.iter().any(|f| f == "text") => ItemText {
+                text: t,
+                source: FieldSource::Ai,
+            },
+            Some(t) => ItemText::user(t),
+        };
         Ok(ItemInput {
             stem: stem_for(&name),
             name,
@@ -264,6 +334,7 @@ impl ItemInput {
             vibe_source: source("vibe", vibe.is_some()),
             vibe,
             tags: clean_list(meta.and_then(|m| m.tags.as_deref()).unwrap_or(&[]), "tags")?,
+            text,
             source_url,
             ..Default::default()
         })
@@ -272,7 +343,7 @@ impl ItemInput {
 
 /// Fields an upload may mark as unapproved AI suggestions
 /// ([`UploadMeta::ai_fields`]). Names and tags are always the user's.
-pub const AI_FIELDS: [&str; 3] = ["keywords", "emojis", "vibe"];
+pub const AI_FIELDS: [&str; 4] = ["keywords", "emojis", "vibe", "text"];
 
 // ---------------------------------------------------------------------------
 // Media
@@ -468,8 +539,9 @@ pub async fn add_media_to_set(
     let t = now();
     let inserted = sqlx::query(
         "INSERT INTO items (id, set_id, media_id, position, filename, name, name_source, keywords, keywords_source, \
-         emojis, emojis_source, vibe, vibe_source, tags, source_url, extra_toml, created_at, updated_at, added_by) \
-         VALUES (?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM items WHERE set_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         emojis, emojis_source, vibe, vibe_source, tags, text, text_source, source_url, extra_toml, created_at, \
+         updated_at, added_by) \
+         VALUES (?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM items WHERE set_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(set_id, media_id) DO NOTHING",
     )
     .bind(&item_id)
@@ -486,6 +558,8 @@ pub async fn add_media_to_set(
     .bind(&input.vibe)
     .bind(source_str(input.vibe_source))
     .bind(to_json_list(&input.tags))
+    .bind(&input.text.text)
+    .bind(source_str(input.text.source))
     .bind(&input.source_url)
     .bind(&input.extra_toml)
     .bind(t)
@@ -512,6 +586,10 @@ pub async fn add_media_to_set(
     if let Some(fill) = AiFill::from_media(&media) {
         ai_fill::apply(&mut tx, &media.id, &fill, Some(&item_id)).await?;
     }
+    // And the words read in it by the current reader (read once per file).
+    if let Some(text) = state.text_reader().and_then(|r| ai_fill::ocr_of(&media, r.model_id())) {
+        ai_fill::apply_text(&mut tx, &media.id, text, Some(&item_id)).await?;
+    }
     sets::bump_version(&mut tx, &set.id).await?;
     tx.commit().await?;
     drop(guard);
@@ -530,19 +608,15 @@ pub async fn add_media_to_set(
             .await?;
         }
     }
-    if let Some(model) = state.ai_model_id() {
-        if media.embedding_model.as_deref() != Some(model)
-            && !jobs::pending_exists(&state.db, JobKind::Enrich, &media.id).await?
-        {
-            jobs::enqueue(
-                state,
-                JobKind::Enrich,
-                json!({"media_id": media.id}),
-                Some(media.id.clone()),
-                Some(&set.owner_id),
-            )
-            .await?;
-        }
+    if ai_fill::needs_enrich(state, &media) && !jobs::pending_exists(&state.db, JobKind::Enrich, &media.id).await? {
+        jobs::enqueue(
+            state,
+            JobKind::Enrich,
+            json!({"media_id": media.id}),
+            Some(media.id.clone()),
+            Some(&set.owner_id),
+        )
+        .await?;
     }
     Ok(Added {
         item_id,

@@ -1136,6 +1136,7 @@ fn summary_of(i: &Item, set_slug: &str, set_name: &str, owner_username: &str) ->
         emojis: i.emojis.clone(),
         vibe: i.vibe.clone(),
         tags: i.tags.clone(),
+        text: i.text.clone(),
         kind: i.media.kind,
         format: i.media.format,
         width: i.media.width,

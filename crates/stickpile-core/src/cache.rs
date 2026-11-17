@@ -6,7 +6,8 @@
 //!   [`OfflineIndex`] (same [`Query`] syntax and ranking code as the server,
 //!   metadata only).
 //! * `meta`: sync cursor (`server_time`), the bound server URL and the cached
-//!   `/me` user, and an item generation counter (cross-process change signal).
+//!   `/me` user, an item generation counter (cross-process change signal),
+//!   and the format of the cached items ([`ITEM_FORMAT`]).
 //! * `files`: thumbnails (`files/thumb/<media>.webp`) and materialised
 //!   variants (`clip/<media>.<variant>/<item name>.<ext>`), with size and last
 //!   access, evicted least-recently-used beyond `cache_max_mb`.
@@ -29,6 +30,14 @@ use crate::{CoreError, Result};
 
 pub const DB_FILE: &str = "cache.sqlite3";
 const SCHEMA_VERSION: i64 = 1;
+/// What the cached [`ItemSummary`] JSON holds, kept in `meta` as
+/// `item_format` (absent: 1). [`sync`] lists everything again, once, when
+/// the cache's items are older, and then records this. The table schema
+/// does not change, so an older client can still open the cache.
+///
+/// - 1: up to stickpile 0.7.0.
+/// - 2: `text`, the words in the picture.
+pub const ITEM_FORMAT: i64 = 2;
 /// Copy history rows kept.
 const HISTORY_MAX: i64 = 2000;
 /// Default `limit` for `GET /items` pages.
@@ -226,6 +235,15 @@ impl Cache {
             Some(t) => self.meta_set("updated_since", &t.to_string()),
             None => self.meta_delete("updated_since"),
         }
+    }
+
+    /// The [`ITEM_FORMAT`] the cached items were listed in.
+    pub fn item_format(&self) -> Result<i64> {
+        Ok(self.meta_get("item_format")?.and_then(|v| v.parse().ok()).unwrap_or(1))
+    }
+
+    pub fn set_item_format(&self, format: i64) -> Result<()> {
+        self.meta_set("item_format", &format.to_string())
     }
 
     /// Changes whenever cached items change (also across processes).
@@ -595,9 +613,15 @@ fn bump_generation(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
 /// Pull item changes into the cache: `GET /items?updated_since=<cursor>`,
 /// following `next_cursor` pages, applying `removed`. Without a cursor (first
 /// sync, or after a reset) it is a full listing and cached items that were not
-/// listed are deleted. The cursor is advanced only after the last page.
+/// listed are deleted. Items cached in an older [`ITEM_FORMAT`] (fields
+/// missing) are listed again in full the same way, once. The cursor is
+/// advanced only after the last page.
 pub async fn sync(cache: &Cache, client: &ApiClient, page_limit: u32) -> Result<SyncReport> {
-    let since = cache.sync_cursor()?;
+    let since = if cache.item_format()? < ITEM_FORMAT {
+        None
+    } else {
+        cache.sync_cursor()?
+    };
     let full = since.is_none();
     let mut report = SyncReport {
         full,
@@ -629,6 +653,9 @@ pub async fn sync(cache: &Cache, client: &ApiClient, page_limit: u32) -> Result<
     }
     let t = server_time.unwrap_or_else(crate::now_unix);
     cache.set_sync_cursor(Some(t))?;
+    if full {
+        cache.set_item_format(ITEM_FORMAT)?;
+    }
     report.server_time = t;
     report.total = cache.item_count()?;
     Ok(report)
@@ -670,6 +697,7 @@ pub fn doc_for(item: &ItemSummary, me: Option<&str>) -> Doc {
         emojis: item.emojis.clone(),
         vibe: item.vibe.clone(),
         tags: item.tags.clone(),
+        text: item.text.clone(),
         kind: item.kind,
         format: item.format,
         quality: item.quality,

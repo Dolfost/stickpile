@@ -69,6 +69,7 @@ impl Within {
                 emojis: item.emojis.clone(),
                 vibe: item.vibe.clone(),
                 tags: item.tags.clone(),
+                text: item.text.clone(),
                 kind: item.kind,
                 format: item.format,
                 quality: item.quality,

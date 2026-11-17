@@ -146,22 +146,40 @@ pub async fn requeue_outdated_variants(pool: &sqlx::SqlitePool) -> crate::error:
 
 /// Embed the representative frame (decoded from the stored thumbnail), store
 /// the embedding and zero-shot suggestions, and fill AI fields of the items.
+/// Then, with a text reader, read the words in the stored original unless
+/// this reader read them before ([`read_words`]).
 pub async fn enrich(state: &AppState, job: &JobRow) -> JobResult {
     let media_id = media_id(job)?;
     if state.ai_status() == crate::state::AiStatus::Loading {
         return Err(JobError::Retry("the AI model is still loading".into()));
     }
-    if state.ai().is_none() {
+    if state.ai().is_none() && state.text_reader().is_none() {
         return Err(JobError::Fatal(
             "AI enrichment is not available (ai.enabled = false or the model failed to load)".into(),
         ));
     }
-    let Some(_media) = db::media_by_id(&state.db, &media_id)
+    let Some(media) = db::media_by_id(&state.db, &media_id)
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?
     else {
         return Ok(Some(json!({"skipped": "media no longer exists"})));
     };
+    let mut result = match state.ai() {
+        Some(_) => embed(state, &media_id).await?,
+        None => json!({}),
+    };
+    if let Some(reader) = state.text_reader() {
+        let words = read_words(state, &media, reader.clone()).await?;
+        if let (Some(obj), serde_json::Value::Object(w)) = (result.as_object_mut(), words) {
+            obj.extend(w);
+        }
+    }
+    Ok(Some(result))
+}
+
+/// The CLIP part of [`enrich`].
+async fn embed(state: &AppState, media_id: &str) -> Result<serde_json::Value, JobError> {
+    let media_id = media_id.to_string();
     let thumb = variant_row(state, &media_id, Variant::Thumb)
         .await?
         .ok_or_else(|| JobError::Fatal("thumbnail missing".into()))?;
@@ -202,13 +220,68 @@ pub async fn enrich(state: &AppState, job: &JobRow) -> JobResult {
 
     index::set_embedding(state, &media_id, Some(Arc::from(embedding)));
     index::refresh_items(state, &changed).await?;
-    Ok(Some(json!({
+    Ok(json!({
         "model": model,
         "keywords": fill.keywords,
         "emojis": fill.emojis,
         "vibe": fill.vibe,
         "items_updated": changed.len(),
-    })))
+    }))
+}
+
+/// The OCR part of [`enrich`]: the words of the stored, sanitised original
+/// (a still, or an animation's first, middle and last frames), stored on
+/// the media with the reader's model id, unless that reader read them
+/// before (a file is read once, however many items it is in); then the
+/// items whose text is still the computer's get them
+/// ([`ai_fill::apply_text`]). Reading runs on the blocking pool. A failed
+/// read fails nothing: it is logged and reported as `ocr_error`, and the
+/// media stays unread for a later run.
+async fn read_words(
+    state: &AppState,
+    media: &db::MediaRow,
+    reader: Arc<dyn stickpile_ai::TextReader>,
+) -> Result<serde_json::Value, JobError> {
+    let model = reader.model_id().to_string();
+    let text = match ai_fill::ocr_of(media, &model) {
+        Some(t) => t.to_string(),
+        None => {
+            let original = variant_row(state, &media.id, Variant::Original)
+                .await?
+                .ok_or_else(|| JobError::Fatal("original file missing".into()))?;
+            let abs =
+                files::resolve(&state.media_dir(), &original.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
+            let probe = media.probe();
+            let tools = state.tools.clone();
+            let read = tokio::task::spawn_blocking(move || {
+                let frames = stickpile_media::text_frames(&abs, &probe, &tools).map_err(|e| e.to_string())?;
+                ai_fill::read_text(reader.as_ref(), &frames).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| JobError::Retry(e.to_string()))?;
+            match read {
+                Ok(t) => {
+                    sqlx::query("UPDATE media SET ocr_text = ?, ocr_model = ? WHERE id = ?")
+                        .bind(&t)
+                        .bind(&model)
+                        .bind(&media.id)
+                        .execute(&state.db)
+                        .await
+                        .map_err(|e| JobError::Retry(e.to_string()))?;
+                    t
+                }
+                Err(e) => {
+                    tracing::warn!(media = %media.id, "reading the text failed: {e}");
+                    return Ok(json!({ "ocr_model": model, "ocr_error": e }));
+                }
+            }
+        }
+    };
+    let mut tx = sets::begin(&state.db).await?;
+    let changed = ai_fill::apply_text(&mut tx, &media.id, &text, None).await?;
+    tx.commit().await.map_err(|e| JobError::Retry(e.to_string()))?;
+    index::refresh_items(state, &changed).await?;
+    Ok(json!({ "ocr_model": model, "text": text, "text_items_updated": changed.len() }))
 }
 
 /// Enqueue `Enrich` for every referenced media without an embedding from the

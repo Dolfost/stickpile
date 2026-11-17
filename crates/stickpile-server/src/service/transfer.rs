@@ -12,12 +12,15 @@
 //!   same manifest data and byte-identical files.
 //! * The set's cover image travels as `cover.<ext>` next to the items,
 //!   named by `cover_image` in set.toml, and is never imported as an item.
+//! * The item text follows its own rule ([`ItemText::merged_into`]): a
+//!   directory without one changes nothing, and an AI text never replaces
+//!   a person's.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::extract::Multipart;
 use stickpile_api::{ImportError, ImportReport, Variant};
-use stickpile_setfmt::{CoverFile, ItemMeta, Manifest, SetBundle, SetFile};
+use stickpile_setfmt::{CoverFile, FieldSource, ItemMeta, Manifest, SetBundle, SetFile};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -30,8 +33,8 @@ use crate::service::cover;
 use crate::service::hydrate::{self, ItemFull};
 use crate::service::sets::{self, Audience, NewSet};
 use crate::service::upload::{
-    self, add_to_set, base_name, clean_list, clean_name, clean_vibe, field_text, multipart_error, own_hashes, stem_for,
-    ItemInput, UploadFile,
+    self, add_to_set, base_name, clean_item_text, clean_list, clean_name, clean_vibe, field_text, multipart_error,
+    own_hashes, stem_for, ItemInput, ItemText, UploadFile,
 };
 use crate::state::AppState;
 
@@ -106,6 +109,10 @@ fn input_from_meta(filename: &str, meta: &ItemMeta) -> AppResult<ItemInput> {
         vibe: clean_vibe(meta.vibe.as_deref())?,
         vibe_source: meta.vibe_source,
         tags: clean_list(&meta.tags, "tags")?,
+        text: ItemText {
+            text: clean_item_text(&meta.text)?,
+            source: meta.effective_text_source(),
+        },
         source_url: None,
         stem: stem_for(&stem_name),
         extra_toml: table_to_string(&meta.extra),
@@ -114,6 +121,11 @@ fn input_from_meta(filename: &str, meta: &ItemMeta) -> AppResult<ItemInput> {
 
 /// Update an existing item's metadata to `input`; true if anything changed.
 async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &ItemInput) -> AppResult<bool> {
+    let cur_text = ItemText {
+        text: cur.text.clone(),
+        source: source(&cur.text_source),
+    };
+    let text = input.text.clone().merged_into(cur_text.clone());
     let same = cur.name == input.name
         && source(&cur.name_source) == input.name_source
         && cur.keywords() == input.keywords
@@ -123,6 +135,7 @@ async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &I
         && cur.vibe == input.vibe
         && source(&cur.vibe_source) == input.vibe_source
         && cur.tags() == input.tags
+        && text == cur_text
         && cur.filename == input.stem
         && cur.extra_toml == input.extra_toml;
     if same {
@@ -130,7 +143,8 @@ async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &I
     }
     sqlx::query(
         "UPDATE items SET name = ?, name_source = ?, keywords = ?, keywords_source = ?, emojis = ?, emojis_source = ?, \
-         vibe = ?, vibe_source = ?, tags = ?, filename = ?, extra_toml = ?, updated_at = ? WHERE id = ?",
+         vibe = ?, vibe_source = ?, tags = ?, text = ?, text_source = ?, filename = ?, extra_toml = ?, updated_at = ? \
+         WHERE id = ?",
     )
     .bind(&input.name)
     .bind(source_str(input.name_source))
@@ -141,6 +155,8 @@ async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &I
     .bind(&input.vibe)
     .bind(source_str(input.vibe_source))
     .bind(to_json_list(&input.tags))
+    .bind(&text.text)
+    .bind(source_str(text.source))
     .bind(&input.stem)
     .bind(&input.extra_toml)
     .bind(now())
@@ -510,7 +526,7 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         if chosen_cover.as_deref() == Some(r.id.as_str()) {
             cover = Some(filename.clone());
         }
-        let meta = ItemMeta {
+        let mut meta = ItemMeta {
             name: r.name.clone(),
             name_source: source(&r.name_source),
             keywords: r.keywords(),
@@ -521,7 +537,9 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
             vibe_source: source(&r.vibe_source),
             tags: r.tags(),
             extra: string_to_table(r.extra_toml.as_deref()),
+            ..Default::default()
         };
+        meta.set_text(r.text.clone(), source(&r.text_source));
         out_files.push(SetFile { filename, meta, bytes });
     }
     let cover_image = match &set.cover_media_id {
@@ -561,6 +579,59 @@ pub async fn export_set(db: &sqlx::SqlitePool, media_dir: &std::path::Path, set:
         cover_image,
         warnings: Vec::new(),
     })
+}
+
+/// Items whose unknown set.toml keys hold a text: a server before the text
+/// field (0.7.0) imported a set.toml a newer one wrote (packs in a
+/// repository are shared between servers) and kept `text` and
+/// `text_source` as unknown keys. Where the item has no text of its own
+/// they become its text; either way they leave the unknown keys, which
+/// would otherwise shadow the field on export. Runs at startup; returns
+/// how many items changed.
+pub async fn lift_text_from_extra(db: &sqlx::SqlitePool) -> AppResult<u64> {
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT id, text, text_source, extra_toml FROM items \
+         WHERE extra_toml LIKE '%text%' AND extra_toml IS NOT NULL",
+    )
+    .fetch_all(db)
+    .await?;
+    let mut changed = 0;
+    for (id, text, text_source, extra) in rows {
+        let mut table = string_to_table(Some(&extra));
+        if !table.contains_key("text") && !table.contains_key("text_source") {
+            continue;
+        }
+        let mut lifted = ItemMeta::default();
+        if let Some(toml::Value::String(t)) = table.remove("text") {
+            lifted.text = t;
+        }
+        lifted.text_source = match table.remove("text_source") {
+            Some(toml::Value::String(s)) if s == "ai" => Some(FieldSource::Ai),
+            Some(toml::Value::String(s)) if s == "user" => Some(FieldSource::User),
+            _ => None,
+        };
+        let cur = ItemText {
+            text,
+            source: source(&text_source),
+        };
+        let text = match clean_item_text(&lifted.text) {
+            Ok(t) => ItemText {
+                text: t,
+                source: lifted.effective_text_source(),
+            },
+            Err(_) => ItemText::default(),
+        }
+        .merged_into(cur);
+        sqlx::query("UPDATE items SET text = ?, text_source = ?, extra_toml = ? WHERE id = ?")
+            .bind(&text.text)
+            .bind(source_str(text.source))
+            .bind(table_to_string(&table))
+            .bind(&id)
+            .execute(db)
+            .await?;
+        changed += 1;
+    }
+    Ok(changed)
 }
 
 /// Export a set as a tar (`<slug>/set.toml` + files).

@@ -50,6 +50,8 @@ text_encoder = "multilingual"
 threads = 2
 max_keywords = 5
 max_emojis = 3
+# Read the words in pictures into the item text (needs a text reader).
+ocr = true
 
 [telegram]
 enabled = true

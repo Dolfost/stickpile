@@ -33,7 +33,7 @@ pub mod web;
 
 pub use app::{
     bind_unix, build_state, cleanup_once, router, run, serve_tcp, serve_unix, spawn_background, EnricherSource,
-    StartOptions,
+    StartOptions, TextReaderSource,
 };
 pub use config::Config;
 pub use error::{AppError, AppResult};

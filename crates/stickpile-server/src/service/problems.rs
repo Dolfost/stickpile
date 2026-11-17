@@ -412,6 +412,8 @@ struct ItemRow {
     emojis_source: String,
     vibe: Option<String>,
     vibe_source: String,
+    text: String,
+    text_source: String,
     created_at: i64,
     media_id: String,
     sha256: String,
@@ -460,6 +462,10 @@ fn ai_fields(r: &ItemRow) -> Vec<&'static str> {
     if r.vibe_source == "ai" && r.vibe.is_some() {
         out.push("vibe");
     }
+    // An empty AI text is "not set", nothing to confirm.
+    if r.text_source == "ai" && !r.text.is_empty() {
+        out.push("text");
+    }
     out
 }
 
@@ -488,7 +494,8 @@ async fn load(state: &AppState, sets: &[SetRow], telegram_on: bool) -> AppResult
     let rows: Vec<ItemRow> = rows_in(
         state,
         "SELECT i.id, i.set_id, i.position, i.name, i.name_source, i.keywords, i.keywords_source, i.emojis, \
-         i.emojis_source, i.vibe, i.vibe_source, i.created_at, i.media_id, m.sha256, m.original_sha256, m.kind, \
+         i.emojis_source, i.vibe, i.vibe_source, i.text, i.text_source, i.created_at, i.media_id, m.sha256, \
+         m.original_sha256, m.kind, \
          m.width, m.height, m.duration_ms, m.quality, m.phash, m.dhash, m.variants_done \
          FROM items i JOIN media m ON m.id = i.media_id WHERE",
         "i.set_id",

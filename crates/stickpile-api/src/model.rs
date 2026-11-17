@@ -138,6 +138,12 @@ pub enum FieldSource {
     Ai,
 }
 
+/// Default of [`Item::text_source`] when a server leaves it out: an empty
+/// AI text means "not set" (see `text`).
+fn ai_source() -> FieldSource {
+    FieldSource::Ai
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -628,6 +634,10 @@ pub struct ProposedChanges {
     /// `Some(None)` clears the vibe.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "double_option")]
     pub vibe: Option<Option<String>>,
+    /// The words in the sticker (`Some("")` clears them); accepted, it is
+    /// the owner's text (`text_source: user`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// An item of the set as its cover.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_item_id: Option<String>,
@@ -1127,6 +1137,16 @@ pub struct Item {
     pub vibe_source: FieldSource,
     /// User tags (never AI).
     pub tags: Vec<String>,
+    /// The words written in the picture: one string, line breaks kept, at
+    /// most [`crate::text::MAX_TEXT_CHARS`] characters. Read by OCR
+    /// (`text_source: ai`) or written by a person. Empty from an older server.
+    #[serde(default)]
+    pub text: String,
+    /// An empty `ai` text means "not set": the computer fills it. Any edit by
+    /// a person, clearing included, makes it `user`, and the computer never
+    /// writes it again.
+    #[serde(default = "ai_source")]
+    pub text_source: FieldSource,
     /// Who added it to the set (`None`: a removed account, or an older server).
     #[serde(default)]
     pub added_by_username: Option<String>,
@@ -1152,6 +1172,10 @@ pub struct ItemSummary {
     pub emojis: Vec<String>,
     pub vibe: Option<String>,
     pub tags: Vec<String>,
+    /// [`Item::text`]; empty from an older server (and in client caches it
+    /// wrote, which clients sync again in full once).
+    #[serde(default)]
+    pub text: String,
     pub kind: MediaKind,
     pub format: MediaFormat,
     pub width: u32,
@@ -1231,10 +1255,14 @@ pub struct UploadMeta {
     pub vibe: Option<String>,
     /// Source URL (browser extension, post-v1).
     pub source_url: Option<String>,
+    /// The words in the picture ([`Item::text`]). Given (even empty), it is
+    /// the user's unless `ai_fields` lists `text`; absent, OCR fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Given fields that hold AI suggestions the user has not approved (from
-    /// `POST /api/v1/ai/suggest`): any of `keywords`, `emojis`, `vibe`.
-    /// They are stored with `*_source: ai`, like enrichment results; every
-    /// other given field is the user's.
+    /// `POST /api/v1/ai/suggest`): any of `keywords`, `emojis`, `vibe`,
+    /// `text`. They are stored with `*_source: ai`, like enrichment results;
+    /// every other given field is the user's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ai_fields: Vec<String>,
 }
@@ -1249,6 +1277,11 @@ pub struct AiSuggestions {
     pub emojis: Vec<String>,
     /// `None` when the model is unsure.
     pub vibe: Option<String>,
+    /// The words read in the image (OCR), lines joined with `\n`; `None`
+    /// when the server has no text reader (or an older server), `Some("")`
+    /// when it read no confident text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1274,8 +1307,12 @@ pub struct UpdateItem {
     #[serde(default, with = "double_option")]
     pub vibe: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
+    /// The words in the picture; any value, `""` included, makes them the
+    /// user's (`text_source: user`), so the computer never fills them again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Mark AI values as confirmed without changing them:
-    /// any of `name`, `keywords`, `emojis`, `vibe`.
+    /// any of `name`, `keywords`, `emojis`, `vibe`, `text`.
     #[serde(default)]
     pub confirm: Vec<String>,
     /// Move to another own set (keeps media, appends at the end).
@@ -1312,7 +1349,8 @@ pub struct SearchHit {
     /// Fused score, higher is better; only comparable within one response.
     pub score: f32,
     /// Which signals matched: `name`, `keyword`, `emoji`, `vibe`, `tag`, `set`,
-    /// `fuzzy`, `image` (text->image embedding), `semantic` (text->keywords embedding).
+    /// `text` (the words in the picture), `fuzzy`, `image` (text->image
+    /// embedding), `semantic` (text->keywords embedding).
     pub matched: Vec<String>,
     /// Set when `target` was given and the item cannot be sent there.
     pub incompatible: Option<String>,
@@ -1829,6 +1867,235 @@ mod tests {
             assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{}\"", s.as_str()));
         }
         assert!(ProblemSeverity::Error < ProblemSeverity::Info);
+    }
+
+    /// The types the text field touched, as stickpile 0.7.0 had them (no
+    /// `text`, no `text_source`), to check both directions of rule 5.
+    mod v070 {
+        use super::super::{FieldSource, MediaFormat, MediaInfo, MediaKind, VariantInfo};
+        use serde::Deserialize;
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct Item {
+            pub id: String,
+            pub set_id: String,
+            pub position: u32,
+            pub filename: String,
+            pub name: String,
+            pub name_source: FieldSource,
+            pub keywords: Vec<String>,
+            pub keywords_source: FieldSource,
+            pub emojis: Vec<String>,
+            pub emojis_source: FieldSource,
+            pub vibe: Option<String>,
+            pub vibe_source: FieldSource,
+            pub tags: Vec<String>,
+            #[serde(default)]
+            pub added_by_username: Option<String>,
+            pub media: MediaInfo,
+            pub likes: u64,
+            pub liked_by_me: bool,
+            pub copies: u64,
+            pub created_at: i64,
+            pub updated_at: i64,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct ItemSummary {
+            pub id: String,
+            pub set_id: String,
+            pub set_slug: String,
+            pub set_name: String,
+            pub owner_username: String,
+            pub name: String,
+            pub keywords: Vec<String>,
+            pub emojis: Vec<String>,
+            pub vibe: Option<String>,
+            pub tags: Vec<String>,
+            pub kind: MediaKind,
+            pub format: MediaFormat,
+            pub width: u32,
+            pub height: u32,
+            pub quality: Option<u8>,
+            pub likes: u64,
+            pub copies: u64,
+            pub media_id: String,
+            pub sha256: String,
+            pub phash: String,
+            pub variants: Vec<VariantInfo>,
+            pub updated_at: i64,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct AiSuggestions {
+            pub keywords: Vec<String>,
+            pub emojis: Vec<String>,
+            pub vibe: Option<String>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct UpdateItem {
+            pub name: Option<String>,
+            pub keywords: Option<Vec<String>>,
+            #[serde(default)]
+            pub confirm: Vec<String>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct UploadMeta {
+            pub name: Option<String>,
+            #[serde(default)]
+            pub ai_fields: Vec<String>,
+        }
+
+        #[derive(Debug, Default, Deserialize)]
+        #[serde(default)]
+        #[allow(dead_code)]
+        pub struct ProposedChanges {
+            pub name: Option<String>,
+            pub keywords: Option<Vec<String>>,
+        }
+    }
+
+    fn sample_item() -> Item {
+        Item {
+            id: "i".into(),
+            set_id: "s".into(),
+            position: 0,
+            filename: "cat".into(),
+            name: "cat".into(),
+            name_source: FieldSource::User,
+            keywords: vec!["cat".into()],
+            keywords_source: FieldSource::Ai,
+            emojis: vec![],
+            emojis_source: FieldSource::User,
+            vibe: None,
+            vibe_source: FieldSource::User,
+            tags: vec![],
+            text: "no thoughts\nhead empty".into(),
+            text_source: FieldSource::Ai,
+            added_by_username: None,
+            media: MediaInfo {
+                id: "m".into(),
+                sha256: "00".into(),
+                kind: MediaKind::Still,
+                format: MediaFormat::Png,
+                width: 1,
+                height: 1,
+                duration_ms: None,
+                frame_count: None,
+                fps: None,
+                has_alpha: false,
+                size_bytes: 1,
+                phash: "0".into(),
+                dhash: "0".into(),
+                quality: None,
+                variants: vec![],
+            },
+            likes: 0,
+            liked_by_me: false,
+            copies: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_summary() -> ItemSummary {
+        ItemSummary {
+            id: "i".into(),
+            set_id: "s".into(),
+            set_slug: "cats".into(),
+            set_name: "Cats".into(),
+            owner_username: "alice".into(),
+            name: "cat".into(),
+            keywords: vec![],
+            emojis: vec![],
+            vibe: None,
+            tags: vec![],
+            text: "Кіт".into(),
+            kind: MediaKind::Still,
+            format: MediaFormat::Png,
+            width: 1,
+            height: 1,
+            quality: None,
+            likes: 0,
+            copies: 0,
+            media_id: "m".into(),
+            sha256: "00".into(),
+            phash: "0".into(),
+            variants: vec![],
+            updated_at: 0,
+        }
+    }
+
+    /// Without the keys a 0.7.0 server leaves out.
+    fn without(v: impl Serialize, keys: &[&str]) -> serde_json::Value {
+        let mut v = serde_json::to_value(v).unwrap();
+        for k in keys {
+            assert!(v.as_object_mut().unwrap().remove(*k).is_some(), "{k} was there");
+        }
+        v
+    }
+
+    #[test]
+    fn answers_of_an_older_server_parse_without_text() {
+        let item: Item = serde_json::from_value(without(sample_item(), &["text", "text_source"])).unwrap();
+        assert_eq!(item.text, "");
+        assert_eq!(item.text_source, FieldSource::Ai, "empty AI text: not set");
+        let summary: ItemSummary = serde_json::from_value(without(sample_summary(), &["text"])).unwrap();
+        assert_eq!(summary.text, "");
+        let s: AiSuggestions = serde_json::from_str(r#"{"keywords": ["cat"], "emojis": [], "vibe": null}"#).unwrap();
+        assert_eq!(s.text, None);
+        let u: UpdateItem = serde_json::from_str(r#"{"name": "x", "confirm": ["name"]}"#).unwrap();
+        assert_eq!(u.text, None);
+        let m: UploadMeta = serde_json::from_str(r#"{"name": "x", "ai_fields": ["keywords"]}"#).unwrap();
+        assert_eq!(m.text, None);
+        let c: ProposedChanges = serde_json::from_str(r#"{"name": "x"}"#).unwrap();
+        assert_eq!(c.text, None);
+    }
+
+    #[test]
+    fn an_older_client_reads_text_and_ignores_it() {
+        let old: v070::Item = serde_json::from_value(serde_json::to_value(sample_item()).unwrap()).unwrap();
+        assert_eq!(old.name, "cat");
+        let old: v070::ItemSummary = serde_json::from_value(serde_json::to_value(sample_summary()).unwrap()).unwrap();
+        assert_eq!(old.set_slug, "cats");
+        let s = AiSuggestions {
+            keywords: vec!["cat".into()],
+            text: Some("hi".into()),
+            ..Default::default()
+        };
+        let old: v070::AiSuggestions = serde_json::from_value(serde_json::to_value(s).unwrap()).unwrap();
+        assert_eq!(old.keywords, vec!["cat"]);
+        // And an older server reads what a new client sends.
+        let u = UpdateItem {
+            name: Some("x".into()),
+            text: Some(String::new()),
+            confirm: vec!["text".into()],
+            ..Default::default()
+        };
+        let old: v070::UpdateItem = serde_json::from_value(serde_json::to_value(u).unwrap()).unwrap();
+        assert_eq!(old.name.as_deref(), Some("x"));
+        let m = UploadMeta {
+            name: Some("x".into()),
+            text: Some("hi".into()),
+            ..Default::default()
+        };
+        let old: v070::UploadMeta = serde_json::from_value(serde_json::to_value(m).unwrap()).unwrap();
+        assert_eq!(old.name.as_deref(), Some("x"));
+        let c = ProposedChanges {
+            text: Some("hi".into()),
+            ..Default::default()
+        };
+        let old: v070::ProposedChanges = serde_json::from_value(serde_json::to_value(c).unwrap()).unwrap();
+        assert_eq!(old.name, None);
+        // No DTO refuses unknown fields: that is what makes added fields safe.
+        assert!(!include_str!("model.rs").contains(concat!("deny_unknown", "_fields")));
     }
 
     #[test]

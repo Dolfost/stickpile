@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::Router;
-use stickpile_ai::{Enricher, Vocabulary, ZeroShot};
+use stickpile_ai::{Enricher, TextReader, Vocabulary, ZeroShot};
 
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::Notify;
@@ -34,9 +34,23 @@ pub enum EnricherSource {
     Disabled,
 }
 
+/// Where the OCR backend (the item text) comes from.
+#[derive(Clone, Default)]
+pub enum TextReaderSource {
+    /// `ai.enabled` and `ai.ocr` decide; see [`text_reader_from_config`].
+    #[default]
+    FromConfig,
+    /// Use this reader regardless of `ai.enabled`, still only with
+    /// `ai.ocr = true` (tests: `MockTextReader`).
+    Provided(Arc<dyn TextReader>),
+    /// No OCR.
+    Disabled,
+}
+
 #[derive(Clone, Default)]
 pub struct StartOptions {
     pub enricher: EnricherSource,
+    pub text_reader: TextReaderSource,
 }
 
 /// Prepare everything except listeners and background tasks: data
@@ -96,6 +110,7 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
         index: RwLock::new(stickpile_search::Index::new()),
         ai: OnceLock::new(),
         ai_status: AtomicU8::new(AiStatus::Off as u8),
+        text_reader: OnceLock::new(),
         vocab,
         jobs_notify: Notify::new(),
         tools,
@@ -105,8 +120,29 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
         text_embeddings: Mutex::new(LruCache::new(256)),
         config,
     }));
+    let lifted = service::transfer::lift_text_from_extra(&state.db).await?;
+    if lifted > 0 {
+        tracing::info!("took the text of {lifted} items out of their unknown set.toml keys");
+    }
     let n = index::load_all(&state).await?;
     tracing::info!("search index loaded: {n} items");
+    let reader = match opts.text_reader {
+        TextReaderSource::Disabled => None,
+        _ if !state.config.ai.ocr => None,
+        TextReaderSource::Provided(r) => Some(r),
+        TextReaderSource::FromConfig if !state.config.ai.enabled => None,
+        TextReaderSource::FromConfig => {
+            let r = text_reader_from_config(&state.config);
+            if r.is_none() {
+                tracing::info!("ai.ocr is on, but this server has no text reader: the words in pictures are not read");
+            }
+            r
+        }
+    };
+    if let Some(r) = reader {
+        tracing::info!("OCR ready: model {}", r.model_id());
+        let _ = state.text_reader.set(r);
+    }
     match opts.enricher {
         EnricherSource::Disabled => {}
         // Provided backends (tests) are cheap: ready before the first request.
@@ -171,6 +207,14 @@ async fn finish_ai(state: &AppState, enricher: anyhow::Result<Arc<dyn Enricher>>
         Ok(n) => tracing::info!("queued AI enrichment for {n} media items"),
         Err(e) => tracing::error!("queueing AI enrichment: {e}"),
     }
+}
+
+/// The OCR backend `ai.ocr` asks for, when `ai.enabled`. None yet: the
+/// text reader seam (`stickpile_ai::ocr`) has no real model behind it, so
+/// OCR is skipped with one log line (docs/ai.md).
+fn text_reader_from_config(config: &Config) -> Option<Arc<dyn TextReader>> {
+    let _ = config;
+    None
 }
 
 /// `ffmpeg -version` with fixed arguments; false if it cannot run.
@@ -484,6 +528,7 @@ pub async fn spawn_for_tests(mut config: Config) -> anyhow::Result<TestServerHan
         config,
         StartOptions {
             enricher: EnricherSource::Disabled,
+            text_reader: TextReaderSource::Disabled,
         },
     )
     .await?;

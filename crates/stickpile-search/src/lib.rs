@@ -4,14 +4,16 @@
 //! it from SQLite at startup and on every write; clients feed it from their
 //! offline cache (without embeddings). Ranking:
 //!
-//! 1. Filters from [`Query`] (`e:`, `set:`, `vibe:`, `tag:`, `type:`, `q>`,
-//!    `likes>`, `by:`, `is:`) and visibility (own items + public sets; unlisted
-//!    sets are never searchable by non-owners) cut the candidate set. An
-//!    `e:` value is an emoji or a name ([`emoji_names::by_name`]: `e:skull`
-//!    is 💀 or ☠️, ...).
+//! 1. Filters from [`Query`] (`e:`, `set:`, `vibe:`, `tag:`, `text:`, `type:`,
+//!    `q>`, `likes>`, `by:`, `is:`) and visibility (own items + public sets;
+//!    unlisted sets are never searchable by non-owners) cut the candidate
+//!    set. An `e:` value is an emoji or a name ([`emoji_names::by_name`]:
+//!    `e:skull` is 💀 or ☠️, ...). A `text:` value's words must appear in
+//!    the item's text, consecutive, after normalisation.
 //! 2. Lexical score: per-field weighted BM25-style scoring over name,
 //!    keywords, emojis (plus a small built-in emoji vocabulary, 😂 -> laugh),
-//!    vibe, tags and set name, with exact > squashed (`naahh` == `nah`) >
+//!    vibe, tags, set name and the text (the words in the picture, weighted
+//!    below name and keywords), with exact > squashed (`naahh` == `nah`) >
 //!    prefix > fuzzy (edit distance) > substring matches, a coordination
 //!    factor for multi-word queries, plus caller-supplied expansion terms
 //!    (vibe synonyms, zero-shot related terms) at reduced weight.
@@ -49,6 +51,8 @@ pub struct Doc {
     pub emojis: Vec<String>,
     pub vibe: Option<String>,
     pub tags: Vec<String>,
+    /// The words written in the picture (OCR or typed); may hold line breaks.
+    pub text: String,
     pub kind: MediaKind,
     pub format: MediaFormat,
     pub quality: Option<u8>,
@@ -87,7 +91,8 @@ pub struct SearchOptions {
 pub struct Hit {
     pub item_id: String,
     pub score: f32,
-    /// `name`, `keyword`, `emoji`, `vibe`, `tag`, `set`, `fuzzy`, `expansion`, `image`.
+    /// `name`, `keyword`, `emoji`, `vibe`, `tag`, `set`, `fuzzy`, `expansion`,
+    /// `image`, `text`.
     pub matched: Vec<&'static str>,
 }
 

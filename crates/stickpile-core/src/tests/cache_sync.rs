@@ -98,6 +98,66 @@ async fn full_sync_sweeps_items_the_server_no_longer_lists() {
     assert_eq!(cache.item_count().unwrap(), 4);
 }
 
+/// A cache an older client wrote holds items without `text`. Nothing on
+/// the server changed since, so an incremental sync would never bring the
+/// text: the first sync lists everything again, once.
+#[tokio::test]
+async fn an_older_item_format_syncs_in_full_once() {
+    let (server, items) = seeded_server();
+    server
+        .state()
+        .set_text(&items[0].id, "No thoughts\nhead empty", stickpile_api::FieldSource::Ai);
+    let client = client_for(&server.url, Some(server.state().issue_token("alice", "t")));
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 16).unwrap();
+    assert!(cache::sync(&cache, &client, 500).await.unwrap().full);
+    assert_eq!(cache.item_format().unwrap(), cache::ITEM_FORMAT);
+    // Make it look like an older client's: items without `text`, no item format.
+    {
+        let db = rusqlite::Connection::open(dir.path().join(cache::DB_FILE)).unwrap();
+        for it in cache.items().unwrap() {
+            let mut v = serde_json::to_value(&it).unwrap();
+            v.as_object_mut().unwrap().remove("text").unwrap();
+            db.execute(
+                "UPDATE items SET json = ?1 WHERE id = ?2",
+                rusqlite::params![v.to_string(), it.id],
+            )
+            .unwrap();
+        }
+        db.execute("DELETE FROM meta WHERE key = 'item_format'", []).unwrap();
+        let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 1, "no schema change: an older client still opens the cache");
+    }
+    assert_eq!(cache.item(&items[0].id).unwrap().unwrap().text, "", "read without text");
+    assert_eq!(cache.item_format().unwrap(), 1);
+    let gen = cache.generation().unwrap();
+
+    let r = cache::sync(&cache, &client, 500).await.unwrap();
+    assert!(r.full, "listed again in full");
+    assert_eq!(r.total, 4);
+    assert_eq!(
+        cache.item(&items[0].id).unwrap().unwrap().text,
+        "No thoughts\nhead empty"
+    );
+    assert_eq!(cache.item_format().unwrap(), cache::ITEM_FORMAT);
+    assert!(cache.generation().unwrap() > gen);
+    assert!(!cache::sync(&cache, &client, 500).await.unwrap().full, "once");
+
+    // Offline search reads the text like the server's.
+    let idx = cache.offline_index().unwrap();
+    let ids = |q: &str| {
+        idx.search(q, None, 10)
+            .into_iter()
+            .map(|h| h.item.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids("text:\"no thoughts\""), vec![items[0].id.clone()]);
+    assert!(ids("text:\"thoughts no\"").is_empty());
+    assert_eq!(ids("x:HEAD -text:nope"), vec![items[0].id.clone()]);
+    let hits = idx.search("thoughts", None, 10);
+    assert_eq!(hits[0].matched, vec!["text"]);
+}
+
 #[test]
 fn server_or_account_change_resets_account_data() {
     let dir = tempfile::tempdir().unwrap();

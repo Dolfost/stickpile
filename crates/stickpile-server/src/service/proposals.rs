@@ -1,6 +1,6 @@
 //! Proposals (docs/collaboration.md): a user asks the owner of a set they
 //! can read to add stickers, to change a sticker (name, keywords, emojis,
-//! tags, vibe) or to change the set (name, description, cover). The owner
+//! tags, vibe, text) or to change the set (name, description, cover). The owner
 //! and contributors with the `review` permission accept or decline it; the
 //! proposer may withdraw it while it is open.
 //!
@@ -27,7 +27,9 @@ use crate::db::{self, enum_str, json_list, parse_enum, to_json_list, MediaRow, S
 use crate::error::{AppError, AppResult};
 use crate::ids::{is_id, new_id, now};
 use crate::index;
-use crate::service::upload::{self, clean_list, clean_name, clean_vibe, ItemInput, UploadFile, UploadParts};
+use crate::service::upload::{
+    self, clean_item_text, clean_list, clean_name, clean_vibe, ItemInput, UploadFile, UploadParts,
+};
 use crate::service::{cover, hydrate, items, sets};
 use crate::state::AppState;
 
@@ -256,8 +258,9 @@ pub async fn propose_items(
     get(state, viewer, &id).await
 }
 
-/// Propose changes to someone else's sticker: name, keywords, emojis, tags
-/// and vibe. Fields equal to the current values are dropped.
+/// Propose changes to someone else's sticker: name, keywords, emojis, tags,
+/// vibe and text. Fields equal to the current values are dropped. An
+/// accepted text is the owner's (`text_source: user`), like an edit.
 pub async fn propose_item_changes(
     state: &AppState,
     viewer: &CurrentUser,
@@ -322,6 +325,12 @@ pub async fn propose_item_changes(
             changes.vibe = Some(v);
         }
     }
+    if let Some(t) = c.text.as_deref().map(clean_item_text).transpose()? {
+        if t != cur.text {
+            before.text = Some(cur.text.clone());
+            changes.text = Some(t);
+        }
+    }
     if changes.is_empty() {
         return Err(AppError::bad_request("nothing to change: the values are the same"));
     }
@@ -356,9 +365,9 @@ pub async fn propose_set_changes(
     }
     let message = clean_note(&req.message, "message")?;
     let c = req.changes;
-    if c.keywords.is_some() || c.emojis.is_some() || c.tags.is_some() || c.vibe.is_some() {
+    if c.keywords.is_some() || c.emojis.is_some() || c.tags.is_some() || c.vibe.is_some() || c.text.is_some() {
         return Err(AppError::bad_request(
-            "keywords, emojis, tags and vibe belong to stickers; propose them for one",
+            "keywords, emojis, tags, vibe and text belong to stickers; propose them for one",
         ));
     }
     let mut changes = ProposedChanges::default();
@@ -869,6 +878,7 @@ async fn apply_item_changes(state: &AppState, seen: &Seen) -> AppResult<()> {
         emojis: c.emojis,
         vibe: c.vibe,
         tags: c.tags,
+        text: c.text,
         ..Default::default()
     };
     items::apply_update(state, &seen.set.viewer, &r, req, None).await?;

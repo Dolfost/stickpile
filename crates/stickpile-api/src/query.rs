@@ -5,11 +5,14 @@
 //! ```
 //!
 //! * bare words / `"quoted phrases"`: soft text terms, ranked (name, keywords,
-//!   emojis, vibe, tags, set name, image content)
+//!   emojis, vibe, tags, set name, the words in the picture, image content)
 //! * `e:` / `emoji:` - item has this emoji, or one that a name selects
 //!   (`e:skull`: letters only; matched in `stickpile_search::emoji_names`)
 //! * `set:` / `s:` - set slug (or name, case-insensitive); repeat for OR
 //! * `vibe:` / `v:`, `tag:` / `t:` - exact (case-insensitive); repeat for OR
+//! * `text:` / `x:` - the words written in the picture (the item's `text`):
+//!   the value's words, consecutive (`text:"no thoughts"` is a phrase);
+//!   repeat for OR
 //! * `type:` - `still|image`, `animated|animation`, `video`, or a format
 //!   (`png jpeg jpg webp gif mp4 webm`); repeat for OR
 //! * `q` / `likes` / `copies` with `> >= < <= =` and a number - AND
@@ -118,18 +121,21 @@ pub enum Key {
     Vibe,
     Tag,
     By,
+    /// The words written in the picture (the item's `text`).
+    Text,
     Type,
     Is,
     Sort,
 }
 
 impl Key {
-    pub const ALL: [Key; 8] = [
+    pub const ALL: [Key; 9] = [
         Key::Emoji,
         Key::Set,
         Key::Vibe,
         Key::Tag,
         Key::By,
+        Key::Text,
         Key::Type,
         Key::Is,
         Key::Sort,
@@ -144,6 +150,7 @@ impl Key {
             "v" | "vibe" => Key::Vibe,
             "t" | "tag" => Key::Tag,
             "b" | "by" | "user" => Key::By,
+            "x" | "text" => Key::Text,
             "type" => Key::Type,
             "is" => Key::Is,
             "sort" => Key::Sort,
@@ -151,7 +158,8 @@ impl Key {
         })
     }
 
-    /// The long name: `emoji`, `set`, `vibe`, `tag`, `by`, `type`, `is`, `sort`.
+    /// The long name: `emoji`, `set`, `vibe`, `tag`, `by`, `text`, `type`,
+    /// `is`, `sort`.
     pub fn name(self) -> &'static str {
         match self {
             Key::Emoji => "emoji",
@@ -159,6 +167,7 @@ impl Key {
             Key::Vibe => "vibe",
             Key::Tag => "tag",
             Key::By => "by",
+            Key::Text => "text",
             Key::Type => "type",
             Key::Is => "is",
             Key::Sort => "sort",
@@ -166,7 +175,8 @@ impl Key {
     }
 
     /// The one-letter form of the keys that have one: `e` for `emoji`,
-    /// `s` for `set`, `v` for `vibe`, `t` for `tag`, `b` for `by`.
+    /// `s` for `set`, `v` for `vibe`, `t` for `tag`, `b` for `by`, `x` for
+    /// `text`.
     pub fn short(self) -> Option<&'static str> {
         match self {
             Key::Emoji => Some("e"),
@@ -174,6 +184,7 @@ impl Key {
             Key::Vibe => Some("v"),
             Key::Tag => Some("t"),
             Key::By => Some("b"),
+            Key::Text => Some("x"),
             Key::Type | Key::Is | Key::Sort => None,
         }
     }
@@ -218,6 +229,10 @@ pub struct Query {
     pub sets: Filter<String>,
     pub vibes: Filter<String>,
     pub tags: Filter<String>,
+    /// `text:` values, lowercased: each is a run of words that must appear,
+    /// consecutive, in the item's text (after normalisation; matched in
+    /// stickpile-search).
+    pub texts: Filter<String>,
     pub types: Filter<TypeFilter>,
     pub owners: Filter<String>,
     pub is: Filter<Is>,
@@ -263,6 +278,7 @@ impl Query {
                         Some(Key::Vibe) => push(&mut q.vibes, neg, lower),
                         Some(Key::Tag) => push(&mut q.tags, neg, lower),
                         Some(Key::By) => push(&mut q.owners, neg, lower),
+                        Some(Key::Text) => push(&mut q.texts, neg, lower),
                         Some(Key::Type) => TypeFilter::parse(val).map(|t| push(&mut q.types, neg, t)).is_some(),
                         Some(Key::Is) => match lower.as_str() {
                             "mine" => push(&mut q.is, neg, Is::Mine),
@@ -424,6 +440,7 @@ impl fmt::Display for Query {
         filt("set", &self.sets);
         filt("vibe", &self.vibes);
         filt("tag", &self.tags);
+        filt("text", &self.texts);
         filt("by", &self.owners);
         parts.extend(self.types.any.iter().map(|t| format!("type:{}", t.as_str())));
         parts.extend(self.types.none.iter().map(|t| format!("-type:{}", t.as_str())));
@@ -505,7 +522,7 @@ mod tests {
 
     #[test]
     fn display_round_trips() {
-        let src = r#"human "big chungus" -nope e:😂 set:"my cats" -tag:nsfw type:animated is:liked q>70 likes>=2 sort:recent"#;
+        let src = r#"human "big chungus" -nope e:😂 set:"my cats" -tag:nsfw text:"no thoughts" type:animated is:liked q>70 likes>=2 sort:recent"#;
         let q = Query::parse(src);
         let again = Query::parse(&q.to_string());
         assert_eq!(q, again);
@@ -574,10 +591,33 @@ mod tests {
             }
         }
         let shorts: Vec<_> = Key::ALL.iter().filter_map(|k| k.short()).collect();
-        assert_eq!(shorts, ["e", "s", "v", "t", "b"]);
+        assert_eq!(shorts, ["e", "s", "v", "t", "b", "x"]);
         assert_eq!(Key::parse("user"), Some(Key::By));
-        assert_eq!(Key::parse("x"), None);
+        assert_eq!(Key::parse("x"), Some(Key::Text));
+        assert_eq!(Key::parse("y"), None);
         assert_eq!(Key::parse("q"), None, "q is a comparison, not a filter key");
+    }
+
+    #[test]
+    fn text_filter_parses_words_and_phrases() {
+        let q = Query::parse(r#"cat text:"No Thoughts" -x:Кіт x:meow"#);
+        assert_eq!(q.text, vec!["cat"], "a text: value is no soft term");
+        assert_eq!(q.texts.any, vec!["no thoughts", "meow"]);
+        assert_eq!(q.texts.none, vec!["кіт"]);
+        assert_eq!(Query::parse("x:hi"), Query::parse("TEXT:hi"), "x: is text:, any case");
+        assert!(Query::parse("text:hi").is_filter_only());
+        // A quoted token stays a phrase of the soft terms.
+        let q = Query::parse(r#""text:hi""#);
+        assert_eq!(q.text, vec!["text:hi"]);
+        assert!(q.texts.is_empty());
+        assert_eq!(Query::parse("text: x:").text, vec!["text:", "x:"], "no value: text");
+    }
+
+    #[test]
+    fn text_filter_displays_as_text() {
+        let q = Query::parse(r#"x:"no thoughts" -x:meow cat t:a"#);
+        assert_eq!(q.to_string(), r#"cat tag:a text:"no thoughts" -text:meow"#);
+        assert_eq!(Query::parse(&q.to_string()), q);
     }
 
     #[test]

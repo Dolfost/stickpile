@@ -2758,6 +2758,7 @@ pub(crate) mod tests {
             emojis: vec!["😺".into()],
             vibe: None,
             tags: vec![],
+            text: String::new(),
             kind: MediaKind::Still,
             format: MediaFormat::Png,
             width: 512,

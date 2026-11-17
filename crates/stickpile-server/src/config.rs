@@ -232,6 +232,10 @@ pub struct AiConfig {
     /// Keywords suggested per item.
     pub max_keywords: u32,
     pub max_emojis: u32,
+    /// Read the words written in pictures (OCR) into the item text, when
+    /// AI is enabled and a text reader is available; without one the server
+    /// logs it once and goes on (docs/ai.md).
+    pub ocr: bool,
 }
 
 impl Default for AiConfig {
@@ -245,6 +249,7 @@ impl Default for AiConfig {
             vocabulary_file: None,
             max_keywords: 5,
             max_emojis: 3,
+            ocr: true,
         }
     }
 }

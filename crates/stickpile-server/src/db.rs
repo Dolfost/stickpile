@@ -214,7 +214,7 @@ pub async fn set_by_id(db: &SqlitePool, id: &str) -> sqlx::Result<Option<SetRow>
 
 pub const MEDIA_COLUMNS: &str = "id, sha256, original_sha256, kind, format, width, height, duration_ms, frame_count, \
      fps, has_alpha, size_bytes, phash, dhash, quality, quality_report, embedding_model, ai_keywords, ai_emojis, \
-     ai_vibe, variants_done, created_at";
+     ai_vibe, ocr_text, ocr_model, variants_done, created_at";
 
 /// Media row without the embedding blob.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -239,6 +239,10 @@ pub struct MediaRow {
     pub ai_keywords: Option<String>,
     pub ai_emojis: Option<String>,
     pub ai_vibe: Option<String>,
+    /// The words read in it (NULL: never read; `""`: read, nothing confident).
+    pub ocr_text: Option<String>,
+    /// The text reader that read `ocr_text`.
+    pub ocr_model: Option<String>,
     pub variants_done: bool,
     pub created_at: i64,
 }

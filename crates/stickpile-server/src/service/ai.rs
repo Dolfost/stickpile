@@ -2,11 +2,15 @@
 //! upload tray's suggestions ([`suggest`]), and applying them to items. AI
 //! values only fill fields that are empty or still AI-sourced; anything the
 //! user wrote or confirmed is never overwritten. Filled fields are marked `ai`.
+//!
+//! The item text (the words in the picture, read by OCR) follows a stricter
+//! rule: the computer writes it only while `text_source = 'ai'`, and
+//! [`apply_text`] is the only place that does.
 
 use std::collections::HashSet;
 
 use image::RgbaImage;
-use stickpile_ai::{AiError, Suggestions};
+use stickpile_ai::{AiError, Suggestions, TextReader};
 use stickpile_api::AiSuggestions;
 
 use crate::config::AiConfig;
@@ -80,13 +84,95 @@ pub async fn suggest(state: &AppState, bytes: Vec<u8>) -> AppResult<AiSuggestion
         let frame = stickpile_media::decode_frame(&bytes, &limits)?;
         let (_, s) = embed_and_suggest(ai, &cfg, &frame).map_err(|e| AppError::internal(format!("AI: {e}")))?;
         let fill = AiFill::from_suggestions(&s);
+        // The words in the image, when a reader is there; a reader that
+        // fails leaves the text out rather than the other suggestions.
+        let text = st
+            .text_reader()
+            .and_then(|r| match read_text(r.as_ref(), std::slice::from_ref(&frame)) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    tracing::warn!("reading the text of a suggestion image failed: {e}");
+                    None
+                }
+            });
         Ok(AiSuggestions {
             keywords: fill.keywords,
             emojis: fill.emojis,
             vibe: fill.vibe,
+            text,
         })
     })
     .await?
+}
+
+/// The words in `frames` (one picture: a still, or the first, middle and
+/// last frames of an animation) as the item text. Blocking.
+pub fn read_text(reader: &dyn TextReader, frames: &[RgbaImage]) -> Result<String, AiError> {
+    stickpile_ai::ocr::read_frames(reader, frames)
+}
+
+/// The OCR result `m` holds from the reader `model`, if that reader read it.
+pub fn ocr_of<'a>(m: &'a MediaRow, model: &str) -> Option<&'a str> {
+    (m.ocr_model.as_deref() == Some(model))
+        .then_some(m.ocr_text.as_deref())
+        .flatten()
+}
+
+/// Whether media `m` needs an `Enrich` job: no embedding from the loaded
+/// image model, or no OCR result from the loaded text reader.
+pub fn needs_enrich(state: &AppState, m: &MediaRow) -> bool {
+    let embed = state
+        .ai_model_id()
+        .is_some_and(|model| m.embedding_model.as_deref() != Some(model));
+    let read = state.text_reader().is_some_and(|r| ocr_of(m, r.model_id()).is_none());
+    embed || read
+}
+
+/// Give the items of `media_id` (or just `only_item`) the text the computer
+/// read, `text`, where their text is still the computer's
+/// (`text_source = 'ai'`). Every AI write of the item text goes through
+/// here, so a text a person wrote, or cleared, is never touched. An empty
+/// `text` (nothing confident read) changes nothing. Bumps the version of
+/// every touched set; returns the ids of changed items.
+pub async fn apply_text(
+    conn: &mut sqlx::SqliteConnection,
+    media_id: &str,
+    text: &str,
+    only_item: Option<&str>,
+) -> AppResult<Vec<String>> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let targets: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, set_id FROM items WHERE media_id = ? AND text_source = 'ai' AND text != ? \
+         AND (? IS NULL OR id = ?)",
+    )
+    .bind(media_id)
+    .bind(text)
+    .bind(only_item)
+    .bind(only_item)
+    .fetch_all(&mut *conn)
+    .await?;
+    let t = now();
+    let mut changed = Vec::new();
+    let mut sets_touched = HashSet::new();
+    for (id, set_id) in targets {
+        let done = sqlx::query("UPDATE items SET text = ?, updated_at = ? WHERE id = ? AND text_source = 'ai'")
+            .bind(text)
+            .bind(t)
+            .bind(&id)
+            .execute(&mut *conn)
+            .await?
+            .rows_affected();
+        if done > 0 {
+            sets_touched.insert(set_id);
+            changed.push(id);
+        }
+    }
+    for set_id in sets_touched {
+        sets::bump_version(conn, &set_id).await?;
+    }
+    Ok(changed)
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

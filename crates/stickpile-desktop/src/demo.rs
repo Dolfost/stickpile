@@ -148,6 +148,7 @@ fn summary_for(path: &Path, format: MediaFormat) -> ItemSummary {
         emojis: vec![],
         vibe,
         tags,
+        text: String::new(),
         kind: kind_of(format),
         format,
         width,

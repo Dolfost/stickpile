@@ -277,6 +277,7 @@ fn field_label(field: &'static str) -> &'static str {
         "keywords" => t("keywords"),
         "emojis" => t("emojis"),
         "vibe" => t("vibe"),
+        "text" => t("text"),
         other => other,
     }
 }

@@ -399,6 +399,11 @@ in
             };
             max_keywords = opt u32 5 "Keywords suggested per item.";
             max_emojis = opt u32 3 "Emojis suggested per item.";
+            ocr = opt types.bool true ''
+              Read the words written in pictures (OCR) into the item text, when
+              AI is enabled and a text reader is available; without one the
+              server logs it once and goes on (docs/ai.md).
+            '';
           };
 
           telegram = section "Telegram sticker pack import/export (Bot API)." {

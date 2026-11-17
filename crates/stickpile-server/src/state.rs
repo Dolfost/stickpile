@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use sqlx::SqlitePool;
-use stickpile_ai::{Enricher, Vocabulary, ZeroShot};
+use stickpile_ai::{Enricher, TextReader, Vocabulary, ZeroShot};
 use stickpile_search::Index;
 use tokio::sync::Notify;
 
@@ -53,6 +53,9 @@ pub struct Inner {
     /// Set once the AI backend is ready (see [`AppState::ai`]).
     pub ai: OnceLock<Ai>,
     pub ai_status: AtomicU8,
+    /// Reads the words in pictures for the item text (OCR), once one is
+    /// available (see [`AppState::text_reader`]).
+    pub text_reader: OnceLock<Arc<dyn TextReader>>,
     /// Vibe synonyms for query expansion; available even without a model.
     pub vocab: Vocabulary,
     pub limiters: RateLimiters,
@@ -101,6 +104,10 @@ impl AppState {
     /// Image embedding space in use, if AI is loaded.
     pub fn ai_model_id(&self) -> Option<&str> {
         self.ai().map(|a| a.image_model_id())
+    }
+    /// The OCR backend, when `ai.ocr` is on and one is available.
+    pub fn text_reader(&self) -> Option<&Arc<dyn TextReader>> {
+        self.0.text_reader.get().filter(|_| self.config.ai.ocr)
     }
     pub fn wake_workers(&self) {
         self.jobs_notify.notify_waiters();

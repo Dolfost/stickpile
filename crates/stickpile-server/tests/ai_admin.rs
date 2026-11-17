@@ -693,6 +693,7 @@ async fn ai_becoming_available_backfills_enrichment() {
         srv.state.config.clone(),
         stickpile_server::StartOptions {
             enricher: stickpile_server::EnricherSource::Provided(mock),
+            ..Default::default()
         },
     )
     .await

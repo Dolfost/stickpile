@@ -27,6 +27,8 @@ pub struct ItemFull {
     pub vibe: Option<String>,
     pub vibe_source: String,
     pub tags: String,
+    pub text: String,
+    pub text_source: String,
     pub source_url: Option<String>,
     pub extra_toml: Option<String>,
     pub likes: i64,
@@ -59,8 +61,9 @@ pub struct ItemFull {
 }
 
 pub const ITEM_FULL_SELECT: &str = "SELECT i.id, i.set_id, i.position, i.filename, i.name, i.name_source, i.keywords, \
-     i.keywords_source, i.emojis, i.emojis_source, i.vibe, i.vibe_source, i.tags, i.source_url, i.extra_toml, i.likes, \
-     i.copies, i.created_at, i.updated_at, i.media_id, m.sha256, m.original_sha256, m.kind, m.format, m.width, m.height, \
+     i.keywords_source, i.emojis, i.emojis_source, i.vibe, i.vibe_source, i.tags, i.text, i.text_source, i.source_url, \
+     i.extra_toml, i.likes, i.copies, i.created_at, i.updated_at, i.media_id, m.sha256, m.original_sha256, m.kind, \
+     m.format, m.width, m.height, \
      m.duration_ms, m.frame_count, m.fps, m.has_alpha, m.size_bytes, m.phash, m.dhash, m.quality, s.slug AS set_slug, \
      s.name AS set_name, s.owner_id, s.visibility, u.username AS owner_username, i.added_by, \
      ab.username AS added_by_username \
@@ -212,6 +215,8 @@ pub fn to_item(f: &ItemFull, variants: Vec<VariantInfo>, liked_by_me: bool) -> I
         vibe: f.vibe.clone(),
         vibe_source: source(&f.vibe_source),
         tags: f.tags(),
+        text: f.text.clone(),
+        text_source: source(&f.text_source),
         added_by_username: f.added_by_username.clone(),
         media: media_info(f, variants),
         likes: f.likes.max(0) as u64,
@@ -234,6 +239,7 @@ pub fn to_summary(f: &ItemFull, variants: Vec<VariantInfo>) -> ItemSummary {
         emojis: f.emojis(),
         vibe: f.vibe.clone(),
         tags: f.tags(),
+        text: f.text.clone(),
         kind: f.kind(),
         format: f.format(),
         width: f.width as u32,

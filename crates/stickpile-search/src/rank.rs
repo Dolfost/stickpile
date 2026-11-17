@@ -7,7 +7,7 @@ use std::ops::Bound;
 use stickpile_api::query::{Filter, Is, Query, Sort};
 use stickpile_api::Visibility;
 
-use crate::store::{IntMap, Slot, Store, EMOJI_NAME, FIELD_B, FIELD_LABEL, FIELD_WEIGHT, NFIELDS};
+use crate::store::{IntMap, Slot, Store, EMOJI_NAME, FIELD_B, FIELD_LABEL, FIELD_WEIGHT, NFIELDS, TEXT};
 use crate::text::{
     dot, emoji_key, is_skin_tone, normalize, osa_within, padded_trigrams, squash_key, tokenize, tri_is_padded,
 };
@@ -26,7 +26,9 @@ const MAX_EXPANSIONS: usize = 32;
 const FUZZY: u16 = 1 << 6;
 const EXPANSION: u16 = 1 << 7;
 const IMAGE: u16 = 1 << 8;
-const LABELS: [&str; 9] = [
+/// Bit `i` is label `i`; the fields' bits are in `FIELD_LABEL` (the text's
+/// is bit 9, after the older labels, so their order stays).
+const LABELS: [&str; 10] = [
     "name",
     "keyword",
     "emoji",
@@ -36,6 +38,7 @@ const LABELS: [&str; 9] = [
     "fuzzy",
     "expansion",
     "image",
+    "text",
 ];
 
 /// How a query token matched a vocabulary token.
@@ -158,6 +161,9 @@ struct Filters<'a> {
     vibes: Filter<String>,
     tags: Filter<String>,
     owners: Filter<String>,
+    /// `text:` values as token-id runs; `None`: a value no doc can contain
+    /// (a word missing from the vocabulary, or no word at all).
+    texts: Filter<Option<Vec<u32>>>,
     /// Token-id sequences that must not occur in any own text field.
     exclude: Vec<Vec<u32>>,
 }
@@ -172,20 +178,15 @@ fn map_filter<T, U>(f: &Filter<T>, g: impl Fn(&T) -> U) -> Filter<U> {
 impl<'a> Filters<'a> {
     fn new(store: &Store, q: &'a Query, viewer: &'a Viewer) -> Filters<'a> {
         let norm = |s: &String| normalize(s.trim());
-        let exclude = q
-            .exclude_text
-            .iter()
-            .filter_map(|t| {
-                let toks = tokenize(t);
-                if toks.is_empty() {
-                    return None;
-                }
-                // A token missing from the vocabulary cannot occur in any doc.
-                toks.iter()
-                    .map(|t| store.vocab.get(&t.text).copied())
-                    .collect::<Option<Vec<u32>>>()
-            })
-            .collect();
+        // A token missing from the vocabulary cannot occur in any doc.
+        let run = |t: &String| -> Option<Vec<u32>> {
+            let toks = tokenize(t);
+            if toks.is_empty() {
+                return None;
+            }
+            toks.iter().map(|t| store.vocab.get(&t.text).copied()).collect()
+        };
+        let exclude = q.exclude_text.iter().filter_map(run).collect();
         Filters {
             q,
             viewer,
@@ -194,6 +195,7 @@ impl<'a> Filters<'a> {
             vibes: map_filter(&q.vibes, norm),
             tags: map_filter(&q.tags, norm),
             owners: map_filter(&q.owners, |s| s.trim().to_lowercase()),
+            texts: map_filter(&q.texts, run),
             exclude,
         }
     }
@@ -224,17 +226,28 @@ impl<'a> Filters<'a> {
             && self.vibes.accepts(|v| s.vibe.as_deref() == Some(v.as_str()))
             && self.tags.accepts(|v| s.tags.contains(v))
             && self.owners.accepts(|v| s.owner == *v)
+            && self
+                .texts
+                .accepts(|v| v.as_deref().is_some_and(|seq| contains_run(&s.fields[TEXT], seq)))
             && !self.excluded(s)
     }
 
+    /// A `-word` leaves out docs with it in any own field: every field but
+    /// the words derived from the emojis.
     fn excluded(&self, s: &Slot) -> bool {
         self.exclude.iter().any(|seq| {
-            s.fields[..EMOJI_NAME]
+            s.fields
                 .iter()
-                .flatten()
-                .any(|v| v.windows(seq.len()).any(|w| w == seq.as_slice()))
+                .enumerate()
+                .filter(|(f, _)| *f != EMOJI_NAME)
+                .any(|(_, values)| contains_run(values, seq))
         })
     }
+}
+
+/// Whether one of `values` has the non-empty token run `seq`, consecutive.
+fn contains_run(values: &[Vec<u32>], seq: &[u32]) -> bool {
+    !seq.is_empty() && values.iter().any(|v| v.windows(seq.len()).any(|w| w == seq))
 }
 
 /// Tie-breaks shared by every ordering: copies desc, updated_at desc, item_id.

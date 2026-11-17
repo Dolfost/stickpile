@@ -400,6 +400,8 @@ impl MockState {
             vibe: None,
             vibe_source: FieldSource::User,
             tags: Vec::new(),
+            text: String::new(),
+            text_source: FieldSource::Ai,
             added_by_username: None,
             media,
             likes: 0,
@@ -448,6 +450,16 @@ impl MockState {
         it.item.updated_at = now;
     }
 
+    /// Give an item the words in its picture, as OCR (`Ai`) or a person
+    /// (`User`) would.
+    pub fn set_text(&mut self, item_id: &str, text: &str, source: FieldSource) {
+        let now = self.tick();
+        let it = self.items.iter_mut().find(|i| i.item.id == item_id).expect("item");
+        it.item.text = text.into();
+        it.item.text_source = source;
+        it.item.updated_at = now;
+    }
+
     fn refresh_set(&mut self, set_id: &str, now: i64) {
         let count = self.items.iter().filter(|i| i.item.set_id == set_id).count() as u64;
         if let Some(s) = self.sets.iter_mut().find(|s| s.id == set_id) {
@@ -474,6 +486,7 @@ impl MockState {
             emojis: item.emojis.clone(),
             vibe: item.vibe.clone(),
             tags: item.tags.clone(),
+            text: item.text.clone(),
             kind: item.media.kind,
             format: item.media.format,
             width: item.media.width,
@@ -758,7 +771,7 @@ pub fn router(state: Shared) -> Router {
         .route(r::SET_TELEGRAM_EXPORT, post(tg_export))
         .route(r::TELEGRAM_IMPORT, post(tg_import))
         .route(r::ITEMS, get(list_items))
-        .route(r::ITEM, get(get_item).delete(delete_item))
+        .route(r::ITEM, get(get_item).delete(delete_item).patch(update_item))
         .route(r::ITEM_FILE, get(item_file))
         .route(r::ITEM_LIKE, put(like).delete(unlike))
         .route(r::SEARCH, get(search))
@@ -1061,6 +1074,14 @@ async fn upload(
         let kw: Vec<String> = meta.keywords.clone().unwrap_or_default();
         let kw_refs: Vec<&str> = kw.iter().map(String::as_str).collect();
         let summary = st.add_item(&id, &name, &kw_refs, bytes);
+        if let Some(text) = &meta.text {
+            let source = if meta.ai_fields.iter().any(|f| f == "text") {
+                FieldSource::Ai
+            } else {
+                FieldSource::User
+            };
+            st.set_text(&summary.id, &stickpile_api::text::clean_text(text), source);
+        }
         let item = st
             .items
             .iter()
@@ -1109,7 +1130,7 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
     for (pos, it) in items.iter().enumerate() {
         let filename =
             stickpile_setfmt::export_filename(pos + 1, total, &it.item.name, it.item.media.format.extension());
-        let meta = stickpile_setfmt::ItemMeta {
+        let mut meta = stickpile_setfmt::ItemMeta {
             name: it.item.name.clone(),
             keywords: it.item.keywords.clone(),
             emojis: it.item.emojis.clone(),
@@ -1117,6 +1138,7 @@ async fn export_set(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<St
             tags: it.item.tags.clone(),
             ..Default::default()
         };
+        meta.set_text(it.item.text.clone(), it.item.text_source);
         manifest.items.insert(filename.clone(), meta.clone());
         files.push(stickpile_setfmt::SetFile {
             filename,
@@ -1784,6 +1806,59 @@ async fn get_item(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<Stri
     }))
 }
 
+/// PATCH an own item: the given fields change and become the user's (the
+/// text too, also when cleared); `confirm` makes AI values the user's.
+async fn update_item(
+    State(s): State<Shared>,
+    h: HeaderMap,
+    AxPath(id): AxPath<String>,
+    Json(req): Json<UpdateItem>,
+) -> HResult<Json<Item>> {
+    let mut st = lock(&s);
+    let u = auth(&st, &h)?;
+    let set_id = st
+        .items
+        .iter()
+        .find(|i| i.item.id == id)
+        .map(|i| i.item.set_id.clone())
+        .ok_or_else(not_found)?;
+    if !st.owns(&u, &set_id) {
+        return Err(not_found());
+    }
+    let now = st.tick();
+    let it = &mut st.items.iter_mut().find(|i| i.item.id == id).expect("item").item;
+    if let Some(n) = req.name {
+        (it.name, it.name_source) = (n, FieldSource::User);
+    }
+    if let Some(k) = req.keywords {
+        (it.keywords, it.keywords_source) = (k, FieldSource::User);
+    }
+    if let Some(e) = req.emojis {
+        (it.emojis, it.emojis_source) = (e, FieldSource::User);
+    }
+    if let Some(v) = req.vibe {
+        (it.vibe, it.vibe_source) = (v, FieldSource::User);
+    }
+    if let Some(t) = req.tags {
+        it.tags = t;
+    }
+    if let Some(t) = req.text {
+        (it.text, it.text_source) = (stickpile_api::text::clean_text(&t), FieldSource::User);
+    }
+    for field in &req.confirm {
+        match field.as_str() {
+            "name" => it.name_source = FieldSource::User,
+            "keywords" => it.keywords_source = FieldSource::User,
+            "emojis" => it.emojis_source = FieldSource::User,
+            "vibe" => it.vibe_source = FieldSource::User,
+            "text" => it.text_source = FieldSource::User,
+            other => return Err(api_err(400, "bad_request", &format!("cannot confirm {other:?}"))),
+        }
+    }
+    it.updated_at = now;
+    Ok(Json(it.clone()))
+}
+
 async fn delete_item(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<String>) -> HResult<StatusCode> {
     let mut st = lock(&s);
     let u = auth(&st, &h)?;
@@ -1900,7 +1975,17 @@ async fn search(
                 matched.push("keyword".to_string());
                 m = true;
             }
+            if sum.text.to_lowercase().contains(term.as_str()) {
+                matched.push("text".to_string());
+                m = true;
+            }
             ok &= m;
+        }
+        // Roughly the real `text:`: the words, consecutive, in the text.
+        let words = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text = words(&sum.text.to_lowercase());
+        if !query.texts.accepts(|v| text.contains(&words(v))) {
+            continue;
         }
         if !ok {
             continue;

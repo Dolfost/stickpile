@@ -26,6 +26,7 @@ pub fn doc(f: &ItemFull, embedding: Option<Arc<[f32]>>) -> Doc {
         emojis: f.emojis(),
         vibe: f.vibe.clone(),
         tags: f.tags(),
+        text: f.text.clone(),
         kind: f.kind(),
         format: f.format(),
         quality: f.quality.map(|q| q.clamp(0, 100) as u8),

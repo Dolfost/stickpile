@@ -28,6 +28,8 @@ emojis = ["😼"]
 vibe = "smug"
 vibe_source = "ai"
 tags = ["reaction"]
+text = "NO THOUGHTS\nhead empty"
+text_source = "ai"
 
 [items."001-cat.png".credits]
 by = "someone"
@@ -35,6 +37,7 @@ by = "someone"
 [items."002-dog.png"]
 name = "not a cat"
 emojis = ["🐶"]
+text = "woof"
 "#;
 
 /// Import a set directory over HTTP (what the CLI and web UI do).
@@ -186,6 +189,19 @@ async fn backup_while_running_round_trips() {
         again.manifest.items["001-cat.png"].keywords_source,
         stickpile_api::FieldSource::Ai
     );
+    // The text and who wrote it travel too.
+    let text = |b: &SetBundle, f: &str| {
+        let i = &b.manifest.items[f];
+        (i.text.clone(), i.effective_text_source())
+    };
+    assert_eq!(
+        text(&again, "001-cat.png"),
+        ("NO THOUGHTS\nhead empty".to_string(), stickpile_api::FieldSource::Ai)
+    );
+    assert_eq!(
+        text(&again, "002-dog.png"),
+        ("woof".to_string(), stickpile_api::FieldSource::User)
+    );
 
     // A second backup into the same directory replaces the first; a
     // directory with other content is refused.
@@ -247,6 +263,16 @@ async fn backup_while_running_round_trips() {
         .expect(200)
         .json();
     let first = &d.items[0].id;
+    // The database brings the text and its source back as they were.
+    let texts: Vec<(&str, stickpile_api::FieldSource)> =
+        d.items.iter().map(|i| (i.text.as_str(), i.text_source)).collect();
+    assert_eq!(
+        texts,
+        [
+            ("NO THOUGHTS\nhead empty", stickpile_api::FieldSource::Ai),
+            ("woof", stickpile_api::FieldSource::User)
+        ]
+    );
     restored
         .get(&alice_again, &routes::path(routes::ITEM_FILE, &[first, "thumb"]))
         .await

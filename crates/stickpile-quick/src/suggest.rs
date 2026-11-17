@@ -167,7 +167,9 @@ pub enum Field {
 
 impl Field {
     /// The field of a `key` as the query syntax spells it, its one-letter
-    /// form included (`v` is `vibe`); `None` for anything that is no key.
+    /// form included (`v` is `vibe`); `None` for anything that is no key,
+    /// and for `text:` (`x:`), whose values are free words with nothing to
+    /// offer.
     pub fn of(key: &str) -> Option<Field> {
         Some(match Key::parse(key)? {
             Key::Vibe => Field::Vibe,
@@ -178,6 +180,7 @@ impl Field {
             Key::Is => Field::Is,
             Key::Sort => Field::Sort,
             Key::Emoji => Field::Emoji,
+            Key::Text => return None,
         })
     }
 
@@ -737,6 +740,16 @@ mod tests {
         assert!(suggest("e:sk ", &vocab()).is_none(), "the token is finished");
         assert!(suggest("\"vibe:sa", &vocab()).is_none(), "inside quotes");
         assert!(suggest("vibe:sa", &Vocabulary::default()).is_none(), "nothing known");
+        // The words in the picture are free text: nothing to offer or to correct.
+        assert_eq!(Field::of("text"), None);
+        assert_eq!(Field::of("X"), None);
+        assert!(suggest("text:", &vocab()).is_none());
+        assert!(suggest("cat x:sa", &vocab()).is_none());
+        assert_eq!(
+            resolve("x:sad text:cat", &vocab()).0,
+            "text:sad text:cat",
+            "x: goes out long"
+        );
     }
 
     #[test]

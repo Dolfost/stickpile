@@ -44,15 +44,19 @@ pub(crate) const TAG: usize = 4;
 pub(crate) const SET: usize = 5;
 /// Words derived from the item's emojis (😂 -> laugh, joy...). Reported as `emoji`.
 pub(crate) const EMOJI_NAME: usize = 6;
-pub(crate) const NFIELDS: usize = 7;
+/// The words written in the picture ([`Doc::text`]), as one value.
+pub(crate) const TEXT: usize = 7;
+pub(crate) const NFIELDS: usize = 8;
 
-/// Per-field weight of a match.
-pub(crate) const FIELD_WEIGHT: [f32; NFIELDS] = [3.0, 2.5, 2.0, 1.5, 2.0, 1.0, 1.0];
-/// BM25 length normalisation per field: names are prose-like, keyword/tag/emoji
+/// Per-field weight of a match. The text weighs less than the name and the
+/// keywords: it is often long, and OCR makes it noisy.
+pub(crate) const FIELD_WEIGHT: [f32; NFIELDS] = [3.0, 2.5, 2.0, 1.5, 2.0, 1.0, 1.0, 1.5];
+/// BM25 length normalisation per field: names and the text are prose, so a
+/// word in a long text counts less (the classic 0.75); keyword/tag/emoji
 /// lists are bags where one more entry should not punish much, vibe is one word.
-pub(crate) const FIELD_B: [f32; NFIELDS] = [0.75, 0.4, 0.3, 0.0, 0.3, 0.5, 0.3];
+pub(crate) const FIELD_B: [f32; NFIELDS] = [0.75, 0.4, 0.3, 0.0, 0.3, 0.5, 0.3, 0.75];
 /// Label bit of each field (see `LABELS`).
-pub(crate) const FIELD_LABEL: [u16; NFIELDS] = [1, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 2];
+pub(crate) const FIELD_LABEL: [u16; NFIELDS] = [1, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 2, 1 << 9];
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Posting {
@@ -134,6 +138,7 @@ fn analyze(doc: &Doc) -> [Vec<Vec<Token>>; NFIELDS] {
         .map(tokenize)
         .collect();
     f[EMOJI_NAME] = names;
+    f[TEXT] = vec![tokenize(&doc.text)];
     for vals in f.iter_mut() {
         vals.retain(|v| !v.is_empty());
     }

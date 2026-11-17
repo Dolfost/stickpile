@@ -10,7 +10,7 @@ use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use stickpile_api::{routes, Item, Role, Set, UploadResult, Visibility};
-use stickpile_server::{AppState, Config, EnricherSource, StartOptions};
+use stickpile_server::{AppState, Config, EnricherSource, StartOptions, TextReaderSource};
 use tokio_util::sync::CancellationToken;
 
 pub struct TestServer {
@@ -36,6 +36,11 @@ pub struct Opts {
     pub ai_from_config: bool,
     /// Spawn the job workers (otherwise tests drain the queue with `run_jobs`).
     pub workers: bool,
+    /// The OCR backend (keep a clone of a `MockTextReader` to see what it read).
+    pub text_reader: Option<Arc<dyn stickpile_ai::TextReader>>,
+    /// Build the OCR backend as configured (`ai.enabled`, `ai.ocr`), like
+    /// production, instead of `text_reader`.
+    pub ocr_from_config: bool,
 }
 
 pub struct TestUser {
@@ -119,7 +124,12 @@ impl TestServer {
         } else {
             EnricherSource::Disabled
         };
-        let state = stickpile_server::build_state(cfg.clone(), StartOptions { enricher })
+        let text_reader = match opts.text_reader {
+            Some(r) => TextReaderSource::Provided(r),
+            None if opts.ocr_from_config => TextReaderSource::FromConfig,
+            None => TextReaderSource::Disabled,
+        };
+        let state = stickpile_server::build_state(cfg.clone(), StartOptions { enricher, text_reader })
             .await
             .expect("start");
         let cancel = CancellationToken::new();
