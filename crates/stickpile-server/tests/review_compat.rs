@@ -92,6 +92,67 @@ async fn the_full_form_keeps_a_text_read_after_the_page_was_loaded() {
     );
 }
 
+/// Rule 6: an import into an existing set (and a git pull, which uses the
+/// same `transfer::import_bundle_into`) reads the set's items once, before
+/// its loop (`hydrate::fetch_by_set`), and `apply_meta` later writes the
+/// text `ItemText::merged_into` worked out from that snapshot with an
+/// unguarded UPDATE. A text a person types while the import runs (here:
+/// while it waits for the media lock to add a new file) is replaced by the
+/// file's AI text, and marked `ai`.
+#[tokio::test]
+async fn an_import_does_not_overwrite_a_text_typed_while_it_runs() {
+    let srv = TestServer::start().await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let x = srv.upload_one(&u, &set.id, "x.png", png(2)).await;
+    assert_eq!(text_of(&x), (String::new(), FieldSource::Ai));
+    let manifest = r#"
+name = "s"
+
+[items."1-new.png"]
+name = "new"
+
+[items."2-x.png"]
+name = "x"
+text = "a machine's guess"
+text_source = "ai"
+"#;
+    let form = reqwest::multipart::Form::new()
+        .text("set.toml", manifest.to_string())
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(png(1)).file_name("s/1-new.png".to_string()),
+        )
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(png(2)).file_name("s/2-x.png".to_string()),
+        );
+    // Media work waits: the import stops at its new file, after it read
+    // the set's items.
+    let lock = srv.state.media_lock.write().await;
+    let rb = srv
+        .client
+        .post(format!("{}?into={}", srv.url(routes::SETS_IMPORT), set.id))
+        .bearer_auth(&u.token)
+        .multipart(form);
+    let import = tokio::spawn(async move { common::read(rb.send().await.unwrap()).await });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // The person types the text meanwhile.
+    let typed: Item = srv
+        .patch(&u, &routes::path(routes::ITEM, &[&x.id]), json!({"text": "mine"}))
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(text_of(&typed), ("mine".to_string(), FieldSource::User));
+    drop(lock);
+    import.await.unwrap().expect(200);
+    assert_eq!(
+        text_of(&item(&srv, &u, &x.id).await),
+        ("mine".to_string(), FieldSource::User),
+        "an AI text from a file never replaces a person's"
+    );
+}
+
 /// Rule 6 (and W2: the text travels with the upload metadata): a proposal
 /// of new stickers takes `meta` "as for uploads", but the text in it is
 /// dropped (`proposal_items` has no text, `add_proposed` builds an
