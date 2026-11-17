@@ -161,6 +161,8 @@ fn parse_errors() {
         "name = \"x\"\nversion = -1",
         "name = \"x\"\n[items.\"a.png\"]\nkeywords_source = \"robot\"",
         "name = \"x\"\n[items.\"a.png\"]\nkeywords = \"not an array\"",
+        "name = \"x\"\n[items.\"a.png\"]\ntext_source = \"robot\"",
+        "name = \"x\"\n[items.\"a.png\"]\ntext = [\"not a string\"]",
         "name = 5",
     ] {
         match Manifest::parse(bad) {
@@ -168,6 +170,115 @@ fn parse_errors() {
             other => panic!("{bad:?} -> {other:?}"),
         }
     }
+}
+
+const TEXTS: &str = r#"
+name = "texts"
+
+[items."1-ai.png"]
+text = "no thoughts\nhead empty"
+text_source = "ai"
+
+[items."2-typed.png"]
+text = "Кіт у мішку"
+
+[items."3-cleared.png"]
+text_source = "user"
+
+[items."4-unset.png"]
+name = "nothing"
+"#;
+
+#[test]
+fn text_and_its_source() {
+    let m = Manifest::parse(TEXTS).unwrap();
+    let get = |f: &str| {
+        let i = &m.items[f];
+        (i.text.as_str(), i.effective_text_source())
+    };
+    assert_eq!(get("1-ai.png"), ("no thoughts\nhead empty", FieldSource::Ai));
+    assert_eq!(
+        get("2-typed.png"),
+        ("Кіт у мішку", FieldSource::User),
+        "a text is the user's"
+    );
+    assert_eq!(get("3-cleared.png"), ("", FieldSource::User), "cleared by a person");
+    assert_eq!(get("4-unset.png"), ("", FieldSource::Ai), "not set");
+    let text = m.to_toml();
+    assert_eq!(Manifest::parse(&text).unwrap(), m, "{text}");
+    // Line breaks are written as such, in a multi-line string.
+    assert!(
+        text.contains("text = \"\"\"\nno thoughts\nhead empty\"\"\"\ntext_source = \"ai\""),
+        "{text}"
+    );
+    // Nothing is written for an item without a text.
+    let unset = text.split(r#"[items."4-unset.png"]"#).nth(1).unwrap();
+    assert!(!unset.contains("text"), "{text}");
+}
+
+#[test]
+fn set_text_writes_the_shortest_form() {
+    let mut i = ItemMeta::default();
+    for (text, source, written) in [
+        ("hi", FieldSource::User, None),
+        ("hi", FieldSource::Ai, Some(FieldSource::Ai)),
+        ("", FieldSource::User, Some(FieldSource::User)),
+        ("", FieldSource::Ai, None),
+    ] {
+        i.set_text(text.into(), source);
+        assert_eq!(i.text_source, written, "{text:?} {source:?}");
+        assert_eq!(i.effective_text_source(), source, "{text:?}");
+        let mut m = Manifest::new("x");
+        m.items.insert("a.png".into(), i.clone());
+        let back = Manifest::parse(&m.to_toml()).unwrap();
+        assert_eq!(back.items["a.png"].effective_text_source(), source);
+        assert_eq!(back.items["a.png"].text, text);
+    }
+}
+
+/// `ItemMeta` as stickpile 0.7.0 had it: no `text`, no `text_source`.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct ItemMeta070 {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    keywords: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
+    #[serde(flatten)]
+    extra: toml::Table,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct Manifest070 {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    items: std::collections::BTreeMap<String, ItemMeta070>,
+    #[serde(flatten)]
+    extra: toml::Table,
+}
+
+/// A set.toml written by a newer server (packs in a repository are shared
+/// between servers) reads on 0.7.0: no key is denied, the text keys land in
+/// the unknown keys it keeps (`items.extra_toml`) and writes back, and a
+/// newer server reads them again.
+#[test]
+fn an_older_reader_keeps_the_text_as_unknown_keys() {
+    let old: Manifest070 = toml::from_str(TEXTS).unwrap();
+    let ai = &old.items["1-ai.png"];
+    assert_eq!(ai.extra["text"].as_str(), Some("no thoughts\nhead empty"));
+    assert_eq!(ai.extra["text_source"].as_str(), Some("ai"));
+    assert_eq!(old.items["3-cleared.png"].extra["text_source"].as_str(), Some("user"));
+    let written = toml::to_string(&old).unwrap();
+    assert_eq!(
+        Manifest::parse(&written).unwrap(),
+        Manifest::parse(TEXTS).unwrap(),
+        "{written}"
+    );
+    // And the other way: what 0.7.0 wrote has no text, which reads as not set.
+    let plain = Manifest::parse("name = \"x\"\n[items.\"a.png\"]\nname = \"a\"").unwrap();
+    assert_eq!(plain.items["a.png"].effective_text_source(), FieldSource::Ai);
 }
 
 #[test]
@@ -251,6 +362,8 @@ const KNOWN: &[&str] = &[
     "vibe",
     "vibe_source",
     "tags",
+    "text",
+    "text_source",
 ];
 
 fn string(rng: &mut Rng) -> String {
@@ -340,6 +453,8 @@ fn manifest(rng: &mut Rng) -> Manifest {
             vibe: rng.chance(50).then(|| string(rng)),
             vibe_source: source(rng),
             tags: strings(rng),
+            text: string(rng),
+            text_source: rng.chance(50).then(|| source(rng)),
             extra: table(rng, 0),
         };
         m.items.insert(filename, item);

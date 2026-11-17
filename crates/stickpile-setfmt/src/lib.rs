@@ -19,6 +19,8 @@
 //! vibe = "smug"
 //! vibe_source = "ai"
 //! tags = ["reaction"]
+//! text = "no thoughts\nhead empty"
+//! text_source = "ai"
 //! ```
 //!
 //! Unknown keys at any level are preserved through parse -> serialise so a
@@ -91,6 +93,17 @@ pub struct ItemMeta {
     pub vibe_source: FieldSource,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// The words written in the picture (line breaks kept). Empty: not
+    /// written, so files of items without a text stay as they were.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    /// Who wrote `text`, when it is not what the key's absence means: absent
+    /// is `user` for a text and "not set" (`ai`, the computer fills it) for
+    /// none. So `text_source = "user"` without a text is a text a person
+    /// cleared. See [`ItemMeta::effective_text_source`] and
+    /// [`ItemMeta::set_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_source: Option<FieldSource>,
     /// Unknown keys, preserved verbatim.
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -98,6 +111,30 @@ pub struct ItemMeta {
 
 fn is_user(s: &FieldSource) -> bool {
     *s == FieldSource::User
+}
+
+impl ItemMeta {
+    /// The source of `text`: `text_source` when given, else `user` for a
+    /// non-empty text (like every other field) and `ai` for none (not set).
+    pub fn effective_text_source(&self) -> FieldSource {
+        self.text_source.unwrap_or(if self.text.is_empty() {
+            FieldSource::Ai
+        } else {
+            FieldSource::User
+        })
+    }
+
+    /// Set the text and the shortest `text_source` that reads back as
+    /// `source`: nothing for a user text or no text at all.
+    pub fn set_text(&mut self, text: String, source: FieldSource) {
+        let implied = if text.is_empty() {
+            FieldSource::Ai
+        } else {
+            FieldSource::User
+        };
+        self.text_source = (source != implied).then_some(source);
+        self.text = text;
+    }
 }
 
 const ITEM_KEYS: &[&str] = &[
@@ -110,6 +147,8 @@ const ITEM_KEYS: &[&str] = &[
     "vibe",
     "vibe_source",
     "tags",
+    "text",
+    "text_source",
 ];
 const SET_KEYS: &[&str] = &[
     "version",
