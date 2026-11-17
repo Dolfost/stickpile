@@ -36,10 +36,10 @@ fn more_url(q: &str, offset: usize) -> String {
 }
 
 pub fn cheat_sheet() -> Markup {
-    let rows: [(&str, &str); 14] = [
+    let rows: [(&str, &str); 15] = [
         (
             "cat \"big chungus\"",
-            t("words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)"),
+            t("words and phrases in name, keywords, emojis, tags, vibe, set and the words in the picture (typos and naahh → nah are forgiven)"),
         ),
         ("-word", t("exclude a word")),
         ("e:😂", t("has this emoji")),
@@ -51,11 +51,15 @@ pub fn cheat_sheet() -> Markup {
         ("vibe:tired", t("AI or user vibe label")),
         ("tag:reaction  -tag:nsfw", t("has / has not this tag")),
         (
+            "text:\"no thoughts\"",
+            t("has these words in the picture, one after another"),
+        ),
+        (
             "type:gif",
             t("still, animated, video, or a format: png jpeg webp gif mp4 webm"),
         ),
         ("by:alice", t("owner")),
-        ("v: t: s: b: e:", t("short for vibe: tag: set: by: emoji:")),
+        ("v: t: s: b: e: x:", t("short for vibe: tag: set: by: emoji: text:")),
         ("is:mine  is:liked  is:public", t("your items, your likes, public sets")),
         ("q>70", t("quality score (also >= < <= =)")),
         ("likes>=2  copies<5", t("like and copy counts")),

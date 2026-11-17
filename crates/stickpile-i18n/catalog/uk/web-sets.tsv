@@ -161,7 +161,7 @@ import a set directory	імпортуйте каталог набору
 public sets	публічні набори
 
 # Search (web/search.rs)
-words and phrases in name, keywords, emojis, tags, vibe and set (typos and naahh → nah are forgiven)	слова й фрази в назві, ключових словах, емодзі, тегах, настрої та наборі (друкарські помилки й naahh → nah не заважають)
+words and phrases in name, keywords, emojis, tags, vibe, set and the words in the picture (typos and naahh → nah are forgiven)	слова й фрази в назві, ключових словах, емодзі, тегах, настрої, наборі й тексті на картинці (друкарські помилки й naahh → nah не заважають)
 exclude a word	виключити слово
 has this emoji	має це емодзі
 in a set (slug or name)	у наборі (за короткою назвою або назвою)
@@ -169,7 +169,7 @@ AI or user vibe label	мітка настрою від ШІ або корист�
 has / has not this tag	має / не має цього тегу
 still, animated, video, or a format: png jpeg webp gif mp4 webm	still (статичні), animated (анімовані), video (відео) або формат: png jpeg webp gif mp4 webm
 owner	власник
-short for vibe: tag: set: by: emoji:	скорочено vibe: tag: set: by: emoji:
+short for vibe: tag: set: by: emoji: text:	скорочено vibe: tag: set: by: emoji: text:
 your items, your likes, public sets	ваші стікери, ваші вподобання, публічні набори
 quality score (also >= < <= =)	оцінка якості (також >= < <= =)
 like and copy counts	кількість вподобань і копіювань
