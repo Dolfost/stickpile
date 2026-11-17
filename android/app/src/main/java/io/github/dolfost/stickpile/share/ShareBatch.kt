@@ -92,6 +92,8 @@ data class SharedFile(
     val keywords: String = "",
     /** The emojis field, as typed. */
     val emojis: String = "",
+    /** The text field (the words in the picture), as typed. Blank: the server reads them. */
+    val text: String = "",
     val status: FileStatus = FileStatus.Copying,
 ) {
     /** The user may change its fields and upload it. */
@@ -107,6 +109,7 @@ data class SharedFile(
             name = name.trim().ifEmpty { null },
             keywords = TagFields.keywords(keywords),
             emojis = TagFields.emojis(emojis),
+            text = TagFields.text(text),
         )
     }
 }
@@ -182,12 +185,23 @@ data class ShareBatch(
         change(id) { if (it.status == FileStatus.Copying) it.copy(status = FileStatus.Unreadable(problem)) else it }
 
     /** The user typed in the fields of file [id] (null: that field unchanged); only while it is [SharedFile.editable]. */
-    fun edit(id: Int, name: String? = null, keywords: String? = null, emojis: String? = null): ShareBatch =
+    fun edit(
+        id: Int,
+        name: String? = null,
+        keywords: String? = null,
+        emojis: String? = null,
+        text: String? = null,
+    ): ShareBatch =
         change(id) {
             if (!it.editable) {
                 it
             } else {
-                it.copy(name = name ?: it.name, keywords = keywords ?: it.keywords, emojis = emojis ?: it.emojis)
+                it.copy(
+                    name = name ?: it.name,
+                    keywords = keywords ?: it.keywords,
+                    emojis = emojis ?: it.emojis,
+                    text = text?.let(TagFields::limitText) ?: it.text,
+                )
             }
         }
 

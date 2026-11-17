@@ -70,8 +70,8 @@ import io.github.dolfost.stickpile.rust.Pack
 
 /**
  * The share screen: the set to upload into, one card per shared file
- * (preview, name, keywords, emojis, status), and the upload with its
- * progress, or why nothing can be uploaded.
+ * (preview, name, keywords, emojis, the words in the picture, status), and
+ * the upload with its progress, or why nothing can be uploaded.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -305,6 +305,16 @@ private fun FileCard(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (several) ApplyToAll { model.emojisToAll(file.id) }
+                // The words in this picture: its own, so no "Apply to all".
+                OutlinedTextField(
+                    value = file.text,
+                    onValueChange = { model.editText(file.id, it) },
+                    label = { Text(stringResource(R.string.share_text_label)) },
+                    supportingText = { Text(stringResource(R.string.share_text_hint)) },
+                    minLines = 2,
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             if (file.status is FileStatus.Failed) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

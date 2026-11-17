@@ -28,6 +28,8 @@
     <string name="share_keywords_label">Ключові слова</string>
     <string name="share_keywords_hint">Через кому</string>
     <string name="share_emojis_label">Емодзі</string>
+    <string name="share_text_label">Текст на картинці</string>
+    <string name="share_text_hint">Для пошуку. Якщо лишити порожнім, сервер прочитає його з картинки, коли зможе.</string>
     <string name="share_apply_to_all">Застосувати до всіх</string>
     <string name="share_remove">Пропустити</string>
     <string name="share_video">Відео</string>

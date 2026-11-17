@@ -136,6 +136,7 @@ class ShareViewModel(application: Application) : AndroidViewModel(application) {
     fun editName(id: Int, text: String) = changeBatch { it.edit(id, name = text) }
     fun editKeywords(id: Int, text: String) = changeBatch { it.edit(id, keywords = text) }
     fun editEmojis(id: Int, text: String) = changeBatch { it.edit(id, emojis = text) }
+    fun editText(id: Int, text: String) = changeBatch { it.edit(id, text = text) }
     fun keywordsToAll(fromId: Int) = changeBatch { it.keywordsToAll(fromId) }
     fun emojisToAll(fromId: Int) = changeBatch { it.emojisToAll(fromId) }
 

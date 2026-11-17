@@ -52,6 +52,19 @@ class ShareBatchTest {
     }
 
     @Test
+    fun theTextIsSentOnlyWhenTyped() {
+        val b = ready(2).edit(0, text = "NO THOUGHTS\nhead empty ")
+        assertEquals("NO THOUGHTS\nhead empty ", b.file(0)?.toUpload()?.text)
+        assertNull("untouched: the server reads it", b.file(1)?.toUpload()?.text)
+        assertNull("blank: the same", b.edit(1, text = " \n ").file(1)?.toUpload()?.text)
+        val long = "x".repeat(TagFields.MAX_TEXT_CHARS + 5)
+        assertEquals(TagFields.MAX_TEXT_CHARS, b.edit(0, text = long).file(0)?.text?.length)
+        // Its own picture's words: "Apply to all" leaves the text alone.
+        val all = b.edit(0, keywords = "cat").keywordsToAll(0).emojisToAll(0)
+        assertEquals(listOf("NO THOUGHTS\nhead empty ", ""), all.files.map { it.text })
+    }
+
+    @Test
     fun onlyEditableFilesChange() {
         val b = batch(1).edit(0, name = "x")
         assertEquals("f0", b.file(0)?.name)

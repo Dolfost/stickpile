@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.share
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TagFieldsTest {
@@ -58,5 +59,18 @@ class TagFieldsTest {
         assertEquals("cat, funny cat", TagFields.keywordsText(listOf("cat", "funny cat")))
         assertEquals("\uD83D\uDE00 \uD83D\uDE02", TagFields.emojisText(listOf("\uD83D\uDE00", "\uD83D\uDE02")))
         assertEquals(listOf("cat", "funny cat"), TagFields.keywords(TagFields.keywordsText(listOf("cat", "funny cat"))))
+    }
+
+    @Test
+    fun theTextIsKeptAsTypedUpTo2000Characters() {
+        assertEquals("one\ntwo ", TagFields.text("one\ntwo "))
+        assertNull(TagFields.text(""))
+        assertNull(TagFields.text(" \n\t"))
+        assertEquals("short", TagFields.limitText("short"))
+        // 2000 characters: an emoji is one, though two UTF-16 units.
+        val emojis = "😀".repeat(2001)
+        val cut = TagFields.limitText(emojis)
+        assertEquals(TagFields.MAX_TEXT_CHARS, cut.codePointCount(0, cut.length))
+        assertEquals("😀".repeat(2000), cut)
     }
 }

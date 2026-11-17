@@ -31,6 +31,8 @@
     <string name="share_keywords_label">Keywords</string>
     <string name="share_keywords_hint">Separated by commas</string>
     <string name="share_emojis_label">Emojis</string>
+    <string name="share_text_label">Text in the picture</string>
+    <string name="share_text_hint">For search. Left empty, the server reads it from the picture when it can.</string>
     <string name="share_apply_to_all">Apply to all</string>
     <string name="share_remove">Leave out</string>
     <string name="share_video">Video</string>

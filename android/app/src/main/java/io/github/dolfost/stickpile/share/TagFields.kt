@@ -3,8 +3,8 @@ package io.github.dolfost.stickpile.share
 import java.text.BreakIterator
 
 /**
- * The keywords and emojis text fields of the share screen (pure, no
- * Android): what the user typed, as the lists `UploadFile` takes, split
+ * The keywords, emojis and text fields of the share screen (pure, no
+ * Android): what the user typed, as `UploadFile` takes it; the lists split
  * like the web UI splits them (`split_list` and `split_emojis` in
  * `stickpile-server`'s `web/items.rs`).
  */
@@ -33,6 +33,25 @@ object TagFields {
             .filter { it.isNotEmpty() }
             .flatMap { if (it.any(Char::isLetterOrDigit)) listOf(it) else graphemes(it) }
             .distinct()
+
+    /** The longest text, in characters (code points), the server takes. */
+    const val MAX_TEXT_CHARS = 2000
+
+    /**
+     * The text field as typed, cut to [MAX_TEXT_CHARS] characters (never
+     * inside a character made of two UTF-16 units).
+     */
+    fun limitText(typed: String): String {
+        if (typed.codePointCount(0, typed.length) <= MAX_TEXT_CHARS) return typed
+        return typed.substring(0, typed.offsetByCodePoints(0, MAX_TEXT_CHARS))
+    }
+
+    /**
+     * The text to upload, the person's own: as typed (the server tidies the
+     * line breaks and the ends); null when blank, so that it is not sent
+     * and the server reads the words in the picture itself.
+     */
+    fun text(typed: String): String? = typed.takeIf { it.isNotBlank() }
 
     /** A list of keywords as the keywords field shows it. */
     fun keywordsText(keywords: List<String>): String = keywords.joinToString(", ")
