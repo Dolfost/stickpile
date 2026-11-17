@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::config::{
-    Background, ClientConfig, ConfigError, SquarePad, StartMode, LANGUAGES, PASTE_DELAY_MAX_MS, PASTE_WAIT_MAX_MS,
-    START_TABS,
+    Background, ClientConfig, ConfigError, SquarePad, StartMode, Theme, LANGUAGES, PASTE_DELAY_MAX_MS,
+    PASTE_WAIT_MAX_MS, START_TABS,
 };
 
 /// The GUI's settings file, next to `config.toml`.
@@ -135,6 +135,14 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "auto follows your account's language (else the system's); a choice here sets the account's too.",
             Choice(LANGUAGES),
             s("auto"),
+        ),
+        spec(
+            "ui.theme",
+            "Popup",
+            "Theme",
+            "system follows the desktop's light or dark style; OLED is dark on pure black.",
+            Choice(Theme::NAMES),
+            s("system"),
         ),
         spec(
             "ui.start_tab",

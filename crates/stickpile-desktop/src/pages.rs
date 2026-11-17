@@ -6,7 +6,7 @@ use std::path::Path;
 
 use stickpile_api::TargetApp;
 use stickpile_core::ClientConfig;
-use stickpile_i18n::global::{t, t_dyn, tf, tp};
+use stickpile_i18n::global::{t, t_dyn, tc, tf, tp};
 use stickpile_i18n::Lang;
 use stickpile_quick::model::target_name;
 use stickpile_quick::{HelpSection, Tab};
@@ -84,6 +84,15 @@ pub fn stat_tiles(p: &Profile) -> Vec<(String, &'static str)> {
 }
 
 /// Display text of a choice value of the setting `key`.
+/// `ui.theme`'s values and their names, translated with the context
+/// `theme` (in Ukrainian they agree with "тема").
+const THEME_LABELS: [(&str, &str); 4] = [
+    ("system", "System"),
+    ("dark", "Dark"),
+    ("oled", "OLED"),
+    ("white", "White"),
+];
+
 pub fn choice_label(key: &str, value: &str) -> String {
     let named = match key {
         "ui.start_tab" if value == "last" => Some(t("Last used tab").to_string()),
@@ -91,6 +100,10 @@ pub fn choice_label(key: &str, value: &str) -> String {
         "ui.language" if value == "auto" => Some(t("Automatic").to_string()),
         "ui.language" => Lang::parse(value).map(|l| l.native_name().to_string()),
         "default_target" => TargetApp::parse(value).map(target_name),
+        "ui.theme" => THEME_LABELS
+            .iter()
+            .find(|(v, _)| *v == value)
+            .map(|&(_, en)| tc("theme", en).to_string()),
         _ => None,
     };
     named.unwrap_or_else(|| {
@@ -288,13 +301,16 @@ mod tests {
                     // Under English (the tests' language) the label is the
                     // catalog key; tabs and languages are named elsewhere.
                     let shown = choice_label(spec.key, n);
-                    let named = matches!(spec.key, "ui.start_tab" | "default_target")
+                    let named = matches!(spec.key, "ui.start_tab" | "default_target" | "ui.theme")
                         || (spec.key == "ui.language" && *n != "auto");
                     if !named {
                         need(&shown);
                     }
                 }
             }
+        }
+        for (_, en) in THEME_LABELS {
+            need(&format!("theme::{en}"));
         }
         for section in stickpile_quick::HELP.iter().chain(stickpile_quick::SYNTAX) {
             need(section.title);
@@ -324,6 +340,8 @@ mod tests {
             target_name(TargetApp::Generic)
         );
         assert_eq!(choice_label("copy.square", "transparent"), "Transparent");
+        assert_eq!(choice_label("ui.theme", "oled"), "OLED");
+        assert_eq!(choice_label("ui.theme", "white"), "White");
         assert_eq!(choice_label("x", "some_value"), "Some value");
         assert_eq!(choice_label("x", ""), "");
     }

@@ -20,6 +20,7 @@ use adw::prelude::*;
 use futures::FutureExt;
 use gtk::{gdk, gio, glib};
 use stickpile_api::{ItemSummary, SetSummary, TargetApp};
+use stickpile_core::config::Theme;
 use stickpile_core::settings as config_file;
 use stickpile_core::{ClientConfig, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
@@ -90,7 +91,30 @@ label.stickpile-heart { color: #ff5470; }
 .stickpile-stat { padding: 10px 6px; }
 row.stickpile-cursor { background-color: alpha(@accent_bg_color, 0.14); box-shadow: inset 3px 0 @accent_bg_color; }
 button.stickpile-cursor { outline: 2px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
+window.stickpile-oled {
+  --window-bg-color: #000000;
+  --view-bg-color: #000000;
+  --headerbar-bg-color: #000000;
+  --headerbar-backdrop-color: #000000;
+  --sidebar-bg-color: #000000;
+  --secondary-sidebar-bg-color: #000000;
+  --dialog-bg-color: #000000;
+  --popover-bg-color: #141414;
+  --thumbnail-bg-color: #000000;
+}
 "#;
+
+/// `ui.theme`: libadwaita's colour scheme, and for OLED the dark one with
+/// pure black behind everything (the `stickpile-oled` class above).
+fn apply_theme(window: &adw::ApplicationWindow, theme: Theme) {
+    let scheme = match theme {
+        Theme::System => adw::ColorScheme::Default,
+        Theme::Dark | Theme::Oled => adw::ColorScheme::ForceDark,
+        Theme::White => adw::ColorScheme::ForceLight,
+    };
+    adw::StyleManager::default().set_color_scheme(scheme);
+    set_class(window, "stickpile-oled", theme == Theme::Oled);
+}
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -1082,6 +1106,9 @@ impl Shell {
         if old.ui.language != new.ui.language {
             self.apply_language();
         }
+        if old.ui.theme != new.ui.theme {
+            apply_theme(&w.window, new.ui.theme);
+        }
         let account = pages::account_changed(&old, &new);
         if pages::needs_new_session(&old, &new) {
             match &self.demo {
@@ -1941,6 +1968,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         .hide_on_close(true)
         .content(&stack)
         .build();
+    apply_theme(&window, cfg.ui.theme);
 
     let w = Widgets {
         window,

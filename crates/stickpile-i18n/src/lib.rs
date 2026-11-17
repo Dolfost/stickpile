@@ -512,6 +512,11 @@ pub mod global {
         super::tp(get(), n, one, many)
     }
 
+    /// [`super::tc`] in the current language.
+    pub fn tc(ctx: &'static str, en: &'static str) -> &'static str {
+        super::tc(get(), ctx, en)
+    }
+
     pub fn t_dyn(en: &str) -> String {
         super::t_dyn(get(), en)
     }

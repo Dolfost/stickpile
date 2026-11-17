@@ -186,6 +186,20 @@ validates the file. The home-manager module
 (`programs.stickpile.settings`, [nix.md](nix.md#home-manager)) can write it
 for you.
 
+### Popup theme
+
+```toml
+[ui]
+theme = "system"      # system | dark | oled | white
+```
+
+`system` follows the desktop's light or dark style (GNOME and KDE's
+setting through libadwaita on Linux, the Appearance setting on macOS).
+`dark` and `white` keep the popup dark or light whatever the desktop
+does; `oled` is the dark style on pure black. The Settings tab changes
+it at once. The Android app has the same four choices in its own
+settings ([android.md](android.md#theme)).
+
 ### Popup tabs and modes
 
 ```toml
@@ -284,7 +298,7 @@ The popup's Settings tab edits these keys:
 
 | Group | Keys |
 |---|---|
-| Popup | `ui.language`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Popup | `ui.language`, `ui.theme`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background`, `paste.auto`, `paste.shortcut` (not on macOS), `paste.delay_ms`, `paste.wait_ms` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 

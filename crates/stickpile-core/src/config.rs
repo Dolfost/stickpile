@@ -101,6 +101,33 @@ pub struct UiConfig {
     /// one, else the system's), or one of [`LANGUAGES`]. Choosing one in
     /// the popup also sets the account's, so the web UI follows.
     pub language: String,
+    /// The popup's colours (`ui.theme`).
+    pub theme: Theme,
+}
+
+/// `ui.theme`: the popup's colours.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// The desktop's light or dark style.
+    #[default]
+    System,
+    Dark,
+    /// Dark on pure black, for OLED screens.
+    Oled,
+    White,
+}
+
+impl Theme {
+    pub const NAMES: &'static [&'static str] = &["system", "dark", "oled", "white"];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Dark => "dark",
+            Theme::Oled => "oled",
+            Theme::White => "white",
+        }
+    }
 }
 
 /// Values of `ui.language`: `auto`, then the translated languages.
@@ -163,6 +190,7 @@ impl Default for UiConfig {
             counts: false,
             safe_mode: false,
             language: "auto".into(),
+            theme: Theme::System,
         }
     }
 }

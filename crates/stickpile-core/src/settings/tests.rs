@@ -29,6 +29,7 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "ui.start_hidden",
         "ui.modal",
         "ui.language",
+        "ui.theme",
         "ui.start_tab",
         "ui.start_mode",
         "ui.mark_favorites",

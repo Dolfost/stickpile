@@ -577,6 +577,7 @@ show_details = true  # the selected item's stats above the footer (zi)
 safe_mode = false    # hide items tagged nsfw (S)
 counts = false       # digits start a count (3j, 5G); tab digits then wait
 language = "auto"    # auto | en | uk: the popup's language (docs/languages.md)
+theme = "system"     # system | dark | oled | white: the popup's colours; oled is dark on pure black
 
 [copy]
 square = "off"       # off | transparent | white: pad non-square stills and stickers to a square

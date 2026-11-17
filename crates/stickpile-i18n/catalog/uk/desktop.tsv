@@ -104,6 +104,11 @@ edit the field; Esc leaves it	редагувати поле; Esc — вийти 
 Popup	Спливне вікно
 Copying	Копіювання
 auto follows your account's language (else the system's); a choice here sets the account's too.	auto — мова вашого облікового запису (або системи); вибрана тут мова стає й мовою облікового запису.
+system follows the desktop's light or dark style; OLED is dark on pure black.	system — світлий або темний стиль робочого столу; OLED — темна на чисто чорному тлі.
+theme::System	Системна
+theme::Dark	Темна
+theme::OLED	OLED
+theme::White	Біла
 Start tab	Початкова вкладка
 Tab shown when the popup opens; last is the tab it was closed on.	Вкладка, з якої відкривається вікно; last — та, на якій його закрили.
 Start mode	Початковий режим
