@@ -346,35 +346,3 @@ pub async fn read_original(state: &AppState, media_id: &str) -> Result<Vec<u8>, 
         .await
         .map_err(|e| JobError::Retry(format!("reading the original: {e}")))
 }
-
-/// Enqueue `Enrich` for every referenced media without an embedding from the
-/// current image model (new installs, model changes, uploads made while the
-/// model was loading). Returns how many jobs were queued.
-pub async fn enqueue_missing_enrichment(state: &AppState) -> crate::error::AppResult<usize> {
-    let Some(model) = state.ai_model_id().map(str::to_string) else {
-        return Ok(0);
-    };
-    let ids: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT m.id, (SELECT s.owner_id FROM items i JOIN sets s ON s.id = i.set_id WHERE i.media_id = m.id LIMIT 1) \
-         FROM media m WHERE (m.embedding_model IS NULL OR m.embedding_model != ?) \
-         AND EXISTS (SELECT 1 FROM items i WHERE i.media_id = m.id) \
-         AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'enrich' AND j.subject = m.id AND j.status IN ('queued', 'running'))",
-    )
-    .bind(&model)
-    .fetch_all(&state.db)
-    .await?;
-    for (media_id, owner) in &ids {
-        super::insert(
-            &state.db,
-            stickpile_api::JobKind::Enrich,
-            json!({ "media_id": media_id }),
-            Some(media_id.clone()),
-            owner.as_deref(),
-        )
-        .await?;
-    }
-    if !ids.is_empty() {
-        state.wake_workers();
-    }
-    Ok(ids.len())
-}

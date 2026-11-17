@@ -687,7 +687,8 @@ async fn ai_becoming_available_backfills_enrichment() {
         .await
         .unwrap();
     assert_eq!(enrich, 0);
-    // ... then start with AI on the same data: missing embeddings are queued.
+    // ... then start with AI on the same data: the server's own recheck
+    // queues the missing embeddings (tests/recheck.rs covers it in full).
     let mock: std::sync::Arc<dyn stickpile_ai::Enricher> = std::sync::Arc::new(stickpile_ai::MockEnricher::default());
     let state = stickpile_server::build_state(
         srv.state.config.clone(),
@@ -699,11 +700,11 @@ async fn ai_becoming_available_backfills_enrichment() {
     .await
     .unwrap();
     assert_eq!(state.ai_status(), stickpile_server::state::AiStatus::Ready);
-    let enrich: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'enrich' AND status = 'queued'")
+    let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'recheck' AND status = 'queued'")
         .fetch_one(&state.db)
         .await
         .unwrap();
-    assert_eq!(enrich, 1);
+    assert_eq!(queued, 1);
     stickpile_server::jobs::run_pending(&state).await.unwrap();
     let model: Option<String> = sqlx::query_scalar("SELECT embedding_model FROM media WHERE id = ?")
         .bind(&item.media.id)
@@ -712,12 +713,10 @@ async fn ai_becoming_available_backfills_enrichment() {
         .unwrap();
     assert_eq!(model.as_deref(), Some("mock-64"));
     // Nothing left to backfill.
-    assert_eq!(
-        stickpile_server::jobs::media::enqueue_missing_enrichment(&state)
-            .await
-            .unwrap(),
-        0
-    );
+    assert!(stickpile_server::service::recheck::start_system_clip(&state)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 fn bin() -> std::process::Command {

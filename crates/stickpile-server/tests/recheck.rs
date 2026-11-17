@@ -3,7 +3,8 @@
 //! MockTextReader). The batch's life (counters, dedup, cancel, restart),
 //! `missing` against `refresh` per part, the rule that a person's value is
 //! never replaced (each write path), the scopes (user, set, server), the
-//! queue's fairness, and the audit log and rate limit.
+//! queue's fairness, the audit log and rate limit, and the server's own
+//! batches at startup.
 
 mod common;
 
@@ -1086,4 +1087,121 @@ async fn parts_and_modes_are_checked() {
     assert_eq!(r.code(), "unavailable");
     let r: Recheck = plain.post(&u, routes::RECHECKS, json!({})).await.expect(201).json();
     assert_eq!(r.parts, [RecheckPart::Quality, RecheckPart::Renditions]);
+}
+
+// ---------------------------------------------------------------------------
+// The server's own rechecks (startup)
+// ---------------------------------------------------------------------------
+
+/// After a model change the server rechecks the embedding and the AI
+/// fields of every picture embedded by another model, as one server-wide
+/// batch it starts itself; the computer's values are replaced, a person's
+/// are not, and no `enrich` job is queued any more. Pictures its text
+/// reader never read get their text the same way.
+#[tokio::test]
+async fn the_server_rechecks_after_a_model_change() {
+    let (srv, _) = server().await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let ai = upload(&srv, &u, &set.id, "a.png", solid_png(RED, 1), None).await;
+    let mine = upload(
+        &srv,
+        &u,
+        &set.id,
+        "b.png",
+        solid_png(BLUE, 2),
+        Some(json!({"keywords": ["mine"]})),
+    )
+    .await;
+    srv.run_jobs().await;
+    sql(
+        &srv,
+        "UPDATE items SET keywords = '[\"stale\"]' WHERE id = ?",
+        &[&ai.id],
+    )
+    .await;
+    let enrich_before = scalar(&srv.state.db, "SELECT COUNT(*) FROM jobs WHERE kind = 'enrich'").await;
+
+    let other_model: Arc<dyn stickpile_ai::Enricher> = Arc::new(stickpile_ai::MockEnricher { dim: 32 });
+    let state = restart(
+        &srv,
+        EnricherSource::Provided(other_model.clone()),
+        TextReaderSource::Disabled,
+    )
+    .await;
+    assert_eq!(
+        scalar(&state.db, "SELECT COUNT(*) FROM jobs WHERE kind = 'enrich'").await,
+        enrich_before,
+        "no enrich job"
+    );
+    let rows: Vec<(String, Option<String>, String, String, i64)> =
+        sqlx::query_as("SELECT scope, requested_by, parts, mode, total FROM rechecks")
+            .fetch_all(&state.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        [(
+            "server".to_string(),
+            None,
+            r#"["keywords","emojis","vibe","embedding"]"#.to_string(),
+            "missing".to_string(),
+            2
+        )]
+    );
+    // A restart before it ran adds nothing.
+    let again = restart(
+        &srv,
+        EnricherSource::Provided(other_model.clone()),
+        TextReaderSource::Disabled,
+    )
+    .await;
+    assert_eq!(scalar(&again.db, "SELECT COUNT(*) FROM rechecks").await, 1);
+    jobs::run_pending(&state).await.unwrap();
+    assert_eq!(
+        scalar(
+            &state.db,
+            "SELECT COUNT(*) FROM media WHERE embedding_model = 'mock-32'"
+        )
+        .await,
+        2
+    );
+    let ai1 = item(&srv, &u, &ai.id).await;
+    assert!(!ai1.keywords.contains(&"stale".to_string()), "{:?}", ai1.keywords);
+    assert_eq!(ai1.keywords_source, FieldSource::Ai);
+    let mine1 = item(&srv, &u, &mine.id).await;
+    assert_eq!(
+        (mine1.keywords.as_slice(), mine1.keywords_source),
+        (&["mine".to_string()][..], FieldSource::User)
+    );
+    // The admin sees the server's batch, done, started by nobody.
+    let admin = srv.admin("root").await;
+    let list: Vec<Recheck> = srv.get(&admin, routes::RECHECKS).await.expect(200).json();
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        (list[0].requested_by.as_deref(), list[0].state),
+        (None, RecheckState::Done)
+    );
+    // The same model again: nothing to do, no batch.
+    restart(&srv, EnricherSource::Provided(other_model), TextReaderSource::Disabled).await;
+    assert_eq!(scalar(&state.db, "SELECT COUNT(*) FROM rechecks").await, 1);
+
+    // A new text reader: the pictures it never read.
+    let new_reader = Arc::new(MockTextReader::with_lines(
+        "mock-ocr-2",
+        vec![stickpile_ai::ocr::TextLine::new("new words", 0.9)],
+    ));
+    let state = restart(&srv, EnricherSource::Disabled, TextReaderSource::Provided(new_reader)).await;
+    let text: Vec<(String, i64)> =
+        sqlx::query_as("SELECT parts, total FROM rechecks WHERE parts = '[\"text\"]' AND requested_by IS NULL")
+            .fetch_all(&state.db)
+            .await
+            .unwrap();
+    assert_eq!(text, [(r#"["text"]"#.to_string(), 2)]);
+    jobs::run_pending(&state).await.unwrap();
+    assert_eq!(
+        item(&srv, &u, &ai.id).await.text,
+        "new words",
+        "a new reading replaces the computer's text"
+    );
 }

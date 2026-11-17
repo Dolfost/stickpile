@@ -136,6 +136,12 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
     if let Some(r) = reader {
         tracing::info!("OCR ready: model {}", r.model_id());
         let _ = state.text_reader.set(r);
+        // Pictures this reader never read get their text in the background.
+        match service::recheck::start_system_text(&state).await {
+            Ok(Some(r)) => tracing::info!("started recheck {} of the text of {} pictures", r.id, r.total),
+            Ok(None) => {}
+            Err(e) => tracing::error!("starting the recheck of the text: {e}"),
+        }
     }
     match opts.enricher {
         EnricherSource::Disabled => {}
@@ -160,8 +166,9 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
 }
 
 /// Embed the vocabulary, publish the AI backend, load stored embeddings
-/// into the index and enqueue enrichment for media not yet embedded with
-/// this model. On failure AI stays off for the life of the process.
+/// into the index and start the server's recheck of media not yet embedded
+/// with this model ([`service::recheck::start_system_clip`]). On failure AI
+/// stays off for the life of the process.
 async fn finish_ai(state: &AppState, enricher: anyhow::Result<Arc<dyn Enricher>>) {
     let enricher = match enricher {
         Ok(e) => e,
@@ -196,10 +203,10 @@ async fn finish_ai(state: &AppState, enricher: anyhow::Result<Arc<dyn Enricher>>
     if let Err(e) = index::load_embeddings(state).await {
         tracing::error!("loading embeddings into the search index: {e}");
     }
-    match jobs::media::enqueue_missing_enrichment(state).await {
-        Ok(0) => {}
-        Ok(n) => tracing::info!("queued AI enrichment for {n} media items"),
-        Err(e) => tracing::error!("queueing AI enrichment: {e}"),
+    match service::recheck::start_system_clip(state).await {
+        Ok(Some(r)) => tracing::info!("started recheck {} of the AI metadata of {} pictures", r.id, r.total),
+        Ok(None) => {}
+        Err(e) => tracing::error!("starting the recheck of the AI metadata: {e}"),
     }
 }
 
