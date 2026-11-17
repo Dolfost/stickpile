@@ -307,7 +307,7 @@ final class GridCell: NSView {
         var markWidth: CGFloat = 0
         var mark: (String, NSColor)?
         switch e.offline {
-        case .available: mark = ("arrow.down.circle.fill", .systemGreen)
+        case .available: mark = ("arrow.down.circle", .systemGreen)
         case .unavailable: mark = ("icloud.slash", .systemOrange)
         case .none: mark = nil
         }
@@ -335,7 +335,7 @@ final class GridCell: NSView {
     private func drawPackLabels(below area: NSRect) {
         guard let p = pack else { return }
         // A kept pack: the mark at the cover's top right.
-        if p.kept, let icon = symbol("arrow.down.circle.fill", size: 10, weight: .bold, color: .systemGreen) {
+        if p.kept, let icon = symbol("arrow.down.circle", size: 10, weight: .bold, color: .systemGreen) {
             let r = NSRect(x: area.maxX - 23, y: area.minY + 3, width: 20, height: 15)
             NSColor.black.withAlphaComponent(0.55).setFill()
             NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()

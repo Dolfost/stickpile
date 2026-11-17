@@ -178,6 +178,8 @@ final class ConfirmOverlay: NSView {
         accept.title = c.accept
         accept.hasDestructiveAction = c.destructive
         accept.contentTintColor = c.destructive ? .systemRed : nil
+        // The yes of a keep is the default answer (Return), drawn so.
+        accept.bezelColor = c.destructive ? nil : .controlAccentColor
         accept.keyEquivalent = ""
         hint.setText(c.hint)
         needsLayout = true
