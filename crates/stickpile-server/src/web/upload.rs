@@ -60,7 +60,9 @@ fn no_files_message() -> &'static str {
 /// still images can be rotated, flipped and cropped before the upload. The
 /// details go in a `meta` field (JSON, one entry per file, like the API).
 /// With `data-ai-suggest` the tray also asks for AI keywords, emojis and
-/// vibe for each file, to approve or edit before the upload.
+/// vibe for each file, to approve or edit before the upload; with
+/// `data-ai-text` (the server reads the words in pictures) also for the
+/// text, and it sends a larger rendering then.
 /// Without JavaScript the file input posts the files as they are.
 fn form(
     ctx: &Ctx,
@@ -80,11 +82,12 @@ fn form(
     let aspect = aspect.map(|(w, h)| format!("{w}:{h}"));
     let vibes_id = format!("upload-vibes-{key}");
     let (ai, ai_suggest) = ai_attrs(state);
+    let reads_text = ai_suggest.is_some() && state.text_reader().is_some();
     html! {
         form.upload-form method="post" enctype="multipart/form-data" action=(action)
             hx-post=(action) hx-encoding="multipart/form-data" hx-target=(format!("#{results_id}")) hx-swap="innerHTML"
             hx-disabled-elt="find button[type=submit]" data-aspect=[aspect] data-vibes=(vibes_id)
-            data-ai=(ai) data-ai-suggest=[ai_suggest] {
+            data-ai=(ai) data-ai-suggest=[ai_suggest] data-ai-text[reads_text] {
             (ctx.csrf_input())
             datalist id=(vibes_id) { @for v in &vibes { option value=(v) {} } }
             @if set_id.is_none() {

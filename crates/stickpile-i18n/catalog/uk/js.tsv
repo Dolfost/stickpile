@@ -103,6 +103,9 @@ Common emojis	Поширені емодзі
 keywords	ключові слова
 emojis	емодзі
 vibe	настрій
+# The words in the picture, in "AI suggested the {fields}" (also the
+# problems page's "AI suggestions nobody confirmed yet").
+text	текст
 Skipped {names}: a cover image is one still PNG, JPEG or WebP, not an animation or a video.	Пропущено {names}: зображення обкладинки має бути одним статичним PNG, JPEG або WebP, а не анімацією чи відео.
 Skipped {names}: only PNG, JPEG, WebP, GIF, MP4 or WebM files can be uploaded.	Пропущено {names}: завантажувати можна лише файли PNG, JPEG, WebP, GIF, MP4 або WebM.
 {n} file selected|{n} files selected	Вибрано {n} файл|Вибрано {n} файли|Вибрано {n} файлів
@@ -124,9 +127,12 @@ The mood in one word, e.g. tired or smug.	Настрій одним словом
 Approve vibe	Схвалити настрій
 Tags	Теги
 Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram.	Ваші власні позначки для сортування й фільтрування, напр. реакція, nsfw (tag:nsfw). Розділяйте комами. У Telegram не надсилаються.
+Text	Текст
+The words written in the picture, line by line; search finds them. Left empty, the server reads them after the upload; emptied, the item keeps no text.	Слова, написані на картинці, рядок за рядком; пошук їх знаходить. Якщо поле лишити порожнім, сервер прочитає їх після завантаження; якщо його очистити, стікер лишиться без тексту.
+Approve text	Схвалити текст
 Use for every file	Використати для всіх файлів
-Gives the other files these keywords, emojis, vibe and tags. Names stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги. Назви не змінюються.
-Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги та схвалює їх. Назви не змінюються.
+Gives the other files these keywords, emojis, vibe and tags. Names and texts stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги. Назви й тексти не змінюються.
+Gives the other files these keywords, emojis, vibe and tags, and approves them. Names and texts stay.	Дає іншим файлам ці ключові слова, емодзі, настрій і теги та схвалює їх. Назви й тексти не змінюються.
 AI	ШІ
 Suggested by AI: approve or edit it	Запропоновано ШІ: схваліть або відредагуйте
 Suggested by AI, not approved.	Запропоновано ШІ, не схвалено.
@@ -154,6 +160,7 @@ Added {n} file.|Added {n} files.	Додано {n} файл.|Додано {n} ф�
 edited	змінено
 AI suggestions to approve	Пропозиції ШІ чекають схвалення
 AI is suggesting keywords, emojis and vibe	ШІ добирає ключові слова, емодзі та настрій
+AI is suggesting keywords, emojis and vibe and reading the text	ШІ добирає ключові слова, емодзі та настрій і читає текст
 AI suggestions on the way	пропозиції ШІ готуються
 Remove {name} from the upload	Прибрати {name} із завантаження
 Edit {name}	Редагування {name}
@@ -171,6 +178,7 @@ Could not prepare the upload: {error}	Не вдалося підготувати
 The server is still loading its AI model; suggestions follow when it is ready…	Сервер ще завантажує модель ШІ; пропозиції з'являться, щойно вона буде готова…
 The server asked to wait a moment (many suggestions at once)…	Сервер попросив трохи зачекати (забагато пропозицій одночасно)…
 Suggesting keywords, emojis and vibe…	Добираємо ключові слова, емодзі та настрій…
+Suggesting keywords, emojis and vibe and reading the text…	Добираємо ключові слова, емодзі та настрій і читаємо текст…
 AI suggested the {fields}. Approve or edit them; unapproved ones are uploaded marked AI.	ШІ запропонував {fields}. Схваліть або відредагуйте їх; несхвалені буде завантажено з позначкою ШІ.
 AI suggested the {fields}. Approve or edit it; unapproved, it is uploaded marked AI.	ШІ запропонував {fields}. Схваліть або відредагуйте; без схвалення це поле буде завантажено з позначкою ШІ.
 AI suggested the {fields}. Nothing left to approve.	ШІ запропонував {fields}. Схвалювати більше нічого.

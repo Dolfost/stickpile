@@ -417,7 +417,7 @@ enforces the `hidden` attribute); "Download" always works.
     "naahh"), the same rule the server applies. Pasted images are called
     "pasted image" (then "pasted image 2", …) because browsers name every
     pasted image `image.png`.
-  - **Keywords**, **Emojis**, **Vibe** and **Tags**, as in the item editor
+  - **Keywords**, **Emojis**, **Vibe**, **Tags** and **Text**, as in the item editor
     (keywords and tags separated by commas, emojis by spaces; the vibe field
     suggests the vocabulary; Emojis has the [emoji
     picker](#keyboard-and-mouse)). The hints say what each is for:
@@ -428,16 +428,33 @@ enforces the `hidden` attribute); "Download" always works.
     from the start, so AI enrichment fills only the fields left empty (and
     unapproved suggestions, below). "Use for every file" gives
     the other files the selected file's keywords, emojis, vibe and tags (not
-    its name). Enter in these fields does not upload. The details are sent
-    in a `meta` field, the same JSON as the API's (one `UploadMeta` per
+    its name and its text, which belong to one picture). Enter in these
+    fields does not upload (in Text it starts a new line). The details are
+    sent in a `meta` field, the same JSON as the API's (one `UploadMeta` per
     file).
+  - **Text**: the words written in the picture, several lines, at most 2000
+    characters. A text you typed or approved is yours (`text` in `meta`);
+    left empty and never touched it is not sent, so the server reads the
+    picture after the upload (when it has a text reader); a text you
+    emptied is sent as `""`, which keeps the item without a text (the
+    server does not read it then).
   - **AI suggestions** (when the server's AI is ready or still loading; the
     form then carries `data-ai-suggest`): as soon as files are staged, the
     tray asks the server for keywords, emojis and a vibe for each one, two
     files at a time, the selected file first
     ([ai.md](ai.md#suggestions-before-an-upload)).
-    It sends a small PNG rendered in the browser, not the file. While it
-    waits, the selected file shows "Suggesting keywords, emojis and vibe…".
+    It sends a small PNG rendered in the browser, not the file (256 px on
+    the longest side). When the server reads the words in pictures (the
+    form's `data-ai-text`: AI is ready or loading and the server has a text
+    reader with `ai.ocr` on), the answer also has the text, and the PNG is
+    larger, 1280 px on the longest side, made smaller by quarters while it
+    is over the endpoint's 2 MiB: 256 px is too small to read words, and
+    1280 px is the size the text reader was measured to read about as well
+    as at 2000 px ([ai.md](ai.md#ocr-evaluation)), while the PNG stays
+    quick to encode and send. An empty text in the answer is no
+    suggestion. While it
+    waits, the selected file shows "Suggesting keywords, emojis and vibe…"
+    ("... and reading the text…" with a text reader).
     Suggestions fill only fields that are still empty, never what you typed,
     and are marked like on the item page: the `AI` badge next to the label,
     a tinted field, and an `AI` badge on the thumbnail while the file has
@@ -452,7 +469,8 @@ enforces the `hidden` attribute); "Download" always works.
       with several files) approves every file's.
     - **Use for every file** counts as approval: the copied values are
       yours on every file, the selected file's suggestions included, and
-      they replace the other files' own suggestions in those fields.
+      they replace the other files' own suggestions in those fields. It
+      leaves the texts alone, suggested or not.
     - Unapproved suggestions are uploaded too, marked AI (`ai_fields` in
       `meta`), so the item page shows them with "✓ Confirm".
     - **What AI is doing** shows on the line above the fields, for the
@@ -475,7 +493,7 @@ enforces the `hidden` attribute); "Download" always works.
       by enrichment after the upload, as before.
     - Screen readers: each field's description says "Suggested by AI, not
       approved." while it is; the ✓ buttons are named "Approve keywords"
-      (and so on), "Approve all suggestions for <file>"; the thumbnail
+      (and so on, "Approve text"), "Approve all suggestions for <file>"; the thumbnail
       says "AI suggestions to approve"; the line above the fields is a
       polite live region.
   - **Image tools** for still images (PNG, JPEG, still WebP): rotate left or

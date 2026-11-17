@@ -6,7 +6,8 @@
 // that are chosen, dropped on the form or pasted anywhere on the page
 // (Ctrl+V) are staged in a tray first, and nothing is sent until Upload is
 // pressed. Each staged file can be selected and removed, and gets its
-// details: name, keywords, emojis (with emoji.js's picker), vibe and tags.
+// details: name, keywords, emojis (with emoji.js's picker), vibe, tags and
+// text (the words in the picture, several lines).
 // Still images (PNG, JPEG, still WebP) can also be rotated, flipped and
 // cropped.
 //
@@ -29,15 +30,22 @@
 // ready or loading), every staged file is rendered small in the browser (a
 // PNG with the longest side 256 px, like the server's thumbnails: the image,
 // an animation's first frame, or a video frame at a tenth of its length) and
-// sent there, two at a time, in the background. The keywords, emojis and
-// vibe that come back fill only fields that are still empty and are marked
-// AI until approved: ✓ on a field (a toggle), "Approve all" for the file, or
-// "Approve AI for all files" in the tray head. Editing a field makes the
-// value the user's; so does "Use for every file", for the selected file and
-// the others. Unapproved values are uploaded with `ai_fields`, so the item
-// keeps them marked AI (to confirm on the item page). Tags are never
-// suggested, and a field the user typed in is never filled, even when the
-// answer arrives later. The selected file's AI line says what is going on:
+// sent there, two at a time, in the background. When the server also reads
+// the words in pictures (data-ai-text), the rendering is larger, the longest
+// side 1280 px (smaller while the PNG is over the endpoint's 2 MiB), because
+// text needs pixels. The keywords, emojis, vibe and text that come back fill
+// only fields that are still empty (an empty text is no suggestion) and are
+// marked AI until approved: ✓ on a field (a toggle), "Approve all" for the
+// file, or "Approve AI for all files" in the tray head. Editing a field
+// makes the value the user's; so does "Use for every file", for the
+// selected file and the others (it copies all but the name and the text,
+// which belong to one picture). Unapproved values are uploaded with
+// `ai_fields`, so the item keeps them marked AI (to confirm on the item
+// page). Tags are never suggested, and a field the user typed in is never
+// filled, even when the answer arrives later. A text the user emptied is
+// sent empty, which the server keeps (it does not read that picture's words
+// then); a text never touched and still empty is left out, so the server
+// reads it after the upload. The selected file's AI line says what is going on:
 // suggesting (a spinner on each waiting thumbnail), waiting for the model
 // to load or for the server (503 `ai_loading` and 429 with Retry-After: the
 // tray asks again then), done, failed (with "Try again"), or AI off on
@@ -80,11 +88,20 @@
   var MAX_ZOOM = 3; // small images are shown at most this much larger
   var THUMB = 176; // edited thumbnails, device pixels
   var SUGGEST_PX = 256; // longest side of the image sent for AI suggestions
+  // ...when the server reads the words in pictures: the size at which its
+  // text reader was measured to read about as well as at 2000 px (docs/ai.md,
+  // "OCR evaluation"); its detector enlarges smaller pictures to 736 px on
+  // the short side anyway, and more pixels only cost encoding and upload time.
+  var SUGGEST_TEXT_PX = 1280;
+  var SUGGEST_MAX_BYTES = 2 * 1024 * 1024; // the endpoint's limit for the image
   var SUGGEST_AT_ONCE = 2; // suggestion requests in flight per tray
   var SUGGEST_TRIES = 3; // per file, when the server is busy (429 + Retry-After)
   var SUGGEST_LOAD_WAIT = 180000; // ms to keep asking while the model loads (503 ai_loading)
   // The details AI may suggest (fieldName names them in sentences).
-  var AI_FIELDS = ["keywords", "emojis", "vibe"];
+  var AI_FIELDS = ["keywords", "emojis", "vibe", "text"];
+  // The details "Use for every file" copies (not the name and the text,
+  // which belong to one picture).
+  var COPIED = ["keywords", "emojis", "vibe", "tags"];
   // Orientation as a 2×2 matrix, to notice when edits cancel out.
   var IDENTITY = [1, 0, 0, 1];
   var TURN = {
@@ -166,6 +183,7 @@
 
   // A detail AI may suggest, as named in a sentence ("AI suggested the vibe").
   function fieldName(k) {
+    if (k === "text") return tr("text");
     return k === "keywords" ? tr("keywords") : k === "emojis" ? tr("emojis") : tr("vibe");
   }
 
@@ -426,25 +444,34 @@
     var vibeInput = detailField("vibe", tr("Vibe"), tr("The mood in one word, e.g. tired or smug."), 50, tr("Approve vibe"));
     if (form.getAttribute("data-vibes")) vibeInput.setAttribute("list", form.getAttribute("data-vibes"));
     var tagsInput = detailField("tags", tr("Tags"), tr("Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram."), 0);
+    var textInput = detailField(
+      "text",
+      tr("Text"),
+      tr("The words written in the picture, line by line; search finds them. Left empty, the server reads them after the upload; emptied, the item keeps no text."),
+      2000,
+      tr("Approve text"),
+      true
+    );
     var copyRow = el("div", "tray-copy");
     var copyAll = button("small", tr("Use for every file"));
     copyAll.id = "tray-copy-" + nextId++;
-    var copyHint = el("p", "hint", tr("Gives the other files these keywords, emojis, vibe and tags. Names stay."));
+    var copyHint = el("p", "hint", tr("Gives the other files these keywords, emojis, vibe and tags. Names and texts stay."));
     copyHint.id = copyAll.id + "-hint";
     copyAll.setAttribute("aria-describedby", copyHint.id);
     copyRow.appendChild(copyAll);
     copyRow.appendChild(copyHint);
     details.appendChild(copyRow);
-    var detailInputs = { keywords: keywordsInput, emojis: emojisInput, vibe: vibeInput, tags: tagsInput };
+    var detailInputs = { keywords: keywordsInput, emojis: emojisInput, vibe: vibeInput, tags: tagsInput, text: textInput };
 
     // A labelled text field (`key`: "name" or one of detailInputs); with
     // `approveName` ("Approve keywords"), a field AI may suggest: the AI
     // badge and the ✓ toggle on the label's line (outside the <label>, so
-    // the field's name stays).
-    function detailField(key, label, hint, maxLength, approveName) {
+    // the field's name stays). `lines`: several lines (the text).
+    function detailField(key, label, hint, maxLength, approveName, lines) {
       var row = el("div", "tray-field");
-      var input = el("input");
-      input.type = "text";
+      var input = el(lines ? "textarea" : "input");
+      if (lines) input.rows = 3;
+      else input.type = "text";
       input.id = "tray-" + key + "-" + nextId++;
       input.autocomplete = "off";
       if (maxLength) input.maxLength = maxLength;
@@ -600,8 +627,8 @@
       if (submit && !coverMode) submit.textContent = n ? trp(n, tr("Upload {n} file|Upload {n} files")) : submitLabel;
       copyRow.hidden = n < 2;
       copyHint.textContent = form.getAttribute("data-ai-suggest")
-        ? tr("Gives the other files these keywords, emojis, vibe and tags, and approves them. Names stay.")
-        : tr("Gives the other files these keywords, emojis, vibe and tags. Names stay.");
+        ? tr("Gives the other files these keywords, emojis, vibe and tags, and approves them. Names and texts stay.")
+        : tr("Gives the other files these keywords, emojis, vibe and tags. Names and texts stay.");
       if (!n) metaInput.value = "";
       showAiAll();
     }
@@ -653,6 +680,7 @@
           emojis: "",
           vibe: "",
           tags: "",
+          text: "",
           // AI suggestions: status "", "queued", "busy", "done" or "failed"
           // (`error` says why); fields[k] is "pending" (marked AI),
           // "approved" or absent (the user's value); `filled` lists the
@@ -726,7 +754,9 @@
       aiBadge.hidden = true;
       // Shown while its suggestions are on the way.
       var aiWait = el("span", "thumb-ai-wait");
-      aiWait.title = tr("AI is suggesting keywords, emojis and vibe");
+      aiWait.title = form.hasAttribute("data-ai-text")
+        ? tr("AI is suggesting keywords, emojis and vibe and reading the text")
+        : tr("AI is suggesting keywords, emojis and vibe");
       var spin = el("span", "spinner");
       spin.setAttribute("aria-hidden", "true");
       aiWait.appendChild(spin);
@@ -1072,6 +1102,11 @@
       if (emojis.length) m.emojis = emojis;
       if (e.vibe.trim()) m.vibe = e.vibe.trim();
       if (tags.length) m.tags = tags;
+      // The text as typed (the server cleans it). Emptied by the user it is
+      // sent empty, the user's "no text"; never touched and empty it is
+      // left out, so the server reads the picture.
+      if (e.text.trim()) m.text = e.text;
+      else if (e.ai.touched.text) m.text = "";
       // Unapproved suggestions stay marked AI on the item.
       var ai = pendingOf(e).filter(function (k) {
         return m[k] !== undefined;
@@ -1203,7 +1238,7 @@
       var ctrl = window.AbortController ? new AbortController() : null;
       e.ai.abort = ctrl;
       showAi(e);
-      return smallStill(e)
+      return suggestStill(e)
         .then(
           function (png) {
             if (e.ai.abort !== ctrl) return null;
@@ -1279,28 +1314,51 @@
 
     // What the server's thumbnail shows, small: a PNG with the longest side
     // SUGGEST_PX (never enlarged). Animations give their first frame,
-    // videos the frame at a tenth of their length (like the server).
-    function smallStill(e) {
+    // videos the frame at a tenth of their length (like the server). When
+    // the server reads the words in pictures (data-ai-text) the longest side
+    // is SUGGEST_TEXT_PX instead, three quarters of that again while the PNG
+    // is over SUGGEST_MAX_BYTES (photos); CLIP looks at 224 px either way.
+    function suggestStill(e) {
+      var px = form.hasAttribute("data-ai-text") ? SUGGEST_TEXT_PX : SUGGEST_PX;
       var frame = e.kind === "video" ? videoFrame(e.url) : createImageBitmap(e.file);
       return frame.then(function (img) {
         var w = img.videoWidth || img.width;
         var h = img.videoHeight || img.height;
-        var s = Math.min(1, SUGGEST_PX / Math.max(w, h, 1));
-        var c = canvas(Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)));
-        var g = c.getContext("2d");
-        g.imageSmoothingQuality = "high";
+        var c;
         try {
-          g.drawImage(img, 0, 0, c.width, c.height);
+          c = scaled(img, w, h, px);
         } finally {
           if (img.close) img.close();
           if (img.tagName === "VIDEO") unload(img);
         }
-        return new Promise(function (resolve, reject) {
-          c.toBlob(function (blob) {
-            if (blob) resolve(blob);
-            else reject(new Error("the browser could not encode the image"));
-          }, "image/png");
+        return fit(c);
+      });
+      // The PNG of `c`, or of a smaller copy while it is too large.
+      function fit(c) {
+        return png(c).then(function (blob) {
+          var side = Math.max(c.width, c.height);
+          if (blob.size <= SUGGEST_MAX_BYTES || side <= SUGGEST_PX) return blob;
+          return fit(scaled(c, c.width, c.height, Math.max(SUGGEST_PX, Math.round(side * 0.75))));
         });
+      }
+    }
+
+    // `src` (w x h) drawn on a canvas with the longest side at most `px`.
+    function scaled(src, w, h, px) {
+      var s = Math.min(1, px / Math.max(w, h, 1));
+      var c = canvas(Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)));
+      var g = c.getContext("2d");
+      g.imageSmoothingQuality = "high";
+      g.drawImage(src, 0, 0, c.width, c.height);
+      return c;
+    }
+
+    function png(c) {
+      return new Promise(function (resolve, reject) {
+        c.toBlob(function (blob) {
+          if (blob) resolve(blob);
+          else reject(new Error("the browser could not encode the image"));
+        }, "image/png");
       });
     }
 
@@ -1347,6 +1405,8 @@
         keywords: (s.keywords || []).join(", "),
         emojis: (s.emojis || []).join(" "),
         vibe: s.vibe || "",
+        // Absent when the server reads no text, empty when it read none.
+        text: typeof s.text === "string" ? s.text : "",
       };
       AI_FIELDS.forEach(function (k) {
         if (!values[k]) return;
@@ -1446,6 +1506,9 @@
           return [tr("The server is still loading its AI model; suggestions follow when it is ready…"), "waiting"];
         }
         if (aiWaitWhy === "busy") return [tr("The server asked to wait a moment (many suggestions at once)…"), "waiting"];
+        if (form.hasAttribute("data-ai-text")) {
+          return [tr("Suggesting keywords, emojis and vibe and reading the text…"), "waiting"];
+        }
         return [tr("Suggesting keywords, emojis and vibe…"), "waiting"];
       }
       if (ai.status === "done") {
@@ -1598,19 +1661,24 @@
     copyAll.addEventListener("click", function () {
       var e = current;
       if (!e) return;
-      approveFile(e);
+      COPIED.forEach(function (k) {
+        if (e.ai.fields[k] === "pending") e.ai.fields[k] = "approved";
+      });
+      showAi(e);
       entries.forEach(function (x) {
         // Chosen for every file, so suggestions still on their way do not
         // replace them (nor fill what was copied empty).
-        AI_FIELDS.forEach(function (k) {
+        COPIED.forEach(function (k) {
           x.ai.touched[k] = true;
         });
         if (x === e) return;
-        Object.keys(detailInputs).forEach(function (k) {
+        COPIED.forEach(function (k) {
           x[k] = e[k];
+          delete x.ai.fields[k];
         });
-        x.ai.fields = {};
-        x.ai.filled = [];
+        x.ai.filled = x.ai.filled.filter(function (k) {
+          return COPIED.indexOf(k) < 0;
+        });
         showAi(x);
       });
       say(
