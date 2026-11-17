@@ -928,6 +928,7 @@ button.emoji-btn:focus-visible { outline: 2px solid var(--focus); outline-offset
 .emoji-suggest-keys { margin: 0.2rem 0 0; padding: 0.25rem 0.5rem 0.05rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.72rem; }
 /* The search fields' offers (suggest.js) in the same list: the filter's
    key as its note, a plain value as one word, an emoji with its name. */
+.emoji-suggest.search-suggest { width: min(max(17rem, var(--emoji-field-width, 0px)), 26rem); }
 .search-suggest .emoji-suggest-note { font-family: var(--mono); }
 .search-suggest .emoji-option-name { color: var(--muted); }
 .search-suggest-word { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

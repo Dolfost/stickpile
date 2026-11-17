@@ -102,7 +102,8 @@
       live: live,
       open: false,
       offer: null, // the server's answer shown
-      caret: 0, // where the caret was when it was asked
+      value: "", // the field's text when it was asked
+      caret: 0, // where the caret was then
       active: -1,
       timer: 0,
       sayTimer: 0,
@@ -188,6 +189,7 @@
           return;
         }
         s.caret = caret;
+        s.value = value;
         render(s, offer);
       })
       .catch(function () {
@@ -244,16 +246,22 @@
     var options = s.list.children;
     s.active = i;
     for (var k = 0; k < options.length; k++) options[k].setAttribute("aria-selected", k === i ? "true" : "false");
-    if (i >= 0 && options[i]) {
-      s.input.setAttribute("aria-activedescendant", options[i].id);
-      options[i].scrollIntoView({ block: "nearest" });
-    } else s.input.removeAttribute("aria-activedescendant");
+    if (i >= 0 && options[i]) s.input.setAttribute("aria-activedescendant", options[i].id);
+    else s.input.removeAttribute("aria-activedescendant");
   }
 
   function keydown(s, ev) {
     if (!s.open || ev.isComposing || ev.keyCode === 229) return;
     var plain = !ev.ctrlKey && !ev.metaKey && !ev.altKey;
     var n = s.offer.words.length;
+    // Typed on since the list was drawn (its answer is on the way): the
+    // list is not what Enter or Tab would put in, so they do what they
+    // do without it.
+    var stale = s.input.value !== s.value || s.input.selectionStart !== s.caret;
+    if (stale && (ev.key === "Enter" || ev.key === "Tab")) {
+      close(s);
+      return;
+    }
     switch (ev.key) {
       case "ArrowDown":
       case "ArrowUp":
