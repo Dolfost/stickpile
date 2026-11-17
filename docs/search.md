@@ -219,7 +219,10 @@ Fields and weights:
 The text weighs less than the name and the keywords: it is often long,
 OCR makes it noisy, and a word in a caption says less about the sticker
 than its name. Its `b` is the prose value, so a word in a long text counts
-less than in a short one.
+less than in a short one. A word said again in the text counts once (`tf`
+is 1 in the text): a caption saying "NO NO NO" says `no` once, so it does
+not outrank the keyword `no`, and `😂😂😂` in the text does not outrank
+😂 in the emojis.
 
 For each query term `t` and each document:
 
@@ -242,7 +245,9 @@ What this gives, and what the tests check:
 
 - An exact name match beats a keyword substring match.
 - name > keyword > tag > vibe > set for the same word.
-- name > keyword > text for the same word.
+- name > keyword > text for the same word, also when the text says it
+  several times.
+- An emoji in the emojis > the same emoji in the text.
 - exact > squashed > prefix > fuzzy > substring for the same field.
 - Rare words outweigh common ones.
 

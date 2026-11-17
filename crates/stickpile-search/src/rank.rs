@@ -271,7 +271,10 @@ impl Store {
             n => self.field_len_sum[field] as f32 / n as f32,
         };
         let b = FIELD_B[field];
-        let tf = tf as f32;
+        // A word said again in the picture ("NO NO NO") says it once: a
+        // caption repeating a word must not outrank the keyword or the
+        // emoji given for it.
+        let tf = if field == TEXT { 1.0 } else { tf as f32 };
         tf * (K1 + 1.0) / (tf + K1 * (1.0 - b + b * len as f32 / avg.max(1e-3)))
     }
 
