@@ -345,6 +345,11 @@ pub enum Event {
     AcceptSuggestion(usize),
     /// Answer to [`Command::LoadVocabulary`].
     VocabularyLoaded(Vocabulary),
+    /// A sync changed the offline cache: the values the search suggests
+    /// load again, shown or hidden ([`Command::LoadVocabulary`]), so a
+    /// suggestion line on screen takes the new ones in place (the query
+    /// stays as typed). Results the cache answered are searched again.
+    LibraryChanged,
     /// Ctrl+D or a like button: like / unlike the selected item.
     ToggleFavorite,
     /// Answer to [`Command::ToggleFavorite`]: the item's new liked state.
@@ -439,6 +444,7 @@ pub enum Command {
     },
     /// Fetch the values the search suggests (the vibes, tags, packs and
     /// owners of the cached items); answer with [`Event::VocabularyLoaded`].
+    /// Sent on every opening and after [`Event::LibraryChanged`].
     LoadVocabulary,
     /// Safe mode was switched: save it as `ui.safe_mode`.
     SaveSafeMode {
@@ -1537,6 +1543,7 @@ impl Model {
                 if vocab == self.vocab {
                     return Vec::new();
                 }
+                let before = resolve(self.query.trim(), &self.vocab).0;
                 self.vocab = vocab;
                 let mut cmds = Vec::new();
                 if let Some(open) = &mut self.packs.open {
@@ -1547,8 +1554,22 @@ impl Model {
                     }
                 }
                 // A search typed before the values were known goes out again,
-                // with its filters resolved now.
-                if self.visible && !self.query.trim().is_empty() && self.completion.is_none() {
+                // with its filters resolved now; one they resolve the same
+                // for keeps its results (and the selection in them).
+                if self.visible
+                    && !self.query.trim().is_empty()
+                    && self.completion.is_none()
+                    && resolve(self.query.trim(), &self.vocab).0 != before
+                {
+                    self.generation += 1;
+                    cmds.push(self.search_command(0));
+                }
+                cmds
+            }
+            Event::LibraryChanged => {
+                let mut cmds = vec![Command::LoadVocabulary];
+                // Results the cache answered may be others now; the server's stay.
+                if self.visible && self.offline && !self.query.trim().is_empty() && self.completion.is_none() {
                     self.generation += 1;
                     cmds.push(self.search_command(0));
                 }
@@ -3832,3 +3853,5 @@ mod pack_search_tests;
 mod safe_tests;
 #[cfg(test)]
 mod suggest_tests;
+#[cfg(test)]
+mod sync_tests;
