@@ -369,7 +369,8 @@ async fn unapproved_and_confirmed_texts() {
     assert_eq!(text_of(&item(&srv, &u, &guess.id).await), (READ, FieldSource::User));
 }
 
-/// The web UI's item form has no text field yet: saving it keeps the text.
+/// The web UI's item form without its text field (a page from before it):
+/// saving it keeps the text.
 #[tokio::test]
 async fn the_web_item_form_keeps_the_text() {
     let (srv, _mock) = ocr_server().await;
@@ -394,6 +395,210 @@ async fn the_web_item_form_keeps_the_text() {
     let after = item(&srv, &u, &it.id).await;
     assert_eq!(after.name, "Grumpy");
     assert_eq!(text_of(&after), (READ, FieldSource::Ai));
+}
+
+/// The item page shows the text with its line breaks and the AI marker,
+/// edits it inline (a textarea; saved, also empty, it is the user's) and
+/// in the full form, which sends it only when it changed.
+#[tokio::test]
+async fn the_web_item_page_shows_and_edits_the_text() {
+    let (srv, _mock) = ocr_server().await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let it = upload(&srv, &u, &set.id, "cat.png", png(1), None).await;
+    let other = upload(&srv, &u, &set.id, "dog.png", png(2), None).await;
+    srv.run_jobs().await;
+    let b = Browser::login(&srv, &u).await;
+    let page = format!("/items/{}", it.id);
+
+    // Shown as it is (CSS keeps the line breaks), marked AI, confirmable.
+    let html = b.get(&page).await.text();
+    let block = field_html(&html, &it.id, "text");
+    assert!(block.starts_with("<div class=\"field field-text ai-field\""), "{block}");
+    assert!(
+        block.contains("<span class=\"value item-text\">NO THOUGHTS\nhead empty</span>"),
+        "{block}"
+    );
+    assert!(block.contains("abbr class=\"ai\""), "{block}");
+    assert!(block.contains(&format!("/items/{}/confirm/text", it.id)), "{block}");
+    // The set page's cards have it too, and its View control a toggle.
+    let set_html = b.get(&format!("/sets/{}", set.id)).await.text();
+    assert!(set_html.contains(&format!("id=\"f-{}-text\"", it.id)));
+    assert!(set_html.contains("<input type=\"checkbox\" value=\"text\" checked data-view-part=\"\">"));
+
+    // The inline form is a textarea of at most 2000 characters.
+    let r = b.get_htmx(&format!("/items/{}/field/text/edit", it.id)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.text().contains("<textarea id=\"in-")
+            && r.text().contains("name=\"value\" rows=\"4\" maxlength=\"2000\"")
+            && r.text().contains(">NO THOUGHTS\nhead empty</textarea>"),
+        "{}",
+        r.text()
+    );
+    // The full form has it as a textarea too.
+    let html = b.get(&format!("{page}?edit=1")).await.text();
+    assert!(
+        html.contains(
+            "<textarea id=\"all-text\" name=\"text\" rows=\"4\" maxlength=\"2000\">NO THOUGHTS\nhead empty</textarea>"
+        ),
+        "{html}"
+    );
+
+    // The full form sent back with the text unchanged (the browser's line
+    // endings aside) leaves it the computer's.
+    let all = |text: &'static str| {
+        [
+            ("name", "cat"),
+            ("keywords", ""),
+            ("emojis", ""),
+            ("vibe", ""),
+            ("tags", ""),
+            ("text", text),
+        ]
+    };
+    let r = b.post_form(&page, &all("NO THOUGHTS\r\nhead empty")).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(text_of(&item(&srv, &u, &it.id).await), (READ, FieldSource::Ai));
+    // Changed, it is the user's; cleared, it is the user's empty text.
+    b.post_form(&page, &all("no thoughts\r\n\r\nhead empty ")).await;
+    assert_eq!(
+        text_of(&item(&srv, &u, &it.id).await),
+        ("no thoughts\n\nhead empty", FieldSource::User)
+    );
+    b.post_form(&page, &all("")).await;
+    assert_eq!(text_of(&item(&srv, &u, &it.id).await), ("", FieldSource::User));
+
+    // Inline: saved, it is the user's (no AI marker); escaped when shown.
+    let r = b
+        .post_htmx(
+            &format!("/items/{}/field/text", it.id),
+            &[("value", "  <b>hi</b>\r\nthere  ")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(!r.text().contains("ai-field"));
+    assert!(
+        r.text()
+            .contains("<span class=\"value item-text\">&lt;b&gt;hi&lt;/b&gt;\nthere</span>"),
+        "{}",
+        r.text()
+    );
+    assert_eq!(
+        text_of(&item(&srv, &u, &it.id).await),
+        ("<b>hi</b>\nthere", FieldSource::User)
+    );
+    // Over 2000 characters: the form again, with the error.
+    let long = "x".repeat(2001);
+    let r = b
+        .post_htmx(&format!("/items/{}/field/text", it.id), &[("value", &long)])
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        r.text().contains("error-text") && r.text().contains("<textarea"),
+        "{}",
+        r.text()
+    );
+
+    // Confirm keeps the AI text and makes it the user's.
+    let r = b.post_htmx(&format!("/items/{}/confirm/text", other.id), &[]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(!r.text().contains("ai-field"));
+    assert_eq!(text_of(&item(&srv, &u, &other.id).await), (READ, FieldSource::User));
+}
+
+/// The field block `f-{item}-{field}` of a page, up to the next field.
+fn field_html<'a>(html: &'a str, item_id: &str, field: &str) -> &'a str {
+    let id = format!("id=\"f-{item_id}-{field}\"");
+    let at = html.find(&id).expect("the field");
+    let start = html[..at].rfind("<div").unwrap();
+    let end = html[at..].find("</dd></div>").map_or(html.len(), |e| at + e);
+    &html[start..end]
+}
+
+/// The upload form says when the server reads the words in pictures, so
+/// the tray sends a rendering large enough to read.
+#[tokio::test]
+async fn the_upload_form_says_when_the_server_reads_text() {
+    let (srv, _mock) = ocr_server().await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let b = Browser::login(&srv, &u).await;
+    let html = b.get(&format!("/sets/{}", set.id)).await.text();
+    assert!(
+        html.contains("data-ai-suggest=\"/api/v1/ai/suggest\" data-ai-text>"),
+        "{html}"
+    );
+    // The search syntax names text: and x:.
+    let html = b.get("/search").await.text();
+    assert!(html.contains("<code>text:&quot;no thoughts&quot;</code>"), "{html}");
+    assert!(html.contains("<code>v: t: s: b: e: x:</code>"), "{html}");
+
+    // OCR off: suggestions without the text.
+    let (srv, _mock) = ocr_server_with(true, |c| c.ai.ocr = false).await;
+    let u = srv.user("alice").await;
+    let set = srv.create_set(&u, "s", Visibility::Private).await;
+    let b = Browser::login(&srv, &u).await;
+    let html = b.get(&format!("/sets/{}", set.id)).await.text();
+    assert!(html.contains("data-ai-suggest=\"/api/v1/ai/suggest\""), "{html}");
+    assert!(!html.contains("data-ai-text"), "{html}");
+}
+
+/// "Suggest changes" offers the text; it proposes it only when it changed,
+/// and a form without the field (an older page) leaves it alone.
+#[tokio::test]
+async fn the_web_suggest_form_proposes_the_text() {
+    let (srv, _mock) = ocr_server_with(false, |_| {}).await;
+    let alice = srv.user("alice").await;
+    let eve = srv.user("eve").await;
+    let set = srv.create_set(&alice, "public", Visibility::Public).await;
+    let cat = srv.upload_one(&alice, &set.id, "cat.png", png(1)).await;
+    srv.run_jobs().await;
+    let b = Browser::login(&srv, &eve).await;
+    let url = format!("/items/{}/suggest", cat.id);
+    let html = b.get(&url).await.text();
+    assert!(html.contains(">NO THOUGHTS\nhead empty</textarea>"), "{html}");
+    let fields = |text: Option<&'static str>, tags: &'static str| {
+        let mut f = vec![
+            ("name", "cat"),
+            ("keywords", ""),
+            ("emojis", ""),
+            ("tags", tags),
+            ("vibe", ""),
+            ("message", ""),
+        ];
+        f.extend(text.map(|t| ("text", t)));
+        f
+    };
+    // The same text (line endings aside): not proposed.
+    let r = b.post_form(&url, &fields(Some("NO THOUGHTS\r\nhead empty"), "a")).await;
+    let p = proposal_made(&srv, &eve, r).await;
+    assert_eq!(p.changes.text, None);
+    // A form without the field: not proposed either.
+    let p = proposal_made(&srv, &eve, b.post_form(&url, &fields(None, "b")).await).await;
+    assert_eq!(p.changes.text, None);
+    // A new text: proposed, and shown with its line breaks.
+    let r = b.post_form(&url, &fields(Some("no thoughts\r\nhead empty"), "")).await;
+    let p = proposal_made(&srv, &eve, r).await;
+    assert_eq!(p.changes.text.as_deref(), Some("no thoughts\nhead empty"));
+    let html = b.get(&format!("/proposals/{}", p.id)).await.text();
+    assert!(
+        html.contains("<td class=\"after item-text\">no thoughts\nhead empty</td>"),
+        "{html}"
+    );
+}
+
+/// The proposal a form post `r` made (it redirects to its page).
+async fn proposal_made(srv: &TestServer, u: &TestUser, r: common::Resp) -> Proposal {
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let id = web_common::location(&r)
+        .strip_prefix("/proposals/")
+        .expect("a proposal page")
+        .to_string();
+    srv.get(u, &routes::path(routes::PROPOSAL, &[&id]))
+        .await
+        .expect(200)
+        .json()
 }
 
 // ---------------------------------------------------------------------------

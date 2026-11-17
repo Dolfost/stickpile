@@ -188,15 +188,15 @@ fn list_text(v: &[String]) -> String {
     }
 }
 
-/// (field, before, after) rows of an edit proposal.
-fn diff_rows(c: &ProposedChanges, b: &ProposedChanges) -> Vec<(&'static str, String, String)> {
+/// (field, before, after, several lines) rows of an edit proposal.
+fn diff_rows(c: &ProposedChanges, b: &ProposedChanges) -> Vec<(&'static str, String, String, bool)> {
     let text = |s: &Option<String>| s.clone().unwrap_or_default();
     let mut rows = Vec::new();
     if let Some(n) = &c.name {
-        rows.push((t("Name"), text(&b.name), n.clone()));
+        rows.push((t("Name"), text(&b.name), n.clone(), false));
     }
     if let Some(d) = &c.description {
-        rows.push((t("Description"), text(&b.description), d.clone()));
+        rows.push((t("Description"), text(&b.description), d.clone(), false));
     }
     for (label, after, before) in [
         (t("Keywords"), &c.keywords, &b.keywords),
@@ -204,12 +204,27 @@ fn diff_rows(c: &ProposedChanges, b: &ProposedChanges) -> Vec<(&'static str, Str
         (t("Tags"), &c.tags, &b.tags),
     ] {
         if let Some(a) = after {
-            rows.push((label, list_text(before.as_deref().unwrap_or(&[])), list_text(a)));
+            rows.push((label, list_text(before.as_deref().unwrap_or(&[])), list_text(a), false));
         }
     }
     if let Some(v) = &c.vibe {
         let shown = |v: &Option<String>| v.clone().unwrap_or_else(|| t("(none)").into());
-        rows.push((t("Vibe"), shown(&b.vibe.clone().flatten()), shown(v)));
+        rows.push((t("Vibe"), shown(&b.vibe.clone().flatten()), shown(v), false));
+    }
+    if let Some(after) = &c.text {
+        let shown = |s: &str| {
+            if s.is_empty() {
+                t("(none)").to_string()
+            } else {
+                s.to_string()
+            }
+        };
+        rows.push((
+            t("Text"),
+            shown(b.text.as_deref().unwrap_or_default()),
+            shown(after),
+            true,
+        ));
     }
     rows
 }
@@ -327,8 +342,9 @@ fn diff_table(c: &ProposedChanges, b: &ProposedChanges, set: bool) -> Markup {
             table.diff {
                 thead { tr { th { (t("Field")) } th { (t("Now")) } th { (t("Proposed")) } } }
                 tbody {
-                    @for (field, before, after) in &rows {
-                        tr { th scope="row" { (field) } td.before { (before) } td.after { (after) } }
+                    @for (field, before, after, lines) in &rows {
+                        // The item text keeps its line breaks.
+                        tr { th scope="row" { (field) } td.before.item-text[*lines] { (before) } td.after.item-text[*lines] { (after) } }
                     }
                     @if set && c.cover_item_id.is_some() {
                         tr { th scope="row" { (t("Cover")) } td.before { (cover_thumb(&b.cover_item_id)) } td.after { (cover_thumb(&c.cover_item_id)) } }
@@ -733,6 +749,9 @@ pub struct SuggestForm {
     tags: String,
     #[serde(default)]
     vibe: String,
+    /// `None` from a form without the field: the text is left alone.
+    #[serde(default)]
+    text: Option<String>,
     #[serde(default)]
     message: String,
 }
@@ -777,6 +796,12 @@ fn suggest_form(ctx: &Ctx, item: &Item, f: &SuggestForm, error: Option<&str>) ->
                 input #s-vibe type="text" name="vibe" value=(f.vibe) maxlength="64";
             }
             div.field-row {
+                label for="s-text" { (t("Text")) }
+                textarea #s-text name="text" rows="3" maxlength=(stickpile_api::text::MAX_TEXT_CHARS)
+                    aria-describedby="s-text-hint" { (f.text.as_deref().unwrap_or_default()) }
+                span.hint #s-text-hint { (t("the words in the picture")) }
+            }
+            div.field-row {
                 label for="s-msg" { (t("Message (optional)")) }
                 textarea #s-msg name="message" rows="2" maxlength="1000" { (f.message) }
             }
@@ -793,6 +818,7 @@ impl SuggestForm {
             emojis: item.emojis.join(", "),
             tags: item.tags.join(", "),
             vibe: item.vibe.clone().unwrap_or_default(),
+            text: Some(item.text.clone()),
             message: String::new(),
         }
     }
@@ -821,6 +847,8 @@ pub async fn suggest_submit(
         emojis: Some(split_list(&f.emojis)),
         tags: Some(split_list(&f.tags)),
         vibe: (vibe != item.vibe).then_some(vibe),
+        // Dropped by the server when it is the item's text already.
+        text: f.text.clone(),
         ..Default::default()
     };
     let req = NewProposal {

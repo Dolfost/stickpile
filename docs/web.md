@@ -30,12 +30,12 @@ more than the API allows.
 | `/collaboration` | Proposals waiting for you (with Accept and Decline and a note), the ones you sent (Withdraw), the packs you contribute to, and the decided proposals. The nav link shows how many wait for you. See [collaboration.md](collaboration.md). |
 | `/proposals/{id}` | One proposal: the stickers with thumbnails, or a table of the current and the proposed values, with the same buttons. |
 | `/sets/{id}/propose` | On someone else's pack: propose new stickers, a new name, description or cover, or a cover image. |
-| `/items/{id}/suggest` | On someone else's sticker: suggest a new name, keywords, emojis, tags or vibe. |
+| `/items/{id}/suggest` | On someone else's sticker: suggest a new name, keywords, emojis, tags, vibe or text (the words in the picture). |
 | `/sets/{id}/export` | Downloads (ZIP, TAR, TAR.GZ), the WhatsApp sticker packs, and for the owner publishing to one or several platforms at once. See [Export and publish](#export-and-publish). |
 | `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default) or its own cover image, then the **Cover image** form (upload, crop, replace, remove; see [Set covers](#set-covers)), plus "Delete this set…". Read-only git packs only offer deletion. A contributor who may edit the pack gets an "Edit pack" page with the name, description and cover. The set page itself lists the **Contributors** for the owner (permissions to tick, Remove, and "Add a contributor") and for contributors (with Leave). |
-| `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing, "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
+| `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing (the text, the words in the picture, shown with its line breaks), "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
-| `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet, and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
+| `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet (`text:"no thoughts"` or `x:` finds the words in the picture, which plain words match too), and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
 | `/popular` | Most copied, most liked and trending side by side, never blended. Scope: whole server, your items, or one set (`?scope=set&set=…`, linked from the set page). The window (day, week, month, all) applies to "most copied". |
 | `/stats` | Your totals, a bar chart of copies per day for 30 days (inline SVG with a hover title per bar and a screen-reader table), your most copied items and the apps you paste into. |
 | `/problems` | Problems in all your sets, grouped by set, with filters by severity and kind; admins also get "Whole server". The set page has the same list for one set at its bottom (`/sets/{id}/problems` without JavaScript). See [Problems](#problems). |
@@ -58,10 +58,12 @@ start page.
 
 The item editor grid shows one card per item: the thumbnail with its kind
 and quality badges, then the fields in a dense layout. The name is the
-card's title; keywords, vibe and tags have small uppercase labels;
+card's title; keywords, vibe, tags and text have small uppercase labels;
 keywords and tags are chips (tags with `#`); emojis and the vibe share a
-line when both fit. A pencil after each field edits it in place (see
-below), "✓" confirms an AI suggestion. Below the fields one row of small buttons:
+line when both fit; the text (the words in the picture) keeps its line
+breaks and shows at most three lines on the card (all of it on the item
+page and in its edit form). A pencil after each field edits it in place
+(see below), "✓" confirms an AI suggestion. Below the fields one row of small buttons:
 like (♡/♥ with the count), Copy, Download (icon), and for editors ↑ and ↓
 (set order only) and Delete (icon). Every icon button has a text name for
 screen readers and a tooltip. On narrow screens (below 40rem) the cards
@@ -266,9 +268,14 @@ wins.
   (the pencil on the set page).
   The field turns into a small form with the cursor in it. Enter saves,
   Escape (or "Cancel") restores the view. Lists are comma-separated (keywords,
-  tags), emojis space-separated, an empty vibe clears it. Invalid input stays
+  tags), emojis space-separated, an empty vibe clears it. The text is a
+  multi-line field (Enter is a line break there, "Save" saves; at most
+  2000 characters): saved, it is yours, and saved empty it stays empty,
+  because the server does not read a text a person cleared again.
+  Invalid input stays
   in the form with the error next to it. Without JavaScript "Edit" opens the
-  item page's full form (`?edit=1`), which saves only the fields you changed.
+  item page's full form (`?edit=1`), which saves only the fields you changed
+  (an AI text sent back unchanged, line endings aside, stays the AI's).
 - **Emoji picker**: the Emojis field (inline, in the full form and in the
   upload tray) has a smiley button that opens a panel under it: a search box
   (English names and keywords from Unicode CLDR plus the slang search knows,
@@ -712,7 +719,7 @@ a sentence about what is wrong and the items concerned:
 | Cut short on Telegram (info) | In a published set: animations and videos longer than 3 s; the pack gets the first 3 s. |
 | Very small pictures (info, warning when published) | The longest side is under 128 px. |
 | Also in other sets (info) | The same file is in another of your sets that got it first (shown once, in the later set). Other users' copies are not your problem and never show. |
-| AI suggestions to review (info) | Items with AI-filled keywords, emojis, vibe or name nobody confirmed. One card per set. |
+| AI suggestions to review (info) | Items with AI-filled keywords, emojis, vibe, name or text nobody confirmed. One card per set. |
 | Empty set (info) | No items yet. |
 
 "Published" means bound to a Telegram pack while the Telegram integration is

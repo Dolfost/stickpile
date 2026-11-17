@@ -55,7 +55,9 @@ object::keywords	ключові слова
 object::emojis	емодзі
 object::vibe	настрій
 object::tags	теги
+object::text	текст
 The mood in one word, e.g. tired or smug. Empty clears it.	Настрій одним словом, напр. втомлений або самовдоволений. Порожнє поле його очищає.
+The words written in the picture, line by line; search finds them (text:). Saved empty, it stays empty: AI does not read it again.	Слова, написані на картинці, рядок за рядком; пошук їх знаходить (text:). Збережене порожнім, поле таким і лишиться: ШІ його більше не читатиме.
 Edit {field}	Редагувати {field}
 Edit	Редагувати
 Keep the AI suggestion as yours	Залишити пропозицію ШІ як вашу

@@ -977,6 +977,8 @@ async fn csp_and_static_assets() {
     assert!(css.contains(".item-side .like-row { margin: 0.75rem 0; }"));
     assert!(css.contains(".items-section.view-grid .editor-grid"));
     assert!(css.contains(".items-section.hide-emojis"));
+    assert!(css.contains(".items-section.hide-text .card.editor .field-text:not(.editing)"));
+    assert!(css.contains(".item-text { white-space: pre-wrap; }"));
     assert!(css.contains(".set-list.hide-cover"));
     assert!(css.contains(".ctx-menu"));
     // Themes: the dark palette for the dark theme, and for "system" (no

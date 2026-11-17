@@ -13,6 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
 use serde::Deserialize;
+use stickpile_api::text::{clean_text, MAX_TEXT_CHARS};
 use stickpile_api::{FieldSource, Item, ItemDetail, MediaKind, Set, UpdateItem, Variant};
 
 use super::components::{
@@ -37,10 +38,20 @@ pub enum Field {
     Emojis,
     Vibe,
     Tags,
+    /// The words in the picture ([`Item::text`]): several lines, read by
+    /// OCR or written by a person.
+    Text,
 }
 
 impl Field {
-    pub const ALL: [Field; 5] = [Field::Name, Field::Keywords, Field::Emojis, Field::Vibe, Field::Tags];
+    pub const ALL: [Field; 6] = [
+        Field::Name,
+        Field::Keywords,
+        Field::Emojis,
+        Field::Vibe,
+        Field::Tags,
+        Field::Text,
+    ];
 
     fn parse(s: &str) -> AppResult<Field> {
         Field::ALL
@@ -55,6 +66,7 @@ impl Field {
             Field::Emojis => "emojis",
             Field::Vibe => "vibe",
             Field::Tags => "tags",
+            Field::Text => "text",
         }
     }
     fn label(self) -> &'static str {
@@ -64,6 +76,7 @@ impl Field {
             Field::Emojis => t("Emojis"),
             Field::Vibe => t("Vibe"),
             Field::Tags => t("Tags"),
+            Field::Text => t("Text"),
         }
     }
     /// The field's name inside a sentence ("Edit keywords", "Confirm name").
@@ -74,6 +87,7 @@ impl Field {
             Field::Emojis => tc("object", "emojis"),
             Field::Vibe => tc("object", "vibe"),
             Field::Tags => tc("object", "tags"),
+            Field::Text => tc("object", "text"),
         }
     }
     fn hint(self) -> &'static str {
@@ -83,6 +97,7 @@ impl Field {
             Field::Emojis => t("Separate with spaces."),
             Field::Vibe => t("The mood in one word, e.g. tired or smug. Empty clears it."),
             Field::Tags => t("Your own labels for sorting and filtering, e.g. reaction, nsfw (tag:nsfw). Separate with commas. Not sent to Telegram."),
+            Field::Text => t("The words written in the picture, line by line; search finds them (text:). Saved empty, it stays empty: AI does not read it again."),
         }
     }
     fn source(self, item: &Item) -> FieldSource {
@@ -92,6 +107,7 @@ impl Field {
             Field::Emojis => item.emojis_source,
             Field::Vibe => item.vibe_source,
             Field::Tags => FieldSource::User,
+            Field::Text => item.text_source,
         }
     }
     /// Current value as the edit form shows it.
@@ -102,6 +118,7 @@ impl Field {
             Field::Emojis => item.emojis.join(" "),
             Field::Vibe => item.vibe.clone().unwrap_or_default(),
             Field::Tags => item.tags.join(", "),
+            Field::Text => item.text.clone(),
         }
     }
     fn is_empty(self, item: &Item) -> bool {
@@ -111,6 +128,8 @@ impl Field {
             Field::Emojis => item.emojis.is_empty(),
             Field::Vibe => item.vibe.is_none(),
             Field::Tags => item.tags.is_empty(),
+            // An empty AI text is "not set", an empty user text "none".
+            Field::Text => item.text.is_empty(),
         }
     }
     /// PATCH body setting this field from form text.
@@ -122,6 +141,8 @@ impl Field {
             Field::Emojis => u.emojis = Some(split_emojis(value)),
             Field::Vibe => u.vibe = Some(Some(value.trim().to_string()).filter(|v| !v.is_empty())),
             Field::Tags => u.tags = Some(split_list(value)),
+            // Cleaned by the server (line breaks kept); "" clears it for good.
+            Field::Text => u.text = Some(value.to_string()),
         }
         u
     }
@@ -159,6 +180,8 @@ fn field_value(item: &Item, f: Field) -> Markup {
                 Field::Emojis => span.value.emojis { (item.emojis.join(" ")) },
                 Field::Keywords => ul.chips { @for k in &item.keywords { li { (k) } } },
                 Field::Tags => ul.chips.tags { @for t in &item.tags { li { (t) } } },
+                // Line breaks kept by CSS (white-space: pre-wrap); escaped by maud.
+                Field::Text => span.value.item-text { (item.text) },
             }
         }
     }
@@ -231,6 +254,8 @@ fn field_input(ctx_vibes: &[String], item: &Item, f: Field, value: &str) -> Mark
             // emoji.js adds its picker to fields marked data-emoji-picker.
             Field::Emojis => input id=(input_id) type="text" name="value" value=(value) autofocus
                 aria-describedby=(hint_id) data-emoji-picker="";,
+            Field::Text => textarea id=(input_id) name="value" rows="4" maxlength=(MAX_TEXT_CHARS) autofocus
+                aria-describedby=(hint_id) { (value) },
             _ => input id=(input_id) type="text" name="value" value=(value) autofocus aria-describedby=(hint_id);,
         }
         @if !f.hint().is_empty() { span.hint id=(hint_id) { (f.hint()) } }
@@ -426,6 +451,8 @@ fn full_form(ctx: &Ctx, vibes: &[String], item: &Item) -> Markup {
                     @if f == Field::Vibe {
                         input id=(format!("all-{}", f.key())) type="text" name=(f.key()) value=(f.text(item)) list="vibe-list-all";
                         datalist #vibe-list-all { @for v in vibes { option value=(v) {} } }
+                    } @else if f == Field::Text {
+                        textarea id=(format!("all-{}", f.key())) name=(f.key()) rows="4" maxlength=(MAX_TEXT_CHARS) { (f.text(item)) }
                     } @else {
                         input id=(format!("all-{}", f.key())) type="text" name=(f.key()) value=(f.text(item))
                             data-emoji-picker=[(f == Field::Emojis).then_some("")];
@@ -697,6 +724,8 @@ pub struct AllFieldsForm {
     vibe: Option<String>,
     #[serde(default)]
     tags: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// The no-JS edit form: only fields whose text changed are sent, so AI
@@ -715,6 +744,7 @@ pub async fn update_all(
         (Field::Emojis, &f.emojis),
         (Field::Vibe, &f.vibe),
         (Field::Tags, &f.tags),
+        (Field::Text, &f.text),
     ] {
         let Some(v) = value else { continue };
         let patch = field.update(v);
@@ -724,6 +754,9 @@ pub async fn update_all(
             Field::Emojis => patch.emojis.as_ref() != Some(&current.emojis),
             Field::Vibe => patch.vibe.as_ref() != Some(&current.vibe),
             Field::Tags => patch.tags.as_ref() != Some(&current.tags),
+            // As the server would store it: an AI text sent back unchanged
+            // (line endings aside) stays the computer's.
+            Field::Text => clean_text(v) != current.text,
         };
         if changed {
             u.name = u.name.or(patch.name);
@@ -731,6 +764,7 @@ pub async fn update_all(
             u.emojis = u.emojis.or(patch.emojis);
             u.vibe = u.vibe.or(patch.vibe);
             u.tags = u.tags.or(patch.tags);
+            u.text = u.text.or(patch.text);
         }
     }
     svc::update(&state, &ctx.user, &id, u).await?;
