@@ -12,3 +12,10 @@ publish = false
 stickpile-api.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
+# Inflates the emoji names table (build.rs deflates it): the version flate2
+# (under png) already brings into every client, inflate code included, so
+# neither a crate nor much code is added.
+miniz_oxide = "0.9.1"
+
+[build-dependencies]
+miniz_oxide = "0.9.1"

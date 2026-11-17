@@ -6,7 +6,7 @@
 //!   An `e:` value made of letters is a name and selects the emojis of
 //!   [`by_name`] (`e:skull`: 💀 and ☠️, among others); [`short_name`]
 //!   labels an emoji (`skull`). The server and the offline clients embed
-//!   the same table, so they agree.
+//!   the same table (deflated, see `build.rs`), so they agree.
 //! - A small curated vocabulary for the emojis most used on stickers, so
 //!   that a text query like `laugh` or `cat` reaches items tagged 😂 or 🐱:
 //!   indexed in a separate low-weight field and reported as `emoji`. Its
@@ -210,9 +210,19 @@ pub(crate) fn names(emoji: &str) -> Option<&'static str> {
     })
 }
 
-/// The names table: `#` lines, then `emoji<TAB>name<TAB>keywords` with `|`
-/// between the keywords.
-const NAMES_TSV: &str = include_str!("emoji_names.tsv");
+/// The names table, deflated at build time (`build.rs`, from
+/// `emoji_names.tsv`): about 33 kB instead of 90 kB in every client.
+const NAMES_DEFLATED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/emoji_names.tsv.deflate"));
+
+/// The names table, inflated on first use: `#` lines, then
+/// `emoji<TAB>name<TAB>keywords` with `|` between the keywords.
+fn names_tsv() -> &'static str {
+    static TSV: OnceLock<String> = OnceLock::new();
+    TSV.get_or_init(|| {
+        let bytes = miniz_oxide::inflate::decompress_to_vec(NAMES_DEFLATED).expect("emoji_names.tsv inflates");
+        String::from_utf8(bytes).expect("emoji_names.tsv is UTF-8")
+    })
+}
 
 /// How a name matched an emoji in [`by_name`], best first: whole words of
 /// the emoji's name, of a keyword, the start of a word of the name, of a
@@ -256,7 +266,7 @@ fn table() -> &'static [Emoji] {
     static TABLE: OnceLock<Vec<Emoji>> = OnceLock::new();
     TABLE.get_or_init(|| {
         let mut emojis = Vec::new();
-        for line in NAMES_TSV.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        for line in names_tsv().lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
             let mut cols = line.split('\t');
             let (Some(glyph), Some(name)) = (cols.next(), cols.next()) else {
                 continue;
