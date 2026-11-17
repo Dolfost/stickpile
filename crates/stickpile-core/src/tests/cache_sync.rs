@@ -158,6 +158,60 @@ async fn an_older_item_format_syncs_in_full_once() {
     assert_eq!(hits[0].matched, vec!["text"]);
 }
 
+/// Review (rule 5, review-compat): a 0.7.0 client and a newer one on the
+/// same machine share the cache. The newer one has listed everything in
+/// format 2; then an item's text changes on the server, and the 0.7.0
+/// client syncs first: it stores the changed item as its `ItemSummary`
+/// (without `text`) and moves the shared cursor, leaving `item_format` at
+/// 2. The newer client's next sync starts from that cursor, so the text
+/// never reaches its cache (offline search misses it) until the item
+/// changes again.
+#[tokio::test]
+async fn a_text_an_older_client_synced_first_reaches_the_cache() {
+    let (server, items) = seeded_server();
+    let client = client_for(&server.url, Some(server.state().issue_token("alice", "t")));
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 16).unwrap();
+    assert!(cache::sync(&cache, &client, 500).await.unwrap().full);
+    assert_eq!(cache.item_format().unwrap(), cache::ITEM_FORMAT);
+
+    // The server reads the words in a picture.
+    server
+        .state()
+        .set_text(&items[1].id, "No thoughts\nhead empty", stickpile_api::FieldSource::Ai);
+    // Time passes on the server (a real server's clock is in seconds: a
+    // sync a second later no longer lists the item).
+    server.state().tick();
+
+    // The 0.7.0 client syncs: what it lists it writes without `text`, and
+    // it moves the cursor. (Its sync, done here by a newer client on a
+    // cache of its own and then written as 0.7.0 writes it.)
+    let other = tempfile::tempdir().unwrap();
+    let scratch = Cache::open(other.path(), 16).unwrap();
+    let seen = cache::sync(&scratch, &client, 500).await.unwrap();
+    let changed = scratch.item(&items[1].id).unwrap().unwrap();
+    assert_eq!(changed.text, "No thoughts\nhead empty");
+    {
+        let mut v = serde_json::to_value(&changed).unwrap();
+        v.as_object_mut().unwrap().remove("text").unwrap();
+        let db = rusqlite::Connection::open(dir.path().join(cache::DB_FILE)).unwrap();
+        db.execute(
+            "UPDATE items SET json = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![v.to_string(), changed.updated_at, changed.id],
+        )
+        .unwrap();
+    }
+    cache.set_sync_cursor(Some(seen.server_time)).unwrap();
+
+    // The newer client syncs again.
+    cache::sync(&cache, &client, 500).await.unwrap();
+    assert_eq!(
+        cache.item(&items[1].id).unwrap().unwrap().text,
+        "No thoughts\nhead empty",
+        "the text reaches the newer client's cache"
+    );
+}
+
 #[test]
 fn server_or_account_change_resets_account_data() {
     let dir = tempfile::tempdir().unwrap();
