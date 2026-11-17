@@ -19,6 +19,7 @@ object SyntaxHelp {
             listOf(
                 Line("cat \"big chungus\"", R.string.display_syntax_words),
                 Line("e:😂", R.string.display_syntax_emoji),
+                Line("e:skull", R.string.display_syntax_emoji_name),
                 Line("vibe:tired", R.string.display_syntax_vibe),
                 Line("tag:reaction", R.string.display_syntax_tag),
                 Line("set:cats", R.string.display_syntax_set),
@@ -37,6 +38,7 @@ object SyntaxHelp {
             R.string.display_syntax_offers,
             listOf(
                 Line("vibe: tag: set: by: e:", R.string.display_syntax_offers_values),
+                Line("e:, e:sk", R.string.display_syntax_offers_emoji),
                 Line("rea", R.string.display_syntax_offers_words),
                 Line("vibe:sarcstic", R.string.display_syntax_offers_typos),
             ),

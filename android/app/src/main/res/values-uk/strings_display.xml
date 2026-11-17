@@ -54,6 +54,7 @@
     <string name="display_syntax">Синтаксис пошуку</string>
     <string name="display_syntax_words">слова й фрази в назві, ключових словах, емодзі, настрої, тегах і наборі; друкарські помилки не заважають</string>
     <string name="display_syntax_emoji">має це емодзі</string>
+    <string name="display_syntax_emoji_name">має емодзі, чия англійська назва або ключове слово так починається; друкарські помилки не заважають</string>
     <string name="display_syntax_vibe">має цей настрій</string>
     <string name="display_syntax_tag">має цей тег</string>
     <string name="display_syntax_set">у цьому наборі (його slug або назва)</string>
@@ -68,6 +69,7 @@
     <string name="display_syntax_in_pack">коли набір відкрито, пошук шукає лише в ньому, з усім цим синтаксисом</string>
     <string name="display_syntax_offers">Підказки</string>
     <string name="display_syntax_offers_values">значення, які вже вживаються, з\'являються під полем, найчастіші першими; торкніться, щоб вставити</string>
+    <string name="display_syntax_offers_emoji">емодзі з назвами: ваші, потім ті, що так звуться; торкніться, щоб вставити емодзі</string>
     <string name="display_syntax_offers_words">слово пропонує теги, настрої й набори, що його містять</string>
     <string name="display_syntax_offers_typos">друкарська помилка чи недописане значення шукає найближче</string>
 </resources>

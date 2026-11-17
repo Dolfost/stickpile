@@ -107,7 +107,8 @@ cover image, else its first sticker).
 ### Search syntax
 
 `cat "big chungus"` (words and phrases; typos are forgiven), `e:😂`,
-`vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`, `type:gif` (gif,
+`e:skull` (an emoji whose English name or keyword starts so, typos
+forgiven), `vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`, `type:gif` (gif,
 png, webp, jpeg, mp4, webm, still, animated, video), `is:mine`,
 `is:liked`, `is:public`, `q>70`, `likes>=2`, `copies<5`, `sort:likes`
 (relevance, recent, likes, copies, quality); `tag:a tag:b` is either; a
@@ -115,7 +116,9 @@ leading `-` leaves out (`-tag:nsfw`). `v:`, `t:`, `s:` and `b:` are short
 for `vibe:`, `tag:`, `set:` and `by:` (`v:tired -t:nsfw`). A misspelled
 or half-typed filter value searches for the closest one. With a pack (in
 the keyboard: a set) open, the search looks only inside it, with all of
-this. The app and the keyboard show this list from their menus
+this. Under the field, `e:` offers emojis with their names (`e:` alone:
+yours; `e:sk`: the emojis named so, yours first); one puts the emoji in.
+The app and the keyboard show this list from their menus
 ([search.md](search.md#query-syntax)).
 
 ## The picker keyboard

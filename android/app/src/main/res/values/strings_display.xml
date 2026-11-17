@@ -53,6 +53,7 @@
     <string name="display_syntax">Search syntax</string>
     <string name="display_syntax_words">words and phrases in the name, keywords, emojis, vibe, tags and pack; typos are forgiven</string>
     <string name="display_syntax_emoji">has this emoji</string>
+    <string name="display_syntax_emoji_name">has an emoji whose English name or keyword starts so; typos are forgiven</string>
     <string name="display_syntax_vibe">has this vibe</string>
     <string name="display_syntax_tag">has this tag</string>
     <string name="display_syntax_set">in this pack (its slug or name)</string>
@@ -67,6 +68,7 @@
     <string name="display_syntax_in_pack">with a pack or set open, the search looks only inside it, with all of this</string>
     <string name="display_syntax_offers">Suggestions</string>
     <string name="display_syntax_offers_values">the values in use are offered under the field, most used first; tap one to put it in</string>
+    <string name="display_syntax_offers_emoji">emojis with their names: yours, then those named so; tap one to put the emoji in</string>
     <string name="display_syntax_offers_words">a word offers the tags, vibes and packs that contain it</string>
     <string name="display_syntax_offers_typos">a typo or a half-typed value searches for the closest one</string>
 </resources>
