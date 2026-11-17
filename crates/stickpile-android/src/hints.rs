@@ -5,8 +5,9 @@
 //! - While a `key:value` filter is typed (`vibe:sar`, `-tag:`), its values,
 //!   as [`suggest::suggest`] ranks them for the desktop's suggestion line;
 //!   for `e:` (or `emoji:`) the emojis, labelled with their names
-//!   (`💀 skull`): the emojis of the cached items, most used first, and
-//!   while a name is typed (`e:sk`) the emojis it selects.
+//!   (`💀 skull`): the emojis of the viewer's own cached items, most used
+//!   first, and while a name is typed (`e:sk`) the emojis it selects,
+//!   the viewer's first.
 //! - While a bare word is typed (`rea`), the filters whose value contains
 //!   it (`tag:reaction`, `vibe:really`, `set:reactions`), and the filter
 //!   keys it starts (`t` offers `tag:` and `type:`).
@@ -34,16 +35,19 @@ const MIN_WORD: usize = 2;
 pub const KEYS: [&str; 8] = ["tag:", "vibe:", "e:", "set:", "by:", "type:", "is:", "sort:"];
 
 /// The words the hints offer: the suggestion vocabulary, the emojis of
-/// the items included ([`Vocabulary::emojis`]).
+/// the viewer's items included ([`Vocabulary::emojis`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Words {
     pub vocab: Vocabulary,
 }
 
 impl Words {
-    pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemSummary>) -> Words {
+    /// The words of `items` (the cache) for the viewer with the username
+    /// `me`: `e:` offers the emojis of `me`'s items (all while `me` is not
+    /// known), as the desktop does ([`Vocabulary::for_viewer`]).
+    pub fn for_viewer<'a>(items: impl IntoIterator<Item = &'a ItemSummary>, me: Option<&str>) -> Words {
         Words {
-            vocab: Vocabulary::from_items(items),
+            vocab: Vocabulary::for_viewer(items, me),
         }
     }
 }
@@ -335,8 +339,27 @@ pub(crate) mod tests {
             ..summary()
         };
         let items = [item(&["🐱", "😂"]), item(&["😂", " "]), item(&["😂", "🐶"])];
-        let w = Words::from_items(items.iter());
+        let w = Words::for_viewer(items.iter(), None);
         assert_eq!(w.vocab.emojis, vec!["😂", "🐱", "🐶"]);
+
+        // The viewer's own: not those of someone else's public item.
+        let theirs = ItemSummary {
+            owner_username: "bob".into(),
+            ..item(&["💀", "💀", "😂"])
+        };
+        let mine = ItemSummary {
+            owner_username: "alice".into(),
+            ..item(&["🐸"])
+        };
+        let w = Words::for_viewer([&theirs, &mine], Some("alice"));
+        assert_eq!(w.vocab.emojis, vec!["🐸"]);
+        assert_eq!(w.vocab.owners, vec!["alice", "bob"], "the other values of all");
+        let h = hints("e:sk", &w);
+        assert_eq!(h[0].label, "💀 skull", "the table's, the viewer having none");
+        assert_eq!(
+            Words::for_viewer([&theirs, &mine], None).vocab.emojis,
+            vec!["💀", "😂", "🐸"]
+        );
     }
 
     pub(crate) fn summary() -> ItemSummary {

@@ -67,8 +67,10 @@ cover image, else its first sticker).
   `v:sar` offer `sarcastic`), the emojis for `e:`, and for a bare word the
   tags, vibes and packs containing it (`rea` offers `tag:reaction`). An
   emoji comes with its English name after it, smaller and dimmer: `e:`
-  alone offers your emojis, most used first, and `e:sk` the emojis named
-  so (💀 skull, ☠️ skull and crossbones, ...), yours first. A tap puts it
+  alone offers the emojis of your own stickers (not of other people's
+  public ones), most used first, and `e:sk` the emojis named so (💀
+  skull, ☠️ skull and crossbones, ...), those your stickers use first,
+  then others. A tap puts it
   in (an emoji in place of the name). The values come from the offline cache: right after
   signing in they come once the first sync is over, also for what is
   typed already.
@@ -568,8 +570,9 @@ Behaviour the signatures do not show:
   as `suggestions` ranks them, `chosen` on the one the search uses. For
   `e:` (or `emoji:`) the values are emojis labelled with their English
   names (`💀 skull`; the query gets the emoji): the emojis of the cached
-  items, most used first, and while a name is typed (`e:sk`) the emojis
-  it selects, the items' first (see [search.md](search.md)). Only these
+  items the cache's account owns (all cached items' while it does not
+  know the account), most used first, and while a name is typed (`e:sk`)
+  the emojis it selects, those first (see [search.md](search.md)). Only these
   value labels have a space, so the app's and the keyboard's chips split
   them at the first one (`display/HintLabel.kt`): the emoji at the chip's
   size, the name after it in the secondary colour. While a

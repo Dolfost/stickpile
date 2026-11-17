@@ -232,9 +232,10 @@ empty): a line already shown takes them in place, with the text as
 typed.
 
 `e:` (or `emoji:`) offers emojis, each followed by its English name,
-smaller and dimmer (💀 skull): `e:` alone offers the emojis of your items,
-most used first, and letters narrow it to the emojis whose name or
-keyword starts so, yours first, then the others, best match first
+smaller and dimmer (💀 skull): `e:` alone offers the emojis of your own
+items (not those of other people's public items), most used first, and
+letters narrow it to the emojis whose name or keyword starts so, those
+your items use first, then others from the table, best match first
 (`e:sk` offers 💀 skull, ☠️ skull and crossbones, 👲 person with
 skullcap, ...; the order is [search.md](search.md#emoji-names)'s). Taking
 one puts the emoji into the query in place of the name (`e:💀`). While a

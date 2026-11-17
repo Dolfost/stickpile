@@ -76,8 +76,8 @@ const PREFIXES: [&str; 17] = [
 #[test]
 fn hints_are_the_desktops_offers_for_the_review_prefixes() {
     let items = fixture_items();
-    let words = Words::from_items(items.iter());
-    let vocab = Vocabulary::from_items(&items);
+    let words = Words::for_viewer(items.iter(), Some("alice"));
+    let vocab = Vocabulary::for_viewer(&items, Some("alice"));
     let mut table = String::from("| typed | Android hints (fixture order) |\n|---|---|\n");
     for p in PREFIXES {
         let h = hints(p, &words);
@@ -116,27 +116,29 @@ fn hints_are_the_desktops_offers_for_the_review_prefixes() {
 
 /// The server's `e:` offers for alice over the fixture (its index order is
 /// the upload order): `GET /api/v1/search/suggest?q=e:` in
-/// `review_search.rs`. The app's words come from a `HashMap` of the
-/// cached items: the same items in another order must offer the same.
+/// `review_search.rs`, the emojis of alice's own items (bob's 🦆 is not
+/// among them), ties in the names table's order. The app's words come
+/// from a `HashMap` of the cached items, for the cache's account: the
+/// same items in another order must offer the same.
 #[test]
 fn the_emoji_hints_do_not_depend_on_the_order_of_the_cached_items() {
     let items = fixture_items();
     let server = [
         "💀",
         "☠️",
-        "😂",
-        "❤️",
         "🐱",
-        "🩻",
-        "👲",
-        "👍🏽",
-        "👍",
-        "👎🏿",
-        "❤️\u{200d}🔥",
+        "❤️",
+        "😂",
         "🐸",
+        "🔥",
+        "👍",
+        "👍🏽",
+        "👎🏿",
+        "🗿",
+        "❤️\u{200d}🔥",
     ];
     let glyphs = |items: &[ItemSummary]| -> Vec<String> {
-        hints("e:", &Words::from_items(items.iter()))
+        hints("e:", &Words::for_viewer(items.iter(), Some("alice")))
             .iter()
             .map(|h| h.label.split(' ').next().unwrap().to_string())
             .collect()

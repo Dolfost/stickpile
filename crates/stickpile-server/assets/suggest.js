@@ -6,7 +6,9 @@
 // typed, the values the desktop popups offer under their search field:
 // the vibes, tags, sets and owners of the items you can search (most used
 // first), the words of type:, is: and sort:, and for e: emojis with their
-// names (e: alone: your emojis; e:sk: the emojis named so, yours first).
+// names (e: alone: the emojis of your own items, not of others' public
+// ones; e:sk: the emojis named so, those your items use first, then
+// others from the table).
 // The matching is the server's (GET /api/v1/search/suggest, the popups'
 // Rust code), never done here.
 //

@@ -62,17 +62,30 @@ Rules:
   selects nothing finds nothing: it is not searched as text. A server
   from before emoji names (0.7.0) compares the name as an emoji, so
   `e:skull` finds nothing there.
-- While `e:` is typed, the suggestion line (`stickpile_quick::suggest`,
-  and the Android hints) offers the emojis of the viewer's items, most
-  used first, each with its English name (`Suggestions::labels`); while a
-  name is typed (`e:sk`), the emojis it selects, the viewer's own first,
-  then the others in the order of
-  [`emoji_names::by_name`](#emoji-names). Taking one puts the emoji into
-  the query (`e:💀`). `resolve` never rewrites an `e:` value: a name goes
-  to the server as typed, and the server forgives its typos itself. The
-  web UI's search fields get the same offers from the server
-  (`GET /api/v1/search/suggest`, [web.md](web.md#keyboard-and-mouse)), which runs
-  `suggest` over the values of the items the viewer can search.
+- Typing `e:` or `emoji:` with nothing after it, the suggestion line
+  (`stickpile_quick::suggest`, and the Android hints) offers the emojis
+  of the viewer's own items, most used first, each with its English name
+  (`Suggestions::labels`); not those of other people's public items. A
+  name typed (`e:sk`) narrows it to the emojis the name selects: those
+  the viewer's items use first, then others from the table in the order
+  of [`emoji_names::by_name`](#emoji-names). Taking one puts the emoji
+  into the query (`e:💀`). `resolve` never rewrites an `e:` value: a name
+  goes to the server as typed, and the server forgives its typos itself.
+  The web UI's search fields get the same offers from the server
+  (`GET /api/v1/search/suggest`, [web.md](web.md#keyboard-and-mouse)),
+  which runs `suggest` over the items the viewer can search, the emojis
+  of the caller's own items.
+- The offers are the same on every surface, whatever order the items
+  come in (the server reads its index, the clients their cache):
+  `Vocabulary` counts the vibes, tags, packs and owners of every item the
+  viewer can search, ties in alphabetical order, and the emojis of the
+  items whose owner is the viewer (the clients compare the owner's
+  username with the cache's account; before the cache knows the account,
+  every cached item counts), ties in the names table's order (the
+  curated emojis first, then Unicode's), then by the emoji. An emoji
+  written in several ways is offered once, in one spelling
+  (`emoji_names::spelling`): the table's fully qualified glyph (`☠️` for
+  `☠` and `☠️`, `❤️` for `❤`) with the item's skin tone (`👍🏽`).
 - Unknown `key:value` tokens are plain text, and so is a key with
   nothing after its colon: the parser reads a bare `x:` as the word `x`.
 

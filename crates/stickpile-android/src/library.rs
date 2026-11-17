@@ -454,8 +454,9 @@ impl Inner {
         }
         let vocabulary = match session.offline_index() {
             Ok(index) => {
-                let items: Vec<&ItemSummary> = index.items().collect();
-                Arc::new(Words::from_items(items.iter().copied()))
+                // `e:` offers the emojis of the viewer's own items.
+                let me = session.cache().me().ok().flatten().map(|u| u.username);
+                Arc::new(Words::for_viewer(index.items(), me.as_deref()))
             }
             Err(e) => {
                 tracing::debug!("no suggestions from the cache: {e}");
@@ -1070,7 +1071,8 @@ impl StickpileLibrary {
     ///
     /// - a `key:value` filter being typed (`vibe:sar`, `-tag:`): its values,
     ///   as `suggestions` ranks them, the one the search uses `chosen`;
-    /// - `e:` (or `emoji:`): the emojis of the cached items, most used first;
+    /// - `e:` (or `emoji:`): the emojis of the viewer's own cached items,
+    ///   most used first;
     /// - a bare word (`rea`): the tags, vibes and packs containing it as
     ///   filters (`tag:reaction`), those starting with it first, then the
     ///   filter keys the word starts (`t`: `tag:`, `type:`);

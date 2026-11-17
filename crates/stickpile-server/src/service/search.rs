@@ -178,7 +178,9 @@ pub async fn search(state: &AppState, viewer: &CurrentUser, params: SearchParams
 
 /// The values offered for the `key:value` filter at the end of `typed`
 /// ([`stickpile_quick::suggest::suggest`]), from the items the viewer can
-/// search: the ones the popups have in their cache.
+/// search: the ones the popups have in their cache. The emojis are those
+/// of the viewer's own items, as the popups count them
+/// ([`Vocabulary::for_viewer`]).
 pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> AppResult<Option<SearchSuggestions>> {
     // No filter being typed: nothing to look up.
     let token = typed.rsplit(char::is_whitespace).next().unwrap_or_default();
@@ -203,6 +205,8 @@ pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> App
                         set_name: &d.set_name,
                         owner_username: &d.owner_username,
                         emojis: &d.emojis,
+                        // `e:` alone offers the emojis of the caller's own items.
+                        mine: d.owner_id == me,
                     }),
             )
         };

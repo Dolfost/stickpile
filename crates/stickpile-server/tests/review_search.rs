@@ -7,9 +7,9 @@
 //! /api/v1/search/suggest`); the offline side is the clients' own path: a
 //! `stickpile_core` cache synced from the server with `cache::sync`, its
 //! `OfflineIndex`, and the vocabulary the desktop backend builds from it
-//! (`Vocabulary::from_items(index.items())`). The popup's suggestion line
-//! is the model's (`Model::suggestions`). Tables go to stdout (run with
-//! `--nocapture`).
+//! (`Vocabulary::for_viewer(index.items(), me)`, `me` the cache's
+//! account). The popup's suggestion line is the model's
+//! (`Model::suggestions`). Tables go to stdout (run with `--nocapture`).
 
 mod common;
 
@@ -116,7 +116,9 @@ async fn world() -> World {
     cache::sync(&cache, &client, 500).await.unwrap();
     let offline = cache.offline_index().unwrap();
     assert_eq!(offline.len(), visible.len(), "the cache holds what alice can search");
-    let vocab = Vocabulary::from_items(offline.items());
+    // As the desktop backend builds it: `e:` offers the viewer's emojis.
+    let me = cache.me().unwrap().map(|u| u.username);
+    let vocab = Vocabulary::for_viewer(offline.items(), me.as_deref());
     World {
         srv,
         alice,
@@ -518,6 +520,15 @@ async fn every_surface_offers_the_same_values() {
         problems.len(),
         problems.join("\n")
     );
+    // `e:` alone offers the emojis of alice's own items (her public set's
+    // too), not those of bob's public ones (🦆 is only his); `e:duck` still
+    // offers 🦆, from the table.
+    let own = server_suggest(&w, "e:").await.unwrap().words;
+    assert!(
+        own.contains(&"💀".to_string()) && !own.contains(&"🦆".to_string()),
+        "{own:?}"
+    );
+    assert_eq!(server_suggest(&w, "e:duck").await.unwrap().words[0], "🦆");
 }
 
 /// Taking an `e:` offer puts the emoji in (`e:<glyph>`); the query then

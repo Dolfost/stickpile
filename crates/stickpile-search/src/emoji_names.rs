@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::text::{emoji_base, emoji_key, is_pictographic, normalize, osa_within};
+use crate::text::{emoji_base, emoji_key, is_pictographic, is_skin_tone, normalize, osa_within};
 
 /// The curated vocabulary, the emojis most used on stickers first.
 /// `scripts/gen-emoji-data.py` reads it (the words of an emoji go into its
@@ -330,11 +330,63 @@ pub fn is_name(value: &str) -> bool {
             .all(|c| (c.is_alphabetic() && !is_pictographic(c)) || c == '_' || c == '-')
 }
 
+/// The place in [`table`] of each [`key`] (the first, should two have it).
+fn places() -> &'static HashMap<&'static str, usize> {
+    static PLACES: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
+    PLACES.get_or_init(|| {
+        let mut places = HashMap::new();
+        for (i, e) in table().iter().enumerate() {
+            places.entry(&*e.key).or_insert(i);
+        }
+        places
+    })
+}
+
 /// The emoji of the table with the [`key`] of `emoji`: the same emoji,
 /// skin tones and variation selectors aside.
 pub fn find(emoji: &str) -> Option<&'static Emoji> {
-    let k = key(emoji);
-    table().iter().find(|e| *e.key == *k)
+    places().get(key(emoji).as_str()).map(|&i| &table()[i])
+}
+
+/// Where `emoji` comes in the table's order, skin tones and variation
+/// selectors aside, smaller first: the curated emojis (the most used on
+/// stickers first), then Unicode's order, as [`by_name`] orders the
+/// emojis a name selects equally well. `None` when the table lacks it.
+pub fn rank(emoji: &str) -> Option<u64> {
+    let i = *places().get(key(emoji).as_str())?;
+    Some((u64::from(table()[i].common) << 32) | i as u64)
+}
+
+/// The emoji presentation selector (VS16).
+const VS16: char = '\u{FE0F}';
+
+/// The one spelling of an emoji however it is written: the table's
+/// glyph, fully qualified (`☠️` for `☠`, `❤️` for `❤`), with the skin
+/// tones of `emoji` (`👍🏽`); a variation selector gives way to a skin
+/// tone after it, as Unicode writes them. An emoji the table lacks is its
+/// [`toned_key`]: as written, without variation selectors. Emojis with
+/// the same [`toned_key`] have the same spelling.
+pub fn spelling(emoji: &str) -> String {
+    let toned: Vec<char> = toned_key(emoji).chars().collect();
+    let Some(e) = find(emoji) else {
+        return toned.into_iter().collect();
+    };
+    let mut glyph = e.glyph.chars().peekable();
+    let mut out = String::with_capacity(e.glyph.len() + 8);
+    for (i, &c) in toned.iter().enumerate() {
+        out.push(c);
+        if is_skin_tone(c) {
+            continue;
+        }
+        // The glyph is the toned key without its tones, with selectors.
+        if glyph.next() != Some(c) {
+            return toned.into_iter().collect();
+        }
+        if glyph.next_if_eq(&VS16).is_some() && !toned.get(i + 1).copied().is_some_and(is_skin_tone) {
+            out.push(VS16);
+        }
+    }
+    out
 }
 
 /// The English short name of an emoji (`skull` for 💀, with a variation
@@ -473,5 +525,37 @@ mod tests {
             }
         }
         assert!(table().len() > 1900);
+    }
+
+    #[test]
+    fn every_way_of_writing_an_emoji_has_one_spelling() {
+        for (written, spelled) in [
+            ("☠", "☠️"),
+            ("☠️", "☠️"),
+            ("❤", "❤️"),
+            (" ❤️ ", "❤️"),
+            ("👍", "👍"),
+            ("👍🏽", "👍🏽"),
+            ("☝🏽", "☝🏽"),
+            ("☝️🏽", "☝🏽"),
+            ("❤\u{200d}🔥", "❤️\u{200d}🔥"),
+            ("🧑🏽\u{200d}💻", "🧑🏽\u{200d}💻"),
+            ("🐸\u{fe0f}\u{200d}🔥", "🐸\u{200d}🔥"),
+        ] {
+            assert_eq!(spelling(written), spelled, "{written:?}");
+            assert_eq!(toned_key(&spelling(written)), toned_key(written), "{written:?}");
+        }
+        assert!(find("🐸\u{200d}🔥").is_none(), "not in the table: without selectors");
+    }
+
+    #[test]
+    fn the_rank_is_the_curated_order_then_unicodes() {
+        let rank = |e: &str| rank(e).unwrap_or_else(|| panic!("{e} ranked"));
+        assert!(rank("😂") < rank("🤣"), "curated, in its order");
+        assert!(rank("🫣") < rank("🥨"), "curated before the others");
+        assert!(rank("🥨") < rank("🌋"), "then Unicode's order");
+        assert_eq!(rank("☠"), rank("☠️"));
+        assert_eq!(rank("👍🏽"), rank("👍"));
+        assert_eq!(super::rank("🐸\u{200d}🔥"), None);
     }
 }

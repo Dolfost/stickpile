@@ -251,8 +251,9 @@ wins.
   the desktop popups do ([desktop.md](desktop.md#search-suggestions)): the
   vibes, tags, sets and owners of the items you can search, most used
   first, the words of `type:`, `is:` and `sort:`, and for `e:` emojis with
-  their English names (`e:` alone: your emojis, most used first; `e:sk`:
-  💀 skull, ☠️ skull and crossbones, ..., yours first). The server matches
+  their English names (`e:` alone: the emojis of your own items, most
+  used first; `e:sk`: 💀 skull, ☠️ skull and crossbones, ..., those your
+  items use first, then others). The server matches
   and ranks them (`GET /api/v1/search/suggest`, the popups' Rust code);
   suggest.js only asks, 120 ms after typing pauses, and draws the answer
   in the `:` suggestions' list. The highlight starts on the value a

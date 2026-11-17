@@ -6,9 +6,15 @@
 //! typo or two forgiven, so `vibe:sarcstic` still offers `sarcastic`.
 //!
 //! `e:` offers emojis, each with its name ([`Suggestions::labels`]): the
-//! items' emojis (most used first), and while a name is typed (`e:sk`) the
-//! emojis it selects (`stickpile_search::emoji_names::by_name`), the
-//! items' first. Taking one puts the emoji in place of the name.
+//! emojis of the viewer's own items (most used first, see
+//! [`Vocabulary::emojis`]), and while a name is typed (`e:sk`) the emojis
+//! it selects (`stickpile_search::emoji_names::by_name`), the viewer's
+//! first. Taking one puts the emoji in place of the name.
+//!
+//! The values do not depend on the order the items come in (the server
+//! reads its index, the clients a `HashMap` of their cache): ties go by
+//! the value, emojis by the names table's order, and an emoji written in
+//! several ways is offered in one ([`emoji_names::spelling`]).
 //!
 //! The search itself goes out with every such value [`resolve`]d to its
 //! best suggestion, so a half-typed or misspelled filter still finds the
@@ -18,7 +24,6 @@
 //! The one-letter keys work as the long ones (`v:sar` as `vibe:sar`, see
 //! `stickpile_api::query::Key`); the key stays as typed.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use stickpile_api::query::Key;
@@ -37,7 +42,10 @@ pub const IS_WORDS: [&str; 3] = ["mine", "liked", "public"];
 /// The `sort:` words.
 pub const SORT_WORDS: [&str; 5] = ["relevance", "recent", "likes", "copies", "quality"];
 
-/// The values the viewer's items use, each list most used first.
+/// The values the viewer's items use, each list most used first, ties in
+/// a fixed order, so the same items in any order give the same lists: the
+/// vibes, tags, packs and owners of every item the viewer can search, ties
+/// alphabetical, and the emojis of the viewer's own.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Vocabulary {
     pub vibes: Vec<String>,
@@ -45,9 +53,11 @@ pub struct Vocabulary {
     /// Pack slugs, and the names that are one word.
     pub sets: Vec<String>,
     pub owners: Vec<String>,
-    /// The emojis of the items, most used first (ties in the order first
-    /// seen), each once however its variation selectors are written (see
-    /// [`emoji_names::toned_key`]), as first seen.
+    /// The emojis of the viewer's own items ([`ItemValues::mine`]), most
+    /// used first, ties in the names table's order
+    /// ([`emoji_names::rank`]), then by [`emoji_names::toned_key`]. Each
+    /// is there once however it is written, in its one spelling
+    /// ([`emoji_names::spelling`]: `☠️` for `☠`, `👍🏽` with its tone).
     pub emojis: Vec<String>,
     /// The viewer's username, as far as the cache knows it: what `is:mine`
     /// means where the client searches by itself (inside an opened pack,
@@ -66,10 +76,15 @@ pub struct ItemValues<'a> {
     pub set_name: &'a str,
     pub owner_username: &'a str,
     pub emojis: &'a [String],
+    /// The viewer owns the item (or who the viewer is is not known): its
+    /// emojis count for [`Vocabulary::emojis`].
+    pub mine: bool,
 }
 
-impl<'a> From<&'a ItemSummary> for ItemValues<'a> {
-    fn from(it: &'a ItemSummary) -> Self {
+impl<'a> ItemValues<'a> {
+    /// The values of a cached item, for the viewer with the username `me`
+    /// (`None`: not known, every item counts as the viewer's).
+    pub fn of(it: &'a ItemSummary, me: Option<&str>) -> ItemValues<'a> {
         ItemValues {
             vibe: it.vibe.as_deref(),
             tags: &it.tags,
@@ -77,16 +92,30 @@ impl<'a> From<&'a ItemSummary> for ItemValues<'a> {
             set_name: &it.set_name,
             owner_username: &it.owner_username,
             emojis: &it.emojis,
+            mine: me.is_none_or(|me| me == it.owner_username),
         }
     }
 }
 
 impl Vocabulary {
+    /// The values of `items`, the emojis of all of them: for items with
+    /// no viewer to tell apart (a pack's own values, a test). The clients'
+    /// vocabulary is [`Vocabulary::for_viewer`].
     pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemSummary>) -> Vocabulary {
-        Vocabulary::from_values(items.into_iter().map(ItemValues::from))
+        Vocabulary::for_viewer(items, None)
     }
 
-    /// [`Vocabulary::from_items`] for items given by their values.
+    /// The values of `items` (the cache) for the viewer with the username
+    /// `me`: the emojis of the items `me` owns, of all while `me` is not
+    /// known; the rest of all of them. [`Vocabulary::me`] is `me`.
+    pub fn for_viewer<'a>(items: impl IntoIterator<Item = &'a ItemSummary>, me: Option<&str>) -> Vocabulary {
+        Vocabulary {
+            me: me.map(str::to_string),
+            ..Vocabulary::from_values(items.into_iter().map(|it| ItemValues::of(it, me)))
+        }
+    }
+
+    /// The values of items given by their values (no [`Vocabulary::me`]).
     pub fn from_values<'a>(items: impl IntoIterator<Item = ItemValues<'a>>) -> Vocabulary {
         #[derive(Default)]
         struct Counts(HashMap<String, u32>);
@@ -110,22 +139,15 @@ impl Vocabulary {
             Counts::default(),
             Counts::default(),
         );
-        // (emoji as first seen, uses), in the order first seen.
-        let mut emojis: Vec<(String, u32)> = Vec::new();
-        let mut emoji_at: HashMap<String, usize> = HashMap::new();
+        // Uses per toned key.
+        let mut emojis: HashMap<String, u32> = HashMap::new();
         for it in items {
-            for e in it.emojis {
+            for e in it.emojis.iter().filter(|_| it.mine) {
                 let e = e.trim();
                 if e.is_empty() || e.contains(char::is_whitespace) {
                     continue;
                 }
-                match emoji_at.entry(emoji_names::toned_key(e)) {
-                    Entry::Occupied(at) => emojis[*at.get()].1 += 1,
-                    Entry::Vacant(at) => {
-                        at.insert(emojis.len());
-                        emojis.push((e.to_string(), 1));
-                    }
-                }
+                *emojis.entry(emoji_names::toned_key(e)).or_default() += 1;
             }
             if let Some(v) = it.vibe {
                 vibes.add(v);
@@ -139,14 +161,20 @@ impl Vocabulary {
             }
             owners.add(it.owner_username);
         }
-        // Stable: ties stay in the order first seen.
-        emojis.sort_by_key(|e| std::cmp::Reverse(e.1));
+        let mut emojis: Vec<(std::cmp::Reverse<u32>, u64, String)> = emojis
+            .into_iter()
+            .map(|(e, uses)| {
+                let rank = emoji_names::rank(&e).unwrap_or(u64::MAX);
+                (std::cmp::Reverse(uses), rank, e)
+            })
+            .collect();
+        emojis.sort_unstable();
         Vocabulary {
             vibes: vibes.ranked(),
             tags: tags.ranked(),
             sets: sets.ranked(),
             owners: owners.ranked(),
-            emojis: emojis.into_iter().map(|(e, _)| e).collect(),
+            emojis: emojis.into_iter().map(|(_, _, e)| emoji_names::spelling(&e)).collect(),
             me: None,
         }
     }
@@ -324,10 +352,11 @@ pub fn suggest(query: &str, vocab: &Vocabulary) -> Option<Suggestions> {
 
 /// The emojis offered for `e:<typed>`, at most [`MAX_SUGGESTIONS`]:
 ///
-/// - nothing typed: the items' emojis, most used first;
+/// - nothing typed: the [`Vocabulary::emojis`] (the viewer's), most used
+///   first;
 /// - a name (`sk`): the emojis it selects
-///   ([`emoji_names::by_name`]), the items' first (in their order);
-/// - an emoji, maybe still being typed (`❤` of `❤️‍🔥`): the items'
+///   ([`emoji_names::by_name`]), the vocabulary's first (in its order);
+/// - an emoji, maybe still being typed (`❤` of `❤️‍🔥`): the vocabulary's
 ///   emojis that start with it, the same one first (else that emoji
 ///   from the names table), then longer ones (another skin tone, a ZWJ
 ///   sequence).
@@ -859,9 +888,31 @@ mod tests {
         let v = Vocabulary::from_items(&items);
         assert_eq!(
             v.emojis,
-            ["😂", "❤️", "🐱", "🐶", "👍🏽", "👍"],
-            "most used first, ties as first seen; ❤ and ❤️ are one"
+            ["😂", "❤️", "🐱", "🐶", "👍", "👍🏽"],
+            "most used first, ties in the table's order; ❤ and ❤️ are one, spelled ❤️"
         );
+        let mut reversed = items.clone();
+        reversed.reverse();
+        assert_eq!(Vocabulary::from_items(&reversed), v, "in any order");
+
+        // The viewer's own items give the emojis; all give the rest.
+        let theirs = ItemSummary {
+            owner_username: "bob".into(),
+            vibe: Some("tired".into()),
+            ..item(&["💀", "💀", "☠"])
+        };
+        let mine = [item(&["🐸"]), theirs.clone(), item(&["☠️", "🐸"])];
+        let v = Vocabulary::for_viewer(&mine, Some("me"));
+        assert_eq!(v.emojis, ["🐸", "☠️"]);
+        assert_eq!(v.owners, ["me", "bob"]);
+        assert_eq!(v.vibes, ["tired"]);
+        assert_eq!(v.me.as_deref(), Some("me"));
+        assert_eq!(
+            Vocabulary::for_viewer(&mine, None).emojis,
+            ["💀", "☠️", "🐸"],
+            "nobody known: every item's, ties in the table's order"
+        );
+        assert_eq!(Vocabulary::for_viewer(&mine, None), Vocabulary::from_items(&mine));
         let only = Vocabulary {
             emojis: vec!["😂".into()],
             ..Vocabulary::default()
