@@ -295,6 +295,45 @@ IP and JSON details. Writing an entry never fails the action it records.
 | `set.delete` | A set was deleted |
 | `recheck.start`, `recheck.cancel` | An admin started a server-wide recheck (target: its id; details: `scope`, `parts`, `mode`, `set_id`, `total`), or cancelled one (details: `dropped`, the queued pictures deleted) |
 
+### What the clients store on the device
+
+The CLI, the desktop popups and the Android app keep an offline cache
+(`crates/stickpile-core/src/cache.rs`; `$XDG_CACHE_HOME/stickpile` by
+default, `cache_dir` in the client config; on Android the app's
+`noBackupFilesDir/cache`, which the system neither backs up nor empties):
+
+- `cache.sqlite3`: the metadata of the items the account can list (own and
+  public), the cached account (`/me`), the local copy history, usage
+  events not yet uploaded, and what is kept offline (the chosen stickers,
+  packs or library, failed downloads with the server's error text,
+  download claims).
+- Files: thumbnails, the renditions that were copied (evicted least
+  recently used beyond `cache_max_mb`), and the files kept offline
+  (thumbnails, the renditions a copy to the configured chat apps uses, pack
+  covers), which stay until they are released, removed or the account goes,
+  bounded by `offline.max_mb` ([offline.md](offline.md)).
+
+Nothing in the cache is a secret: the API token is a separate file (mode
+`0600`, `token_file`), never in the cache. The files are the pictures the
+account can see, so anyone who can read the user's cache directory can see
+them; the cache relies on the user's file permissions and, on Android, on
+the app's private storage.
+
+How they are removed:
+
+- "Clear cache" deletes the cached files that are not kept and says how
+  many kept files stay.
+- "Remove kept files" (confirmed) deletes every kept file and forgets what
+  to keep.
+- Signing out (`stickpile logout`, the popups, the app), signing in as
+  another account and pointing the client at another server drop the
+  account's data from the cache: items, history, queued usage, and the kept
+  files with the list of what to keep. A client up to 0.8.0 does not know
+  the kept files; when it signed out, a newer client sharing the cache
+  deletes them the next time it brings its offline files in line (after a
+  sync, a keep or a download run).
+- Deleting the cache directory removes everything; the clients rebuild it.
+
 ### No telemetry
 
 The server makes no outbound connections of its own. The only outbound traffic

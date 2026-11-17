@@ -1,119 +1,287 @@
 # Keeping stickers offline
 
-Design note for the offline round (branch `offline`, from `v0.8.0`). The
-CLI, the GTK popup, the macOS app, the Android app and its keyboard keep
-chosen stickers on the device so they copy, insert and play with the server
-unreachable. The web UI is out of scope (no client cache). This page is
-rewritten into the final documentation when the work lands.
+The CLI, the GTK popup, the macOS app, the Android app and its keyboard
+keep chosen stickers on the device, so that they copy, insert and play with
+the server unreachable. The user keeps a sticker, a pack or the whole
+library ("Keep offline"); automatic rules keep more; a downloader fetches
+the files in the background. The web UI has no client cache and is out of
+scope.
 
-## Facts this design rests on
+Everything below up to "Clients" is implemented in `stickpile-core`
+(`stickpile_core::offline`, the cache in `cache.rs`) and tested there
+(`crates/stickpile-core/src/tests/offline.rs`). The client sections are the
+plan for the shells, which only draw, forward input and decide when the
+platform allows a download.
+
+## Facts this rests on
 
 - The server's file route (`GET /api/v1/items/{id}/file/{variant}`) has no
   rate limit: the keyed limiters in `security.rs` cover login, upload, AI
-  suggestions, rechecks and webhooks only. The downloader still bounds its
-  concurrency (4 at once) and obeys a `429` with `Retry-After` if a proxy
-  sends one.
+  suggestions, rechecks and webhooks only. It sends a strong `ETag` (the
+  file's sha256), immutable caching and `Range`. The downloader still
+  bounds its concurrency (4 at once) and obeys a `429` with `Retry-After`
+  if a proxy sends one.
 - Android keeps its cache in `noBackupFilesDir/cache` (`StickpileApp`),
   which the system never empties (unlike `cacheDir`). Kept files stay
   there; existing users' caches do not move.
-- The Settings schema (`settings.rs`: Bool, Int, Choice, Text, in groups)
-  expresses the options; the GTK page (`ui/settings.rs`) and the macOS view
-  (`settings_page.rs`) already add a non-schema block (warnings), so the
-  usage/progress block is additive.
 - Measured on a demo library: thumbnails 3-10 KB, Telegram renditions
   ~100-170 KB, originals ~1.9 MB on average and PNG renditions ~7.7 MB (up
   to 17 MB). What a kept sticker costs depends mostly on the target app.
 
-## The cache (rule: one store, additive schema)
+## What can be kept, and why an item is kept
 
-`SCHEMA_VERSION` stays 1; everything is additive, so 0.8.0 still opens the
-cache.
+- `Scope::Item(id)`: one sticker. Always downloaded whole, whatever the
+  per-kind options say: an explicit choice beats a general rule.
+- `Scope::Set(id)`: a pack, its items now and whatever a sync adds later.
+- `Scope::Library`: everything the cache knows the account can see, now
+  and later.
 
-- `files` gains `kept INTEGER NOT NULL DEFAULT 0` (ALTER TABLE, run when the
-  column is missing). `evict` deletes only `kept = 0`; `clear_files`
-  ("Clear cache") deletes only `kept = 0`; the confirmed "Remove kept
-  files" deletes all files and forgets every keep. The flag is recomputed
-  from the plan on every derivation (set for wanted files present, cleared
-  for the rest), so what a 0.8.0 client does (it evicts or re-registers a
-  kept file without the flag) heals on the next run: the file is wanted,
-  missing or unflagged, and is fetched or flagged again.
-- `offline_keeps (scope TEXT, id TEXT, created_at INTEGER, PRIMARY KEY
-  (scope, id))` with scope `item`, `set` or `library` (id empty): the
-  explicit choices. Automatic rules are not stored: they come from the
-  options each time.
-- `offline_failures (path TEXT PRIMARY KEY, item_id TEXT, error TEXT,
-  attempts INTEGER, at INTEGER)`: what failed and why, for status.
-- `offline_claims (path TEXT PRIMARY KEY, owner TEXT, at INTEGER)`: a
-  process claims a file before downloading it; another process skips a
-  fresh claim (stale after 10 minutes), so the CLI and the popup never
-  fetch the same file twice. Files arrive as `<path>.part.<owner>` and are
-  renamed into place after the size (and the sha256, when the server sends
-  the `ETag`) check out.
-- Meta key `offline_format` = 1 for later changes (precedent:
-  `ITEM_FORMAT`).
-- `Cache::reset_account_data` (sign-out, another server) deletes the kept
-  files and empties the three tables.
+The choices live in the cache (`offline_keeps`), on this device only: not
+on the server, not synced. Automatic rules come from the options each time
+and are not stored. An item is kept for every `Reason` that applies
+(`Item`, `Set`, `Library`, `Used`, `Liked`, `OwnPack`); it stays until the
+last one is gone, and then its files go back to ordinary
+least-recently-used life (they are not deleted at once).
 
-## Options (`[offline]` in the client config, mirrored in home-manager)
+## Which files a kept item needs
+
+`offline::needs(item, options, device)` is the one function that decides
+it, for the plan, the estimate and every client:
+
+- its thumbnail (`files/thumb/<media>.webp`);
+- for each target app of the device (`offline.targets`; when empty, the
+  client's `default_target` plus the targets in the local copy history),
+  the rendition a copy chooses (`session::pick_variant`, which uses
+  `stickpile_api::profiles::choose_variant`), and with
+  `offline.sticker_renditions` also the one it chooses with the sticker
+  flag (`clip/<media>.<variant>/<name>.<ext>`);
+- on a device whose grids play animations (the Android app:
+  `Session::with_grid_playback(true)`), the rendition played,
+  `offline::played_rendition`: the Android rule moved into the core
+  unchanged (an animation plays its smaller GIF or WebP picture, else its
+  MP4; a video its MP4, else its MP4 or WebM original).
+
+A kept pack also keeps its cover: the pack's own cover image when the
+server lists one (`files/cover/...`, learnt by the downloader from
+`GET /sets` and kept in `meta` as `offline_covers`), and the thumbnail of
+its cover item and of its first item by name (what the offline pack lists
+show).
+
+The per-kind options and `offline.max_file_mb` then decide what pack,
+library and automatic keeping download (`offline::skip_reason`):
+renditions of a kind switched off, or larger than the limit, are skipped
+and reported as skipped with the reason (`SkipReason`), not as failed.
+Thumbnails and covers are always kept (the grids need them; they are
+small), so a pack kept with videos off still shows its videos, dimmed.
+
+## The cache (one store, additive schema)
+
+Kept files are ordinary cache files, found by the lookup
+`Session::prepare_copy`, `fetch_variant` and `thumbnail` already use: a
+kept file is useful because the copy path finds it without knowing it was
+kept. `SCHEMA_VERSION` stays 1 and every change is additive
+(`cache::OFFLINE_FORMAT` = 1, in `meta` as `offline_format`), so a client
+up to 0.8.0 still opens and uses the cache.
+
+- `files.kept INTEGER NOT NULL DEFAULT 0`, added with `ALTER TABLE` when the
+  column is missing (in an immediate transaction, so two processes opening
+  the cache at once do not both add it), with a partial index.
+- `offline_keeps (scope, id, created_at)`: the user's choices (`item`,
+  `set`, or `library` with an empty id).
+- `offline_failures (path, item_id, error, attempts, at)`: downloads that
+  failed and why.
+- `offline_claims (path, owner, at)`: which process is downloading a file.
+- `meta`: `offline_owner` (the account the kept data belongs to),
+  `offline_epoch` (moves on every reset), `offline_liked` and
+  `offline_covers` (what the downloader last learnt from the server, for
+  plans made offline).
+
+How a kept file is protected:
+
+- `Cache::evict` (the `cache_max_mb` cap) only deletes files with
+  `kept = 0`, and only they count against the cap: `offline.max_mb`
+  bounds the kept files.
+- `Cache::clear_files` ("Clear cache") deletes only files that are not
+  kept; its report says how many kept files stay (`kept_files`,
+  `kept_bytes`).
+- `Cache::offline_reset` (the confirmed "Remove kept files", and part of
+  sign-out) deletes the kept files and forgets every keep, failure and
+  claim.
+- The flag is recomputed from the plan on every derivation
+  (`Session::offline_refresh`, run after every sync, keep and release, and
+  at the start of every download run): wanted files that are present are
+  flagged, flagged files nothing wants any more are released to the LRU
+  (as used now), and the kept files of items a sync removed (no cached
+  item has their media any more) are deleted.
+- A kept file's `last_access` is the largest value SQLite holds. The new
+  client never reads it for kept files; a client up to 0.8.0, which evicts
+  by `last_access` alone, so takes every other file first.
+
+What an older client does to the new cache, and how it heals:
+
+| 0.8.0 does | Effect | Healed by |
+|---|---|---|
+| opens it | `CREATE TABLE IF NOT EXISTS` and `user_version = 1` change nothing | nothing to heal |
+| evicts under its `cache_max_mb` (kept files count there) | other files go first; with more pressure kept files are deleted | the next refresh finds them missing; the next run downloads them again |
+| "Clear cache" (Android `clear_cache`) | every file deleted | the same |
+| registers a file again | the row keeps `kept`, `last_access` is lowered | the next refresh sets it back |
+| a wrong-size or missing file | its row is dropped | the next run downloads it |
+| signs out or changes account | items and `me` go, the offline tables stay | the next refresh sees `offline_owner` differ from the cached account (or none) and resets the offline data: kept files deleted, keeps forgotten |
+
+Running the released 0.8.0 CLI on a cache the new client wrote is a
+manual test: `real_0_8_0_cli_on_a_cache_the_new_client_wrote` in
+`tests/offline.rs` (ignored; it needs `STICKPILE_080_CLI`).
+
+## Options
+
+`[offline]` in the client config (`ClientConfig::offline`,
+`config::OfflineConfig`, also exported as `offline::OfflineOptions`),
+mirrored in the home-manager module. Android keeps its own copy next to
+its display settings and passes it with `Session::set_offline_options`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `offline.targets` | `[]` | Chat apps whose renditions are kept; empty: the default target plus the targets in the local copy history |
+| `offline.targets` | `[]` | Chat apps whose renditions are kept; empty: `default_target` plus the targets in the copy history. A list: config file only, not on the Settings page |
 | `offline.sticker_renditions` | `true` | Also keep the rendition a copy with the sticker flag uses |
 | `offline.stills` / `.animations` / `.videos` | `true` / `true` / `false` | Kinds downloaded by pack, library and automatic keeping |
-| `offline.max_file_mb` | `0` | Skip a single file larger than this (0: no limit); the budget and the kind switches already bound the total |
+| `offline.max_file_mb` | `0` | Skip a single rendition larger than this (0: no limit), for pack, library and automatic keeping |
 | `offline.max_mb` | `1024` | Budget for kept files (0: no limit): ~10,000 stickers for Telegram, a few hundred for targets that copy originals |
-| `offline.auto.thumbnails` | `true` | After a sync, fetch every item's thumbnail |
-| `offline.auto.used` | `false` | Keep the most recent `offline.auto.used_count` (200) copied stickers |
-| `offline.auto.liked` | `false` | Keep liked stickers |
-| `offline.auto.own_packs` | `false` | Keep the packs the user owns |
+| `offline.auto.thumbnails` | `true` | Keep every item's thumbnail (fetched after each sync) |
+| `offline.auto.used` | `false` | Keep the most recently copied stickers of this device... |
+| `offline.auto.used_count` | `200` | ...this many (1-2000) |
+| `offline.auto.liked` | `false` | Keep the stickers the account liked (listed from the server by each run) |
+| `offline.auto.own_packs` | `false` | Keep the packs the account owns |
 | `offline.mobile_data` | `false` | Android only: also download on metered networks |
 
-A sticker kept by itself is always downloaded, whatever the kind switches
-and `max_file_mb` say. A skipped item is reported as skipped with its
-reason. Android stores these options next to its display settings and
-passes them to the core as an `OfflineOptions` value; the desktop clients
-read them from the config.
+The Settings page's group "Offline" (`settings::settings_schema`) has every
+key but `offline.targets` (a list) and `offline.mobile_data` (Android's
+own).
 
-## Core API (`stickpile_core::offline`, used by every shell)
+## Core API
 
-- `Scope { Item(id), Set(id), Library }`; `Reason` adds the automatic
-  rules. `Session::offline_keep(scope)`, `offline_release(scope)`,
-  `offline_keeps() -> Vec<Scope>`.
-- `needs(item, opts, client) -> Vec<WantedFile>`: the one function that
-  says which files a kept item needs (thumbnail; for each target the
-  renditions `pick_variant` chooses, with and without the sticker flag; the
-  played rendition on clients that play animations; the pack cover).
-- `Session::offline_plan(opts) -> Plan`: (keeps and automatic rules) x
-  (cached items) x `needs`, in download order (thumbnails, kept stickers,
-  packs, library; most used first within a group), with present/missing,
-  skipped with reasons, and byte totals.
-- `Session::offline_estimate(scope, opts) -> Estimate { files, bytes,
-  present_files, present_bytes, skipped }`, shown before keeping a pack or
-  the library.
-- `Session::offline_run(opts, control) -> OfflineOutcome` drives the
-  downloader to completion or until paused, cancelled, the server is
-  unreachable, the budget is reached or the disk is full;
-  `OfflineControl` pauses, resumes and cancels; a copy's own download goes
-  first. `OfflineStatus { state: Idle | Downloading | Paused |
-  WaitingForNetwork | LimitReached | DiskFull, files_done, files_total,
-  bytes_done, bytes_total, skipped, failed, scopes: Vec<ScopeProgress> }`
-  is published while it runs.
-- `Session::offline_usage() -> Usage { kept_files, kept_bytes,
-  other_files, other_bytes }`; `Session::available_offline(items, target)`
-  for the tile marks.
-- Offline, `prepare_copy` of a sticker whose file is not on the device
-  fails with `CoreError::NotOnDevice` (the shells explain it instead of a
-  network error).
+In `stickpile_core::offline` and on `Session`; all of it is `Send + Sync`
+and works without a server unless said otherwise.
+
+| Call | What it does |
+|---|---|
+| `Session::with_grid_playback(bool)` | The client's grids play animations (Android): keep the played rendition too |
+| `Session::offline_options()` / `set_offline_options(opts)` | The options in use (`[offline]` of the config, or what the shell set) |
+| `Session::offline_device()` | The resolved targets and playback, as `needs` gets them |
+| `Session::offline_keep(&scope)` / `offline_release(&scope)` | Keep or release a scope; flags or releases what is on the device at once |
+| `Session::offline_keeps()` | The kept scopes, oldest first |
+| `Session::offline_reasons(&item)` | Why an item is kept (empty: it is not) |
+| `Session::offline_plan()` | The `Plan`: every wanted file in download order with present/missing, the skipped items with reasons, totals overall and per scope, the budget, the failures. Read-only |
+| `Session::offline_refresh()` | The plan, and the cache brought in line with it (flags, releases, deletions of removed items' files) |
+| `Session::offline_estimate(&scope)` | What keeping a scope would take: files, bytes, how much is present, what is skipped, the kept bytes afterwards, the budget (`Estimate::fits`) |
+| `Session::offline_run(&control)` | The downloader, until complete, cancelled, the server unreachable, the budget reached or the disk full; waits while paused. Returns `OfflineOutcome { end: RunEnd, status }` |
+| `OfflineControl::{new, pause, resume, cancel, is_paused, status, subscribe}` | Controls a run and carries its status (a `tokio::sync::watch` channel, runtime-independent) |
+| `Session::offline_usage()` | `OfflineUsage { kept_files, kept_bytes, other_files, other_bytes, budget }` |
+| `Session::clear_cache()` | "Clear cache": the files that are not kept |
+| `Session::offline_remove_all()` | The confirmed "Remove kept files": kept files deleted, keeps forgotten |
+| `Session::available_offline(&items, target, sticker)` | Per item, whether the copy's file is on the device (tile marks); touches nothing |
+| `Session::variant_on_device(&item, variant)` | Whether one rendition is on the device (the keyboard's choice) |
+| `offline::needs`, `played_rendition`, `skip_reason`, `kind_kept`, `thumb_rel`, `cover_rel` | The rules above, for display and tests |
+
+`OfflineStatus { state, files_done, files_total, bytes_done, bytes_total,
+skipped, failed, scopes: Vec<ScopeProgress>, message }`, where `state` is
+`Idle | Downloading | Paused | WaitingForNetwork | LimitReached |
+DiskFull`, "done" counts the wanted files on the device (those there
+before the run included), each `ScopeProgress` covers one kept scope or
+automatic rule (`PlanScope::{Thumbnails, Kept(scope), Used, Liked,
+OwnPacks}`, with the kept sticker's or pack's `name` from the cache) and
+`message` is the English reason of a stop (for logs; the state says
+which). The plan's `ScopeTotals` carry the same scopes and names, with the
+number of items each keeps. `RunEnd` is `Complete` (everything tried; `failed` may
+be non-zero), `Cancelled`, `WaitingForNetwork`, `LimitReached`, `DiskFull`
+or `Unauthorized`; `OfflineOutcome::is_complete` means every wanted file
+is on the device.
+
+With the server unreachable, `prepare_copy` and `fetch_variant` of a file
+that is not on the device fail with `CoreError::NotOnDevice { item,
+variant, cause }` (`is_offline()` is true for it too, `is_not_on_device()`
+tells it apart), so a shell explains it instead of naming a network error.
+
+## The downloader
+
+`Session::offline_run` derives the plan, then fetches the missing files in
+its order: thumbnails, then stickers (kept by themselves, used, liked),
+then packs (with their covers first), then the library; most used first
+within a group (copies on this device, then over all users).
+
+- Concurrency 4. Before a file is fetched it is claimed in
+  `offline_claims`; another process (the CLI next to the popup) skips a
+  fresh claim and looks again later, so no file is fetched twice. A claim
+  is renewed every 30 s while its download runs and is stale 120 s after
+  that; the part files of a dead process go when the file is claimed next
+  (thumbnails and covers: when a run starts).
+- A file is written to `<path>.part.<owner>` and renamed into place once
+  its size equals `size_bytes` and its sha256 the server's `ETag`, so an
+  interrupted download leaves nothing that looks complete; the part file is
+  deleted when the download ends any other way, also when the run's future
+  is dropped. Partial bytes are not reused: the next run fetches the file
+  again.
+- A `429` makes every download wait as `Retry-After` says (30 s without
+  one, at most 10 minutes; at most 5 times per file). Other errors are
+  retried after 2 s and 4 s; the third failure counts the file as failed
+  (`offline_failures`, the reason kept), and the run goes on with the rest.
+  A file that failed in an earlier run gets one try per run.
+- The server unreachable: the run stops at once (`WaitingForNetwork`), the
+  running downloads too; the next run after a successful sync goes on. A
+  rejected token stops it (`Unauthorized`).
+- The budget: before a file starts, the kept bytes, the running downloads
+  and the file must fit in `offline.max_mb`; when they do not, no download
+  starts any more, the running ones finish, and the status says
+  `LimitReached` with the budget. Nothing is deleted to make room.
+- A full disk (`ENOSPC`, `EDQUOT`, or SQLite's "disk is full") stops the run
+  (`DiskFull`) without a retry and without deleting anything.
+- Pause stops the running downloads (they start again first on resume) and
+  holds the run; it stays paused across runs until resumed. Cancel ends the
+  run; the next one starts afresh.
+- A copy goes first: while a download the user asked for runs (a copy, an
+  insert, a thumbnail or cover on screen), no background download starts
+  and the running ones hold between chunks (at most 30 s at a time).
+
+## Sign-out and another server
+
+`Cache::reset_account_data` (logout, another account, another server)
+deletes the kept files and empties the keep, failure and claim tables, with
+the rest of the account's data. A download still running throws its file
+away (`offline_epoch` moved).
 
 ## Clients
 
-As in the brief, section 4.9: CLI `stickpile offline keep|release|status
-[--dry-run]|sync` (exit codes 0 complete, 2 incomplete, 1 failed); GTK and
-macOS: a key and menu entry for the sticker and the pack, an "Offline"
-Settings group plus a usage/progress block with pause, cancel and "Remove
-kept files", the downloader after each sync, the dimmed unavailable tiles
-and the available mark (a tile mark like the others); Android app: keep and
-release in the sticker menu and details and on the pack screen, a settings
-section, a WorkManager job (unmetered unless `mobile_data`, not on low
-storage); the keyboard: keep/release in the long-press menu and the marks.
+The plan for the shells, as in the brief, section 4.9:
+
+- **CLI**: `stickpile offline keep <item>`, `--set <pack>`, `--all`;
+  `stickpile offline release` with the same forms; `stickpile offline
+  status` (what is kept, `offline_usage`, the plan's totals per scope,
+  skipped and failures; the estimate for a scope with `--dry-run`);
+  `stickpile offline sync` to sync and run the downloader to completion
+  with progress, since the CLI is not resident. Exit codes: 0 complete
+  (`is_complete`), 2 incomplete (paused, limit, network, failures), 1
+  failed (an error). Explain `CoreError::NotOnDevice` in `stickpile copy`.
+- **GTK popup and macOS app**: a key and a menu entry to keep or release
+  the selected sticker (`offline_reasons` tells which to show), the same
+  for a pack in the packs view (with the estimate first); the "Offline"
+  Settings group (generic, from the schema) plus a block with the library
+  switch, `offline_usage`, the progress (`OfflineControl::subscribe`) with
+  pause and cancel, and "Remove kept files" (confirmed,
+  `offline_remove_all`); "Clear cache" says how many kept files stay. The
+  resident process runs `offline_run` after each successful sync
+  (`SyncPolicy`) and after a keep. Tiles not `available_offline` are dimmed
+  when the server is unreachable, and a mark shows what is available
+  offline when it is reachable (a tile mark like the others).
+  `NotOnDevice` is explained, translated.
+- **Android app**: keep and release in the sticker's menu and details and
+  on the pack screen; a settings section that stores `OfflineOptions` and
+  passes them with `set_offline_options`; `with_grid_playback(true)`; a
+  WorkManager job that runs `offline_run` (unmetered unless `mobile_data`,
+  not on low storage), cancelled by dropping it. `cache_bytes` and
+  `clear_cache` move to `offline_usage` and `Session::clear_cache`;
+  `motion::choose` moves to `offline::played_rendition`;
+  `LibraryError` gets its own kind for `NotOnDevice` (today it maps to
+  `Unreachable`).
+- **Android keyboard**: keep and release in the long-press menu, the marks
+  (`variant_on_device` for the rendition it would insert), no settings of
+  its own, no downloads beyond what a pick needs.
+- **home-manager module**: the `[offline]` options, mirrored (done).
