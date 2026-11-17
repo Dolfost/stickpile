@@ -1,7 +1,6 @@
 package io.github.dolfost.stickpile.ui.settings
 
 import android.text.format.DateUtils
-import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,8 +72,10 @@ import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.version
 import io.github.dolfost.stickpile.ui.common.DisplayOptions
 import io.github.dolfost.stickpile.ui.common.Doing
+import io.github.dolfost.stickpile.ui.common.byteSize
 import io.github.dolfost.stickpile.ui.common.filterTouchesWhenObscured
 import io.github.dolfost.stickpile.ui.common.messageFor
+import io.github.dolfost.stickpile.ui.common.sizeText
 import io.github.dolfost.stickpile.ui.common.text
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -97,7 +98,6 @@ fun SettingsScreen(
     onKeyboardSetup: () -> Unit,
     onLicences: () -> Unit,
 ) {
-    val context = LocalContext.current
     val resources = LocalResources.current
     val state = vm.state
     val snackbar = remember { SnackbarHostState() }
@@ -107,7 +107,7 @@ fun SettingsScreen(
             val text = when (event) {
                 is SettingsEvent.Notice -> event.message.text(resources)
                 is SettingsEvent.CacheCleared -> {
-                    val freed = Formatter.formatShortFileSize(context, event.bytes)
+                    val freed = resources.byteSize(event.bytes.toULong())
                     if (event.keptFiles > 0) {
                         resources.getString(R.string.settings_cache_cleared_kept, freed, event.keptFiles.toInt())
                     } else {
@@ -115,7 +115,7 @@ fun SettingsScreen(
                     }
                 }
                 is SettingsEvent.KeptRemoved ->
-                    resources.getString(R.string.offline_removed, Formatter.formatShortFileSize(context, event.bytes))
+                    resources.getString(R.string.offline_removed, resources.byteSize(event.bytes.toULong()))
             }
             launch { snackbar.showSnackbar(text) }
         }
@@ -328,15 +328,14 @@ private fun SyncSection(vm: SettingsViewModel) {
 
 @Composable
 private fun CacheSection(vm: SettingsViewModel) {
-    val context = LocalContext.current
     val state = vm.state
     SectionHeader(stringResource(R.string.settings_cache))
     val usage = state.usage
     if (usage == null) {
         Paragraph(stringResource(R.string.settings_cache_unknown))
     } else {
-        Paragraph(stringResource(R.string.settings_cache_size, Formatter.formatShortFileSize(context, usage.otherBytes.toLong())))
-        Paragraph(stringResource(R.string.settings_cache_kept, Formatter.formatShortFileSize(context, usage.keptBytes.toLong())))
+        Paragraph(stringResource(R.string.settings_cache_size, sizeText(usage.otherBytes)))
+        Paragraph(stringResource(R.string.settings_cache_kept, sizeText(usage.keptBytes)))
     }
     Paragraph(stringResource(R.string.settings_cache_text))
     Actions {

@@ -214,9 +214,11 @@ design; everything below is the app's side of it).
 - **What packs, the library and the rules download**: pictures and
   animations (on), videos (off), the sticker versions Telegram sends (on),
   files up to a largest size (no limit by default), within the space for
-  kept files (1 GB by default; downloads stop when it is full and nothing
-  is deleted to make room). A sticker kept by itself is always downloaded
-  whole. What a sticker needs is the core's: its thumbnail,
+  kept files (1024 MiB, that is 1 GiB, by default; downloads stop when it
+  is full and nothing is deleted to make room). The sliders count in MiB,
+  and every size the app shows counts in 1024s (KiB, MiB, GiB; Ukrainian
+  КіБ, МіБ, ГіБ), as the CLI does. A sticker kept by itself is always
+  downloaded whole. What a sticker needs is the core's: its thumbnail,
   for each chat app it was sent to from this phone (and the one an
   unknown app counts as) the file a share uses and the files the keyboard
   inserts into the usual fields (one that takes any picture, one that

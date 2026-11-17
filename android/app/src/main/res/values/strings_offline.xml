@@ -29,8 +29,16 @@
     <string name="offline_max_file">Largest file</string>
     <string name="offline_budget">Space for kept files</string>
     <string name="offline_budget_text">Downloads stop when it is full; nothing is deleted to make room.</string>
-    <!-- %1$d: megabytes. -->
-    <string name="offline_size_mb">%1$d MB</string>
+    <!-- %1$d: mebibytes (1024 x 1024 bytes), as the options count. -->
+    <string name="offline_size_mb">%1$d MiB</string>
+    <!-- Sizes count in 1024s (ui.common.ByteSize): bytes, KiB, MiB, GiB, TiB. -->
+    <string-array name="size_units">
+        <item>B</item>
+        <item>KiB</item>
+        <item>MiB</item>
+        <item>GiB</item>
+        <item>TiB</item>
+    </string-array>
     <string name="offline_no_limit">No limit</string>
     <string name="offline_mobile_data">Use mobile data</string>
     <string name="offline_mobile_data_text">Off: downloads wait for Wi-Fi or another network that is not metered.</string>

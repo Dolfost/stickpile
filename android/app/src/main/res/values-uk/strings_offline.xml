@@ -22,7 +22,14 @@
     <string name="offline_max_file">Найбільший файл</string>
     <string name="offline_budget">Місце для збережених файлів</string>
     <string name="offline_budget_text">Завантаження зупиняються, коли воно заповнене; нічого не видаляється, щоб звільнити місце.</string>
-    <string name="offline_size_mb">%1$d МБ</string>
+    <string name="offline_size_mb">%1$d МіБ</string>
+    <string-array name="size_units">
+        <item>Б</item>
+        <item>КіБ</item>
+        <item>МіБ</item>
+        <item>ГіБ</item>
+        <item>ТіБ</item>
+    </string-array>
     <string name="offline_no_limit">Без обмеження</string>
     <string name="offline_mobile_data">Використовувати мобільні дані</string>
     <string name="offline_mobile_data_text">Вимкнено: завантаження чекають на Wi-Fi чи іншу нелімітовану мережу.</string>

@@ -1,6 +1,5 @@
 package io.github.dolfost.stickpile.ui.common
 
-import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
@@ -8,16 +7,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.offline.KeepAsk
 import io.github.dolfost.stickpile.rust.OfflineEstimate
 
-/** A size as the phone writes it ("12 MB"). */
+/** A size in 1024-based units ("12.0 MiB", [ByteSize]). */
 @Composable
-fun sizeText(bytes: ULong): String = Formatter.formatShortFileSize(LocalContext.current, bytes.toLong())
+fun sizeText(bytes: ULong): String = LocalResources.current.byteSize(bytes)
 
 /**
  * Keep a pack or the whole library offline? What it takes first (the
