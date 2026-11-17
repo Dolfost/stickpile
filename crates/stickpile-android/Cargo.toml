@@ -41,12 +41,6 @@ tracing.workspace = true
 toml.workspace = true
 # `item_url`: the item's page under the server URL.
 url.workspace = true
-# WhatsApp packs: the server's build (JSON), the index of the packs
-# unpacked here, and reading the `.wastickers` (ZIP, stored entries only:
-# no default features, as the server builds it).
-serde.workspace = true
-serde_json.workspace = true
-zip.workspace = true
 
 # The device model for the token name (`ro.product.model`).
 [target.'cfg(target_os = "android")'.dependencies]

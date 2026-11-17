@@ -6,8 +6,6 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.ContentProvider
 import io.github.dolfost.stickpile.provider.StickerProvider
-import io.github.dolfost.stickpile.whatsapp.WhatsApp
-import io.github.dolfost.stickpile.whatsapp.WhatsAppRoutes
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
@@ -62,35 +60,6 @@ class ManifestTest {
         }
         assertTrue(provider.children("grant-uri-permission").isEmpty())
         assertTrue(provider.children("path-permission").isEmpty())
-    }
-
-    @Test
-    fun theWhatsAppProviderIsDeclaredAsWhatsAppsSampleDeclaresIt() {
-        val provider = component("provider", ".whatsapp.WhatsAppProvider")
-        assertEquals("io.github.dolfost.stickpile.whatsapp", WhatsAppRoutes.AUTHORITY)
-        assertEquals(WhatsAppRoutes.AUTHORITY, provider.android("authorities"))
-        assertTrue("starts with the package, as the sample checks", WhatsAppRoutes.AUTHORITY.startsWith("io.github.dolfost.stickpile."))
-        assertEquals("true", provider.android("exported"))
-        assertEquals("true", provider.android("enabled"))
-        assertEquals("false", provider.android("grantUriPermissions"))
-        // Read with WhatsApp's permission only; nothing can write.
-        assertEquals("com.whatsapp.sticker.READ", provider.android("readPermission"))
-        listOf("permission", "writePermission").forEach {
-            assertFalse("provider has android:$it", provider.hasAttributeNS(androidNs, it))
-        }
-        assertTrue(provider.children("grant-uri-permission").isEmpty())
-        assertTrue(provider.children("path-permission").isEmpty())
-        // The app does not ask for that permission, nor declare it.
-        assertTrue(manifest.children("permission").isEmpty())
-        assertFalse(manifest.children("uses-permission").any { it.android("name").startsWith("com.whatsapp") })
-    }
-
-    @Test
-    fun whatsAppAndWhatsAppBusinessAreVisible() {
-        val queries = manifest.children("queries").single()
-        assertEquals(listOf("package"), queries.children().map { it.tagName }.distinct())
-        assertEquals(WhatsApp.APPS, queries.children("package").map { it.android("name") })
-        assertEquals(listOf("com.whatsapp", "com.whatsapp.w4b"), WhatsApp.APPS)
     }
 
     @Test
@@ -150,8 +119,8 @@ class ManifestTest {
         val named: List<Pair<String, Class<*>>> =
             listOf(application.android("name") to Application::class.java) +
                 types.flatMap { (tag, type) -> application.children(tag).map { it.android("name") to type } }
-        // The app's seven, and the QR scanner's activity (its orientation overridden).
-        assertEquals(8, named.size)
+        // The app's six, and the QR scanner's activity (its orientation overridden).
+        assertEquals(7, named.size)
         named.forEach { (name, type) ->
             val cls = Class.forName(qualified(name), false, javaClass.classLoader)
             assertTrue("$name is not a ${type.simpleName}", type.isAssignableFrom(cls))

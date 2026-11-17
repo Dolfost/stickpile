@@ -5,8 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,7 +36,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,9 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -61,7 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.provider.PreparedFiles
@@ -72,9 +67,6 @@ import io.github.dolfost.stickpile.ui.common.FailureLog
 import io.github.dolfost.stickpile.ui.common.Loading
 import io.github.dolfost.stickpile.ui.common.catching
 import io.github.dolfost.stickpile.ui.common.text
-import io.github.dolfost.stickpile.whatsapp.AndroidWhatsAppApps
-import io.github.dolfost.stickpile.whatsapp.WhatsAppHost
-import io.github.dolfost.stickpile.whatsapp.WhatsAppViewModel
 import kotlinx.coroutines.launch
 
 /**
@@ -82,8 +74,7 @@ import kotlinx.coroutines.launch
  * and the tiles' info as toggles, a menu (what the tiles show, the search
  * syntax, sync, settings), the tabs (recent, liked, packs, most used) and
  * a grid of tiles that show what [settings] asks. A tap shares an item, a
- * long press opens its details; pulling down syncs. An open pack's header,
- * and a long press on a pack in the list, offer "Add to WhatsApp".
+ * long press opens its details; pulling down syncs.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,8 +93,6 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
     var searchFocused by remember { mutableStateOf(false) }
     var sheet by rememberSaveable { mutableStateOf<LibrarySheet?>(null) }
-    val appContext = context.applicationContext
-    val whatsApp = viewModel(key = "whatsapp") { WhatsAppViewModel(library, AndroidWhatsAppApps(appContext)) }
 
     // A message that replaces the one shown.
     fun notify(text: String) {
@@ -182,7 +171,7 @@ fun LibraryScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             val pack = state.pack
             // Also while searching: the search looks inside this pack.
-            if (pack != null) PackHeader(pack, onBack = { vm.closePack() }, onWhatsApp = { whatsApp.open(pack) })
+            if (pack != null) PackHeader(pack, onBack = { vm.closePack() })
             val content = state.content
             val offline = (content as? LibraryContent.Items)?.offline ?: (content as? LibraryContent.Packs)?.offline ?: false
             if (offline) OfflineNotice()
@@ -207,7 +196,7 @@ fun LibraryScreen(
                         if (content.packs.isEmpty()) {
                             Empty(stringResource(R.string.library_empty_packs))
                         } else {
-                            PackList(content.packs, library, vm::openPack, onWhatsApp = whatsApp::open)
+                            PackList(content.packs, library, vm::openPack)
                         }
                     is LibraryContent.Failed -> Failed(content, vm::reload, onSignInAgain)
                 }
@@ -232,7 +221,6 @@ fun LibraryScreen(
         LibrarySheet.SYNTAX -> SyntaxSheet(onExample = vm::searchNow, onDismiss = { sheet = null })
         null -> Unit
     }
-    WhatsAppHost(whatsApp)
 }
 
 /** A pack's cover in the list of packs. */
@@ -258,19 +246,12 @@ private fun emptyText(request: LibraryRequest, safeMode: Boolean): Int = when (r
 }
 
 @Composable
-private fun PackHeader(pack: Pack, onBack: () -> Unit, onWhatsApp: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun PackHeader(pack: Pack, onBack: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.library_all_packs))
         }
-        Text(
-            pack.name,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onWhatsApp) { Text(stringResource(R.string.whatsapp_add), maxLines = 1) }
+        Text(pack.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -324,17 +305,8 @@ private fun Failed(failed: LibraryContent.Failed, onRetry: () -> Unit, onSignInA
     }
 }
 
-/** The packs; a tap opens one, a long press offers it to WhatsApp. */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PackList(
-    packs: List<Pack>,
-    library: StickpileLibraryInterface,
-    onOpen: (Pack) -> Unit,
-    onWhatsApp: (Pack) -> Unit,
-) {
-    val haptics = LocalHapticFeedback.current
-    val whatsAppLabel = stringResource(R.string.whatsapp_add)
+private fun PackList(packs: List<Pack>, library: StickpileLibraryInterface, onOpen: (Pack) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(packs.distinctBy { it.id }, key = { it.id }) { pack ->
             val count = pack.itemCount.toInt()
@@ -344,14 +316,7 @@ private fun PackList(
                 supportingContent = {
                     Text(stringResource(R.string.library_pack_details, pack.owner, pluralStringResource(R.plurals.library_items, count, count)))
                 },
-                modifier = Modifier.combinedClickable(
-                    onLongClickLabel = whatsAppLabel,
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onWhatsApp(pack)
-                    },
-                    onClick = { onOpen(pack) },
-                ),
+                modifier = Modifier.clickable { onOpen(pack) },
             )
         }
     }

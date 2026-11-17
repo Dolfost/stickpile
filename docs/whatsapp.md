@@ -12,8 +12,7 @@ packs as files** that anyone who can read the set downloads:
   `GET /api/v1/sets/{id}/whatsapp` reports the last build,
   `GET /api/v1/sets/{id}/whatsapp.zip` and
   `GET /api/v1/sets/{id}/whatsapp/packs/{n}` download it
-  ([api.md](api.md#whatsapp-packs)). The Android app uses these for its
-  "Add to WhatsApp" ([below](#on-android-add-to-whatsapp));
+  ([api.md](api.md#whatsapp-packs));
 - with the CLI: `stickpile export <set> --format whatsapp -o FILE`
   ([cli.md](cli.md)).
 
@@ -93,9 +92,8 @@ contents.json            the packs in the layout of WhatsApp's sample app
 `publisher`, `tray_image_file`, `image_data_version`, `avoid_cache`,
 `animated_sticker_pack`, the empty link fields, and `stickers` with
 `image_file` and `emojis`) plus `wastickers`, the file that holds the
-pack's images. An app that bundles packs, like WhatsApp's sample, can
-read it as it is (the Android app reads the build's JSON instead, the
-same facts).
+pack's images. An app that bundles packs, like WhatsApp's sample, can read
+it as it is.
 
 ## From items to stickers
 
@@ -169,59 +167,6 @@ replaces the files atomically, so downloads in progress finish. The
 periodic cleanup removes the exports of deleted sets. Everything under
 `exports/` can be made again; backups need not include it.
 
-## On Android: "Add to WhatsApp"
-
-The Android app is the sticker app WhatsApp needs on the phone
-([android.md](android.md#add-to-whatsapp)): "Add to WhatsApp" on a pack
-uses the routes above, unpacks the parts on the phone, serves them to
-WhatsApp through a content provider made after WhatsApp's sample app, and
-starts WhatsApp's "add sticker pack" intent for each part.
-
-- **Build.** `crates/stickpile-android` (`whatsapp_packs`) reads the
-  status; when the last build no longer matches the pack (or there is
-  none) it posts a build, or waits for the one in progress (the status's
-  `job`), polling the job for up to 10 minutes. It reads the build from
-  the job's result (a `WhatsappBuild`; `set_id` and `reused` are ignored),
-  else from the status. A failed job whose error starts with "nothing to
-  export" is "too few stickers"; 404 on these routes for a pack the
-  account can read means a server without WhatsApp packs.
-- **Download.** One `GET .../whatsapp/packs/{n}` per part, not the whole
-  zip (`contents.json` is not used: the build has the same facts). A part
-  whose `image_data_version` the phone has already, with all its files,
-  is not downloaded again.
-- **Unpack.** Into `<cache_dir>/whatsapp/<pack id>/<n>-<image_data_version>/`
-  of the app's private storage, only the tray icon and the stickers the
-  build lists (`title.txt` and `author.txt` are not needed: the build has
-  the name and publisher). Every entry name must be a plain file name,
-  every file within WhatsApp's limits above and the PNG or WebP its name
-  says; anything else refuses the part (details in
-  [android.md](android.md#bridge-interface), "WhatsApp packs").
-- **Identifiers.** WhatsApp knows a pack by the provider's authority and
-  the pack's identifier. The app does not use the build's identifier
-  (`<slug>`, `<slug>-<n>`: slugs change on a rename and need not be
-  unique across owners) but `<pack id>-<n>`, which stays the same when the
-  pack is renamed, so WhatsApp updates the pack it has (a new
-  `image_data_version`) instead of seeing a new one.
-- **Provider and intent.** Authority `io.github.dolfost.stickpile.whatsapp`,
-  the sample's paths, columns and types, protected by
-  `com.whatsapp.sticker.READ`; the intent
-  `com.whatsapp.intent.action.ENABLE_STICKER_PACK` with `sticker_pack_id`,
-  `sticker_pack_authority` and `sticker_pack_name`; the
-  `sticker_whitelist_check` providers of WhatsApp and WhatsApp Business to
-  tell whether a part is added
-  ([android.md](android.md#whatsapp-provider), with the sources read).
-- **One pack at a time.** WhatsApp's README: "Users must explicitly add
-  each pack to WhatsApp one-by-one, so your app should list each pack
-  separately and each pack must have its own affordance to add it to
-  WhatsApp (do not try to create 'add all packs' operations)." A
-  stickpile pack of one part opens WhatsApp's dialog at once; with
-  several parts, each has its own button.
-
-Not tried with WhatsApp: no phone with WhatsApp was at hand. The files,
-the provider's rows and the intent follow the sample app and are checked
-by host tests (`crates/stickpile-android/tests/library/whatsapp.rs`; the
-app's `whatsapp` JVM tests), not by WhatsApp itself.
-
 ## Tests
 
 - `crates/stickpile-media/tests/pipeline.rs` (`whatsapp_*`): animated
@@ -238,17 +183,3 @@ app's `whatsapp` JVM tests), not by WhatsApp itself.
   animated pack leaving out a lonely still, a set of two failing, a queued
   build returned again, readers allowed and others 404, the cleanup after
   the set is deleted.
-- `crates/stickpile-android/tests/library/whatsapp.rs`, against the core
-  mock serving real stored `.wastickers`: build, download and unpack;
-  reuse of an unchanged pack; a rebuilt pack in a new version and
-  directory; a pack of 31 in two parts; offline answers from what was
-  unpacked; hostile archives refused (`../`, absolute paths, a
-  subdirectory, a backslash, a hidden name, a directory entry, a
-  duplicate, an oversized sticker, a PNG named `.webp`, a missing
-  sticker, too many entries, not a ZIP) with the old parts kept; too few
-  stickers, an old server (404), an unknown pack; a queued build waited
-  for and a wait cancelled; the files gone after a sign-out.
-- `android/app/src/test/.../whatsapp/`: the provider's routes, types,
-  columns and rows, the files it serves and who may read; the intent's
-  action and extras, the choice of app and the dialog's results; the
-  sheet's states.

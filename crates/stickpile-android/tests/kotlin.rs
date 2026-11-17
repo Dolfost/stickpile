@@ -62,10 +62,6 @@ const METHODS: &[&str] = &[
     // cache
     "fun `cacheBytes`(): kotlin.ULong",
     "fun `clearCache`(): kotlin.ULong",
-    // WhatsApp
-    "suspend fun `whatsappPacks`(`packId`: kotlin.String): WhatsappPacks",
-    "fun `whatsappProgress`(`packId`: kotlin.String): WhatsappProgress?",
-    "fun `whatsappUnpacked`(): List<WhatsappPart>",
 ];
 
 /// The methods that do not throw (`throws` is missing in the contract).
@@ -79,8 +75,6 @@ const NOT_THROWING: &[&str] = &[
     "pendingUsage",
     "hints",
     "itemUrl",
-    "whatsappProgress",
-    "whatsappUnpacked",
 ];
 
 /// Records with their fields in order, as `name: type`.
@@ -195,37 +189,6 @@ const RECORDS: &[(&str, &[&str])] = &[
             "due: kotlin.Boolean",
         ],
     ),
-    (
-        "WhatsappPacks",
-        &[
-            "parts: List<WhatsappPart>",
-            "skipped: kotlin.UInt",
-            "offline: kotlin.Boolean",
-        ],
-    ),
-    (
-        "WhatsappPart",
-        &[
-            "packId: kotlin.String",
-            "number: kotlin.UInt",
-            "identifier: kotlin.String",
-            "name: kotlin.String",
-            "publisher: kotlin.String",
-            "animated: kotlin.Boolean",
-            "version: kotlin.String",
-            "dir: kotlin.String",
-            "trayFile: kotlin.String",
-            "stickers: List<WhatsappSticker>",
-        ],
-    ),
-    (
-        "WhatsappSticker",
-        &["file: kotlin.String", "emojis: List<kotlin.String>"],
-    ),
-    (
-        "WhatsappProgress",
-        &["step: WhatsappStep", "part: kotlin.UInt", "parts: kotlin.UInt"],
-    ),
 ];
 
 const ENUMS: &[(&str, &[&str])] = &[
@@ -238,7 +201,6 @@ const ENUMS: &[(&str, &[&str])] = &[
     ("MediaFormat", &["PNG", "JPEG", "WEBP", "GIF", "MP4", "WEBM"]),
     ("HintKind", &["VALUE", "FILTER", "KEY"]),
     ("MotionKind", &["PICTURE", "VIDEO"]),
-    ("WhatsappStep", &["BUILDING", "DOWNLOADING"]),
     (
         "LibraryErrorKind",
         &[

@@ -6,7 +6,6 @@ mod account;
 mod files;
 mod reading;
 mod sync;
-mod whatsapp;
 mod writing;
 
 use std::io::Cursor;

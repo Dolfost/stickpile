@@ -31,7 +31,7 @@ Discord, Signal, WhatsApp, Slack or a browser chat.
   publish a set to several of them at once
   ([Telegram](docs/telegram.md), [Discord](docs/discord.md),
   [Signal](docs/signal.md)); WhatsApp packs and a Signal-ready zip are
-  downloads, and the Android app adds a set to WhatsApp.
+  downloads.
 - **Collaboration**: add contributors to a pack and choose what each may do,
   or propose stickers and changes to someone else's pack; both sides follow
   the requests on a Collaboration tab ([docs](docs/collaboration.md)).
@@ -55,7 +55,7 @@ v3](https://www.unicode.org/license.txt); see
 | `stickpile` | command-line client |
 | `stickpile-desktop` | Linux quick-search popup (GTK4/libadwaita), resident, bound to a global shortcut |
 | `Stickpile.app` | the same popup for macOS, a menu bar app with its own shortcut ([docs/macos.md](docs/macos.md)) |
-| Android app | a picker keyboard that inserts stickers into any chat app, a share target that uploads, and a content provider other keyboards can read, and "Add to WhatsApp" for a pack ([docs/android.md](docs/android.md)) |
+| Android app | a picker keyboard that inserts stickers into any chat app, a share target that uploads, and a content provider other keyboards can read ([docs/android.md](docs/android.md)) |
 
 A stickpile panel for Unexpected Keyboard comes later (see
 [docs/plan.md](docs/plan.md)).

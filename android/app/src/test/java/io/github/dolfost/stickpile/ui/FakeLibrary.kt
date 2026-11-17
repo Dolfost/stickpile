@@ -18,10 +18,6 @@ import io.github.dolfost.stickpile.rust.Suggestions
 import io.github.dolfost.stickpile.rust.SyncState
 import io.github.dolfost.stickpile.rust.Target
 import io.github.dolfost.stickpile.rust.UploadFile
-import io.github.dolfost.stickpile.rust.WhatsappPacks
-import io.github.dolfost.stickpile.rust.WhatsappPart
-import io.github.dolfost.stickpile.rust.WhatsappProgress
-import io.github.dolfost.stickpile.rust.WhatsappSticker
 
 /**
  * A [StickpileLibraryInterface] for the view model tests: every call is
@@ -58,13 +54,6 @@ class FakeLibrary : StickpileLibraryInterface {
     var cacheBytes: () -> ULong = { 0u }
     var clearCache: () -> ULong = { 0u }
     var serverUrl = "http://localhost:8080"
-
-    /** The pack's id. */
-    var whatsappPacks: suspend (String) -> WhatsappPacks = { unexpected("whatsappPacks") }
-
-    /** Polled, so not recorded in [calls]. */
-    var whatsappProgress: (String) -> WhatsappProgress? = { null }
-    var whatsappUnpacked: () -> List<WhatsappPart> = { emptyList() }
 
     private fun unexpected(name: String): Nothing = throw AssertionError("unexpected call: $name")
 
@@ -220,33 +209,7 @@ class FakeLibrary : StickpileLibraryInterface {
     }
 
     override suspend fun upload(setId: String, file: UploadFile): Item = unexpected("upload")
-
-    override suspend fun whatsappPacks(packId: String): WhatsappPacks {
-        calls += "whatsappPacks $packId"
-        return whatsappPacks.invoke(packId)
-    }
-
-    override fun whatsappProgress(packId: String): WhatsappProgress? = whatsappProgress.invoke(packId)
-
-    override fun whatsappUnpacked(): List<WhatsappPart> {
-        calls += "whatsappUnpacked"
-        return whatsappUnpacked.invoke()
-    }
 }
-
-/** Part [number] of the pack [packId], made ready for WhatsApp, with [stickers] stickers. */
-fun whatsappPart(packId: String, number: Int = 1, stickers: Int = 3, animated: Boolean = false) = WhatsappPart(
-    packId = packId,
-    number = number.toUInt(),
-    identifier = "$packId-$number",
-    name = "Pack $packId",
-    publisher = "Alice",
-    animated = animated,
-    version = "00ff00ff00ff00ff",
-    dir = "/data/whatsapp/$packId/$number-00ff00ff00ff00ff",
-    trayFile = "cover.png",
-    stickers = (1..stickers).map { WhatsappSticker(file = "%02d.webp".format(it), emojis = listOf("\uD83D\uDE42")) },
-)
 
 val alice = Account(username = "alice", displayName = null, serverUrl = "https://s.example", auth = AuthKind.TOKEN, isAdmin = false)
 

@@ -67,10 +67,6 @@ const CONTRACT: &[&str] = &[
     "async fn StickpileLibrary.pack_cover(pack_id: String) -> String? throws LibraryError",
     "fn StickpileLibrary.cache_bytes() -> u64 throws LibraryError",
     "fn StickpileLibrary.clear_cache() -> u64 throws LibraryError",
-    // WhatsApp
-    "async fn StickpileLibrary.whatsapp_packs(pack_id: String) -> WhatsappPacks throws LibraryError",
-    "fn StickpileLibrary.whatsapp_progress(pack_id: String) -> WhatsappProgress?",
-    "fn StickpileLibrary.whatsapp_unpacked() -> List<WhatsappPart>",
     // records
     "record LibraryDirs { config_file: String, cache_dir: String, token_file: String }",
     "record Account { username: String, display_name: String?, server_url: String, auth: AuthKind, is_admin: Boolean }",
@@ -89,11 +85,6 @@ const CONTRACT: &[&str] = &[
      sticker: Boolean }",
     "record UploadFile { path: String, name: String?, keywords: List<String>, emojis: List<String> }",
     "record SyncState { last_sync: i64?, last_error: LibraryErrorKind?, pending_usage: u32, due: Boolean }",
-    "record WhatsappPacks { parts: List<WhatsappPart>, skipped: u32, offline: Boolean }",
-    "record WhatsappPart { pack_id: String, number: u32, identifier: String, name: String, publisher: String, \
-     animated: Boolean, version: String, dir: String, tray_file: String, stickers: List<WhatsappSticker> }",
-    "record WhatsappSticker { file: String, emojis: List<String> }",
-    "record WhatsappProgress { step: WhatsappStep, part: u32, parts: u32 }",
     // enums
     "enum AuthKind { Token, Tailnet }",
     "enum Target { Telegram, Discord, Signal, Whatsapp, Slack, Generic }",
@@ -101,7 +92,6 @@ const CONTRACT: &[&str] = &[
     "enum MediaFormat { Png, Jpeg, Webp, Gif, Mp4, Webm }",
     "enum HintKind { Value, Filter, Key }",
     "enum MotionKind { Picture, Video }",
-    "enum WhatsappStep { Building, Downloading }",
     "enum LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited, NothingFits, \
      InvalidInput, Server, Io, Other }",
     // the error

@@ -16,8 +16,6 @@ it accepts. So the app is:
    stickers. Switch to it from any keyboard, search or browse, tap a
    sticker, and it switches back. Its keys type only into its own search.
 3. **A share target**: "Share -> stickpile" uploads a picture into a set.
-4. **A sticker app for WhatsApp**: "Add to WhatsApp" puts a pack into
-   WhatsApp's sticker tray ([Add to WhatsApp](#add-to-whatsapp)).
 
 Layout: `crates/stickpile-android` (the Rust library, behind UniFFI),
 `android/` (the Gradle project, one module `app`), `nix/android-shell.nix`
@@ -98,50 +96,8 @@ cover image, else its first sticker).
   pack and owner, the numbers, the vibe, emojis, tags and keywords (a tap
   on one searches for it), and Share, Like or Unlike, and Open in browser
   (its page in the web UI).
-- **Add to WhatsApp**: an open pack's header has the button; a long
-  press on a pack in the Packs tab does the same
-  ([below](#add-to-whatsapp)).
 - The menu also has the search syntax, Sync now and Settings; pulling the
   grid down syncs too.
-
-### Add to WhatsApp
-
-WhatsApp has no publishing API: a pack gets into WhatsApp from a sticker
-app on the phone, which serves it through a content provider and asks
-WhatsApp to add it ([whatsapp.md](whatsapp.md)). stickpile is that app:
-
-1. "Add to WhatsApp" asks the server for the pack's WhatsApp packs
-   (`POST /api/v1/sets/{id}/whatsapp`, unless the last build still
-   matches the pack) and waits while it makes them ("The server is making
-   the WhatsApp stickers"); a pack of animations can take minutes. Closing
-   the sheet stops the waiting, not the server.
-2. It downloads each part ("Downloading pack 1 of 2") and unpacks it on
-   the phone. WhatsApp takes 3 to 30 stickers of one kind per pack, so a
-   bigger pack, or one with stills and animations, comes in several parts,
-   each its own pack in WhatsApp ("Cats (1/2)", "Cats (2/2)"). A part that
-   did not change since the last time is not downloaded again.
-3. A pack of one part opens WhatsApp's "Add sticker pack" dialog at once.
-   With several, each part has its own Add button, as WhatsApp asks of
-   sticker apps (no "add all"); one dialog at a time.
-4. Each part then says Added to WhatsApp, Not added (the dialog was closed),
-   WhatsApp did not accept this pack (its reason goes to the log), or
-   Already in WhatsApp (both WhatsApp and WhatsApp Business are asked when
-   both are installed; a chooser offers both when neither has it).
-
-The sheet says so when WhatsApp is not installed (the files are made all
-the same), when the server runs a stickpile without WhatsApp packs, when
-the pack has fewer than 3 items that can become stickers of one kind, how
-many items the server left out, and, offline, that the parts shown are the
-ones made before (they can still be added; without any: an error).
-
-A pack changed on the server gets a new `image_data_version` when it is
-added again, and WhatsApp then updates the pack it has. The files stay on
-the phone (outside the offline cache; "Clear cache" leaves them) until the
-account or server changes; then they go, also from WhatsApp's reach.
-
-Not tried with WhatsApp yet: no phone with WhatsApp was at hand, so what
-WhatsApp does with the packs, its dialog's result codes and its
-`validation_error` are as WhatsApp's sample app reads them (UNVERIFIED).
 
 ### Search syntax
 
@@ -322,13 +278,6 @@ signature-level permission of the app's own
 (`io.github.dolfost.stickpile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`),
 which no other app can hold. Nothing else.
 
-"Add to WhatsApp" asks for no permission. Its provider is protected by
-`com.whatsapp.sticker.READ` (`android:readPermission`), a permission
-WhatsApp declares and holds; this app neither requests nor declares it.
-`<queries>` for `com.whatsapp` and `com.whatsapp.w4b` makes the two apps
-visible to the package manager (Android 11 package visibility); it is not
-a permission and needs no grant.
-
 No backup and no device transfer: `allowBackup` is off and the backup and
 data-extraction rules exclude everything, so the API token never leaves the
 device.
@@ -434,15 +383,6 @@ object StickpileLibrary
   fn cache_bytes() throws -> u64                       // thumbnails and prepared files
   fn clear_cache() throws -> u64                       // deletes them, returns the bytes freed;
                                                        // the item list (offline search) stays
-
-  // WhatsApp (docs/whatsapp.md)
-  async fn whatsapp_packs(pack_id: String) throws -> WhatsappPacks
-                                                       // the server's build, downloaded and
-                                                       // unpacked; offline: what was unpacked
-  fn whatsapp_progress(pack_id: String) -> WhatsappProgress?
-                                                       // how far whatsapp_packs is (no network)
-  fn whatsapp_unpacked() -> List<WhatsappPart>         // every part on the phone: what the
-                                                       // WhatsApp provider serves (no network)
 ```
 
 Records and enums:
@@ -480,16 +420,6 @@ record UploadFile  { path: String, name: String?, keywords: List<String>,
                      emojis: List<String> }
 record SyncState   { last_sync: i64?, last_error: LibraryErrorKind?,
                      pending_usage: u32, due: Boolean }
-record WhatsappPacks { parts: List<WhatsappPart>, skipped: u32, offline: Boolean }
-record WhatsappPart  { pack_id: String, number: u32,
-                       identifier: String,   // "<pack id>-<number>", unique in the app
-                       name: String, publisher: String, animated: Boolean,
-                       version: String,      // image_data_version
-                       dir: String,          // absolute; the files below are in it
-                       tray_file: String, stickers: List<WhatsappSticker> }
-record WhatsappSticker { file: String, emojis: List<String> }
-enum   WhatsappStep  { Building, Downloading }
-record WhatsappProgress { step: WhatsappStep, part: u32, parts: u32 }
 
 error  LibraryError {
   NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
@@ -638,41 +568,6 @@ Behaviour the signatures do not show:
   link whose URL has a user name or password, a query or a fragment.
   `PairingLink.code` and `normalize_pairing_code` give
   the display form `XXXX-XXXX-XXXX`.
-- **WhatsApp packs.** `whatsapp_packs(pack_id)` reads the server's status
-  of the pack's WhatsApp build (`GET /api/v1/sets/{id}/whatsapp`); when
-  the last build no longer matches the pack, or there is none, it asks for
-  one (`POST`, or waits for the one the server is making already) and
-  polls the job, from every 250 ms up to every 2 s, for 10 minutes at
-  most. Then it downloads each part's `.wastickers`
-  (`GET .../whatsapp/packs/{n}`) unless that part's directory, named
-  `<n>-<image_data_version>`, is complete already, and unpacks it into
-  `<cache_dir>/whatsapp/<pack id>/`; `index.json` there is written last
-  and atomically, and directories it no longer names are removed.
-  Unpacking keeps only the tray icon and the stickers the build lists,
-  and refuses the whole part (`Other`, the part's old files stay) for an
-  entry that is not a plain file name (`../x`, `/x`, `a/b`, `.x`, a
-  backslash), a name twice, a directory, a link, a compressed or encrypted
-  entry, an entry header that disagrees with the central directory, more
-  than 64 entries, a file over 32 MiB, a sticker over
-  WhatsApp's limit (100 KB still, 500 KB animated) or a tray icon over
-  50 KB, a file that is not the PNG or WebP its name says, or a missing
-  file; ids, versions and file names from the server are checked against
-  fixed character sets before they become paths. Names and publishers are
-  cut to 128 characters, a sticker without emoji gets the server's
-  default. Errors: `InvalidInput` with field `pack` when the server's job
-  says there is nothing to export (fewer than 3 stickers of one kind),
-  `Server { status: 404 }` when the WhatsApp routes answer 404 but the
-  pack itself is there (a server older than WhatsApp packs), `NotFound`
-  when the pack is not, `InvalidInput` with field `pack_id` for an id that
-  is not one, `Other` for a failed build or an unusable file. Unreachable
-  or a server error (5xx): the parts unpacked before, `offline = true`,
-  else `Unreachable`. The call stops when the coroutine is cancelled (the
-  server's job goes on; the next call waits for it); one runs at a time.
-  `whatsapp_progress` is `Building` until the downloads start, then
-  `Downloading` part `n` of `parts`, and null when no call runs. The
-  unpacked parts stay until the account or the server changes (sign-out,
-  another account, another server), which removes them; `clear_cache`
-  and `cache_bytes` leave them out.
 - **Upload.** The file is streamed from disk, never held in memory whole.
   With `name = null` the server names the item after the file
   name (the path's last part), so the app names its temporary copy after
@@ -738,17 +633,10 @@ is one process; these pieces are shared by its parts:
 - `ui.common.AccountChanges`: counts the account changes made away from the
   launcher; the launcher watches it while resumed and asks again who is
   signed in when it moved.
-- `whatsapp.WhatsAppViewModel` and `WhatsAppHost`: the "Add to WhatsApp"
-  sheet of the library screen and the launcher of WhatsApp's dialog;
-  `whatsapp.WhatsAppProvider` serves the unpacked parts to WhatsApp
-  ([WhatsApp provider](#whatsapp-provider)); `whatsapp.AndroidWhatsAppApps`
-  asks the package manager and WhatsApp which apps are installed and what
-  they have.
 
 Packages: `ui` (onboarding, the library screen, settings, licences),
 `ime` (the picker keyboard), `provider` (the content provider below),
-`share` (the share target and upload), `sync` (background sync),
-`whatsapp` ("Add to WhatsApp" and its provider). Strings
+`share` (the share target and upload), `sync` (background sync). Strings
 are Android resources: English in `res/values/`, Ukrainian in
 `res/values-uk/`, one `strings_<area>.xml` per package group.
 
@@ -844,95 +732,3 @@ custom permissions have an install-order problem).
   `getTypeAnonymous` (asked with the caller's identity cleared) answers
   nothing.
 - A `/search` ranks for the app named by `package` (`target_for_package`).
-
-## WhatsApp provider
-
-A second content provider, for WhatsApp only: it serves the parts that
-"Add to WhatsApp" unpacked (`whatsapp_unpacked`), the way WhatsApp's own
-sample sticker app serves its packs. The contract is WhatsApp's, from
-[github.com/WhatsApp/stickers](https://github.com/WhatsApp/stickers),
-branch `main` (commit `06144a1`, read on 2026-11-17): `Android/README.md`
-("ContentProvider", "Intent", "Check if pack is added") and, in
-`Android/app/src/main/`, `AndroidManifest.xml` and
-`java/com/example/samplestickerapp/StickerContentProvider.java`,
-`StickerPackLoader.java`, `AddStickerPackActivity.java`,
-`WhitelistCheck.java` and `StickerPackValidator.java`.
-
-**Authority:** `io.github.dolfost.stickpile.whatsapp` (it starts with the
-package name, which the sample checks). Declared like the sample's:
-exported, enabled, `android:readPermission="com.whatsapp.sticker.READ"`;
-no write permission, no URI grants. The manifest also has `<queries>` for
-`com.whatsapp` and `com.whatsapp.w4b`, as the sample has.
-
-| Path | Answer | Type |
-|---|---|---|
-| `/metadata` | a row per unpacked part | `vnd.android.cursor.dir/vnd.<authority>.metadata` |
-| `/metadata/<identifier>` | that part's row, or none | `vnd.android.cursor.item/vnd.<authority>.metadata` |
-| `/stickers/<identifier>` | a row per sticker, in order | `vnd.android.cursor.dir/vnd.<authority>.stickers` |
-| `/stickers_asset/<identifier>/<file name>` | the file, read-only (`openAssetFile`, `openFile`) | `image/png` (tray icon), `image/webp` (sticker) |
-
-`<identifier>` is `<pack id>-<number>` (`WhatsappPart.identifier`).
-
-Pack rows have the sample's columns, in its order:
-`sticker_pack_identifier`, `sticker_pack_name`, `sticker_pack_publisher`,
-`sticker_pack_icon` (the tray icon's file name, `cover.png`),
-`android_play_store_link`, `ios_app_download_link`,
-`sticker_pack_publisher_email`, `sticker_pack_publisher_website`,
-`sticker_pack_privacy_policy_website`,
-`sticker_pack_license_agreement_website` (all six empty, as in the
-sample's `contents.json`), `image_data_version` (`WhatsappPart.version`),
-`whatsapp_will_not_cache_stickers` (0) and `animated_sticker_pack` (1 or
-0). Sticker rows: `sticker_file_name`, `sticker_emoji` (the emoji joined
-with `,`, as the sample joins them) and `sticker_accessibility_text`
-(null).
-
-- Only files the part lists (its tray icon and stickers) open; anything
-  else is a `FileNotFoundException`. Opening for anything but reading is
-  a `SecurityException`; inserts, updates and deletes are refused.
-- Paths are matched strictly: each segment is letters, digits, `.`, `-`
-  and `_`, not starting with `.` (what the library writes), so a percent
-  escape or `..` is no route. An unknown path throws
-  `IllegalArgumentException` in a query, as the sample's does.
-- The type depends on the path only, so `getType` (and
-  `getTypeAnonymous`) answer anyone.
-- Besides the manifest's permission, queries and files check the caller in
-  code: the app itself, root (`adb root`, to look at the rows on an
-  emulator), and the packages `com.whatsapp` and `com.whatsapp.w4b`;
-  anyone else gets a `SecurityException`. Without this, an app that
-  declares a permission named `com.whatsapp.sticker.READ` on a phone
-  without WhatsApp could read the packs. That WhatsApp reads the provider
-  from its own process (its own uid) is assumed, not observed.
-- The README says a sticker app holds 1 to 10 packs; the provider lists
-  every part unpacked, however many. Whether WhatsApp minds more than 10
-  is not known.
-
-The app asks WhatsApp to add a part with the README's intent: action
-`com.whatsapp.intent.action.ENABLE_STICKER_PACK`, extras
-`sticker_pack_id` (the identifier), `sticker_pack_authority` (the
-authority above) and `sticker_pack_name`, started for a result. As the
-sample's `AddStickerPackActivity` does: with neither app installed, it
-says so; it asks each installed app's
-`<package>.provider.sticker_whitelist_check/is_whitelisted?authority=&identifier=`
-(column `result`, 1 when added) and goes to the app that lacks the part,
-through a chooser when both lack it, and nowhere when both have it.
-`RESULT_OK` counts as added; a cancel with a `validation_error` extra as
-refused (the error goes to the log); any other cancel as not added. Each
-request is logged under the tag `stickpile`, also when WhatsApp is not
-installed ("would ask it: ...").
-
-To look at it on an emulator without WhatsApp: add a pack (the sheet
-says WhatsApp is not installed; the files are there all the same), then,
-on an emulator image without Google Play (where `adb root` works):
-
-```sh
-adb root
-adb shell content query --uri content://io.github.dolfost.stickpile.whatsapp/metadata
-adb shell content query --uri content://io.github.dolfost.stickpile.whatsapp/stickers/<identifier>
-adb shell content gettype --uri content://io.github.dolfost.stickpile.whatsapp/stickers_asset/<identifier>/01.webp
-adb exec-out content read --uri content://io.github.dolfost.stickpile.whatsapp/stickers_asset/<identifier>/cover.png > cover.png
-adb shell run-as io.github.dolfost.stickpile ls -lR no_backup/cache/whatsapp    # a debug build
-adb logcat -s stickpile
-```
-
-Without `adb root` the shell lacks `com.whatsapp.sticker.READ` and the
-query is refused.

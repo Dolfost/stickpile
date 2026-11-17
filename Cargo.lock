@@ -3890,8 +3890,6 @@ dependencies = [
  "goblin",
  "image",
  "libc",
- "serde",
- "serde_json",
  "stickpile-api",
  "stickpile-core",
  "stickpile-quick",
@@ -3903,7 +3901,6 @@ dependencies = [
  "uniffi",
  "uniffi_meta",
  "url",
- "zip",
 ]
 
 [[package]]

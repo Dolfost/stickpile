@@ -118,30 +118,5 @@
             android:authorities="io.github.dolfost.stickpile.stickers"
             android:exported="true"
             android:grantUriPermissions="false" />
-
-        <!--
-          The packs made ready for WhatsApp ("Add to WhatsApp", docs/android.md),
-          declared as WhatsApp's sample sticker app declares its provider:
-          exported and readable only with com.whatsapp.sticker.READ, a
-          permission of WhatsApp's that WhatsApp holds. This app does not
-          ask for it; the provider checks the caller once more in code.
-        -->
-        <provider
-            android:name=".whatsapp.WhatsAppProvider"
-            android:authorities="io.github.dolfost.stickpile.whatsapp"
-            android:enabled="true"
-            android:exported="true"
-            android:grantUriPermissions="false"
-            android:readPermission="com.whatsapp.sticker.READ" />
     </application>
-
-    <!--
-      Package visibility of WhatsApp and WhatsApp Business (as the sample
-      declares it): whether they are installed, and their providers that
-      say whether a pack is added. Not a permission.
-    -->
-    <queries>
-        <package android:name="com.whatsapp" />
-        <package android:name="com.whatsapp.w4b" />
-    </queries>
 </manifest>
