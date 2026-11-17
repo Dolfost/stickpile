@@ -40,6 +40,8 @@ class DisplaySettings(context: Context) {
 
     fun setAutoplay(autoplay: Autoplay) = save(current.copy(autoplay = autoplay))
 
+    fun setTheme(theme: AppTheme) = save(current.copy(theme = theme))
+
     private fun save(display: Display) {
         mutable.value = display
         prefs.edit {
@@ -49,6 +51,7 @@ class DisplaySettings(context: Context) {
             putInt(COLUMNS, display.columns)
             remove(OLD_TILE_SIZE)
             putString(AUTOPLAY, display.autoplay.name)
+            putString(THEME, display.theme.name)
         }
     }
 
@@ -64,6 +67,7 @@ class DisplaySettings(context: Context) {
         /** The size of the tiles before [COLUMNS]: read once for the columns it gave. */
         const val OLD_TILE_SIZE = "tile_size"
         const val AUTOPLAY = "autoplay"
+        const val THEME = "theme"
 
         fun read(prefs: SharedPreferences): Display {
             val defaults = Display()
@@ -85,6 +89,8 @@ class DisplaySettings(context: Context) {
                 ),
                 autoplay = Autoplay.entries.firstOrNull { it.name == prefs.getString(AUTOPLAY, null) }
                     ?: defaults.autoplay,
+                theme = AppTheme.entries.firstOrNull { it.name == prefs.getString(THEME, null) }
+                    ?: defaults.theme,
             )
         }
     }

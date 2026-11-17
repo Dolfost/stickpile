@@ -3,7 +3,6 @@ package io.github.dolfost.stickpile.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -44,6 +43,7 @@ import io.github.dolfost.stickpile.ui.main.launchRequest
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingScreen
 import io.github.dolfost.stickpile.ui.onboarding.OnboardingViewModel
 import io.github.dolfost.stickpile.ui.theme.StickpileTheme
+import io.github.dolfost.stickpile.ui.theme.ThemedActivity
 import kotlinx.coroutines.launch
 
 /**
@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
  * to pairing with that link; with [EXTRA_SIGN_IN_ELSEWHERE] (from the
  * settings), to onboarding with a way back.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : ThemedActivity() {
 
     private val vm: MainViewModel by viewModels {
         viewModelFactory {

@@ -39,13 +39,14 @@ import io.github.dolfost.stickpile.ui.settings.LicencesScreen
 import io.github.dolfost.stickpile.ui.settings.SettingsScreen
 import io.github.dolfost.stickpile.ui.settings.SettingsViewModel
 import io.github.dolfost.stickpile.ui.theme.StickpileTheme
+import io.github.dolfost.stickpile.ui.theme.ThemedActivity
 
 /**
  * The app's settings, also opened by the system as the input method's
  * settings (res/xml/method.xml): the settings list, the keyboard
  * walk-through and the licences.
  */
-class SettingsActivity : ComponentActivity() {
+class SettingsActivity : ThemedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)

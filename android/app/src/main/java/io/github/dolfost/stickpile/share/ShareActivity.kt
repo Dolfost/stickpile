@@ -3,12 +3,12 @@ package io.github.dolfost.stickpile.share
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import io.github.dolfost.stickpile.ui.MainActivity
 import io.github.dolfost.stickpile.ui.theme.StickpileTheme
+import io.github.dolfost.stickpile.ui.theme.ThemedActivity
 
 /**
  * "Share -> stickpile" (ACTION_SEND and ACTION_SEND_MULTIPLE with images
@@ -16,7 +16,7 @@ import io.github.dolfost.stickpile.ui.theme.StickpileTheme
  * ([ShareScreen], [ShareViewModel]). The files are copied as soon as the
  * activity starts, while the sender's read grant holds.
  */
-class ShareActivity : ComponentActivity() {
+class ShareActivity : ThemedActivity() {
     private val model: ShareViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {

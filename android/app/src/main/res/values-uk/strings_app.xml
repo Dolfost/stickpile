@@ -157,6 +157,11 @@
         <item quantity="other">%d використання чекає на надсилання</item>
     </plurals>
     <string name="settings_sync_now">Синхронізувати зараз</string>
+    <string name="settings_theme">Тема</string>
+    <string name="settings_theme_text">Системна тема світла чи темна, як на телефоні. OLED: темна тема на чисто чорному тлі, яка заощаджує заряд на OLED-екранах. Клавіатура стікерів теж її використовує.</string>
+    <string name="settings_theme_system">Системна</string>
+    <string name="settings_theme_dark">Темна</string>
+    <string name="settings_theme_white">Біла</string>
     <string name="settings_cache">Збережені зображення</string>
     <string name="settings_cache_size">На цьому телефоні: %1$s</string>
     <string name="settings_cache_unknown">Не вдається визначити розмір.</string>

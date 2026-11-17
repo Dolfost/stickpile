@@ -11,6 +11,15 @@ import org.junit.Test
 
 class DisplayTest {
     @Test
+    fun aThemeIsDarkLightOrThePhones() {
+        assertNull(AppTheme.SYSTEM.night)
+        assertEquals(true, AppTheme.DARK.night)
+        assertEquals(true, AppTheme.OLED.night)
+        assertEquals(false, AppTheme.WHITE.night)
+        assertEquals(AppTheme.SYSTEM, Display().theme)
+    }
+
+    @Test
     fun theColumnsAreKeptInRangeAndFillAWiderGrid() {
         assertEquals(Columns.MIN, Columns.clamp(0))
         assertEquals(Columns.MAX, Columns.clamp(99))

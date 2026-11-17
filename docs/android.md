@@ -182,10 +182,21 @@ Account (sign out; an account signed in by its tailnet identity has no
 token to revoke, so it shows "Signed in through Tailscale" and offers to
 change the server instead), sync (sync now, the last sync, uses waiting to
 be sent), the offline cache (its size, clear it, which also revokes every
-prepared file's URI), the sticker info (safe mode, what the tiles show,
+prepared file's URI), the [theme](#theme), the sticker info (safe mode, what the tiles show,
 the stickers in a row, when GIFs and videos play), the keyboard's
 height, switches and walk-through, the keyboards allowed to read
 stickers, and licences.
+
+### Theme
+
+Four choices, for the app and the picker keyboard together: **System**
+(the default) follows the phone's light or dark setting, **Dark** and
+**White** keep the app dark or light whatever the phone does, and
+**OLED** is the dark theme on pure black (the containers, such as the
+bars and the keyboard's keys, a little darker than in Dark but still
+apart from the black). The app's colours stay the wallpaper's (dynamic
+colour) on Android 12 and later. A change shows at once in the app; the
+keyboard takes it the next time it opens.
 
 The app syncs in the background every 15 minutes when there is a network
 (WorkManager), and when the app or the keyboard opens. Offline, search, the
@@ -630,6 +641,15 @@ is one process; these pieces are shared by its parts:
   `revokeAll()` revokes every token at once: after a sign-out and a cache
   clear (settings), after a sign-in as another account or on another
   server, and when onboarding saved another server address (launcher).
+- `display.DisplaySettings`: what the grids show and the theme
+  (`display.AppTheme`), shared by the app and the keyboard. Every
+  activity is a `ui.theme.ThemedActivity`: it lays a night or day
+  `uiMode` over its configuration as the theme says (`AppThemes.override`,
+  nothing for System), so the window, the system bars and
+  `StickpileTheme` agree, and it is made again when the theme changes.
+  The keyboard's views get the same through `AppThemes.views`, plus
+  `ThemeOverlay.Stickpile.Oled` for OLED; the keyboard makes its view
+  again when it opens after a change.
 - `ui.common.AccountChanges`: counts the account changes made away from the
   launcher; the launcher watches it while resumed and asks again who is
   signed in when it moved.

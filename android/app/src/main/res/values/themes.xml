@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Window theme of the Compose activities (light or dark with the
-      system); their colours come from ui.theme.StickpileTheme.
+      Window theme of the Compose activities (light or dark as the theme
+      chosen in the settings says, ui.theme.ThemedActivity); their colours
+      come from ui.theme.StickpileTheme.
     -->
     <style name="Theme.Stickpile" parent="Theme.Material3.DayNight.NoActionBar" />
 
@@ -14,4 +15,20 @@
       (ime.PickerInputMethodService) and any other UI not in Compose.
     -->
     <style name="Theme.Stickpile.Views" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <!--
+      Laid over Theme.Stickpile.Views, which is then dark, for the OLED theme
+      (ui.theme.AppThemes): the keyboard on pure black, its keys and panels
+      darker than in the dark theme but still apart from the black.
+    -->
+    <style name="ThemeOverlay.Stickpile.Oled" parent="">
+        <item name="android:colorBackground">@color/oled_black</item>
+        <item name="colorSurface">@color/oled_black</item>
+        <item name="colorSurfaceDim">@color/oled_black</item>
+        <item name="colorSurfaceContainerLowest">@color/oled_black</item>
+        <item name="colorSurfaceContainer">@color/oled_black</item>
+        <item name="colorSurfaceContainerLow">@color/oled_container_low</item>
+        <item name="colorSurfaceContainerHigh">@color/oled_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/oled_container_highest</item>
+    </style>
 </resources>

@@ -2,6 +2,7 @@ package io.github.dolfost.stickpile.ui.settings
 
 import android.text.format.DateUtils
 import android.text.format.Formatter
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -61,6 +65,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.display.AppTheme
 import io.github.dolfost.stickpile.ime.ImeSettings
 import io.github.dolfost.stickpile.ime.PickerHeight
 import io.github.dolfost.stickpile.provider.KeyboardAllowlist
@@ -139,6 +144,8 @@ fun SettingsScreen(
             SyncSection(vm)
             HorizontalDivider()
             CacheSection(vm)
+            HorizontalDivider()
+            ThemeSection()
             HorizontalDivider()
             DisplaySection()
             HorizontalDivider()
@@ -330,6 +337,35 @@ private fun CacheSection(vm: SettingsViewModel) {
 }
 
 /** Safe mode and what the tiles show, in the app and the keyboard alike. */
+/** The colours of the app and the keyboard ([AppTheme]), one of four. */
+@Composable
+private fun ThemeSection() {
+    val context = LocalContext.current
+    val settings = remember { StickpileApp.from(context).display }
+    val display by settings.state.collectAsStateWithLifecycle()
+    SectionHeader(stringResource(R.string.settings_theme))
+    Paragraph(stringResource(R.string.settings_theme_text))
+    Column(Modifier.selectableGroup()) {
+        AppTheme.entries.forEach { theme ->
+            val selected = theme == display.theme
+            ListItem(
+                headlineContent = { Text(stringResource(theme.label)) },
+                leadingContent = { RadioButton(selected = selected, onClick = null) },
+                modifier = Modifier.selectable(selected, role = Role.RadioButton) { settings.setTheme(theme) },
+            )
+        }
+    }
+}
+
+@get:StringRes
+private val AppTheme.label: Int
+    get() = when (this) {
+        AppTheme.SYSTEM -> R.string.settings_theme_system
+        AppTheme.DARK -> R.string.settings_theme_dark
+        AppTheme.OLED -> R.string.settings_theme_oled
+        AppTheme.WHITE -> R.string.settings_theme_white
+    }
+
 @Composable
 private fun DisplaySection() {
     val context = LocalContext.current

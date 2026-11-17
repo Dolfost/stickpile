@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colours of the OLED theme in Views (ThemeOverlay.Stickpile.Oled). -->
+<resources>
+    <color name="oled_black">#FF000000</color>
+    <color name="oled_container_low">#FF0C0B0E</color>
+    <color name="oled_container_high">#FF1A191D</color>
+    <color name="oled_container_highest">#FF242328</color>
+</resources>

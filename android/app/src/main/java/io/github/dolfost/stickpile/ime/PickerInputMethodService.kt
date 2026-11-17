@@ -9,7 +9,6 @@ import android.inputmethodservice.InputMethodService
 import android.net.Uri
 import android.os.Build
 import android.util.Log
-import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -19,12 +18,14 @@ import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.display.AppTheme
 import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.ui.MainActivity
+import io.github.dolfost.stickpile.ui.theme.AppThemes
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,9 @@ class PickerInputMethodService : InputMethodService() {
     private val settings by lazy { ImeSettings(this) }
 
     private var picker: PickerView? = null
+
+    /** The theme [picker] was made in: another one chosen since makes it again. */
+    private var pickerTheme: AppTheme? = null
     private var insertJob: Job? = null
     private var shareJob: Job? = null
 
@@ -76,9 +80,10 @@ class PickerInputMethodService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         picker?.dispose()
-        val themed = ContextThemeWrapper(this, R.style.Theme_Stickpile_Views)
-        val view = PickerView(themed, scope, library, app.display, settings, actions)
+        val theme = app.display.current.theme
+        val view = PickerView(AppThemes.views(this, theme), scope, library, app.display, settings, actions)
         picker = view
+        pickerTheme = theme
         return view.root
     }
 
@@ -97,6 +102,8 @@ class PickerInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // Another theme was chosen in the app since the picker was made.
+        if (picker != null && pickerTheme != app.display.current.theme) setInputView(onCreateInputView())
         library.editorPackage = info.packageName.orEmpty()
         val read = readDraft(info)
         draft = InputRestart.draft(restarting, read, draft)

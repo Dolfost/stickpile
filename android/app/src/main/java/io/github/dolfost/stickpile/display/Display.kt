@@ -73,6 +73,26 @@ enum class Autoplay {
 }
 
 /**
+ * The colours of the app and the keyboard. [SYSTEM] follows the phone's
+ * light or dark setting; [OLED] is the dark theme on pure black.
+ */
+enum class AppTheme {
+    SYSTEM,
+    DARK,
+    OLED,
+    WHITE,
+    ;
+
+    /** Dark colours (true) or light (false); null follows the phone. */
+    val night: Boolean?
+        get() = when (this) {
+            SYSTEM -> null
+            DARK, OLED -> true
+            WHITE -> false
+        }
+}
+
+/**
  * What the grids show, shared by the app and the keyboard
  * ([DisplaySettings] keeps it).
  *
@@ -86,6 +106,8 @@ data class Display(
     /** Stickers in a row with the phone upright ([Columns]). */
     val columns: Int = Columns.DEFAULT,
     val autoplay: Autoplay = Autoplay.ALWAYS,
+    /** The colours of the app and the keyboard. */
+    val theme: AppTheme = AppTheme.SYSTEM,
 ) {
     /** The tiles show [field] now. */
     fun shows(field: TileField): Boolean = showInfo && field in fields
