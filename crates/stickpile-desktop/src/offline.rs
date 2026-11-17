@@ -202,6 +202,26 @@ impl Panel {
         }
     }
 
+    /// What the plan says between runs (after a keep, a release, a
+    /// removal): its numbers replace the last run's, whose stop (the limit,
+    /// the disk, the network) still holds while the plan is not complete.
+    pub fn planned(&mut self, mut s: OfflineStatus) {
+        if self.running {
+            return;
+        }
+        if let Some(last) = &self.status {
+            let stopped = matches!(
+                last.state,
+                OfflineState::LimitReached | OfflineState::DiskFull | OfflineState::WaitingForNetwork
+            );
+            if stopped && s.files_done < s.files_total {
+                s.state = last.state;
+                s.message = last.message.clone();
+            }
+        }
+        self.status = Some(s);
+    }
+
     /// "Clear cache" went through.
     pub fn cleared(&mut self, r: &EvictReport) {
         let text = tp(
@@ -419,6 +439,29 @@ mod tests {
             .starts_with("Waiting for the server: 10 of 120 files"));
         p.status = Some(status(OfflineState::DiskFull, 10, 120));
         assert!(p.view(false).state_warning);
+    }
+
+    #[test]
+    fn the_plan_between_runs_replaces_the_numbers_and_keeps_a_stop() {
+        let mut p = Panel {
+            status: Some(status(OfflineState::Idle, 28, 28)),
+            ..Panel::default()
+        };
+        // The kept files removed: the thumbnails are wanted again.
+        p.planned(status(OfflineState::Idle, 0, 14));
+        assert_eq!(
+            p.view(false).state,
+            "0 of 14 files, 0 B of 14.0 MB on this device; the rest downloads after the next sync."
+        );
+        p.status = Some(status(OfflineState::LimitReached, 10, 20));
+        p.planned(status(OfflineState::Idle, 11, 20));
+        assert!(p.view(false).state.starts_with("The limit of ? is reached: 11 of 20"));
+        p.planned(status(OfflineState::Idle, 20, 20));
+        assert!(p.view(false).state.starts_with("Up to date"), "complete: no stop");
+        // A run publishes its own.
+        p.running = true;
+        p.planned(status(OfflineState::Idle, 0, 1));
+        assert!(p.view(false).state.starts_with("Up to date"));
     }
 
     #[test]

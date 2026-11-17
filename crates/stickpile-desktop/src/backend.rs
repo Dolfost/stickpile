@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats};
 use stickpile_core::cache::EvictReport;
-use stickpile_core::offline::{OfflineControl, OfflineOptions, OfflineOutcome, OfflineUsage, RunEnd};
+use stickpile_core::offline::{
+    OfflineControl, OfflineOptions, OfflineOutcome, OfflineState, OfflineStatus, OfflineUsage, RunEnd,
+};
 use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
@@ -240,6 +242,12 @@ pub trait Backend: Send + Sync + 'static {
     }
     /// Kept files and the others on the device.
     fn offline_usage(self: Arc<Self>) -> BoxFut<Result<OfflineUsage, String>> {
+        no_offline()
+    }
+    /// What the plan says now, as a status of no run (`Idle`): how much of
+    /// what is wanted is on the device, skipped, failed. For the Settings
+    /// block between runs (after a keep, a release, a removal).
+    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<OfflineStatus, String>> {
         no_offline()
     }
     /// "Clear cache": the files that are not kept.
@@ -723,6 +731,23 @@ impl Backend for CoreBackend {
         self.blocking(|s| s.offline_usage())
     }
 
+    fn offline_plan_status(self: Arc<Self>) -> BoxFut<Result<OfflineStatus, String>> {
+        self.blocking(|s| {
+            let plan = s.offline_plan()?;
+            Ok(OfflineStatus {
+                state: OfflineState::Idle,
+                files_done: plan.totals.present_files,
+                files_total: plan.totals.files,
+                bytes_done: plan.totals.present_bytes,
+                bytes_total: plan.totals.bytes,
+                skipped: plan.skipped.len() as u64,
+                failed: plan.failures.len() as u64,
+                scopes: Vec::new(),
+                message: None,
+            })
+        })
+    }
+
     fn clear_cache(self: Arc<Self>) -> BoxFut<Result<EvictReport, String>> {
         self.blocking(|s| s.clear_cache())
     }
@@ -1143,7 +1168,7 @@ mod tests {
             assert!(e.files >= 3 && e.bytes > 0, "{e:?}");
             assert!(e.fits());
             b.clone().offline_set(cats.clone(), true).await.unwrap();
-            assert_eq!(b.clone().offline_keeps().await.unwrap(), [cats.clone()]);
+            assert_eq!(b.clone().offline_keeps().await.unwrap(), std::slice::from_ref(&cats));
             assert_eq!(b.clone().offline_reasons(cat.clone()).await.unwrap(), [KeptFor::Set]);
             assert!(b.clone().offline_reasons(dog.clone()).await.unwrap().is_empty());
 
