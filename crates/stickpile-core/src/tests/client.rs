@@ -620,3 +620,45 @@ async fn export_formats_publish_and_whatsapp() {
         Some(404)
     );
 }
+
+/// A 0.7.0 server has no rechecks: every recheck call says the server is
+/// too old. A newer server's 404 for an unknown recheck stays a 404.
+#[tokio::test]
+async fn rechecks_on_a_server_without_them() {
+    let not_found = || async {
+        (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"code": "not_found", "message": "not found"})),
+        )
+    };
+    // As 0.7.0 answers any /api path it does not know.
+    let old = axum::Router::new().route("/api/{*rest}", axum::routing::any(not_found));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, old).await.unwrap() });
+    let client = client_for(&url, Some("spk_x".into()));
+    let too_old = |e: CoreError| matches!(&e, CoreError::Other(m) if m == crate::client::SERVER_TOO_OLD_FOR_RECHECKS);
+    assert!(too_old(
+        client.start_recheck(&StartRecheck::default()).await.unwrap_err()
+    ));
+    assert!(too_old(
+        client.admin_start_recheck(&StartRecheck::default()).await.unwrap_err()
+    ));
+    assert!(too_old(client.rechecks().await.unwrap_err()));
+    assert!(too_old(client.recheck("x").await.unwrap_err()));
+    assert!(too_old(client.recheck_failures("x").await.unwrap_err()));
+    assert!(too_old(client.cancel_recheck("x").await.unwrap_err()));
+
+    // A server with rechecks: an unknown one is just not found.
+    let new = axum::Router::new()
+        .route(routes::RECHECKS, get(|| async { axum::Json(Vec::<Recheck>::new()) }))
+        .route("/api/{*rest}", axum::routing::any(not_found));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, new).await.unwrap() });
+    let client = client_for(&url, Some("spk_x".into()));
+    assert!(client.rechecks().await.unwrap().is_empty());
+    let err = client.recheck("x").await.unwrap_err();
+    assert_eq!(err.status(), Some(404));
+    assert_eq!(err.api_code(), Some("not_found"));
+}

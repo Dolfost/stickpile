@@ -144,6 +144,19 @@ impl GitPackResponse {
     }
 }
 
+/// The error of a recheck call to a server that has no rechecks (0.7.0 and
+/// older answer their routes with 404).
+pub const SERVER_TOO_OLD_FOR_RECHECKS: &str =
+    "the server is too old for rechecks (it has no /api/v1/rechecks); update stickpile on the server";
+
+/// What [`ApiClient::start_recheck`] got back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecheckStarted {
+    pub recheck: Recheck,
+    /// False: the same recheck was running, and this is it.
+    pub started: bool,
+}
+
 /// The message of a read refused because the server was unreachable a
 /// moment ago ([`ApiClient::with_fail_fast`]).
 pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached a moment ago";
@@ -967,6 +980,100 @@ impl ApiClient {
                 return Ok(job);
             }
             tokio::time::sleep(interval).await;
+        }
+    }
+
+    // -- rechecks ---------------------------------------------------------------
+    //
+    // Servers older than rechecks (0.7.0) answer these routes with 404: the
+    // calls then fail with [`SERVER_TOO_OLD_FOR_RECHECKS`].
+
+    /// `POST /api/v1/rechecks`: recheck the caller's own items. `started`
+    /// is false when the same recheck was running and is returned instead.
+    pub async fn start_recheck(&self, req: &StartRecheck) -> Result<RecheckStarted> {
+        self.start_recheck_at(routes::RECHECKS, req).await
+    }
+
+    /// `POST /api/v1/admin/rechecks`: recheck every item on the server (admins).
+    pub async fn admin_start_recheck(&self, req: &StartRecheck) -> Result<RecheckStarted> {
+        self.start_recheck_at(routes::ADMIN_RECHECKS, req).await
+    }
+
+    async fn start_recheck_at(&self, route: &str, req: &StartRecheck) -> Result<RecheckStarted> {
+        let rb = self.request(Method::POST, route, true)?.json(req);
+        let resp = match self.send(rb).await {
+            Ok(r) => r,
+            Err(e) => return Err(self.recheck_error(e).await),
+        };
+        let started = resp.status() == StatusCode::CREATED;
+        let bytes = resp.bytes().await.map_err(map_reqwest)?;
+        let recheck = serde_json::from_slice(&bytes)
+            .map_err(|e| CoreError::Other(format!("unexpected response from {route}: {e}")))?;
+        Ok(RecheckStarted { recheck, started })
+    }
+
+    /// The caller's rechecks (an admin's include the server-wide ones), newest first.
+    pub async fn rechecks(&self) -> Result<Vec<Recheck>> {
+        match self.get(routes::RECHECKS, &[]).await {
+            Err(e) if e.status() == Some(404) => Err(CoreError::Other(SERVER_TOO_OLD_FOR_RECHECKS.into())),
+            other => other,
+        }
+    }
+
+    pub async fn recheck(&self, id: &str) -> Result<Recheck> {
+        match self.get(&path(routes::RECHECK, &[id]), &[]).await {
+            Err(e) => Err(self.recheck_error(e).await),
+            ok => ok,
+        }
+    }
+
+    pub async fn recheck_failures(&self, id: &str) -> Result<Vec<RecheckFailure>> {
+        match self.get(&path(routes::RECHECK_FAILURES, &[id]), &[]).await {
+            Err(e) => Err(self.recheck_error(e).await),
+            ok => ok,
+        }
+    }
+
+    pub async fn cancel_recheck(&self, id: &str) -> Result<Recheck> {
+        match self
+            .post(&path(routes::RECHECK_CANCEL, &[id]), &serde_json::json!({}))
+            .await
+        {
+            Err(e) => Err(self.recheck_error(e).await),
+            ok => ok,
+        }
+    }
+
+    /// Poll a recheck every `interval` until it is over (or `max_wait`
+    /// passed), calling `progress` with each answer.
+    pub async fn wait_recheck(
+        &self,
+        id: &str,
+        interval: Duration,
+        max_wait: Duration,
+        mut progress: impl FnMut(&Recheck),
+    ) -> Result<Recheck> {
+        let deadline = tokio::time::Instant::now() + max_wait;
+        loop {
+            let r = self.recheck(id).await?;
+            progress(&r);
+            if r.state != RecheckState::Running || tokio::time::Instant::now() >= deadline {
+                return Ok(r);
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
+    /// A 404 from a recheck route: the server is too old for rechecks when
+    /// it does not know the list either; else the error as it was (an
+    /// unknown recheck or set).
+    async fn recheck_error(&self, e: CoreError) -> CoreError {
+        if e.status() != Some(404) {
+            return e;
+        }
+        match self.get::<serde_json::Value>(routes::RECHECKS, &[]).await {
+            Err(probe) if probe.status() == Some(404) => CoreError::Other(SERVER_TOO_OLD_FOR_RECHECKS.into()),
+            _ => e,
         }
     }
 
