@@ -156,7 +156,13 @@ let
     let
       set = dropNulls s;
     in
-    dropEmpty (set // { clipboard = dropEmpty set.clipboard; });
+    dropEmpty (
+      set
+      // {
+        clipboard = dropEmpty set.clipboard;
+        offline = dropEmpty set.offline;
+      }
+    );
   renderedConfig = settingsFormat.generate "stickpile-client.toml" rendered;
   canRunCli = pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform;
   validatedConfig =
@@ -463,6 +469,45 @@ in
                 built-in defaults, not `default`.
               '';
             };
+          };
+
+          # What is kept (a sticker, a pack, the library) is chosen in the
+          # clients and stored in the cache; these say what that means.
+          offline = section "Keeping stickers offline (docs/offline.md)." {
+            targets = setting (types.listOf target) [ ] ''
+              Chat apps whose renditions are kept. Empty: `default_target`
+              plus every target in this device's copy history.
+            '';
+            sticker_renditions = setting types.bool true ''
+              Also keep the rendition a copy with the sticker flag uses (the
+              Telegram sticker WebP or WebM).
+            '';
+            stills = setting types.bool true ''
+              Download stills when keeping a pack, the library or by an
+              automatic rule. A sticker kept by itself is always downloaded.
+            '';
+            animations = setting types.bool true "The same for animations.";
+            videos = setting types.bool false "The same for videos.";
+            max_file_mb = setting u64 0 ''
+              Skip a single rendition larger than this many MiB when keeping a
+              pack, the library or by an automatic rule (0: no limit).
+            '';
+            max_mb = setting u64 1024 ''
+              The most disk space kept files may take, in MiB (0: no limit).
+              When it is reached the download stops; nothing is deleted to
+              make room. Separate from `cache_max_mb`.
+            '';
+            auto = section "What is kept without being chosen." {
+              thumbnails = setting types.bool true ''
+                After each sync, fetch every item's thumbnail so the grids are
+                complete offline.
+              '';
+              used = setting types.bool false "Keep the most recently copied stickers of this device.";
+              used_count = setting (types.ints.between 1 2000) 200 "How many of them.";
+              liked = setting types.bool false "Keep the stickers the account liked.";
+              own_packs = setting types.bool false "Keep the packs the account owns.";
+            };
+            mobile_data = setting types.bool false "Android only: also download on metered networks.";
           };
         };
       };

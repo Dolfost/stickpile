@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::config::{
-    Background, ClientConfig, ConfigError, ParsedConfig, SquarePad, StartMode, Theme, LANGUAGES, PASTE_DELAY_MAX_MS,
-    PASTE_WAIT_MAX_MS, START_TABS,
+    Background, ClientConfig, ConfigError, ParsedConfig, SquarePad, StartMode, Theme, AUTO_USED_MAX, LANGUAGES,
+    PASTE_DELAY_MAX_MS, PASTE_WAIT_MAX_MS, START_TABS,
 };
 
 /// The GUI's settings file, next to `config.toml`.
 pub const SETTINGS_FILE: &str = "settings.toml";
 
 /// Groups of [`settings_schema`], in display order.
-pub const GROUPS: &[&str] = &["Popup", "Copying", "Server"];
+pub const GROUPS: &[&str] = &["Popup", "Copying", "Offline", "Server"];
 
 const NIX_STORE: &str = "/nix/store";
 
@@ -126,7 +126,10 @@ fn kind_name(kind: &SettingKind) -> &'static str {
 }
 
 /// Every key the Settings page edits, grouped (see [`GROUPS`]) and in display
-/// order. Clipboard offer lists and focus rules stay config-file only.
+/// order. Clipboard offer lists, focus rules and `offline.targets` (a list)
+/// stay config-file only; `offline.mobile_data` is the Android app's own.
+/// What is kept (a sticker, a pack, the library) is not a setting: it is
+/// stored in the cache ([`crate::offline`]).
 pub fn settings_schema() -> Vec<SettingSpec> {
     use SettingKind::*;
     let spec = |key, group, label, help, kind, default: toml::Value| SettingSpec {
@@ -372,6 +375,97 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             i(1000),
         ),
         spec(
+            "offline.auto.thumbnails",
+            "Offline",
+            "Keep all thumbnails",
+            "After each sync, fetch every item's thumbnail so the grids are complete offline.",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "offline.auto.used",
+            "Offline",
+            "Keep recently used",
+            "Keep the stickers you copied most recently on this device.",
+            Bool,
+            b(false),
+        ),
+        spec(
+            "offline.auto.used_count",
+            "Offline",
+            "Recently used kept",
+            "How many of the most recently copied stickers to keep.",
+            Int {
+                min: 1,
+                max: AUTO_USED_MAX as i64,
+            },
+            i(200),
+        ),
+        spec(
+            "offline.auto.liked",
+            "Offline",
+            "Keep liked",
+            "Keep the stickers you liked.",
+            Bool,
+            b(false),
+        ),
+        spec(
+            "offline.auto.own_packs",
+            "Offline",
+            "Keep own packs",
+            "Keep the packs you own.",
+            Bool,
+            b(false),
+        ),
+        spec(
+            "offline.stills",
+            "Offline",
+            "Stills",
+            "Download still pictures when keeping a pack, the library or by an automatic rule.",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "offline.animations",
+            "Offline",
+            "Animations",
+            "Download animations when keeping a pack, the library or by an automatic rule.",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "offline.videos",
+            "Offline",
+            "Videos",
+            "Download videos when keeping a pack, the library or by an automatic rule. A sticker kept by itself is always downloaded.",
+            Bool,
+            b(false),
+        ),
+        spec(
+            "offline.sticker_renditions",
+            "Offline",
+            "Sticker renditions",
+            "Also keep the rendition a copy as a sticker uses (Telegram).",
+            Bool,
+            b(true),
+        ),
+        spec(
+            "offline.max_file_mb",
+            "Offline",
+            "Largest file",
+            "MiB: skip a single file larger than this when keeping a pack, the library or by an automatic rule (0: no limit).",
+            Int { min: 0, max: 102_400 },
+            i(0),
+        ),
+        spec(
+            "offline.max_mb",
+            "Offline",
+            "Space for kept files",
+            "MiB that kept files may take (0: no limit). When it is reached the download stops; nothing is deleted.",
+            Int { min: 0, max: 1_048_576 },
+            i(1024),
+        ),
+        spec(
             "server_url",
             "Server",
             "Server URL",
@@ -391,7 +485,7 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             "cache_max_mb",
             "Server",
             "Cache size",
-            "MiB of thumbnails and copied files kept for offline use.",
+            "MiB of thumbnails and copied files cached, least recently used first out. Kept files do not count.",
             Int { min: 16, max: 102_400 },
             i(512),
         ),

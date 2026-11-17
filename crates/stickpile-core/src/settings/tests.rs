@@ -47,6 +47,17 @@ fn schema_keys_exist_with_the_rust_defaults() {
         "paste.shortcut",
         "paste.delay_ms",
         "paste.wait_ms",
+        "offline.auto.thumbnails",
+        "offline.auto.used",
+        "offline.auto.used_count",
+        "offline.auto.liked",
+        "offline.auto.own_packs",
+        "offline.stills",
+        "offline.animations",
+        "offline.videos",
+        "offline.sticker_renditions",
+        "offline.max_file_mb",
+        "offline.max_mb",
     ];
     let mut sorted = keys.clone();
     sorted.sort_unstable();

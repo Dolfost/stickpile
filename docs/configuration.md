@@ -215,10 +215,12 @@ keys of the last releases:
 | Key | First client that knows it |
 |---|---|
 | `ui.theme` | 0.7.0 |
-| `ui.show_text` (`zx`) | newer than 0.7.0 |
+| `ui.show_text` (`zx`) | 0.8.0 |
+| `[offline]` (every key) | newer than 0.8.0 |
 
-So going back to 0.7.0 needs `ui.show_text` removed, and going back
-further `ui.theme` too.
+So going back to 0.7.0 needs `ui.show_text` and `[offline]` removed, and
+going back further `ui.theme` too. 0.8.0 skips `[offline]` with the
+warning above.
 
 The popup writes a key when you change it (Settings tab, `zx` and the
 other `z` toggles), not before. Keys in `settings.toml` (a read-only
@@ -333,6 +335,48 @@ macOS app always presses Cmd+V and needs the Accessibility permission
 
 Details per compositor: [desktop.md](desktop.md#paste-after-a-pick).
 
+### Keeping stickers offline
+
+```toml
+[offline]
+targets = []                # chat apps whose renditions are kept; [] = default_target + the apps in the copy history
+sticker_renditions = true   # also keep the rendition a copy as a sticker uses (Telegram)
+stills = true               # kinds downloaded by pack, library and automatic keeping
+animations = true
+videos = false
+max_file_mb = 0             # skip a single file larger than this (pack, library, automatic); 0: no limit
+max_mb = 1024               # the most kept files may take; 0: no limit
+
+[offline.auto]
+thumbnails = true           # keep every item's thumbnail (fetched after each sync)
+used = false                # keep the most recently copied stickers...
+used_count = 200            # ...this many (1-2000)
+liked = false               # keep the stickers you liked
+own_packs = false           # keep the packs you own
+```
+
+Which stickers and packs are kept, and whether the whole library is, is
+chosen in the clients and stored in the cache, on this device only. These
+keys say what that means:
+
+- A kept sticker keeps its thumbnail and the file a copy to each app in
+  `targets` uses, as a sticker too with `sticker_renditions`; the Android
+  app also keeps the rendition its grid plays. To list the apps yourself,
+  name them: `targets = ["telegram", "discord"]` (`telegram`, `discord`,
+  `signal`, `whatsapp`, `slack`, `generic`).
+- `stills`, `animations`, `videos` and `max_file_mb` apply to packs, the
+  library and the automatic rules. A sticker kept by itself is always
+  downloaded whole. What they leave out is reported as skipped, with the
+  reason.
+- `max_mb` is separate from `cache_max_mb`, which keeps governing the
+  other cached files (kept files neither count against it nor are evicted
+  by it). When kept files reach `max_mb` the download stops and says so;
+  nothing is deleted to make room.
+- `mobile_data = false` (Android only) keeps downloads to unmetered
+  networks.
+
+Details, and how kept files are protected: [offline.md](offline.md).
+
 ### Settings saved from the popup
 
 The popup's Settings tab edits these keys:
@@ -341,10 +385,12 @@ The popup's Settings tab edits these keys:
 |---|---|
 | Popup | `ui.language`, `ui.theme`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_text`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background`, `paste.auto`, `paste.shortcut` (not on macOS), `paste.delay_ms`, `paste.wait_ms` |
+| Offline | `offline.auto.thumbnails`, `offline.auto.used`, `offline.auto.used_count`, `offline.auto.liked`, `offline.auto.own_packs`, `offline.stills`, `offline.animations`, `offline.videos`, `offline.sticker_renditions`, `offline.max_file_mb`, `offline.max_mb` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 
-Clipboard offer lists, focus rules, paste rules, `token_file` and
-`cache_dir` are set in `config.toml` only.
+Clipboard offer lists, focus rules, paste rules, `offline.targets`,
+`offline.mobile_data`, `token_file` and `cache_dir` are set in
+`config.toml` only.
 
 Where the changes go depends on whether `config.toml` can be written:
 

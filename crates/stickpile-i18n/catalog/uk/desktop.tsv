@@ -153,7 +153,30 @@ Base URL of the stickpile server (http or https).	Базова адреса се
 Timeout	Час очікування
 Seconds to wait for the server before using the offline cache.	Скільки секунд чекати на сервер, перш ніж брати дані з офлайн-кешу.
 Cache size	Розмір кешу
-MiB of thumbnails and copied files kept for offline use.	МіБ мініатюр і скопійованих файлів для роботи офлайн.
+MiB of thumbnails and copied files cached, least recently used first out. Kept files do not count.	МіБ мініатюр і скопійованих файлів у кеші; першими видаляються ті, що давно не використовувались. Файли, збережені на пристрої, не враховуються.
+Offline	Офлайн
+Keep all thumbnails	Зберігати всі мініатюри
+After each sync, fetch every item's thumbnail so the grids are complete offline.	Після кожної синхронізації завантажувати мініатюри всіх стікерів, щоб сітки були повними й без мережі.
+Keep recently used	Зберігати нещодавні
+Keep the stickers you copied most recently on this device.	Зберігати стікери, які ви нещодавно копіювали на цьому пристрої.
+Recently used kept	Скільки нещодавніх зберігати
+How many of the most recently copied stickers to keep.	Скільки останніх скопійованих стікерів зберігати.
+Keep liked	Зберігати вподобані
+Keep the stickers you liked.	Зберігати стікери, які ви вподобали.
+Keep own packs	Зберігати власні набори
+Keep the packs you own.	Зберігати набори, які належать вам.
+Stills	Статичні зображення
+Download still pictures when keeping a pack, the library or by an automatic rule.	Завантажувати статичні зображення, коли зберігається набір, уся бібліотека або спрацьовує автоматичне правило.
+Animations	Анімації
+Download animations when keeping a pack, the library or by an automatic rule.	Завантажувати анімації, коли зберігається набір, уся бібліотека або спрацьовує автоматичне правило.
+Videos	Відео
+Download videos when keeping a pack, the library or by an automatic rule. A sticker kept by itself is always downloaded.	Завантажувати відео, коли зберігається набір, уся бібліотека або спрацьовує автоматичне правило. Окремо збережений стікер завантажується завжди.
+Sticker renditions	Варіанти для стікерів
+Also keep the rendition a copy as a sticker uses (Telegram).	Також зберігати варіант, який використовується під час копіювання як стікер (Telegram).
+Largest file	Найбільший файл
+MiB: skip a single file larger than this when keeping a pack, the library or by an automatic rule (0: no limit).	МіБ: пропускати файл, більший за це значення, коли зберігається набір, уся бібліотека або спрацьовує автоматичне правило (0: без обмеження).
+Space for kept files	Місце для збережених файлів
+MiB that kept files may take (0: no limit). When it is reached the download stops; nothing is deleted.	Скільки МіБ можуть займати збережені файли (0: без обмеження). Коли місце закінчується, завантаження зупиняється; нічого не видаляється.
 Transparent	Прозорий
 White	Білий
 Keep	Залишити

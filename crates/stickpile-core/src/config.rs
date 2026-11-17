@@ -49,6 +49,9 @@ pub struct ClientConfig {
     pub focus: FocusConfig,
     pub paste: PasteConfig,
     pub clipboard: ClipboardConfig,
+    /// Keeping stickers on this device for use without the server
+    /// (docs/offline.md).
+    pub offline: OfflineConfig,
 }
 
 impl Default for ClientConfig {
@@ -66,6 +69,91 @@ impl Default for ClientConfig {
             focus: FocusConfig::default(),
             paste: PasteConfig::default(),
             clipboard: ClipboardConfig::default(),
+            offline: OfflineConfig::default(),
+        }
+    }
+}
+
+/// `[offline]`: what is kept on this device so that it copies, inserts and
+/// plays with the server unreachable (docs/offline.md). Which stickers,
+/// packs or whether the whole library are kept is chosen in the clients
+/// and stored in the cache, not here; these are the options that apply to
+/// all of them. The Android app keeps its own copy of them in its settings
+/// and passes them to the core (`stickpile_core::offline::OfflineOptions`
+/// is this type).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct OfflineConfig {
+    /// Chat apps whose renditions are kept. Empty: `default_target` plus
+    /// every target in this device's copy history.
+    pub targets: Vec<TargetApp>,
+    /// Also keep the rendition a copy with the sticker flag uses (the
+    /// Telegram sticker WebP or WebM).
+    pub sticker_renditions: bool,
+    /// Download still items when keeping a pack, the library or by an
+    /// automatic rule. A sticker kept by itself is always downloaded.
+    pub stills: bool,
+    /// The same for animations.
+    pub animations: bool,
+    /// The same for videos.
+    pub videos: bool,
+    /// Skip a single rendition larger than this many MiB when keeping a
+    /// pack, the library or by an automatic rule (0: no limit).
+    pub max_file_mb: u64,
+    /// The most disk space kept files may take, in MiB (0: no limit). When
+    /// it is reached the download stops; nothing is deleted to make room.
+    /// Separate from `cache_max_mb`, which governs the other cached files.
+    pub max_mb: u64,
+    pub auto: AutoKeepConfig,
+    /// Android only: also download on metered networks (mobile data).
+    pub mobile_data: bool,
+}
+
+impl Default for OfflineConfig {
+    fn default() -> Self {
+        OfflineConfig {
+            targets: Vec::new(),
+            sticker_renditions: true,
+            stills: true,
+            animations: true,
+            videos: false,
+            max_file_mb: 0,
+            max_mb: 1024,
+            auto: AutoKeepConfig::default(),
+            mobile_data: false,
+        }
+    }
+}
+
+/// The largest `offline.auto.used_count` (the copy history keeps 2000 copies).
+pub const AUTO_USED_MAX: u32 = 2000;
+
+/// `[offline.auto]`: what is kept without being chosen. Each rule is a reason
+/// like an explicit choice: turning it off releases what only it held.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct AutoKeepConfig {
+    /// After each sync, fetch every item's thumbnail, so the grids are
+    /// complete offline.
+    pub thumbnails: bool,
+    /// Keep the most recently copied stickers of this device.
+    pub used: bool,
+    /// How many of them (1..=2000).
+    pub used_count: u32,
+    /// Keep the stickers the account liked.
+    pub liked: bool,
+    /// Keep the packs the account owns.
+    pub own_packs: bool,
+}
+
+impl Default for AutoKeepConfig {
+    fn default() -> Self {
+        AutoKeepConfig {
+            thumbnails: true,
+            used: false,
+            used_count: 200,
+            liked: false,
+            own_packs: false,
         }
     }
 }
@@ -700,6 +788,12 @@ impl ClientConfig {
                 "paste.wait_ms must be at most {PASTE_WAIT_MAX_MS} and paste.delay_ms at most {PASTE_DELAY_MAX_MS}"
             )));
         }
+        if !(1..=AUTO_USED_MAX).contains(&self.offline.auto.used_count) {
+            return Err(ConfigError::Invalid(format!(
+                "offline.auto.used_count must be 1..={AUTO_USED_MAX}, got {}",
+                self.offline.auto.used_count
+            )));
+        }
         let shortcuts = std::iter::once(("paste.shortcut", &self.paste.shortcut))
             .chain(self.paste.rules.iter().map(|r| ("paste.rules", &r.shortcut)));
         for (key, text) in shortcuts {
@@ -1248,6 +1342,41 @@ mod tests {
             let c = ClientConfig::from_toml(&format!("[ui]\nstart_mode = {name:?}")).unwrap();
             assert_eq!(c.ui.start_mode.as_str(), *name);
         }
+    }
+
+    #[test]
+    fn offline_keys_and_defaults() {
+        let d = ClientConfig::default().offline;
+        assert!(d.targets.is_empty());
+        assert!(d.sticker_renditions && d.stills && d.animations && !d.videos);
+        assert_eq!((d.max_file_mb, d.max_mb), (0, 1024));
+        assert!(d.auto.thumbnails && !d.auto.used && !d.auto.liked && !d.auto.own_packs);
+        assert_eq!(d.auto.used_count, 200);
+        assert!(!d.mobile_data);
+        let c = ClientConfig::from_toml(
+            "[offline]\ntargets = [\"telegram\", \"discord\"]\nsticker_renditions = false\nstills = false\n\
+             animations = false\nvideos = true\nmax_file_mb = 20\nmax_mb = 0\nmobile_data = true\n\
+             [offline.auto]\nthumbnails = false\nused = true\nused_count = 50\nliked = true\nown_packs = true\n",
+        )
+        .unwrap();
+        let o = c.offline;
+        assert_eq!(o.targets, [TargetApp::Telegram, TargetApp::Discord]);
+        assert!(!o.sticker_renditions && !o.stills && !o.animations && o.videos);
+        assert_eq!((o.max_file_mb, o.max_mb), (20, 0));
+        assert!(!o.auto.thumbnails && o.auto.used && o.auto.liked && o.auto.own_packs && o.mobile_data);
+        assert_eq!(o.auto.used_count, 50);
+        for bad in [
+            "[offline.auto]\nused_count = 0\n",
+            "[offline.auto]\nused_count = 2001\n",
+        ] {
+            let e = ClientConfig::from_toml(bad).unwrap_err().to_string();
+            assert!(e.contains("offline.auto.used_count"), "{e}");
+        }
+        assert!(ClientConfig::from_toml("[offline]\ntargets = [\"icq\"]\n").is_err());
+        // A client that does not know a newer offline key skips it.
+        let p = ClientConfig::parse("[offline]\nmax_mb = 5\nfuture = 1\n").unwrap();
+        assert_eq!(p.unknown_keys, ["offline.future"]);
+        assert_eq!(p.config.offline.max_mb, 5);
     }
 
     #[test]
