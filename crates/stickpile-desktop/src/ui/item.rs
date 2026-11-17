@@ -48,6 +48,11 @@ mod imp {
         pub vibe: RefCell<String>,
         #[property(get, set)]
         pub has_vibe: Cell<bool>,
+        /// The words in the picture on one line; empty: none.
+        #[property(get, set)]
+        pub text: RefCell<String>,
+        #[property(get, set)]
+        pub has_text: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -79,6 +84,11 @@ impl StickerObject {
             String::new()
         };
         let vibe = if tiles.vibe { model::vibe(&entry.item) } else { "" };
+        let text = if tiles.text {
+            model::text_line(&entry.item)
+        } else {
+            String::new()
+        };
         glib::Object::builder()
             .property("item-id", &entry.item.id)
             .property("texture", texture)
@@ -93,6 +103,8 @@ impl StickerObject {
             .property("tags", tags)
             .property("has-vibe", !vibe.is_empty())
             .property("vibe", vibe)
+            .property("has-text", !text.is_empty())
+            .property("text", text)
             .build()
     }
 }

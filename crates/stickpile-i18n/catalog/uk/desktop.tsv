@@ -52,7 +52,7 @@ f	f
 gx	gx
 t / T	t / T
 s	s
-zf / ze / zt / zv	zf / ze / zt / zv
+zf / ze / zt / zv / zx	zf / ze / zt / zv / zx
 /	/
 i, a	i, a
 ?	?
@@ -83,7 +83,7 @@ add to / remove from favorites	додати до вибраного / прибр
 open the item in the browser	відкрити стікер у браузері
 next / previous target app	наступний / попередній застосунок-адресат
 toggle sticker mode	перемкнути режим стікерів
-favorite marks / emojis / tags / vibe on the tiles	позначки вибраного / емодзі / теги / настрій на плитках
+favorite marks / emojis / tags / vibe / text on the tiles	позначки вибраного / емодзі / теги / настрій / текст на плитках
 new search	новий пошук
 edit the query	редагувати запит
 this help	ця довідка
@@ -127,6 +127,8 @@ Show tags	Показувати теги
 An item's tags on its tile (zt in Normal mode).	Теги стікера на його плитці (zt у звичайному режимі).
 Show vibe	Показувати настрій
 An item's vibe (sarcastic, tired, ...) on its tile (zv in Normal mode).	Настрій стікера (sarcastic, tired, ...) на його плитці (zv у звичайному режимі).
+Show text	Показувати текст
+The words in an item's picture on its tile, one line (zx in Normal mode).	Текст на картинці стікера на його плитці, одним рядком (zx у звичайному режимі).
 Counts	Лічильники
 Digits in Normal mode start a count (3j, 5G). A lone 1-7 then switches tabs after a short wait; off, it switches at once.	Цифри у звичайному режимі починають лічильник (3j, 5G). Тоді окрема цифра 1-7 перемикає вкладку після короткої паузи; якщо вимкнено, перемикає одразу.
 Recent items	Нещодавні стікери
@@ -273,6 +275,8 @@ No matches for “{query}” with safe mode on	Нічого не знайден�
 {n} item hidden by safe mode (tagged nsfw)|{n} items hidden by safe mode (tagged nsfw)	Безпечний режим сховав {n} стікер (з тегом nsfw)|Безпечний режим сховав {n} стікери (з тегом nsfw)|Безпечний режим сховав {n} стікерів (з тегом nsfw)
 Vibe shown	Настрій показано
 Vibe hidden	Настрій приховано
+Text shown	Текст показано
+Text hidden	Текст приховано
 Stickpile {version}: open the project page	Stickpile {version}: відкрити сторінку проєкту
 Item stats shown	Статистику стікера показано
 Item stats hidden	Статистику стікера приховано

@@ -64,6 +64,7 @@ gridview.stickpile-grid > child:selected:hover { background-color: alpha(@accent
 .stickpile-pill { font-size: 0.9em; padding: 0 4px; border-radius: 6px; }
 .stickpile-tags { font-size: 0.7em; padding: 1px 5px; }
 .stickpile-vibe { font-size: 0.7em; font-style: italic; padding: 1px 5px; }
+.stickpile-text { font-size: 0.7em; padding: 1px 5px; margin: 3px 3px 0 3px; }
 label.stickpile-heart { color: #ff5470; }
 .stickpile-footer { padding: 4px 10px; }
 .stickpile-footer .stickpile-sticker { min-height: 0; min-width: 0; padding: 0 6px; font-weight: normal; }
@@ -1698,8 +1699,18 @@ impl Shell {
             vibe.add_css_class("osd");
             vibe.add_css_class("stickpile-pill");
             vibe.add_css_class("stickpile-vibe");
-            // Emojis, the vibe and the heart along the top, the warning, tags
-            // and the GIF badge along the bottom. Clicks go through to the cell.
+            // The words in the picture, one line (off by default).
+            let text = gtk::Label::builder()
+                .halign(gtk::Align::Start)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .single_line_mode(true)
+                .build();
+            text.add_css_class("osd");
+            text.add_css_class("stickpile-pill");
+            text.add_css_class("stickpile-text");
+            // Emojis, the vibe and the heart along the top, the text above
+            // the warning, tags and the GIF badge along the bottom. Clicks go
+            // through to the cell.
             let row = |valign, parts: &[&gtk::Widget]| {
                 let row = gtk::Box::builder().spacing(3).valign(valign).can_target(false).build();
                 row.add_css_class("stickpile-tile-row");
@@ -1717,10 +1728,17 @@ impl Shell {
                 gtk::Align::End,
                 &[warn.upcast_ref(), tags.upcast_ref(), &spacer(), badge.upcast_ref()],
             );
+            let foot = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .valign(gtk::Align::End)
+                .can_target(false)
+                .build();
+            foot.append(&text);
+            foot.append(&bottom);
             let cell = gtk::Overlay::new();
             cell.set_child(Some(&picture));
             cell.add_overlay(&top);
-            cell.add_overlay(&bottom);
+            cell.add_overlay(&foot);
             li.set_child(Some(&cell));
 
             let item = li.property_expression("item");
@@ -1748,6 +1766,10 @@ impl Shell {
                 .bind(&vibe, "label", gtk::Widget::NONE);
             item.chain_property::<StickerObject>("has-vibe")
                 .bind(&vibe, "visible", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("text")
+                .bind(&text, "label", gtk::Widget::NONE);
+            item.chain_property::<StickerObject>("has-text")
+                .bind(&text, "visible", gtk::Widget::NONE);
 
             let source = gtk::DragSource::new();
             source.set_actions(gdk::DragAction::COPY);

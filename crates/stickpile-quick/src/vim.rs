@@ -96,8 +96,8 @@ pub(crate) enum Cmd {
     Back,
     /// `o`
     Open,
-    /// `zf`, `ze`, `zt`, `zv`: show or hide favorite marks, emojis, tags or
-    /// the vibe on the tiles; `zi` the stats row.
+    /// `zf`, `ze`, `zt`, `zv`, `zx`: show or hide favorite marks, emojis,
+    /// tags, the vibe or the text on the tiles; `zi` the stats row.
     Tile(Tile),
 }
 
@@ -201,6 +201,7 @@ impl Pending {
                 NormalKey::Char('e') => Some(Tile::Emojis),
                 NormalKey::Char('t') => Some(Tile::Tags),
                 NormalKey::Char('v') => Some(Tile::Vibe),
+                NormalKey::Char('x') => Some(Tile::Text),
                 NormalKey::Char('i') => Some(Tile::Details),
                 _ => None,
             };
@@ -320,8 +321,8 @@ pub const HELP: &[HelpSection] = &[
             ("s", "toggle sticker mode"),
             ("S", "safe mode: hide or show items tagged nsfw"),
             (
-                "zf / ze / zt / zv",
-                "favorite marks / emojis / tags / vibe on the tiles",
+                "zf / ze / zt / zv / zx",
+                "favorite marks / emojis / tags / vibe / text on the tiles",
             ),
             ("zi", "the item stats row"),
             ("/", "new search"),
@@ -519,6 +520,7 @@ mod tests {
         assert_eq!(run("ze"), [Cmd::Tile(Tile::Emojis)]);
         assert_eq!(run("zt"), [Cmd::Tile(Tile::Tags)]);
         assert_eq!(run("zv"), [Cmd::Tile(Tile::Vibe)]);
+        assert_eq!(run("zx"), [Cmd::Tile(Tile::Text)]);
         assert_eq!(run("zi"), [Cmd::Tile(Tile::Details)]);
         assert_eq!(run("g/"), [Cmd::Syntax]);
         assert_eq!(run("3zt"), [Cmd::Tile(Tile::Tags)], "a count is dropped");

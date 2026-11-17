@@ -223,13 +223,15 @@ mark_favorites = true # a heart on the items you liked
 show_emojis = true    # an item's emojis on its tile
 show_tags = true      # an item's tags on its tile
 show_vibe = true      # an item's vibe on its tile
+show_text = false     # the words in an item's picture on its tile, one line
 show_details = true   # the selected item's stats above the footer
 safe_mode = false     # hide the items tagged nsfw
 ```
 
-`zf`, `ze`, `zt`, `zv` and `zi` in Normal mode turn them on and off and
-save the change like the Settings tab does; `S` does the same for safe
-mode. `counts = true` makes Normal-mode digits start a count (`3j`, `5G`);
+`zf`, `ze`, `zt`, `zv`, `zx` and `zi` in Normal mode turn them on and off
+and save the change like the Settings tab does; `S` does the same for
+safe mode. `show_text` is off by default because the line covers the
+picture whose words it repeats. `counts = true` makes Normal-mode digits start a count (`3j`, `5G`);
 a lone tab digit then switches after a short wait instead of at once.
 
 ### Copy-time image adjustments
@@ -299,7 +301,7 @@ The popup's Settings tab edits these keys:
 
 | Group | Keys |
 |---|---|
-| Popup | `ui.language`, `ui.theme`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
+| Popup | `ui.language`, `ui.theme`, `ui.start_tab`, `ui.start_mode`, `ui.modal`, `ui.columns`, `ui.thumb_px`, `ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`, `ui.show_text`, `ui.show_details`, `ui.safe_mode`, `ui.counts`, `ui.recent_count`, `ui.max_results`, `ui.hide_on_copy`, `ui.start_hidden` |
 | Copying | `default_target`, `focus.detect`, `prefer_stickers`, `copy.square`, `copy.background`, `paste.auto`, `paste.shortcut` (not on macOS), `paste.delay_ms`, `paste.wait_ms` |
 | Server | `server_url`, `timeout_secs`, `cache_max_mb` |
 

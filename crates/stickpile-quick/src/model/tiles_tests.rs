@@ -292,6 +292,35 @@ fn zv_shows_and_hides_the_vibe() {
 }
 
 #[test]
+fn zx_shows_and_hides_the_text() {
+    let (mut m, _) = recent_with_marks();
+    assert!(!m.tiles().text, "off by default");
+    let revision = m.entries_revision();
+    let cmds = keys(&mut m, "zx");
+    assert_eq!(
+        cmds,
+        [Command::SaveTile {
+            tile: Tile::Text,
+            on: true
+        }]
+    );
+    assert!(m.tiles().text);
+    assert!(m.entries_revision() > revision, "the tiles are drawn again");
+    assert_eq!(m.footer().status, "Text shown");
+    keys(&mut m, "zx");
+    assert!(!m.tiles().text);
+    assert_eq!(m.footer().status, "Text hidden");
+}
+
+#[test]
+fn a_tile_shows_the_text_on_one_line() {
+    let mut it = item("x");
+    assert_eq!(text_line(&it), "");
+    it.text = "NO THOUGHTS\n\n  head empty \nx".into();
+    assert_eq!(text_line(&it), "NO THOUGHTS / head empty / x");
+}
+
+#[test]
 fn a_tile_shows_the_vibe_trimmed() {
     let mut it = item("v");
     it.vibe = Some(" sarcastic ".into());

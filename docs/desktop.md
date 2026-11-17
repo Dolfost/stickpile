@@ -196,7 +196,13 @@ emojis, the tags and the vibe on and off, and the Settings tab has a switch
 for each (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`,
 `ui.show_vibe`). The heart marks
 the items the Favorites tab lists (fetched each time the popup opens) and
-the ones you like or unlike since.
+the ones you like or unlike since. `zx` (`ui.show_text`) adds the words in
+the picture (the item's text, read by the server or written in the web
+UI) as one line above the tags, its lines joined with " / "; it is off by
+default, because the line covers the picture whose words it repeats.
+Hovering a tile shows its name, pack, emojis and keywords and, after a
+blank line, its text with its line breaks (the first 8 lines or 300
+characters).
 
 **Safe mode.** `S` in Normal mode (Ctrl+Shift+S in any mode, or a click on
 "safe" in the footer) hides every item tagged `nsfw`: on every tab, inside
@@ -300,7 +306,7 @@ popup.
 | t / T | next / previous target app |
 | s | toggle sticker mode |
 | S | safe mode: hide or show the items tagged `nsfw` (saved like a setting) |
-| zf / ze / zt / zv | show or hide the favorite hearts / emojis / tags / vibe on the tiles (saved like a setting) |
+| zf / ze / zt / zv / zx | show or hide the favorite hearts / emojis / tags / vibe / text on the tiles (saved like a setting) |
 | zi | show or hide the selected item's stats row above the footer (saved like a setting) |
 | / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
 | i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
@@ -591,6 +597,7 @@ mark_favorites = true # a heart on the items you liked (zf)
 show_emojis = true   # an item's emojis on its tile (ze)
 show_tags = true     # an item's tags on its tile (zt)
 show_vibe = true     # an item's vibe on its tile (zv)
+show_text = false    # the words in an item's picture on its tile, one line (zx)
 show_details = true  # the selected item's stats above the footer (zi)
 safe_mode = false    # hide items tagged nsfw (S)
 counts = false       # digits start a count (3j, 5G); tab digits then wait

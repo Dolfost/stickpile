@@ -92,8 +92,8 @@ pub fn is_nsfw(item: &ItemSummary) -> bool {
 }
 
 /// What the popup shows besides the thumbnails: the marks on the tiles
-/// (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`)
-/// and the stats row of the footer (`ui.show_details`).
+/// (`ui.mark_favorites`, `ui.show_emojis`, `ui.show_tags`, `ui.show_vibe`,
+/// `ui.show_text`) and the stats row of the footer (`ui.show_details`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tiles {
     /// A heart on the items the viewer liked ([`Entry::liked`]).
@@ -102,6 +102,9 @@ pub struct Tiles {
     pub tags: bool,
     /// The item's vibe label ("sarcastic"), see [`vibe`].
     pub vibe: bool,
+    /// The words in the picture on one line, see [`text_line`]. Off by
+    /// default: the line covers the picture whose words it repeats.
+    pub text: bool,
     /// The footer's row of the selection's stats ([`Footer::details`]).
     pub details: bool,
 }
@@ -113,6 +116,7 @@ impl Default for Tiles {
             emojis: true,
             tags: true,
             vibe: true,
+            text: false,
             details: true,
         }
     }
@@ -125,6 +129,7 @@ impl Tiles {
             Tile::Emojis => self.emojis,
             Tile::Tags => self.tags,
             Tile::Vibe => self.vibe,
+            Tile::Text => self.text,
             Tile::Details => self.details,
         }
     }
@@ -135,24 +140,34 @@ impl Tiles {
             Tile::Emojis => self.emojis = on,
             Tile::Tags => self.tags = on,
             Tile::Vibe => self.vibe = on,
+            Tile::Text => self.text = on,
             Tile::Details => self.details = on,
         }
     }
 }
 
-/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`, `zv`, `zi`).
+/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`, `zv`, `zx`, `zi`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
     Favorites,
     Emojis,
     Tags,
     Vibe,
+    /// The words in the picture.
+    Text,
     /// The stats row.
     Details,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 5] = [Tile::Favorites, Tile::Emojis, Tile::Tags, Tile::Vibe, Tile::Details];
+    pub const ALL: [Tile; 6] = [
+        Tile::Favorites,
+        Tile::Emojis,
+        Tile::Tags,
+        Tile::Vibe,
+        Tile::Text,
+        Tile::Details,
+    ];
 }
 
 /// What the overlay over the popup shows.
@@ -190,6 +205,17 @@ struct Completion {
 pub fn vibe(item: &ItemSummary) -> &str {
     item.vibe.as_deref().map_or("", str::trim)
 }
+
+/// The words in the picture as a tile shows them, on one line: the lines
+/// that are not blank, trimmed, joined with " / "; empty for none.
+pub fn text_line(item: &ItemSummary) -> String {
+    let lines: Vec<&str> = item.text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    lines.join(" / ")
+}
+
+/// At most this much of the item text goes into a tile's tooltip.
+const TOOLTIP_TEXT_CHARS: usize = 300;
+const TOOLTIP_TEXT_LINES: usize = 8;
 
 impl Default for ModelConfig {
     fn default() -> Self {
@@ -635,6 +661,8 @@ impl Status {
                 (Tile::Tags, false) => t("Tags hidden"),
                 (Tile::Vibe, true) => t("Vibe shown"),
                 (Tile::Vibe, false) => t("Vibe hidden"),
+                (Tile::Text, true) => t("Text shown"),
+                (Tile::Text, false) => t("Text hidden"),
                 (Tile::Details, true) => t("Item stats shown"),
                 (Tile::Details, false) => t("Item stats hidden"),
             }
@@ -795,7 +823,9 @@ impl Entry {
         self.item.kind != MediaKind::Still
     }
 
-    /// Multi-line tooltip: name, set, keywords/emojis, incompatibility.
+    /// Multi-line tooltip: name, set, keywords/emojis, incompatibility,
+    /// then after a blank line the words in the picture, line breaks kept
+    /// (the first lines of a long text, ending in "...").
     pub fn tooltip(&self) -> String {
         let it = &self.item;
         let mut s = format!("{}\n{}", it.name, it.set_name);
@@ -810,6 +840,23 @@ impl Entry {
         if let Some(why) = &self.incompatible {
             s.push_str("\n⚠ ");
             s.push_str(&t_template(why, profiles::INCOMPATIBLE));
+        }
+        let text = it.text.trim();
+        if !text.is_empty() {
+            s.push_str("\n\n");
+            let mut shown: String = text
+                .lines()
+                .take(TOOLTIP_TEXT_LINES)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .chars()
+                .take(TOOLTIP_TEXT_CHARS)
+                .collect();
+            if shown.len() < text.len() {
+                shown = shown.trim_end().to_string();
+                shown.push_str("...");
+            }
+            s.push_str(&shown);
         }
         s
     }
@@ -1717,7 +1764,7 @@ impl Model {
         Vec::new()
     }
 
-    /// `zf`, `ze`, `zt`, `zv`, `zi`.
+    /// `zf`, `ze`, `zt`, `zv`, `zx`, `zi`.
     fn toggle_tile(&mut self, tile: Tile) -> Vec<Command> {
         let on = !self.tiles.get(tile);
         let mut cmds = self.set_tile(tile, on);
@@ -3810,6 +3857,18 @@ pub(crate) mod tests {
         e.item.emojis.clear();
         e.item.keywords.clear();
         assert_eq!(e.tooltip(), "item-a\nCats");
+        // The words in the picture last, after a blank line, line breaks kept.
+        e.item.text = "NO THOUGHTS\nhead empty".into();
+        assert_eq!(e.tooltip(), "item-a\nCats\n\nNO THOUGHTS\nhead empty");
+        // A long text: its first lines, at most 300 characters.
+        e.item.text = (1..=20).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n");
+        assert_eq!(
+            e.tooltip(),
+            "item-a\nCats\n\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8..."
+        );
+        e.item.text = "ж".repeat(400);
+        let tip = e.tooltip();
+        assert!(tip.ends_with(&format!("{}...", "ж".repeat(300))), "{tip}");
     }
 
     #[test]

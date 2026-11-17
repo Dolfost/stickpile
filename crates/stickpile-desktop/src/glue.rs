@@ -55,6 +55,7 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
             emojis: cfg.ui.show_emojis,
             tags: cfg.ui.show_tags,
             vibe: cfg.ui.show_vibe,
+            text: cfg.ui.show_text,
             details: cfg.ui.show_details,
         },
         counts: cfg.ui.counts,
@@ -73,6 +74,7 @@ pub fn tile_key(tile: Tile) -> &'static str {
         Tile::Emojis => "ui.show_emojis",
         Tile::Tags => "ui.show_tags",
         Tile::Vibe => "ui.show_vibe",
+        Tile::Text => "ui.show_text",
         Tile::Details => "ui.show_details",
     }
 }
@@ -283,7 +285,11 @@ mod tests {
     fn tile_keys_are_settings() {
         for tile in Tile::ALL {
             let spec = stickpile_core::settings::setting_spec(tile_key(tile)).unwrap();
-            assert_eq!(spec.default, toml::Value::Boolean(true));
+            assert_eq!(
+                spec.default,
+                toml::Value::Boolean(Tiles::default().get(tile)),
+                "{tile:?}"
+            );
         }
     }
 

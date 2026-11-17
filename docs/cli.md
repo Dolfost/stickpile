@@ -96,6 +96,7 @@ mark_favorites = true   # a heart on the items you liked
 show_emojis = true      # an item's emojis on its tile
 show_tags = true        # an item's tags on its tile
 show_vibe = true        # an item's vibe on its tile
+show_text = false       # the words in an item's picture on its tile, one line
 show_details = true     # the selected item's stats above the footer
 safe_mode = false       # hide the items tagged nsfw (S in the popup)
 counts = false          # digits start a count (3j, 5G); tab digits then wait
@@ -181,6 +182,7 @@ sticker = ["text/uri-list"]
 | `ui.show_emojis` | `true` | an item's emojis on its tile |
 | `ui.show_tags` | `true` | an item's tags on its tile |
 | `ui.show_vibe` | `true` | an item's vibe on its tile |
+| `ui.show_text` | `false` | the words in an item's picture on its tile, one line (off: the line would cover the picture whose words it repeats) |
 | `ui.show_details` | `true` | the selected item's stats in a row above the popup's footer |
 | `ui.safe_mode` | `false` | safe mode: the popup hides the items tagged `nsfw` (`S` switches it) |
 | `ui.counts` | `false` | Normal-mode digits start a count (`3j`, `5G`); a lone 1-7 then switches tabs after a short wait instead of at once |

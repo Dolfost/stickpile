@@ -279,6 +279,11 @@ in
               An item's vibe (sarcastic, tired, ...) on its tile (`zv` in
               Normal mode).
             '';
+            show_text = setting types.bool false ''
+              The words in an item's picture on its tile, one line (`zx` in
+              Normal mode). Off by default: the line covers the picture
+              whose words it repeats.
+            '';
             show_details = setting types.bool true ''
               The selected item's pack, format, size, copies, likes and
               quality in a row above the footer (`zi` in Normal mode).

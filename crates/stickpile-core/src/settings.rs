@@ -217,6 +217,14 @@ pub fn settings_schema() -> Vec<SettingSpec> {
             b(true),
         ),
         spec(
+            "ui.show_text",
+            "Popup",
+            "Show text",
+            "The words in an item's picture on its tile, one line (zx in Normal mode).",
+            Bool,
+            b(false),
+        ),
+        spec(
             "ui.show_details",
             "Popup",
             "Show item stats",
