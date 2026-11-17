@@ -23,11 +23,14 @@ import io.github.dolfost.stickpile.rust.LibraryException
  *
  * A failure is recorded by the library (`SyncState.lastError`) and logged
  * here; [SyncOutcome.after] decides between one retry and the next period.
+ * A run that changed the cache counts in [CacheChanges], so offers shown
+ * meanwhile in the app or the keyboard are asked for again.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        val app = StickpileApp.from(applicationContext)
         val failure = try {
-            StickpileApp.from(applicationContext).library.syncNow()
+            app.cacheChanges.after(app.library.syncNow())
             null
         } catch (e: LibraryException) {
             Log.w(TAG, "background sync failed: ${e.javaClass.simpleName}: ${e.message}")

@@ -130,8 +130,11 @@ class MainActivity : ThemedActivity() {
          */
         fun startSync(context: Context, library: StickpileLibraryInterface) {
             SyncScheduler.ensureScheduled(context)
-            StickpileApp.from(context).scope.launch {
-                catching { library.syncIfDue() }.onFailure { FailureLog.android.failed(Doing.SYNCING, it) }
+            val app = StickpileApp.from(context)
+            app.scope.launch {
+                catching { library.syncIfDue() }
+                    .onSuccess(app.cacheChanges::after)
+                    .onFailure { FailureLog.android.failed(Doing.SYNCING, it) }
             }
         }
     }
@@ -173,7 +176,7 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
             if (library == null) return Loading()
             val app = StickpileApp.from(LocalContext.current)
             val screen = viewModel(key = "library-${vm.session}") {
-                LibraryViewModel(library, app.display.state, refreshLikes = app::refreshLikes)
+                LibraryViewModel(library, app.display.state, refreshLikes = app::refreshLikes, cacheChanges = app.cacheChanges)
             }
             LibraryScreen(
                 vm = screen,

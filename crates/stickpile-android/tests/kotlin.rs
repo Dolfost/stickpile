@@ -187,6 +187,7 @@ const RECORDS: &[(&str, &[&str])] = &[
             "lastError: LibraryErrorKind?",
             "pendingUsage: kotlin.UInt",
             "due: kotlin.Boolean",
+            "cacheChanged: kotlin.Boolean",
         ],
     ),
 ];

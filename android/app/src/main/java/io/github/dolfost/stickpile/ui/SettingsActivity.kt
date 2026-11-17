@@ -125,6 +125,7 @@ private fun SettingsContent(
                 PreparedFiles.revokeAll()
                 AccountChanges.changed()
             },
+            onSynced = StickpileApp.from(appContext).cacheChanges::after,
         )
     }
     when (page) {

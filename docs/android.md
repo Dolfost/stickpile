@@ -66,7 +66,9 @@ cover image, else its first sticker).
   (v:)`, `e:`, ...), the values of the filter being typed (`vibe:sar` and
   `v:sar` offer `sarcastic`), the emojis for `e:`, and for a bare word the
   tags, vibes and packs containing it (`rea` offers `tag:reaction`). A
-  tap puts it in.
+  tap puts it in. The values come from the offline cache: right after
+  signing in they come once the first sync is over, also for what is
+  typed already.
 - **Search in a pack.** With a pack open (Packs tab), the field says
   "Search in <pack>" and searches only that pack, with the whole syntax
   (`v:tired`, `type:gif`, `-t:nsfw`, `is:liked`, `sort:copies`, words),
@@ -430,7 +432,7 @@ record Prepared    { path: String, mime_type: String, display_name: String,
 record UploadFile  { path: String, name: String?, keywords: List<String>,
                      emojis: List<String> }
 record SyncState   { last_sync: i64?, last_error: LibraryErrorKind?,
-                     pending_usage: u32, due: Boolean }
+                     pending_usage: u32, due: Boolean, cache_changed: Boolean }
 
 error  LibraryError {
   NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
@@ -506,7 +508,10 @@ Behaviour the signatures do not show:
   `last_error`. `last_sync` is the local time of this process's last sync,
   else the cache's sync cursor (the server's clock), and null after an
   account or server change; the policy starts from it, so a restarted app
-  does not sync at once.
+  does not sync at once. `cache_changed` is true when the sync the call
+  ran changed the cached items (new, changed or removed; items the server
+  sends again as they were do not count); false from `sync_state` and
+  when no sync was due.
 - **Search** resolves a half-typed `key:value` filter to its best
   suggestion, as the desktop popup does. The one-letter keys `v:`, `t:`,
   `s:`, `b:` (and `e:`) are `vibe:`, `tag:`, `set:`, `by:` (and
@@ -544,7 +549,10 @@ Behaviour the signatures do not show:
   long key. A short key being typed (`v:sar`) offers what the long one
   does, and the key stays as typed. A leading `-` stays on what is
   offered; inside an unfinished phrase nothing is. The words come from
-  the offline cache, so they follow the last sync.
+  the offline cache, so they follow the last sync: a sync that changed
+  the cache returns `cache_changed` true, and the app and the keyboard
+  then ask for the offers on screen again (the text as it is), so the
+  ones shown while the first sync ran do not stay empty.
 - **Item marks.** `nsfw` is the desktop's safe-mode test: a tag `nsfw` in
   any case. `liked` comes from the favorites the library last read (and
   the likes toggled since): false for every item until `favorites` was

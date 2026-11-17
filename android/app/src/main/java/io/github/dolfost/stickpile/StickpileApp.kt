@@ -7,6 +7,7 @@ import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
+import io.github.dolfost.stickpile.sync.CacheChanges
 import java.io.File
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -58,6 +59,9 @@ class StickpileApp : Application() {
 
     /** What the grids show (safe mode, the tiles' information), shared by the app and the keyboard. */
     val display: DisplaySettings by lazy { DisplaySettings(this) }
+
+    /** The syncs that changed the offline cache, for the offers of the app and the keyboard. */
+    val cacheChanges = CacheChanges()
 
     @Volatile
     private var likesReadAt = 0L

@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -57,9 +58,10 @@ import kotlinx.coroutines.launch
  * the offers edit it here only: the editor never sees it, and it is never
  * logged. Each change asks for the offers and, after a short pause
  * ([PickerSearch.SEARCH_DELAY_MS]), searches: inside the set while one is
- * open in Sets, everywhere otherwise ([PickerSearch.load]). Safe mode (shared with the
- * app through [DisplaySettings]) leaves nsfw out of the search and of every
- * list.
+ * open in Sets, everywhere otherwise ([PickerSearch.load]). A sync that
+ * changed the cache asks for the offers again ([ImeLibrary.cacheChanges]).
+ * Safe mode (shared with the app through [DisplaySettings]) leaves nsfw
+ * out of the search and of every list.
  *
  * Runs on the main thread; it loads through [ImeLibrary] in coroutines of
  * its own scope (a child of the service's), cancelled by [stop] and
@@ -245,6 +247,9 @@ internal class PickerView(
         showQuery()
         showSafeMode()
         scope.launch { displaySettings.state.collect { onDisplay(it) } }
+        // The offers come from the cache: a sync that changed it while the
+        // picker is shown (the first one, say) brings them for the text as it is.
+        scope.launch { library.cacheChanges.drop(1).collect { if (started) requestHints() } }
     }
 
     /**

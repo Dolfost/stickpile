@@ -572,6 +572,7 @@ impl Inner {
             last_error: status.last_error,
             pending_usage: to_u32(session.pending_usage()),
             due: status.policy.due(Instant::now()),
+            cache_changed: false,
         }
     }
 
@@ -591,7 +592,10 @@ impl Inner {
                 Err(e) => status.last_error = Some(e.kind()),
             }
         }
-        result.map(|_| self.sync_state())
+        result.map(|changed| SyncState {
+            cache_changed: changed,
+            ..self.sync_state()
+        })
     }
 }
 

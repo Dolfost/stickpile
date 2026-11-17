@@ -37,6 +37,7 @@ class SettingsViewModelTest {
     private val library = FakeLibrary()
     private var cacheCleared = 0
     private var signedOut = 0
+    private val synced = mutableListOf<SyncState>()
 
     /** The app's scope: it outlives the view model. */
     private val background = CoroutineScope(SupervisorJob() + main.dispatcher)
@@ -48,6 +49,7 @@ class SettingsViewModelTest {
         log = { _, _ -> },
         onCacheCleared = { cacheCleared++ },
         onSignedOut = { signedOut++ },
+        onSynced = { synced += it },
     )
 
     private val vm by lazy { model() }
@@ -56,7 +58,8 @@ class SettingsViewModelTest {
     fun showsTheAccountTheSyncAndTheCache() = runTest(main.dispatcher) {
         library.account = { alice }
         library.serverUrl = "https://s.example"
-        library.syncState = SyncState(lastSync = 1_700_000_000, lastError = LibraryErrorKind.UNREACHABLE, pendingUsage = 2u, due = false)
+        library.syncState =
+            SyncState(lastSync = 1_700_000_000, lastError = LibraryErrorKind.UNREACHABLE, pendingUsage = 2u, due = false, cacheChanged = false)
         library.pendingUsage = 3u
         library.cacheBytes = { 12_345u }
         assertTrue(vm.state.checking)
@@ -113,6 +116,18 @@ class SettingsViewModelTest {
         assertEquals(SettingsEvent.Notice(Message(R.string.app_error_rate_limited)), vm.eventFlow.first())
         assertEquals("syncNow", library.calls.first())
         assertTrue("syncState" in library.calls)
+        assertEquals(emptyList<SyncState>(), synced)
+    }
+
+    @Test
+    fun aSyncThatWentThroughIsHandedOn() = runTest(main.dispatcher) {
+        vm.state // create it
+        advanceUntilIdle()
+        val done = library.syncState.copy(lastSync = 1_700_000_000, cacheChanged = true)
+        library.syncNow = { done }
+        vm.syncNow()
+        advanceUntilIdle()
+        assertEquals(listOf(done), synced)
     }
 
     @Test

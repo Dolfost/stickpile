@@ -84,7 +84,8 @@ const CONTRACT: &[&str] = &[
     "record Prepared { path: String, mime_type: String, display_name: String, target: Target, variant: String, \
      sticker: Boolean }",
     "record UploadFile { path: String, name: String?, keywords: List<String>, emojis: List<String> }",
-    "record SyncState { last_sync: i64?, last_error: LibraryErrorKind?, pending_usage: u32, due: Boolean }",
+    "record SyncState { last_sync: i64?, last_error: LibraryErrorKind?, pending_usage: u32, due: Boolean, \
+     cache_changed: Boolean }",
     // enums
     "enum AuthKind { Token, Tailnet }",
     "enum Target { Telegram, Discord, Signal, Whatsapp, Slack, Generic }",

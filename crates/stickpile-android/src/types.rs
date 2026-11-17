@@ -363,4 +363,9 @@ pub struct SyncState {
     pub pending_usage: u32,
     /// A sync is due: `StickpileLibrary.sync_if_due` would sync now.
     pub due: bool,
+    /// The sync this call ran changed the offline cache (items new,
+    /// changed or removed): what `hints` and `suggestions` offer may be
+    /// different now, so offers on screen are asked for again. False from
+    /// `sync_state`, and when no sync was due.
+    pub cache_changed: bool,
 }

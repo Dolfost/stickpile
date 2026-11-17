@@ -16,6 +16,7 @@ import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchHint
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.rust.Target
+import io.github.dolfost.stickpile.sync.CacheChanges
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.common.FailureLog
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -141,13 +143,16 @@ sealed interface LibraryEvent {
  * with the keyboard) the searches leave out the items tagged nsfw and the
  * lists hide them. [refreshLikes] reads the account's likes in the
  * background ([io.github.dolfost.stickpile.StickpileApp.refreshLikes]).
- * The non-suspend library calls run on [io].
+ * The offers come from the offline cache: a sync that changed it (counted
+ * in [cacheChanges], the refresh's too) asks for them again, the text as
+ * it is. The non-suspend library calls run on [io].
  */
 @OptIn(FlowPreview::class)
 class LibraryViewModel(
     private val library: StickpileLibraryInterface,
     private val display: StateFlow<Display>,
     private val refreshLikes: () -> Job? = { null },
+    private val cacheChanges: CacheChanges = CacheChanges(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val log: FailureLog = FailureLog.android,
 ) : ViewModel() {
@@ -182,7 +187,8 @@ class LibraryViewModel(
                 .collectLatest { load(it.request) }
         }
         viewModelScope.launch {
-            hintQueries.filterNotNull().collectLatest { loadHints(it) }
+            combine(hintQueries.filterNotNull(), cacheChanges.count) { query, _ -> query }
+                .collectLatest { loadHints(it) }
         }
         viewModelScope.launch {
             // Switched here or in the keyboard: the list is filtered again at
@@ -259,7 +265,9 @@ class LibraryViewModel(
         if (state.refreshing) return
         state = state.copy(refreshing = true)
         viewModelScope.launch {
-            catching { library.syncNow() }.onFailure { e -> notice(Doing.SYNCING, e) }
+            catching { library.syncNow() }
+                .onSuccess(cacheChanges::after)
+                .onFailure { e -> notice(Doing.SYNCING, e) }
             state = state.copy(refreshing = false)
             reload()
         }

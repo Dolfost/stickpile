@@ -61,9 +61,9 @@ sealed interface SettingsEvent {
 /**
  * The library side of the settings: the account, the sync, the cache, and
  * signing out. The non-suspend library calls run on [io].
- * [onCacheCleared] and [onSignedOut] are what the rest of the app must
- * hear of (drop the decoded thumbnails and the prepared files' tokens;
- * stop the background sync). Signing out runs in [background], the app's
+ * [onCacheCleared], [onSignedOut] and [onSynced] are what the rest of
+ * the app must hear of (drop the decoded thumbnails and the prepared
+ * files' tokens; stop the background sync; offer from the synced cache). Signing out runs in [background], the app's
  * scope, so that it ends with its follow-ups even when the screen goes.
  */
 class SettingsViewModel(
@@ -73,6 +73,7 @@ class SettingsViewModel(
     private val log: FailureLog = FailureLog.android,
     private val onCacheCleared: () -> Unit = {},
     private val onSignedOut: () -> Unit = {},
+    private val onSynced: (SyncState) -> Unit = {},
 ) : ViewModel() {
 
     var state: SettingsState by mutableStateOf(SettingsState())
@@ -124,7 +125,7 @@ class SettingsViewModel(
         if (state.syncing) return
         state = state.copy(syncing = true)
         viewModelScope.launch {
-            catching { library.syncNow() }.onFailure { notice(Doing.SYNCING, it) }
+            catching { library.syncNow() }.onSuccess(onSynced).onFailure { notice(Doing.SYNCING, it) }
             state = state.copy(syncing = false)
             refreshLocal()
         }

@@ -4,6 +4,7 @@ import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.rust.HintKind
 import io.github.dolfost.stickpile.rust.ItemList
 import io.github.dolfost.stickpile.rust.SearchHint
+import io.github.dolfost.stickpile.sync.CacheChanges
 import io.github.dolfost.stickpile.ui.library.Details
 import io.github.dolfost.stickpile.ui.library.LibraryContent
 import io.github.dolfost.stickpile.ui.library.LibraryTab
@@ -32,8 +33,16 @@ class LibrarySearchAndSafeModeTest {
 
     /** What the next `refreshLikes` returns: null when the likes were read lately. */
     private var likesRead: Job? = null
+    private val changes = CacheChanges()
     private val vm by lazy {
-        LibraryViewModel(library, display, refreshLikes = { likesRead }, io = main.dispatcher, log = { _, _ -> })
+        LibraryViewModel(
+            library,
+            display,
+            refreshLikes = { likesRead },
+            cacheChanges = changes,
+            io = main.dispatcher,
+            log = { _, _ -> },
+        )
     }
 
     private val cat = item("cat")
@@ -146,6 +155,42 @@ class LibrarySearchAndSafeModeTest {
         advanceUntilIdle()
         assertEquals(listOf("hints "), hints())
         assertEquals(keys, vm.state.hints)
+    }
+
+    @Test
+    fun aSyncThatChangedTheCacheOffersAgainForTheTextAsItIs() = runTest(main.dispatcher) {
+        val vm = started()
+        changes.after(library.syncState.copy(cacheChanged = true))
+        advanceUntilIdle()
+        assertEquals("the field was never used", emptyList<String>(), hints())
+
+        // The first opening: the cache is still empty.
+        vm.setQuery("v:")
+        advanceUntilIdle()
+        assertEquals(emptyList<SearchHint>(), vm.state.hints)
+        // The sync brings the vibes.
+        library.hintsFor = { q -> listOf(hint("${q}tired ")) }
+        changes.after(library.syncState.copy(cacheChanged = false))
+        advanceUntilIdle()
+        assertEquals("nothing changed: not asked again", listOf("hints v:"), hints())
+        changes.after(library.syncState.copy(cacheChanged = true))
+        advanceUntilIdle()
+        assertEquals(listOf("hints v:", "hints v:"), hints())
+        assertEquals(listOf(hint("v:tired ")), vm.state.hints)
+        assertEquals("v:", vm.state.query)
+    }
+
+    @Test
+    fun aRefreshThatChangedTheCacheOffersAgain() = runTest(main.dispatcher) {
+        val vm = started()
+        vm.setQuery("v:")
+        advanceUntilIdle()
+        library.syncNow = { library.syncState.copy(cacheChanged = true) }
+        library.hintsFor = { q -> listOf(hint("${q}tired ")) }
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(1, changes.count.value)
+        assertEquals(listOf(hint("v:tired ")), vm.state.hints)
     }
 
     @Test

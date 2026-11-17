@@ -49,7 +49,7 @@ class FakeLibrary : StickpileLibraryInterface {
     var normalizePairingCode: (String) -> String? = { null }
     var syncNow: suspend () -> SyncState = { syncState }
     var syncIfDue: suspend () -> SyncState = { syncState }
-    var syncState = SyncState(lastSync = null, lastError = null, pendingUsage = 0u, due = false)
+    var syncState = SyncState(lastSync = null, lastError = null, pendingUsage = 0u, due = false, cacheChanged = false)
     var pendingUsage: UInt = 0u
     var cacheBytes: () -> ULong = { 0u }
     var clearCache: () -> ULong = { 0u }

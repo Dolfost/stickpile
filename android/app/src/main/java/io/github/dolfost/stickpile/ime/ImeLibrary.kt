@@ -12,6 +12,7 @@ import io.github.dolfost.stickpile.rust.SearchHint
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.rust.targetForPackage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 /**
@@ -32,6 +33,9 @@ internal class ImeLibrary(private val app: StickpileApp) {
 
     /** The offers under the search field for [query] as typed: no network, but native, so off the main thread too. */
     suspend fun hints(query: String): List<SearchHint> = call { it.hints(query) }
+
+    /** Moves on after each sync that changed the cache, the app's included: the offers are asked for again then. */
+    val cacheChanges: StateFlow<Int> get() = app.cacheChanges.count
 
     /** The package of the field being typed into, set by the service on each input start. */
     @Volatile
@@ -80,8 +84,9 @@ internal class ImeLibrary(private val app: StickpileApp) {
         !ImeTexts.isSignedOut(e.kind)
     }
 
+    /** A sync if one is due; one that changed the cache counts in [cacheChanges]. */
     suspend fun syncIfDue() {
-        call { it.syncIfDue() }
+        app.cacheChanges.after(call { it.syncIfDue() })
     }
 
     private companion object {

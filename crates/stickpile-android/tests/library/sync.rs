@@ -108,3 +108,34 @@ async fn a_reopened_library_remembers_a_recent_sync() {
     lib.sync_if_due().await.unwrap();
     assert_eq!(requests(&server, ME), 2, "no sync on reopening");
 }
+
+/// The offers come from the cache: a sync says when it changed it, so
+/// that offers on screen (for `v:` typed before the first sync was over)
+/// are asked for again.
+#[tokio::test]
+async fn a_sync_says_when_it_changed_the_offers() {
+    let (server, items) = seeded_server();
+    {
+        let mut st = server.state();
+        let it = st.items.iter_mut().find(|i| i.item.id == items[0].id).unwrap();
+        it.item.vibe = Some("grumpy".into());
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    let offered =
+        |lib: &StickpileLibrary| -> Vec<String> { lib.hints("v:".into()).into_iter().map(|h| h.label).collect() };
+    assert!(!offered(&lib).contains(&"grumpy".to_string()), "nothing cached yet");
+    assert!(!lib.sync_state().cache_changed);
+
+    let state = lib.sync_if_due().await.unwrap();
+    assert!(state.cache_changed, "the first sync fills the cache");
+    assert!(offered(&lib).contains(&"grumpy".to_string()), "{:?}", offered(&lib));
+
+    assert!(!lib.sync_if_due().await.unwrap().cache_changed, "none was due");
+    assert!(
+        !lib.sync_now().await.unwrap().cache_changed,
+        "nothing new on the server"
+    );
+    server.state().rename_item(&items[1].id, "naahh bro");
+    assert!(lib.sync_now().await.unwrap().cache_changed);
+}
