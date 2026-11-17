@@ -134,3 +134,8 @@ opt-level = 2
 # seconds per animated Signal sticker in tests and debug servers.
 [profile.dev.package.stickpile-media]
 opt-level = 2
+
+# The same for the OCR reader's pixel loops (resizing, contours, crops): a
+# debug server would take seconds per picture.
+[profile.dev.package.stickpile-ai]
+opt-level = 2
