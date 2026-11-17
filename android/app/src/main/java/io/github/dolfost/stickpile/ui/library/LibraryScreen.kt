@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -64,6 +67,8 @@ import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.ui.common.FailureLog
+import io.github.dolfost.stickpile.ui.common.KeepDialog
+import io.github.dolfost.stickpile.ui.common.ReleaseDialog
 import io.github.dolfost.stickpile.ui.common.Loading
 import io.github.dolfost.stickpile.ui.common.catching
 import io.github.dolfost.stickpile.ui.common.text
@@ -93,6 +98,9 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
     var searchFocused by remember { mutableStateOf(false) }
     var sheet by rememberSaveable { mutableStateOf<LibrarySheet?>(null) }
+
+    // Stop keeping the open pack offline? Asked first.
+    var releasePack by rememberSaveable { mutableStateOf(false) }
 
     // A message that replaces the one shown.
     fun notify(text: String) {
@@ -171,7 +179,15 @@ fun LibraryScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             val pack = state.pack
             // Also while searching: the search looks inside this pack.
-            if (pack != null) PackHeader(pack, onBack = { vm.closePack() })
+            if (pack != null) {
+                PackHeader(
+                    pack,
+                    kept = state.packKept,
+                    onBack = { vm.closePack() },
+                    onKeep = vm::askKeepPack,
+                    onRelease = { releasePack = true },
+                )
+            }
             val content = state.content
             val offline = (content as? LibraryContent.Items)?.offline ?: (content as? LibraryContent.Packs)?.offline ?: false
             if (offline) OfflineNotice()
@@ -187,7 +203,7 @@ fun LibraryScreen(
                     LibraryContent.Loading -> Loading()
                     is LibraryContent.Items -> when {
                         content.items.isNotEmpty() ->
-                            ItemGrid(content.items, library, display, state.preparing, vm::share, vm::showDetails)
+                            ItemGrid(content.items, library, display, state.preparing, state.marks, vm::share, vm::showDetails)
                         content.hidden > 0 ->
                             Empty(pluralStringResource(R.plurals.display_hidden_by_safe_mode, content.hidden, content.hidden))
                         else -> Empty(stringResource(emptyText(state.request, display.safeMode)))
@@ -214,6 +230,21 @@ fun LibraryScreen(
             onLike = vm::toggleLike,
             onOpen = { url -> if (!openPage(context, url)) notify(resources.getString(R.string.library_open_failed)) },
             onSearch = vm::searchNow,
+            onKeep = vm::toggleKeep,
+        )
+    }
+    state.keepAsk?.let { ask ->
+        KeepDialog(ask, vm.mobileData(), onConfirm = vm::confirmKeep, onDismiss = vm::dismissKeep)
+    }
+    val open = state.pack
+    if (releasePack && open != null) {
+        ReleaseDialog(
+            open.name,
+            onConfirm = {
+                releasePack = false
+                vm.releasePack()
+            },
+            onDismiss = { releasePack = false },
         )
     }
     when (sheet) {
@@ -245,13 +276,37 @@ private fun emptyText(request: LibraryRequest, safeMode: Boolean): Int = when (r
     is LibraryRequest.PackItems -> R.string.library_empty_pack
 }
 
+/**
+ * The open pack: back to the list, its name, and keeping it offline
+ * ([kept]: it is, null: not known yet): "Keep offline", or "Kept offline"
+ * that offers to stop.
+ */
 @Composable
-private fun PackHeader(pack: Pack, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun PackHeader(pack: Pack, kept: Boolean?, onBack: () -> Unit, onKeep: () -> Unit, onRelease: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.library_all_packs))
         }
-        Text(pack.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            pack.name,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        when (kept) {
+            null -> Unit
+            false -> TextButton(onClick = onKeep) {
+                Icon(painterResource(R.drawable.ic_offline), contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(stringResource(R.string.offline_keep))
+            }
+            true -> TextButton(onClick = onRelease) {
+                Icon(painterResource(R.drawable.ic_offline_done), contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(stringResource(R.string.offline_pack_kept))
+            }
+        }
     }
 }
 

@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Autoplay
 import io.github.dolfost.stickpile.display.ItemLabels
+import io.github.dolfost.stickpile.offline.KeepAction
+import io.github.dolfost.stickpile.offline.OfflineLabels
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import kotlinx.coroutines.launch
@@ -47,7 +49,8 @@ import kotlinx.coroutines.launch
  * and the words in the picture (line breaks kept). A tap on a vibe, emoji
  * or tag searches for it ([onSearch]
  * gets the query). Share, Like or Unlike, and Open in browser when the
- * item has a web page.
+ * item has a web page; Keep offline, or Don't keep offline for a sticker kept
+ * by itself, and why it is kept.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -60,6 +63,7 @@ internal fun DetailsSheet(
     onLike: (Item) -> Unit,
     onOpen: (String) -> Unit,
     onSearch: (String) -> Unit,
+    onKeep: (Item) -> Unit,
 ) {
     val item = details.item
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -101,6 +105,15 @@ internal fun DetailsSheet(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                    val reasons = details.reasons.orEmpty()
+                    if (reasons.isNotEmpty()) {
+                        val why = OfflineLabels.reasons(reasons).map { stringResource(it) }.joinToString(", ")
+                        Text(
+                            stringResource(R.string.offline_reasons, why),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -112,6 +125,13 @@ internal fun DetailsSheet(
                         ButtonLabel(R.drawable.ic_heart, stringResource(R.string.library_unlike))
                     } else {
                         ButtonLabel(R.drawable.ic_heart_outline, stringResource(R.string.library_like))
+                    }
+                }
+                details.reasons?.let { reasons ->
+                    val action = OfflineLabels.stickerAction(reasons)
+                    OutlinedButton(onClick = { onKeep(item) }) {
+                        val icon = if (action == KeepAction.KEEP) R.drawable.ic_offline else R.drawable.ic_offline_done
+                        ButtonLabel(icon, stringResource(OfflineLabels.label(action)))
                     }
                 }
                 details.url?.let { url ->

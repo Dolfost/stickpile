@@ -8,9 +8,15 @@ import androidx.lifecycle.viewModelScope
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.SafeMode
+import io.github.dolfost.stickpile.offline.KeepAction
+import io.github.dolfost.stickpile.offline.KeepAsk
+import io.github.dolfost.stickpile.offline.OfflineLabels
+import io.github.dolfost.stickpile.offline.OfflineMarks
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
+import io.github.dolfost.stickpile.rust.KeepReason
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
+import io.github.dolfost.stickpile.rust.OfflineScope
 import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchHint
@@ -109,8 +115,12 @@ sealed interface LibraryContent {
     data class Failed(val message: Message, val signInAgain: Boolean) : LibraryContent
 }
 
-/** The item whose details are open, and its page in the web UI (null: none, or not known yet). */
-data class Details(val item: Item, val url: String? = null)
+/**
+ * The item whose details are open, its page in the web UI (null: none, or
+ * not known yet), and why it is kept offline (empty: it is not; null: not
+ * known yet).
+ */
+data class Details(val item: Item, val url: String? = null, val reasons: List<KeepReason>? = null)
 
 data class LibraryState(
     val query: String = "",
@@ -125,6 +135,12 @@ data class LibraryState(
     /** The offers under the search field: for [query], or for a moment for the text before it. */
     val hints: List<SearchHint> = emptyList(),
     val details: Details? = null,
+    /** Which tiles work without the server, and whether it is away now. */
+    val marks: OfflineMarks = OfflineMarks(),
+    /** The open pack is kept offline; null: not known (yet). */
+    val packKept: Boolean? = null,
+    /** Asking before the open pack is kept: what it would take. */
+    val keepAsk: KeepAsk? = null,
 ) {
     val request: LibraryRequest get() = requestFor(query, tab, pack)
 }
@@ -145,7 +161,11 @@ sealed interface LibraryEvent {
  * background ([io.github.dolfost.stickpile.StickpileApp.refreshLikes]).
  * The offers come from the offline cache: a sync that changed it (counted
  * in [cacheChanges], the refresh's too) asks for them again, the text as
- * it is. The non-suspend library calls run on [io].
+ * it is. Keeping offline (docs/offline.md): a sticker from its details, a
+ * pack from its header (its estimate first); after a keep
+ * [requestOfflineRun] lets the downloads run, [mobileData] says on which
+ * networks. Each list asks which of its stickers work without the server,
+ * for the tiles' marks. The non-suspend library calls run on [io].
  */
 @OptIn(FlowPreview::class)
 class LibraryViewModel(
@@ -155,6 +175,8 @@ class LibraryViewModel(
     private val cacheChanges: CacheChanges = CacheChanges(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val log: FailureLog = FailureLog.android,
+    private val requestOfflineRun: () -> Unit = {},
+    val mobileData: () -> Boolean = { false },
 ) : ViewModel() {
 
     var state: LibraryState by mutableStateOf(LibraryState())
@@ -228,14 +250,15 @@ class LibraryViewModel(
     }
 
     fun openPack(pack: Pack) {
-        state = state.copy(pack = pack)
+        state = state.copy(pack = pack, packKept = null)
         request(typed = false)
+        loadPackKept(pack)
     }
 
     /** Back from a pack to the list of packs; false when no pack is open. */
     fun closePack(): Boolean {
         if (state.pack == null) return false
-        state = state.copy(pack = null)
+        state = state.copy(pack = null, packKept = null, keepAsk = null)
         request(typed = false)
         return true
     }
@@ -252,7 +275,7 @@ class LibraryViewModel(
      * is loaded again to show them.
      */
     fun resumed() {
-        if (state.request == LibraryRequest.Recent) reload()
+        if (state.request == LibraryRequest.Recent) reload() else loadMarks()
         val reading = refreshLikes() ?: return
         viewModelScope.launch {
             reading.join()
@@ -301,7 +324,7 @@ class LibraryViewModel(
         }
     }
 
-    /** Open [item]'s details; its web page is looked up meanwhile. */
+    /** Open [item]'s details; its web page and why it is kept offline are looked up meanwhile. */
     fun showDetails(item: Item) {
         state = state.copy(details = Details(item))
         viewModelScope.launch {
@@ -309,10 +332,140 @@ class LibraryViewModel(
             val open = state.details
             if (open != null && open.item.id == item.id) state = state.copy(details = open.copy(url = url))
         }
+        loadReasons(item.id)
     }
 
     fun hideDetails() {
         state = state.copy(details = null)
+    }
+
+    // -- keeping offline ------------------------------------------------------------
+
+    /**
+     * Keep [item] offline by itself, or stop (the details offer it as
+     * [OfflineLabels.stickerAction] says); the downloads run after a keep.
+     */
+    fun toggleKeep(item: Item) {
+        val reasons = state.details?.takeIf { it.item.id == item.id }?.reasons ?: return
+        val action = OfflineLabels.stickerAction(reasons)
+        val scope = OfflineScope.Sticker(item.id)
+        viewModelScope.launch {
+            catching {
+                if (action == KeepAction.KEEP) library.keepOffline(scope) else library.releaseOffline(scope)
+            }.fold(
+                onSuccess = {
+                    if (action == KeepAction.KEEP) requestOfflineRun()
+                    val text = if (action == KeepAction.KEEP) R.string.offline_kept_notice else R.string.offline_released_notice
+                    events.send(LibraryEvent.Notice(Message(text, listOf(item.name))))
+                    loadReasons(item.id)
+                    loadMarks()
+                },
+                onFailure = { e -> notice(Doing.KEEPING_OFFLINE, e) },
+            )
+        }
+    }
+
+    /** Keep the open pack offline? Its estimate first ([LibraryState.keepAsk]). */
+    fun askKeepPack() {
+        val pack = state.pack ?: return
+        if (state.keepAsk != null) return
+        val scope = OfflineScope.Pack(pack.id)
+        state = state.copy(keepAsk = KeepAsk(scope, pack.name))
+        viewModelScope.launch {
+            catching { library.offlineEstimate(scope) }.fold(
+                onSuccess = { e ->
+                    val ask = state.keepAsk
+                    if (ask != null && ask.scope == scope) state = state.copy(keepAsk = ask.copy(estimate = e))
+                },
+                onFailure = { e ->
+                    state = state.copy(keepAsk = null)
+                    notice(Doing.KEEPING_OFFLINE, e)
+                },
+            )
+        }
+    }
+
+    fun dismissKeep() {
+        state = state.copy(keepAsk = null)
+    }
+
+    /** The pack asked about is kept; the downloads run when the platform allows. */
+    fun confirmKeep() {
+        val ask = state.keepAsk ?: return
+        state = state.copy(keepAsk = null)
+        viewModelScope.launch {
+            catching { library.keepOffline(ask.scope) }.fold(
+                onSuccess = {
+                    requestOfflineRun()
+                    events.send(LibraryEvent.Notice(Message(R.string.offline_kept_notice, listOf(ask.name.orEmpty()))))
+                    state.pack?.let(::loadPackKept)
+                    loadMarks()
+                },
+                onFailure = { e -> notice(Doing.KEEPING_OFFLINE, e) },
+            )
+        }
+    }
+
+    /** The open pack is no longer kept (asked first); its files stay until the space is needed. */
+    fun releasePack() {
+        val pack = state.pack ?: return
+        viewModelScope.launch {
+            catching { library.releaseOffline(OfflineScope.Pack(pack.id)) }.fold(
+                onSuccess = {
+                    events.send(LibraryEvent.Notice(Message(R.string.offline_released_notice, listOf(pack.name))))
+                    loadPackKept(pack)
+                    loadMarks()
+                },
+                onFailure = { e -> notice(Doing.KEEPING_OFFLINE, e) },
+            )
+        }
+    }
+
+    private fun loadReasons(itemId: String) {
+        viewModelScope.launch {
+            val reasons = withContext(io) {
+                catching { library.offlineReasons(itemId) }.onFailure { log.failed(Doing.LOADING, it) }.getOrNull()
+            } ?: return@launch
+            val open = state.details
+            if (open != null && open.item.id == itemId) state = state.copy(details = open.copy(reasons = reasons))
+        }
+    }
+
+    private fun loadPackKept(pack: Pack) {
+        viewModelScope.launch {
+            val keeps = withContext(io) {
+                catching { library.offlineKeeps() }.onFailure { log.failed(Doing.LOADING, it) }.getOrNull()
+            } ?: return@launch
+            if (state.pack?.id == pack.id) {
+                state = state.copy(packKept = OfflineLabels.kept(OfflineScope.Pack(pack.id), keeps))
+            }
+        }
+    }
+
+    private var marksJob: Job? = null
+
+    /**
+     * Which stickers of the list shown work without the server (as a tap
+     * shares them: any app, any picture or video, [SHARE_TYPES]), and whether the
+     * server is away now.
+     */
+    private fun loadMarks() {
+        marksJob?.cancel()
+        val shown = answer
+        if (shown !is LibraryContent.Items) {
+            state = state.copy(marks = OfflineMarks())
+            return
+        }
+        val ids = shown.items.map { it.id }
+        marksJob = viewModelScope.launch {
+            val marks = withContext(io) {
+                catching {
+                    val available = library.availableOffline(ids, "", SHARE_TYPES, false)
+                    OfflineMarks.of(ids, available, shown.offline || library.serverUnreachable())
+                }.onFailure { log.failed(Doing.LOADING, it) }.getOrNull()
+            } ?: return@launch
+            if (answer === shown) state = state.copy(marks = marks)
+        }
     }
 
     private fun request(typed: Boolean) {
@@ -322,7 +475,10 @@ class LibraryViewModel(
     private suspend fun load(request: LibraryRequest) {
         // A reload or a refined search keeps the old list until the new
         // one is there; anything else (another tab or pack) starts empty.
-        if (!refines(shown, request)) show(LibraryContent.Loading)
+        if (!refines(shown, request)) {
+            show(LibraryContent.Loading)
+            state = state.copy(marks = OfflineMarks())
+        }
         shown = request
         val result = catching { fetch(request) }
         show(
@@ -333,6 +489,7 @@ class LibraryViewModel(
                 LibraryContent.Failed(messageFor(failure, Doing.LOADING), signInAgain = gone)
             },
         )
+        loadMarks()
     }
 
     private suspend fun fetch(request: LibraryRequest): LibraryContent = when (request) {

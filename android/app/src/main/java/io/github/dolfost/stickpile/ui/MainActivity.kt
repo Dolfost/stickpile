@@ -176,7 +176,14 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
             if (library == null) return Loading()
             val app = StickpileApp.from(LocalContext.current)
             val screen = viewModel(key = "library-${vm.session}") {
-                LibraryViewModel(library, app.display.state, refreshLikes = app::refreshLikes, cacheChanges = app.cacheChanges)
+                LibraryViewModel(
+                    library,
+                    app.display.state,
+                    refreshLikes = app::refreshLikes,
+                    cacheChanges = app.cacheChanges,
+                    requestOfflineRun = { app.requestOfflineRun() },
+                    mobileData = { app.offline.current.options.mobileData },
+                )
             }
             LibraryScreen(
                 vm = screen,

@@ -216,7 +216,7 @@ class LibrarySearchAndSafeModeTest {
         advanceUntilIdle()
         val liked = cat.copy(liked = true, likes = 1u)
         assertEquals(LibraryContent.Items(listOf(liked, item("dog")), offline = false), vm.state.content)
-        assertEquals(Details(liked, url = "https://s.example/items/cat"), vm.state.details)
+        assertEquals(Details(liked, url = "https://s.example/items/cat", reasons = emptyList()), vm.state.details)
         assertEquals(listOf("toggleLike cat"), library.calls)
 
         library.toggleLike = { false }
@@ -231,7 +231,7 @@ class LibrarySearchAndSafeModeTest {
         vm.showDetails(cat)
         assertEquals(Details(cat), vm.state.details)
         advanceUntilIdle()
-        assertEquals(Details(cat, url = "https://s.example/items/cat"), vm.state.details)
+        assertEquals(Details(cat, url = "https://s.example/items/cat", reasons = emptyList()), vm.state.details)
         vm.hideDetails()
         assertNull(vm.state.details)
     }

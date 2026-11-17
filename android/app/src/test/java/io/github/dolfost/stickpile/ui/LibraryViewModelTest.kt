@@ -2,7 +2,11 @@ package io.github.dolfost.stickpile.ui
 
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Display
+import io.github.dolfost.stickpile.offline.KeepAsk
 import io.github.dolfost.stickpile.rust.ItemList
+import io.github.dolfost.stickpile.rust.KeepReason
+import io.github.dolfost.stickpile.rust.LibraryException
+import io.github.dolfost.stickpile.rust.OfflineScope
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.ui.common.Message
 import io.github.dolfost.stickpile.ui.library.LibraryContent
@@ -306,5 +310,109 @@ class LibraryViewModelTest {
         advanceUntilIdle()
         assertEquals(LibraryEvent.Notice(Message(R.string.app_error_unreachable)), vm.eventFlow.first())
         assertEquals(listOf("syncNow", "recent"), library.calls)
+    }
+
+    // -- keeping offline ------------------------------------------------------------
+
+    @Test
+    fun aStickersDetailsKeepItOfflineAndThenOfferToStop() = runTest(main.dispatcher) {
+        var runs = 0
+        val vm = LibraryViewModel(
+            library,
+            MutableStateFlow(Display()),
+            io = main.dispatcher,
+            log = { _, _ -> },
+            requestOfflineRun = { runs++ },
+        )
+        vm.state // create it
+        advanceUntilIdle()
+        val cat = item("cat", name = "grumpy cat")
+        vm.showDetails(cat)
+        advanceUntilIdle()
+        assertEquals(emptyList<KeepReason>(), vm.state.details?.reasons)
+
+        vm.toggleKeep(cat)
+        advanceUntilIdle()
+        assertEquals(listOf<OfflineScope>(OfflineScope.Sticker("cat")), library.keeps)
+        assertEquals(1, runs)
+        assertEquals(listOf(KeepReason.STICKER), vm.state.details?.reasons)
+        assertEquals(
+            LibraryEvent.Notice(Message(R.string.offline_kept_notice, listOf("grumpy cat"))),
+            vm.eventFlow.first(),
+        )
+
+        vm.toggleKeep(cat)
+        advanceUntilIdle()
+        assertTrue(library.keeps.isEmpty())
+        assertEquals(1, runs)
+        assertEquals(
+            LibraryEvent.Notice(Message(R.string.offline_released_notice, listOf("grumpy cat"))),
+            vm.eventFlow.first(),
+        )
+    }
+
+    @Test
+    fun aPackIsKeptAfterItsEstimate() = runTest(main.dispatcher) {
+        var runs = 0
+        val vm = LibraryViewModel(
+            library,
+            MutableStateFlow(Display()),
+            io = main.dispatcher,
+            log = { _, _ -> },
+            requestOfflineRun = { runs++ },
+        )
+        vm.state // create it
+        advanceUntilIdle()
+        val cats = pack("cats")
+        vm.openPack(cats)
+        advanceUntilIdle()
+        assertEquals(false, vm.state.packKept)
+
+        vm.askKeepPack()
+        assertEquals(KeepAsk(OfflineScope.Pack("cats"), "Pack cats"), vm.state.keepAsk)
+        advanceUntilIdle()
+        assertEquals(sampleEstimate(), vm.state.keepAsk?.estimate)
+        assertTrue("offlineEstimate Pack(packId=cats)" in library.calls)
+        assertTrue("nothing kept yet", library.keeps.isEmpty())
+
+        vm.confirmKeep()
+        advanceUntilIdle()
+        assertEquals(listOf<OfflineScope>(OfflineScope.Pack("cats")), library.keeps)
+        assertEquals(true, vm.state.packKept)
+        assertNull(vm.state.keepAsk)
+        assertEquals(1, runs)
+
+        vm.releasePack()
+        advanceUntilIdle()
+        assertTrue(library.keeps.isEmpty())
+        assertEquals(false, vm.state.packKept)
+    }
+
+    @Test
+    fun eachListAsksWhichOfItsStickersWorkOffline() = runTest(main.dispatcher) {
+        library.recent = { listOf(item("a"), item("b")) }
+        library.available = setOf("a")
+        val vm = started()
+        val marks = vm.state.marks
+        assertTrue(marks.known)
+        assertEquals(setOf("a"), marks.available)
+        assertFalse(marks.unreachable)
+        vm.state.content.let { assertTrue(it is LibraryContent.Items) }
+
+        // A list from the cache: the server is away, so what is not here is dimmed.
+        library.search = { ItemList(listOf(item("a"), item("b")), offline = true) }
+        vm.searchNow("cat")
+        advanceUntilIdle()
+        assertTrue(vm.state.marks.unreachable)
+        assertEquals("'' [image/*, video/*]", library.marksAsked.last())
+    }
+
+    @Test
+    fun aStickerNotOnThePhoneIsExplainedWhenShared() = runTest(main.dispatcher) {
+        library.prepare = { throw LibraryException.NotOnDevice("grumpy cat: not on this device") }
+        val vm = started()
+        vm.share(item("cat"))
+        advanceUntilIdle()
+        assertEquals(LibraryEvent.Notice(Message(R.string.app_error_not_on_device)), vm.eventFlow.first())
     }
 }

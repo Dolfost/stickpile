@@ -31,6 +31,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeJoin
@@ -62,6 +63,8 @@ import io.github.dolfost.stickpile.ime.TileInfo as LineFit
 import io.github.dolfost.stickpile.motion.LoopingVideoView
 import io.github.dolfost.stickpile.motion.MotionPolicy
 import io.github.dolfost.stickpile.motion.Motions
+import io.github.dolfost.stickpile.offline.OfflineMark
+import io.github.dolfost.stickpile.offline.OfflineMarks
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.MotionKind
@@ -91,6 +94,7 @@ internal fun ItemGrid(
     library: StickpileLibraryInterface,
     display: Display,
     preparing: String?,
+    marks: OfflineMarks,
     onShare: (Item) -> Unit,
     onDetails: (Item) -> Unit,
 ) {
@@ -131,14 +135,20 @@ internal fun ItemGrid(
                         .semantics { contentDescription = item.name },
                     contentAlignment = Alignment.Center,
                 ) {
-                    ItemPicture(library, item, display.autoplay, tileDp)
-                    TileOverlays(info)
+                    val mark = marks.of(item.id, display)
+                    Box(Modifier.alpha(if (mark == OfflineMark.UNAVAILABLE) UNAVAILABLE_ALPHA else 1f)) {
+                        ItemPicture(library, item, display.autoplay, tileDp)
+                    }
+                    TileOverlays(info, mark)
                     if (preparing == item.id) CircularProgressIndicator(Modifier.size(32.dp))
                 }
             }
         }
     }
 }
+
+/** How visible a sticker that is not on the phone is, with the server unreachable. */
+private const val UNAVAILABLE_ALPHA = 0.35f
 
 /** More columns than this: the tiles stand closer. */
 private const val TIGHT_ABOVE = 4
@@ -148,7 +158,7 @@ private const val TIGHT_ABOVE = 4
  * bottom; nothing has a background ([TileIcons], [HaloLine]).
  */
 @Composable
-private fun BoxScope.TileOverlays(info: TileInfo) {
+private fun BoxScope.TileOverlays(info: TileInfo, mark: OfflineMark) {
     if (info.badge != null || info.nsfw) {
         Row(
             Modifier.align(Alignment.TopStart).padding(4.dp),
@@ -159,12 +169,20 @@ private fun BoxScope.TileOverlays(info: TileInfo) {
             if (info.nsfw) TileIcon(TileIcons.NSFW, stringResource(R.string.display_nsfw_badge))
         }
     }
-    if (info.liked) {
-        TileIcon(
-            TileIcons.LIKED,
-            stringResource(R.string.display_liked_by_you),
+    if (info.liked || mark != OfflineMark.NONE) {
+        Row(
             Modifier.align(Alignment.TopEnd).padding(4.dp),
-        )
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when (mark) {
+                OfflineMark.AVAILABLE -> TileIcon(TileIcons.OFFLINE, stringResource(R.string.offline_mark_available))
+                OfflineMark.UNAVAILABLE ->
+                    TileIcon(TileIcons.UNAVAILABLE, stringResource(R.string.offline_mark_unavailable))
+                OfflineMark.NONE -> Unit
+            }
+            if (info.liked) TileIcon(TileIcons.LIKED, stringResource(R.string.display_liked_by_you))
+        }
     }
     if (info.hasBand) {
         Column(
