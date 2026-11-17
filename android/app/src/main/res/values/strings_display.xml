@@ -24,6 +24,7 @@
     <string name="display_field_emojis">Emojis</string>
     <string name="display_field_vibe">Vibe</string>
     <string name="display_field_tags">Tags</string>
+    <string name="display_field_text">Text in the picture</string>
     <string name="display_field_size">Format and resolution</string>
     <string name="display_field_copies">Times copied</string>
     <string name="display_field_likes">Likes</string>

@@ -8,8 +8,11 @@ import io.github.dolfost.stickpile.rust.MediaKind
  * One piece of information the item tiles can show over the thumbnail, in
  * the app and in the keyboard alike (the desktop's `zf`, `ze`, `zt`, `zv`
  * and `zi`, split finer). Each can be hidden on its own.
+ *
+ * @property startsOn shown until the user turns it off; the others
+ *   ([TEXT]) are off until turned on.
  */
-enum class TileField {
+enum class TileField(val startsOn: Boolean = true) {
     /** The kind of a moving item (GIF, WEBP, VIDEO) and the NSFW mark, in the top corner. */
     BADGES,
 
@@ -22,6 +25,12 @@ enum class TileField {
     VIBE,
     TAGS,
 
+    /**
+     * The words in the picture ([Item.text]) on one line. Off at first:
+     * it is drawn over the picture whose words it repeats.
+     */
+    TEXT(startsOn = false),
+
     /** The format and resolution: "PNG 512x512". */
     SIZE,
 
@@ -33,6 +42,30 @@ enum class TileField {
 
     /** The server's quality score ([Item.quality]). */
     QUALITY,
+    ;
+
+    /** See [TileField.stored]. */
+    data class Stored(val hidden: Set<String>, val shown: Set<String>)
+
+    companion object {
+        /** What the tiles show before the user changed anything. */
+        val DEFAULTS: Set<TileField> = entries.filter { it.startsOn }.toSet()
+
+        /**
+         * [fields] as [DisplaySettings] keeps them: the names of the fields
+         * that start on and are off, and of those that start off and are
+         * on. Kept apart, so that a field added later starts as it should
+         * (on, or off like [TEXT]) for those who changed others before.
+         */
+        fun stored(fields: Set<TileField>): Stored = Stored(
+            hidden = entries.filter { it.startsOn && it !in fields }.map { it.name }.toSet(),
+            shown = entries.filter { !it.startsOn && it in fields }.map { it.name }.toSet(),
+        )
+
+        /** The fields shown, from what [stored] kept (unknown names are ignored). */
+        fun fromStored(stored: Stored): Set<TileField> =
+            entries.filter { if (it.startsOn) it.name !in stored.hidden else it.name in stored.shown }.toSet()
+    }
 }
 
 /**
@@ -102,7 +135,7 @@ enum class AppTheme {
 data class Display(
     val safeMode: Boolean = false,
     val showInfo: Boolean = true,
-    val fields: Set<TileField> = TileField.entries.toSet(),
+    val fields: Set<TileField> = TileField.DEFAULTS,
     /** Stickers in a row with the phone upright ([Columns]). */
     val columns: Int = Columns.DEFAULT,
     val autoplay: Autoplay = Autoplay.ALWAYS,
@@ -189,6 +222,14 @@ object ItemLabels {
     /** The emojis run together: "😂🐱"; null for none. */
     fun emojis(item: Item): String? = item.emojis.map { it.trim() }.filter { it.isNotEmpty() }
         .takeIf { it.isNotEmpty() }?.joinToString("")
+
+    /**
+     * The words in the picture on one line, as a tile shows them: its
+     * lines trimmed, the empty ones dropped, joined with " / "; null for
+     * none ("NO THOUGHTS / head empty").
+     */
+    fun text(item: Item): String? = item.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        .takeIf { it.isNotEmpty() }?.joinToString(" / ")
 
     /** The tags as "#reaction #cat"; null for none. */
     fun tags(item: Item): String? = item.tags.map { it.trim() }.filter { it.isNotEmpty() }

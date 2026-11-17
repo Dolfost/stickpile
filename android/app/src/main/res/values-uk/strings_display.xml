@@ -21,6 +21,7 @@
     <string name="display_field_emojis">Емодзі</string>
     <string name="display_field_vibe">Настрій</string>
     <string name="display_field_tags">Теги</string>
+    <string name="display_field_text">Текст на картинці</string>
     <string name="display_field_size">Формат і роздільність</string>
     <string name="display_field_copies">Скільки разів скопійовано</string>
     <string name="display_field_likes">Вподобання</string>

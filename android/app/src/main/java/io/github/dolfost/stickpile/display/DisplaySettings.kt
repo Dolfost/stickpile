@@ -47,7 +47,9 @@ class DisplaySettings(context: Context) {
         prefs.edit {
             putBoolean(SAFE_MODE, display.safeMode)
             putBoolean(SHOW_INFO, display.showInfo)
-            putStringSet(HIDDEN_FIELDS, (TileField.entries - display.fields).map { it.name }.toSet())
+            val fields = TileField.stored(display.fields)
+            putStringSet(HIDDEN_FIELDS, fields.hidden)
+            putStringSet(SHOWN_FIELDS, fields.shown)
             putInt(COLUMNS, display.columns)
             remove(OLD_TILE_SIZE)
             putString(AUTOPLAY, display.autoplay.name)
@@ -60,8 +62,13 @@ class DisplaySettings(context: Context) {
         const val SAFE_MODE = "safe_mode"
         const val SHOW_INFO = "show_info"
 
-        /** The fields turned off (so that a field added later starts on). */
+        /**
+         * The fields turned off of those that start on (so that a field
+         * added later starts on), and the ones turned on of those that
+         * start off ([TileField.startsOn], [TileField.stored]).
+         */
         const val HIDDEN_FIELDS = "hidden_fields"
+        const val SHOWN_FIELDS = "shown_fields"
         const val COLUMNS = "columns"
 
         /** The size of the tiles before [COLUMNS]: read once for the columns it gave. */
@@ -71,11 +78,14 @@ class DisplaySettings(context: Context) {
 
         fun read(prefs: SharedPreferences): Display {
             val defaults = Display()
-            val hidden = prefs.getStringSet(HIDDEN_FIELDS, emptySet()).orEmpty()
+            val stored = TileField.Stored(
+                hidden = prefs.getStringSet(HIDDEN_FIELDS, emptySet()).orEmpty(),
+                shown = prefs.getStringSet(SHOWN_FIELDS, emptySet()).orEmpty(),
+            )
             return Display(
                 safeMode = prefs.getBoolean(SAFE_MODE, defaults.safeMode),
                 showInfo = prefs.getBoolean(SHOW_INFO, defaults.showInfo),
-                fields = TileField.entries.filter { it.name !in hidden }.toSet(),
+                fields = TileField.fromStored(stored),
                 columns = Columns.clamp(
                     if (prefs.contains(COLUMNS)) {
                         prefs.getInt(COLUMNS, defaults.columns)

@@ -86,6 +86,10 @@
             style="@style/Widget.Stickpile.Ime.TileText" />
 
         <io.github.dolfost.stickpile.ime.HaloTextView
+            android:id="@+id/ime_item_text"
+            style="@style/Widget.Stickpile.Ime.TileText" />
+
+        <io.github.dolfost.stickpile.ime.HaloTextView
             android:id="@+id/ime_item_stats"
             style="@style/Widget.Stickpile.Ime.TileText" />
     </LinearLayout>

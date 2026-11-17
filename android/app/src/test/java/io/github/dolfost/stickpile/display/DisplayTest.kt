@@ -47,13 +47,40 @@ class DisplayTest {
     @Test
     fun fieldsHideOneByOneOrAllAtOnce() {
         val d = Display()
-        assertTrue(TileField.entries.all(d::shows))
+        assertTrue(TileField.entries.filter { it != TileField.TEXT }.all(d::shows))
+        assertFalse("the words in the picture are off at first", d.shows(TileField.TEXT))
+        assertTrue(d.with(TileField.TEXT, true).shows(TileField.TEXT))
         val noTags = d.with(TileField.TAGS, false)
         assertFalse(noTags.shows(TileField.TAGS))
         assertTrue(noTags.shows(TileField.NAME))
         assertTrue(noTags.with(TileField.TAGS, true).shows(TileField.TAGS))
         val off = d.copy(showInfo = false)
         assertTrue(TileField.entries.none(off::shows))
+    }
+
+    @Test
+    fun theFieldsAreKeptSoThatNewOnesStartAsTheyShould() {
+        // Nothing stored yet: the defaults, the text off.
+        val none = TileField.Stored(emptySet(), emptySet())
+        assertEquals(TileField.DEFAULTS, TileField.fromStored(none))
+        assertEquals(none, TileField.stored(Display().fields))
+        // Stored before the text field existed (tags turned off): still off.
+        val old = TileField.fromStored(TileField.Stored(setOf("TAGS"), emptySet()))
+        assertEquals(TileField.DEFAULTS - TileField.TAGS, old)
+        // Turned on, it stays on; a field it does not know is ignored.
+        val on = Display().with(TileField.TEXT, true).with(TileField.QUALITY, false).fields
+        val kept = TileField.stored(on)
+        assertEquals(TileField.Stored(setOf("QUALITY"), setOf("TEXT")), kept)
+        assertEquals(on, TileField.fromStored(kept))
+        assertEquals(on, TileField.fromStored(kept.copy(hidden = kept.hidden + "GONE", shown = kept.shown + "NEW")))
+    }
+
+    @Test
+    fun theTextIsOneLine() {
+        val it = item("a").copy(text = " NO THOUGHTS \n\n head empty\n")
+        assertEquals("NO THOUGHTS / head empty", ItemLabels.text(it))
+        assertNull(ItemLabels.text(item("b")))
+        assertNull(ItemLabels.text(item("c").copy(text = " \n ")))
     }
 
     @Test

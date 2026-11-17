@@ -2,8 +2,8 @@
 <!--
   A sticker's details over the picker's grid (ime.DetailsPanel), opened by
   a long press: a bigger thumbnail, the name, set, format and numbers, the
-  vibe, emojis and tags as chips that search for them, and what can be
-  done with it. Clickable, so that taps do not reach the grid under it;
+  vibe, emojis and tags as chips that search for them, the words in the
+  picture, and what can be done with it. Clickable, so that taps do not reach the grid under it;
   opaque, as it covers the grid (lint's overdraw check assumes the
   activities' window theme, which the input method's window does not use).
 -->
@@ -85,6 +85,24 @@
                     android:layout_marginTop="4dp"
                     app:chipSpacingHorizontal="4dp"
                     app:chipSpacingVertical="6dp" />
+
+                <!-- The words in the picture, line breaks kept; gone without any. -->
+                <TextView
+                    android:id="@+id/ime_details_text_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/display_field_text"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/ime_details_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:visibility="gone" />
             </LinearLayout>
         </ScrollView>
     </LinearLayout>

@@ -6,7 +6,7 @@ import io.github.dolfost.stickpile.display.TileField
 import io.github.dolfost.stickpile.rust.Item
 
 /** A line of text at the bottom of a tile, in the order they are drawn. */
-enum class TileLine { NAME, EMOJIS_VIBE, TAGS, STATS }
+enum class TileLine { NAME, EMOJIS_VIBE, TAGS, TEXT, STATS }
 
 /**
  * What a tile of the picker's grid shows over the thumbnail, following
@@ -14,8 +14,11 @@ enum class TileLine { NAME, EMOJIS_VIBE, TAGS, STATS }
  * cell without hiding the sticker. Pure.
  */
 object TileInfo {
-    /** Which lines stay when not all fit: the first ones here. */
-    private val PRIORITY = listOf(TileLine.NAME, TileLine.STATS, TileLine.TAGS, TileLine.EMOJIS_VIBE)
+    /**
+     * Which lines stay when not all fit: the first ones here. The words in
+     * the picture go first, as the picture shows them anyway.
+     */
+    private val PRIORITY = listOf(TileLine.NAME, TileLine.STATS, TileLine.TAGS, TileLine.EMOJIS_VIBE, TileLine.TEXT)
 
     /** The share of a cell's height the lines may cover. */
     private const val COVER = 0.45f
@@ -44,6 +47,7 @@ object TileInfo {
         TileLine.NAME -> display.shows(TileField.NAME) && item.name.isNotBlank()
         TileLine.EMOJIS_VIBE -> emojisAndVibe(item, display) != null
         TileLine.TAGS -> display.shows(TileField.TAGS) && ItemLabels.tags(item) != null
+        TileLine.TEXT -> display.shows(TileField.TEXT) && ItemLabels.text(item) != null
         TileLine.STATS -> display.shows(TileField.SIZE) || ItemLabels.stats(item, display).isNotEmpty()
     }
 }

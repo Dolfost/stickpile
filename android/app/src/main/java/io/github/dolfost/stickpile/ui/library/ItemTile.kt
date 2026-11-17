@@ -176,6 +176,7 @@ private fun BoxScope.TileOverlays(info: TileInfo) {
             info.name?.let { HaloLine(it, weight = FontWeight.SemiBold) }
             info.mood?.let { HaloLine(it) }
             info.tags?.let { HaloLine(it) }
+            info.text?.let { HaloLine(it) }
             if (info.hasStatsLine) StatsLine(info.shape, info.stats)
         }
     }

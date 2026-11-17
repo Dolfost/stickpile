@@ -25,11 +25,12 @@ class LibraryTilesTest {
         copies = 1234u,
         likes = 7u,
         quality = 81u,
+        text = "NO THOUGHTS\nhead empty",
     )
 
     @Test
     fun aTileShowsEveryFieldThatIsOn() {
-        val info = TileInfo.of(gif, Display())
+        val info = TileInfo.of(gif, Display().with(TileField.TEXT, true))
         assertEquals(
             TileInfo(
                 badge = "GIF",
@@ -38,24 +39,29 @@ class LibraryTilesTest {
                 name = "Grumpy",
                 mood = "😾 grumpy",
                 tags = "#cat #nsfw",
+                text = "NO THOUGHTS / head empty",
                 shape = "GIF 320x240",
                 stats = listOf(Stat(TileField.COPIES, "1.2k"), Stat(TileField.LIKES, "7"), Stat(TileField.QUALITY, "81")),
             ),
             info,
         )
         assertTrue(info.hasBand)
+        assertEquals("the text is off at first", null, TileInfo.of(gif, Display()).text)
     }
 
     @Test
     fun fieldsTurnOffOneByOneOrAllAtOnce() {
         val some = Display(fields = setOf(TileField.VIBE, TileField.LIKES))
         assertEquals(
-            TileInfo(null, false, false, null, "grumpy", null, null, listOf(Stat(TileField.LIKES, "7"))),
+            TileInfo(null, false, false, null, "grumpy", null, null, null, listOf(Stat(TileField.LIKES, "7"))),
             TileInfo.of(gif, some),
         )
         val none = TileInfo.of(gif, Display(showInfo = false))
-        assertEquals(TileInfo(null, false, false, null, null, null, null, emptyList()), none)
+        assertEquals(TileInfo(null, false, false, null, null, null, null, null, emptyList()), none)
         assertFalse(none.hasBand)
+        val text = TileInfo.of(gif, Display(fields = setOf(TileField.TEXT)))
+        assertEquals(TileInfo(null, false, false, null, null, null, "NO THOUGHTS / head empty", null, emptyList()), text)
+        assertTrue(text.hasBand)
     }
 
     @Test

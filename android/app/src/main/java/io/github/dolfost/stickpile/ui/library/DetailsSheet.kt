@@ -43,8 +43,9 @@ import kotlinx.coroutines.launch
 /**
  * An item's details, from a long press: a larger picture (moving, as
  * [autoplay] lets it), the name, the
- * pack and its owner, the numbers, and the vibe, emojis, tags and
- * keywords. A tap on a vibe, emoji or tag searches for it ([onSearch]
+ * pack and its owner, the numbers, the vibe, emojis, tags and keywords,
+ * and the words in the picture (line breaks kept). A tap on a vibe, emoji
+ * or tag searches for it ([onSearch]
  * gets the query). Share, Like or Unlike, and Open in browser when the
  * item has a web page.
  */
@@ -128,6 +129,14 @@ internal fun DetailsSheet(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SectionTitle(R.string.library_details_keywords)
                     Text(keywords.joinToString(", "), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            // The words in the picture as they are, line breaks kept.
+            val text = item.text.trim()
+            if (text.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SectionTitle(R.string.display_field_text)
+                    Text(text, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }

@@ -95,6 +95,7 @@ internal class ItemsAdapter(
             TileLine.NAME to view.findViewById(R.id.ime_item_name),
             TileLine.EMOJIS_VIBE to view.findViewById(R.id.ime_item_emojis),
             TileLine.TAGS to view.findViewById(R.id.ime_item_tags),
+            TileLine.TEXT to view.findViewById(R.id.ime_item_text),
             TileLine.STATS to view.findViewById(R.id.ime_item_stats),
         )
         var job: Job? = null
@@ -179,6 +180,7 @@ internal class ItemsAdapter(
                 TileLine.NAME -> item.name
                 TileLine.EMOJIS_VIBE -> TileInfo.emojisAndVibe(item, display)
                 TileLine.TAGS -> ItemLabels.tags(item)
+                TileLine.TEXT -> ItemLabels.text(item)
                 TileLine.STATS -> look.stats(item)
             }
         }

@@ -19,8 +19,9 @@ import kotlinx.coroutines.Job
 /**
  * A sticker's details over the picker's grid, opened by a long press
  * (`ime_details.xml`): a bigger picture (moving, as [MotionBinder] makes
- * it), its name, set and owner, format and size, the numbers, and its
- * vibe, emojis and tags as chips that search for them; and the buttons to
+ * it), its name, set and owner, format and size, the numbers, its vibe,
+ * emojis and tags as chips that search for them, and the words in the
+ * picture (line breaks kept); and the buttons to
  * send it (as a picture or as a sticker), like or unlike it, share it, or
  * close the panel. It shows all of it, whatever the tiles show.
  */
@@ -50,6 +51,8 @@ internal class DetailsPanel(
     private val set: TextView = view.findViewById(R.id.ime_details_set)
     private val facts: TextView = view.findViewById(R.id.ime_details_facts)
     private val chips: ChipGroup = view.findViewById(R.id.ime_details_chips)
+    private val textLabel: TextView = view.findViewById(R.id.ime_details_text_label)
+    private val text: TextView = view.findViewById(R.id.ime_details_text)
     private val like: MaterialButton = view.findViewById(R.id.ime_details_like)
     private var thumbnailJob: Job? = null
     private var motionJob: Job? = null
@@ -78,6 +81,11 @@ internal class DetailsPanel(
         set.text = context.getString(R.string.display_pack_by, item.setName, item.owner)
         showLike(item, liked)
         showChips(item)
+        // The words in the picture as they are, line breaks kept.
+        val words = item.text.trim()
+        text.text = words
+        text.isVisible = words.isNotEmpty()
+        textLabel.isVisible = words.isNotEmpty()
         view.isVisible = true
     }
 

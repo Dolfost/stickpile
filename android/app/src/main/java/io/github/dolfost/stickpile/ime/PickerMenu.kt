@@ -71,6 +71,7 @@ internal object PickerMenu {
         TileField.EMOJIS -> R.string.display_field_emojis
         TileField.VIBE -> R.string.display_field_vibe
         TileField.TAGS -> R.string.display_field_tags
+        TileField.TEXT -> R.string.display_field_text
         TileField.SIZE -> R.string.display_field_size
         TileField.COPIES -> R.string.display_field_copies
         TileField.LIKES -> R.string.display_field_likes
