@@ -75,6 +75,12 @@ proposal that changes nothing is refused. A proposal shows what it would
 change: the stickers with thumbnails, or a table of the current and the
 proposed values.
 
+New stickers proposed through the API carry the `meta` of an upload: a
+`text` in it is kept with the proposal (`ProposedItem.text`) and, once
+accepted, is the sticker's text as the proposer gave it (typed, it is a
+person's and the server never refills it); without one the server reads
+the picture after the accept.
+
 Who may propose: anyone who can read the pack (public, unlisted, or one
 they contribute to) and is not its owner. Contributors propose what their
 permissions do not let them do themselves. Read-only git packs take no

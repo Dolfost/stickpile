@@ -452,8 +452,8 @@ fields: an empty `ai` text means "not set", and the server writes the text
 only while the source is `ai`, from the OCR result of the item's file
 ([ai.md](ai.md#ocr-and-the-text-field)). Any edit by a person makes it
 `user` for good, clearing included: `PATCH` with `text` (`""` too),
-`confirm: ["text"]`, a `text` in the upload's `meta`, an accepted
-proposal, a set.toml `text` without `text_source`
+`confirm: ["text"]`, a `text` in the upload's `meta` (or a proposal's), an
+accepted proposal, a set.toml `text` without `text_source`
 ([set-format.md](set-format.md)). A client shows the AI marker only on a
 non-empty `ai` text. Search matches the text as a field and with `text:`
 ([search.md](search.md#query-syntax)).
@@ -606,9 +606,9 @@ Contributors and proposals, described in [collaboration.md](collaboration.md).
 | `PUT /api/v1/sets/{id}/members/{username}` | `PutMember` -> `Member` | Owner only: add a contributor or change their permissions. 400 for an unknown or disabled user, or the owner. A new contributor's client cache picks the set up on its next sync. |
 | `DELETE /api/v1/sets/{id}/members/{username}` | -> 204 | The owner removes a contributor, or a contributor leaves. Their cache drops the set's items on its next sync. |
 | `POST /api/v1/sets/{id}/proposals` | `NewProposal` -> `Proposal` (201) | Propose a new `name`, `description` or `cover_item_id` (an item of the set) for someone else's set, with a `message`. Values equal to the current ones are left out; nothing left is a 400. |
-| `POST /api/v1/sets/{id}/proposals/items` | multipart -> `Proposal` (201) | Propose new stickers: file parts, an optional `meta` JSON part as for uploads, an optional `message` part. At most 50 files; rate-limited like uploads. |
+| `POST /api/v1/sets/{id}/proposals/items` | multipart -> `Proposal` (201) | Propose new stickers: file parts, an optional `meta` JSON part as for uploads, an optional `message` part. At most 50 files; rate-limited like uploads. A `text` in `meta` is kept (`ProposedItem.text`) and becomes the sticker's text on accept, as the proposer gave it (`user` unless listed in `ai_fields`); without one the server reads the picture. |
 | `POST /api/v1/sets/{id}/proposals/cover` | multipart -> `Proposal` (201) | Propose a cover image: one still image part, an optional `message`. |
-| `POST /api/v1/items/{id}/proposals` | `NewProposal` -> `Proposal` (201) | Propose a new `name`, `keywords`, `emojis`, `tags` or `vibe` for someone else's sticker. 400 if the caller may edit it directly. |
+| `POST /api/v1/items/{id}/proposals` | `NewProposal` -> `Proposal` (201) | Propose a new `name`, `keywords`, `emojis`, `tags`, `vibe` or `text` for someone else's sticker. Values equal to the current ones are left out. 400 if the caller may edit it directly. |
 | `GET /api/v1/proposals?box=&status=&limit=` | -> `[Proposal]` | `incoming` (default: for the sets the caller owns or reviews) or `outgoing` (the caller's own), newest first; `status` is `open`, `accepted`, `declined` or `withdrawn`. |
 | `GET /api/v1/proposals/{id}` | -> `Proposal` | Its proposer, the set's owner and reviewers; 404 for everyone else. |
 | `POST /api/v1/proposals/{id}/accept` | `DecideProposal` -> `Proposal` | Owner or reviewer: makes the change. 409 if the proposal is not open, or the change cannot be made any more (it then stays open). |

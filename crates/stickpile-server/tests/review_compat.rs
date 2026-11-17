@@ -307,6 +307,8 @@ async fn a_proposed_stickers_text_is_kept() {
         .await
         .expect(201)
         .json();
+    // The reviewer sees it.
+    assert_eq!(p.items[0].text, "typed by eve");
     let p: Proposal = srv
         .post(&alice, &routes::path(routes::PROPOSAL_ACCEPT, &[&p.id]), json!({}))
         .await
@@ -318,5 +320,58 @@ async fn a_proposed_stickers_text_is_kept() {
         text_of(&item(&srv, &alice, &id).await),
         ("typed by eve".to_string(), FieldSource::User),
         "the words the proposer typed"
+    );
+}
+
+/// The other ways a proposal gives (or does not give) a sticker its text:
+/// none at all leaves it "not set", so the reader fills it once the
+/// sticker is accepted; an unapproved suggestion stays the computer's (so
+/// the reader may replace it); an empty typed text is the proposer's.
+#[tokio::test]
+async fn a_proposed_sticker_without_a_typed_text_is_read() {
+    let srv = ocr_server().await;
+    let alice = srv.user("alice").await;
+    let eve = srv.user("eve").await;
+    let set = srv.create_set(&alice, "public", Visibility::Public).await;
+    let meta = json!([
+        {"name": "none"},
+        {"name": "suggested", "text": "a guess", "ai_fields": ["text"]},
+        {"name": "cleared", "text": ""},
+    ]);
+    let mut form = reqwest::multipart::Form::new();
+    for (i, name) in ["a.png", "b.png", "c.png"].into_iter().enumerate() {
+        form = form.part(
+            "file",
+            reqwest::multipart::Part::bytes(png(i as u64 + 1)).file_name(name.to_string()),
+        );
+    }
+    let form = form.text("meta", meta.to_string());
+    let rb = srv
+        .client
+        .post(srv.url(&routes::path(routes::SET_PROPOSAL_ITEMS, &[&set.id])))
+        .bearer_auth(&eve.token);
+    let p: Proposal = common::read(rb.multipart(form).send().await.unwrap())
+        .await
+        .expect(201)
+        .json();
+    let shown: Vec<&str> = p.items.iter().map(|i| i.text.as_str()).collect();
+    assert_eq!(shown, vec!["", "a guess", ""]);
+    let p: Proposal = srv
+        .post(&alice, &routes::path(routes::PROPOSAL_ACCEPT, &[&p.id]), json!({}))
+        .await
+        .expect(200)
+        .json();
+    srv.run_jobs().await;
+    let mut texts = Vec::new();
+    for it in &p.items {
+        texts.push(text_of(&item(&srv, &alice, it.item_id.as_deref().unwrap()).await));
+    }
+    assert_eq!(
+        texts,
+        vec![
+            (READ.to_string(), FieldSource::Ai),
+            (READ.to_string(), FieldSource::Ai),
+            (String::new(), FieldSource::User),
+        ]
     );
 }

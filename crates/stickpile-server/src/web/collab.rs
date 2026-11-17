@@ -282,6 +282,7 @@ pub fn proposal_card(ctx: &Ctx, p: &Proposal, link: bool) -> Markup {
                                     strong { (it.name) }
                                     @if !it.emojis.is_empty() { " " (it.emojis.concat()) }
                                     @if !it.tags.is_empty() { br; span.muted.small { (it.tags.join(", ")) } }
+                                    @if !it.text.is_empty() { br; span.small.item-text { (it.text) } }
                                 }
                             }
                         }

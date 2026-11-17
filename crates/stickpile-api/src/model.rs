@@ -661,6 +661,12 @@ pub struct ProposedItem {
     pub emojis: Vec<String>,
     pub tags: Vec<String>,
     pub vibe: Option<String>,
+    /// The words in the picture as the proposer gave them (`text` in the
+    /// proposal's `meta`). Empty when they gave none (the server reads the
+    /// picture once it is accepted) or an empty one, and from a server
+    /// before item texts (0.7.0).
+    #[serde(default)]
+    pub text: String,
     pub kind: MediaKind,
     pub format: MediaFormat,
     pub width: u32,

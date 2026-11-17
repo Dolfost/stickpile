@@ -28,7 +28,7 @@ use crate::error::{AppError, AppResult};
 use crate::ids::{is_id, new_id, now};
 use crate::index;
 use crate::service::upload::{
-    self, clean_item_text, clean_list, clean_name, clean_vibe, ItemInput, UploadFile, UploadParts,
+    self, clean_item_text, clean_list, clean_name, clean_vibe, ItemInput, ItemText, UploadFile, UploadParts,
 };
 use crate::service::{cover, hydrate, items, sets};
 use crate::state::AppState;
@@ -95,8 +95,15 @@ struct ItemRow {
     emojis: String,
     vibe: Option<String>,
     tags: String,
+    /// The proposer's text and its source ('' and 'ai': not set).
+    text: String,
+    text_source: String,
     item_id: Option<String>,
 }
+
+/// The [`ItemRow`]s of a proposal (one bind: its id), in order.
+const ITEM_ROWS_SQL: &str = "SELECT position, media_id, kind, format, width, height, filename, name, keywords, \
+     emojis, vibe, tags, text, text_source, item_id FROM proposal_items WHERE proposal_id = ? ORDER BY position";
 
 fn clean_note(s: &str, what: &str) -> AppResult<String> {
     let s = s.trim();
@@ -235,7 +242,7 @@ pub async fn propose_items(
     for (pos, (media, input)) in stored.iter().enumerate() {
         sqlx::query(
             "INSERT INTO proposal_items (proposal_id, position, media_id, kind, format, width, height, filename, \
-             name, keywords, emojis, vibe, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             name, keywords, emojis, vibe, tags, text, text_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(pos as i64)
@@ -250,6 +257,8 @@ pub async fn propose_items(
         .bind(to_json_list(&input.emojis))
         .bind(&input.vibe)
         .bind(to_json_list(&input.tags))
+        .bind(&input.text.text)
+        .bind(db::source_str(input.text.source))
         .execute(&mut *tx)
         .await?;
     }
@@ -604,13 +613,7 @@ async fn to_api(state: &AppState, seen: &[Seen]) -> AppResult<Vec<Proposal>> {
         };
         let open = row.status() == ProposalStatus::Open;
         let items: Vec<ItemRow> = if row.kind() == ProposalKind::AddItems {
-            sqlx::query_as(
-                "SELECT position, media_id, kind, format, width, height, filename, name, keywords, emojis, vibe, \
-                 tags, item_id FROM proposal_items WHERE proposal_id = ? ORDER BY position",
-            )
-            .bind(&row.id)
-            .fetch_all(&state.db)
-            .await?
+            sqlx::query_as(ITEM_ROWS_SQL).bind(&row.id).fetch_all(&state.db).await?
         } else {
             Vec::new()
         };
@@ -624,6 +627,7 @@ async fn to_api(state: &AppState, seen: &[Seen]) -> AppResult<Vec<Proposal>> {
                 emojis: json_list(&i.emojis),
                 tags: json_list(&i.tags),
                 vibe: i.vibe.clone(),
+                text: i.text.clone(),
                 kind: parse_enum(&i.kind).unwrap_or(MediaKind::Still),
                 format: parse_enum(&i.format).unwrap_or(MediaFormat::Png),
                 width: i.width.max(0) as u32,
@@ -771,13 +775,7 @@ async fn apply(state: &AppState, seen: &Seen) -> AppResult<()> {
     let set: &SetRow = &seen.set.set;
     match row.kind() {
         ProposalKind::AddItems => {
-            let items: Vec<ItemRow> = sqlx::query_as(
-                "SELECT position, media_id, kind, format, width, height, filename, name, keywords, emojis, vibe, \
-                 tags, item_id FROM proposal_items WHERE proposal_id = ? ORDER BY position",
-            )
-            .bind(&row.id)
-            .fetch_all(&state.db)
-            .await?;
+            let items: Vec<ItemRow> = sqlx::query_as(ITEM_ROWS_SQL).bind(&row.id).fetch_all(&state.db).await?;
             let mut added = Vec::new();
             let outcome = add_proposed(state, set, row, &items, &mut added).await;
             if let Err(e) = outcome {
@@ -819,6 +817,13 @@ async fn add_proposed(
             vibe: it.vibe.clone(),
             vibe_source: FieldSource::User,
             tags: json_list(&it.tags),
+            // As the proposer gave it: a text they typed is a person's (an
+            // empty one too), an unapproved suggestion stays the
+            // computer's, and without one the server reads the picture.
+            text: ItemText {
+                text: it.text.clone(),
+                source: db::source(&it.text_source),
+            },
             stem: it.filename.clone(),
             ..Default::default()
         };
