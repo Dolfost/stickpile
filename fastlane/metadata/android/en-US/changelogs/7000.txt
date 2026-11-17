@@ -1,0 +1,1 @@
+Themes for the app and the sticker keyboard: System, Dark, OLED (dark on pure black) and White, in Settings, Theme. Add to WhatsApp is gone from the app; the server still makes WhatsApp packs to download.
