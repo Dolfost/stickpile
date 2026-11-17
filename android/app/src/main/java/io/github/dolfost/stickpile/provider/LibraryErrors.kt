@@ -16,6 +16,7 @@ val LibraryException.kind: LibraryErrorKind
         is LibraryException.Server -> LibraryErrorKind.SERVER
         is LibraryException.Io -> LibraryErrorKind.IO
         is LibraryException.Other -> LibraryErrorKind.OTHER
+        is LibraryException.NotOnDevice -> LibraryErrorKind.NOT_ON_DEVICE
     }
 
 /** The `error` values of the provider's calls (docs/android.md, "Provider contract", "Calls"). */
@@ -31,7 +32,9 @@ object ProviderErrors {
         LibraryErrorKind.NOTHING_FITS -> NOTHING_FITS
         LibraryErrorKind.NOT_FOUND -> NOT_FOUND
         LibraryErrorKind.NOT_SIGNED_IN, LibraryErrorKind.UNAUTHORIZED -> NOT_SIGNED_IN
-        LibraryErrorKind.UNREACHABLE -> UNREACHABLE
+        // Not kept offline, and the server away: unreachable to a keyboard
+        // (the contract has no code of its own for it).
+        LibraryErrorKind.UNREACHABLE, LibraryErrorKind.NOT_ON_DEVICE -> UNREACHABLE
         LibraryErrorKind.RATE_LIMITED,
         LibraryErrorKind.INVALID_INPUT,
         LibraryErrorKind.SERVER,

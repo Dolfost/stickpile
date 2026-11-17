@@ -18,4 +18,15 @@ class CacheChangesTest {
         changes.after(synced(cacheChanged = true))
         assertEquals(2, changes.count.value)
     }
+
+    /** The offline downloads follow each sync that went through, not a call that ran none. */
+    @Test
+    fun aSyncThatWentThroughIsHeardOf() {
+        var heard = 0
+        val changes = CacheChanges(synced = { heard++ })
+        changes.after(synced(cacheChanged = false).copy(synced = true))
+        changes.after(synced(cacheChanged = false))
+        changes.after(synced(cacheChanged = true).copy(synced = true))
+        assertEquals(2, heard)
+    }
 }

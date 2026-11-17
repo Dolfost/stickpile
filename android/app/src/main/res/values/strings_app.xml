@@ -36,6 +36,7 @@
     <string name="app_error_server">The server answered with an error (%1$d).</string>
     <string name="app_error_storage">Cannot read or write the data of the app on this phone.</string>
     <string name="app_error_other">Something went wrong.</string>
+    <string name="app_error_not_on_device">This sticker is not on this phone, and the server cannot be reached. Keep it offline to have it without the server.</string>
     <string name="app_error_not_a_pairing_link">This link is not a stickpile pairing link.</string>
     <string name="app_error_not_a_pairing_qr">This QR code is not a stickpile pairing code. Scan the one under Settings, Add a device, on the web page of your server.</string>
 
@@ -197,11 +198,15 @@
     <string name="settings_theme_white">White</string>
     <string name="settings_cache">Saved pictures</string>
     <!-- %1$s: a size, such as 12 MB. -->
-    <string name="settings_cache_size">On this phone: %1$s</string>
+    <string name="settings_cache_size">Other saved files: %1$s</string>
+    <!-- %1$s: a size, such as 120 MB. -->
+    <string name="settings_cache_kept">Kept offline: %1$s</string>
     <string name="settings_cache_unknown">The size cannot be read.</string>
-    <string name="settings_cache_text">Thumbnails, and files kept for sending. Clearing them frees the space; the offline search keeps working, and pictures download again when needed.</string>
+    <string name="settings_cache_text">Thumbnails, and files saved when they were sent or played. Clearing them frees the space and leaves what is kept offline; the offline search keeps working, and pictures download again when needed.</string>
     <string name="settings_cache_clear">Clear</string>
     <string name="settings_cache_cleared">Freed %1$s</string>
+    <!-- %1$s: the space freed; %2$d: the kept files that stay. -->
+    <string name="settings_cache_cleared_kept">Freed %1$s. Files kept offline stay: %2$d</string>
     <string name="settings_keyboard">Sticker keyboard</string>
     <string name="settings_keyboard_setup">Turn on and switch</string>
     <string name="settings_keyboard_setup_text">How to turn the keyboard on and switch to it</string>

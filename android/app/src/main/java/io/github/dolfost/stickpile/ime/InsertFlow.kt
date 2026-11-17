@@ -61,14 +61,16 @@ object InsertFlow {
     val SHARE_TYPES = listOf("image/*", "video/*")
 
     /** Errors of the field's rendition after which a rendition for sharing is still tried. */
-    private val TRY_SHARING = setOf(LibraryErrorKind.NOTHING_FITS, LibraryErrorKind.UNREACHABLE)
+    private val TRY_SHARING =
+        setOf(LibraryErrorKind.NOTHING_FITS, LibraryErrorKind.UNREACHABLE, LibraryErrorKind.NOT_ON_DEVICE)
 
     fun <P> start(fieldMimeTypes: List<String>): InsertStep<P> = InsertStep.PrepareForField(fieldMimeTypes)
 
     /**
-     * Nothing fits the field, or the server is out of reach (the original
-     * may still be in the cache): share instead. Any other error ends it
-     * (sharing would fail the same way).
+     * Nothing fits the field, the server is out of reach, or the field's
+     * file is not on the phone (one for sharing may still be in the
+     * cache): share instead. Any other error ends it (sharing would fail
+     * the same way).
      */
     fun <P> afterFieldPrepared(result: PrepareResult<P>): InsertStep<P> = when (result) {
         is PrepareResult.Ready -> InsertStep.Commit(result.prepared)

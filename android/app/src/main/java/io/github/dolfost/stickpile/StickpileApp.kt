@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.Context
 import android.os.SystemClock
 import io.github.dolfost.stickpile.display.DisplaySettings
+import io.github.dolfost.stickpile.offline.OfflineJobs
+import io.github.dolfost.stickpile.offline.OfflineScheduler
+import io.github.dolfost.stickpile.offline.OfflineSettings
 import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
@@ -25,7 +28,8 @@ import kotlinx.coroutines.launch
  *
  * Everything lives in `noBackupFilesDir`: never backed up or transferred
  * (the token is there), and not cleared by the system like `cacheDir`, so
- * the offline search keeps working. The app's settings clear the files.
+ * the offline search keeps working, and the files kept offline stay. The
+ * app's settings clear the files (those kept offline only when asked).
  */
 class StickpileApp : Application() {
 
@@ -42,7 +46,24 @@ class StickpileApp : Application() {
                 cacheDir = File(noBackupFilesDir, "cache").path,
                 tokenFile = File(noBackupFilesDir, "token").path,
             ),
-        )
+        ).also { lib ->
+            // What is kept offline follows the app's settings from the start.
+            val choices = offline.current
+            lib.setOfflineOptions(choices.options)
+            if (choices.paused) lib.pauseOffline()
+        }
+    }
+
+    /** The options of keeping stickers offline, and whether the downloads are paused. */
+    val offline: OfflineSettings by lazy { OfflineSettings(this) }
+
+    /** The offline downloads' WorkManager job. */
+    val offlineJobs: OfflineJobs by lazy { OfflineScheduler.jobs(this) }
+
+    /** Run the offline downloads when the platform allows (after a keep or a sync), unless paused. */
+    fun requestOfflineRun(restart: Boolean = false) {
+        val choices = offline.current
+        if (!choices.paused) offlineJobs.request(choices.options.mobileData, restart)
     }
 
     /**
@@ -60,8 +81,12 @@ class StickpileApp : Application() {
     /** What the grids show (safe mode, the tiles' information), shared by the app and the keyboard. */
     val display: DisplaySettings by lazy { DisplaySettings(this) }
 
-    /** The syncs that changed the offline cache, for the offers of the app and the keyboard. */
-    val cacheChanges = CacheChanges()
+    /**
+     * The syncs that changed the offline cache, for the offers of the app
+     * and the keyboard; each sync that went through runs the offline
+     * downloads (new stickers of a kept pack, say).
+     */
+    val cacheChanges = CacheChanges(synced = { requestOfflineRun() })
 
     @Volatile
     private var likesReadAt = 0L

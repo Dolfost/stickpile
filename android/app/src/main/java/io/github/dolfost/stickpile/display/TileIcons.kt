@@ -32,6 +32,14 @@ object TileIcons {
     @DrawableRes
     val LIKED: Int = R.drawable.ic_tile_heart
 
+    /** It works without the server ([io.github.dolfost.stickpile.offline.OfflineMark.AVAILABLE]). */
+    @DrawableRes
+    val OFFLINE: Int = R.drawable.ic_tile_offline
+
+    /** Not on this phone, and the server is away ([io.github.dolfost.stickpile.offline.OfflineMark.UNAVAILABLE]). */
+    @DrawableRes
+    val UNAVAILABLE: Int = R.drawable.ic_tile_unavailable
+
     private const val GIF = "GIF"
     private const val VIDEO = "VIDEO"
 }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A green arrow into a tray: available offline (kept, or saved, on this
+  phone). Drawn over a sticker: a dark outline first (the same shapes,
+  wider), then the shape, so it shows on any picture. Not tinted.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="15dp"
+    android:height="15dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeColor="#B3000000"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,3.5L12,14.5M7,10L12,15L17,10M4.5,19.5L19.5,19.5" />
+    <path
+        android:strokeColor="#FF7CE38B"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,3.5L12,14.5M7,10L12,15L17,10M4.5,19.5L19.5,19.5" />
+</vector>

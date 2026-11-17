@@ -106,8 +106,16 @@ fun SettingsScreen(
         vm.eventFlow.collect { event ->
             val text = when (event) {
                 is SettingsEvent.Notice -> event.message.text(resources)
-                is SettingsEvent.CacheCleared ->
-                    resources.getString(R.string.settings_cache_cleared, Formatter.formatShortFileSize(context, event.bytes))
+                is SettingsEvent.CacheCleared -> {
+                    val freed = Formatter.formatShortFileSize(context, event.bytes)
+                    if (event.keptFiles > 0) {
+                        resources.getString(R.string.settings_cache_cleared_kept, freed, event.keptFiles.toInt())
+                    } else {
+                        resources.getString(R.string.settings_cache_cleared, freed)
+                    }
+                }
+                is SettingsEvent.KeptRemoved ->
+                    resources.getString(R.string.offline_removed, Formatter.formatShortFileSize(context, event.bytes))
             }
             launch { snackbar.showSnackbar(text) }
         }
@@ -149,6 +157,9 @@ fun SettingsScreen(
             HorizontalDivider()
             DisplaySection()
             HorizontalDivider()
+            val offline by vm.offlineChoices.collectAsStateWithLifecycle()
+            OfflineSection(vm, offline.options, offline.paused)
+            HorizontalDivider()
             KeyboardSection(onKeyboardSetup)
             HorizontalDivider()
             AllowlistSection()
@@ -169,7 +180,7 @@ internal fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun Paragraph(text: String, error: Boolean = false) {
+internal fun Paragraph(text: String, error: Boolean = false) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,
@@ -179,7 +190,7 @@ private fun Paragraph(text: String, error: Boolean = false) {
 }
 
 @Composable
-private fun Actions(content: @Composable () -> Unit) {
+internal fun Actions(content: @Composable () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -190,7 +201,7 @@ private fun Actions(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun BusyLabel(text: String, busy: Boolean) {
+internal fun BusyLabel(text: String, busy: Boolean) {
     if (busy) {
         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
         Spacer(Modifier.size(8.dp))
@@ -320,14 +331,13 @@ private fun CacheSection(vm: SettingsViewModel) {
     val context = LocalContext.current
     val state = vm.state
     SectionHeader(stringResource(R.string.settings_cache))
-    val bytes = state.cacheBytes
-    Paragraph(
-        if (bytes == null) {
-            stringResource(R.string.settings_cache_unknown)
-        } else {
-            stringResource(R.string.settings_cache_size, Formatter.formatShortFileSize(context, bytes))
-        },
-    )
+    val usage = state.usage
+    if (usage == null) {
+        Paragraph(stringResource(R.string.settings_cache_unknown))
+    } else {
+        Paragraph(stringResource(R.string.settings_cache_size, Formatter.formatShortFileSize(context, usage.otherBytes.toLong())))
+        Paragraph(stringResource(R.string.settings_cache_kept, Formatter.formatShortFileSize(context, usage.keptBytes.toLong())))
+    }
     Paragraph(stringResource(R.string.settings_cache_text))
     Actions {
         OutlinedButton(onClick = vm::clearCache, enabled = !state.clearing) {
@@ -448,10 +458,10 @@ private data class KeyboardValues(
 
 /** A switch with its title and explanation; the whole row toggles it. */
 @Composable
-private fun SwitchItem(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SwitchItem(title: String, text: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = { Text(text) },
+        supportingContent = text?.let { { Text(it) } },
         trailingContent = { Switch(checked = checked, onCheckedChange = null) },
         modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
     )

@@ -473,7 +473,8 @@ private fun failureText(failure: UploadFailure): String = when (failure.kind) {
     LibraryErrorKind.INVALID_INPUT -> stringResource(R.string.share_error_invalid_input)
     LibraryErrorKind.SERVER -> stringResource(R.string.share_error_server, failure.status ?: 0)
     LibraryErrorKind.IO -> stringResource(R.string.share_error_io)
-    LibraryErrorKind.NOTHING_FITS, LibraryErrorKind.OTHER -> stringResource(R.string.share_error_other)
+    LibraryErrorKind.NOTHING_FITS, LibraryErrorKind.OTHER, LibraryErrorKind.NOT_ON_DEVICE ->
+        stringResource(R.string.share_error_other)
 }
 
 /** Why the account or its sets could not be read. */

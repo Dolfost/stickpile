@@ -1,5 +1,6 @@
 package io.github.dolfost.stickpile.ime
 
+import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -119,6 +120,21 @@ class InsertFlowTest {
             listOf("prepare field", "prepare share") to InsertOutcome.Failed(LibraryErrorKind.UNREACHABLE),
             run(unreachable, share = unreachable),
         )
+    }
+
+    /** The field's rendition is not kept offline: one for sharing may be; else that is the failure, explained. */
+    @Test
+    fun whenTheFieldsFileIsNotOnThePhoneASharedOneIsTried() {
+        val notHere = PrepareResult.Error(LibraryErrorKind.NOT_ON_DEVICE)
+        assertEquals(
+            listOf("prepare field", "prepare share", "send shared.png") to InsertOutcome.Sent("shared.png"),
+            run(notHere, send = true),
+        )
+        assertEquals(
+            listOf("prepare field", "prepare share") to InsertOutcome.Failed(LibraryErrorKind.NOT_ON_DEVICE),
+            run(notHere, share = notHere),
+        )
+        assertEquals(R.string.ime_error_not_on_device, ImeTexts.forError(LibraryErrorKind.NOT_ON_DEVICE))
     }
 
     @Test

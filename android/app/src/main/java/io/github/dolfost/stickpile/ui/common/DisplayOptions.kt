@@ -136,6 +136,7 @@ val TileField.label: Int
     get() = when (this) {
         TileField.BADGES -> R.string.display_field_badges
         TileField.LIKED -> R.string.display_field_liked
+        TileField.OFFLINE -> R.string.display_field_offline
         TileField.NAME -> R.string.display_field_name
         TileField.EMOJIS -> R.string.display_field_emojis
         TileField.VIBE -> R.string.display_field_vibe

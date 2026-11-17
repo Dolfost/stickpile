@@ -25,7 +25,7 @@ class SyncOutcomeTest {
     @Test
     fun otherFailuresWaitForTheNextPeriod() {
         val lasting = LibraryErrorKind.entries - SyncOutcome.TRANSIENT
-        assertEquals(7, lasting.size)
+        assertEquals(8, lasting.size)
         for (kind in lasting) {
             assertEquals(kind.name, SyncOutcome.DONE, SyncOutcome.after(kind, 0))
         }
@@ -50,6 +50,7 @@ class SyncOutcomeTest {
             LibraryException.Server(500u, "") to LibraryErrorKind.SERVER,
             LibraryException.Io("") to LibraryErrorKind.IO,
             LibraryException.Other("") to LibraryErrorKind.OTHER,
+            LibraryException.NotOnDevice("") to LibraryErrorKind.NOT_ON_DEVICE,
         )
         kinds.forEach { (e, kind) -> assertEquals(kind, e.kind()) }
         assertEquals(LibraryErrorKind.entries.toSet(), kinds.map { it.second }.toSet())

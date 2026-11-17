@@ -29,6 +29,7 @@
     <string name="display_field_copies">Times copied</string>
     <string name="display_field_likes">Likes</string>
     <string name="display_field_quality">Quality</string>
+    <string name="display_field_offline">Available offline (a mark)</string>
     <string name="display_columns">Stickers in a row</string>
     <string name="display_columns_text">With the phone upright; held sideways, more of the same size fit.</string>
     <string name="display_columns_menu">Stickers in a row: %1$d</string>

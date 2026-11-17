@@ -87,6 +87,8 @@ class ProviderRowsTest {
             LibraryException.Server(500u, "d") to "failed",
             LibraryException.Io("d") to "failed",
             LibraryException.Other("d") to "failed",
+            // Not kept offline: no code of its own in the contract.
+            LibraryException.NotOnDevice("d") to "unreachable",
         )
         assertEquals(LibraryErrorKind.entries.toSet(), cases.keys.map { it.kind }.toSet())
         cases.forEach { (e, code) -> assertEquals(e.toString(), code, ProviderErrors.code(e.kind)) }

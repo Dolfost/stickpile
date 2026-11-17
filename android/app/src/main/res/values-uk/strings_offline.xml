@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="offline_title">Доступне офлайн</string>
+    <string name="offline_text">Зберігайте стікери на цьому телефоні, щоб надсилати й відтворювати їх без сервера. Стікер чи пак зберігають з його меню, а все одразу - тут.</string>
+    <string name="offline_library">Зберігати всю бібліотеку</string>
+    <string name="offline_library_on">Зберігається все, що вам доступно, і те, що додасться пізніше.</string>
+    <string name="offline_library_off">Лише те, що ви зберегли, і правила нижче.</string>
+    <string name="offline_auto">Зберігати автоматично</string>
+    <string name="offline_auto_thumbnails">Мініатюри всіх стікерів</string>
+    <string name="offline_auto_thumbnails_text">Сітки повні й без сервера. Мініатюри невеликі.</string>
+    <string name="offline_auto_used">Нещодавно надіслані стікери</string>
+    <string name="offline_auto_used_count">Останні надіслані з цього телефона: %1$d</string>
+    <string name="offline_auto_liked">Стікери, які ви вподобали</string>
+    <string name="offline_auto_own_packs">Ваші власні паки</string>
+    <string name="offline_kinds">З паками, бібліотекою та правилами</string>
+    <string name="offline_kinds_text">Що завантажується, коли цілий пак, бібліотека чи правило його зберігає. Стікер, збережений окремо, завжди завантажується повністю.</string>
+    <string name="offline_stills">Зображення</string>
+    <string name="offline_animations">GIF і анімації</string>
+    <string name="offline_videos">Відео</string>
+    <string name="offline_sticker_versions">Версії-стікери</string>
+    <string name="offline_sticker_versions_text">Також файл, що надсилається як стікер (Telegram).</string>
+    <string name="offline_max_file">Найбільший файл</string>
+    <string name="offline_budget">Місце для збережених файлів</string>
+    <string name="offline_budget_text">Завантаження зупиняються, коли воно заповнене; нічого не видаляється, щоб звільнити місце.</string>
+    <string name="offline_size_mb">%1$d МБ</string>
+    <string name="offline_no_limit">Без обмеження</string>
+    <string name="offline_mobile_data">Використовувати мобільні дані</string>
+    <string name="offline_mobile_data_text">Вимкнено: завантаження чекають на Wi-Fi чи іншу нелімітовану мережу.</string>
+
+    <string name="offline_progress">Завантаження</string>
+    <string name="offline_state_up_to_date">Усе збережене вже на цьому телефоні.</string>
+    <string name="offline_state_nothing">Поки нічого не збережено.</string>
+    <string name="offline_state_downloading">Завантажується.</string>
+    <string name="offline_state_paused">Призупинено.</string>
+    <string name="offline_state_waiting_wifi">Чекає на Wi-Fi (і достатньо вільної пам\'яті).</string>
+    <string name="offline_state_waiting_network">Чекає на мережу (і достатньо вільної пам\'яті).</string>
+    <string name="offline_state_unreachable">Сервер недоступний. Завантаження продовжаться після наступної синхронізації.</string>
+    <string name="offline_state_limit">Місце для збережених файлів заповнене (%1$s). Нічого не видалено: дайте йому більше місця або зберігайте менше.</string>
+    <string name="offline_state_disk_full">Пам\'ять телефона заповнена. Нічого не видалено.</string>
+    <string name="offline_state_pending">Ще завантажити: %1$s. Продовжиться після наступної синхронізації.</string>
+    <string name="offline_on_phone">Файлів на телефоні: %1$d з %2$d (%3$s з %4$s)</string>
+    <string name="offline_failed">Не вдалося завантажити: %1$d</string>
+    <string name="offline_skipped">Пропущено через налаштування: %1$d</string>
+    <string name="offline_pause">Призупинити</string>
+    <string name="offline_resume">Продовжити</string>
+    <string name="offline_cancel">Зупинити</string>
+    <string name="offline_download_now">Завантажити зараз</string>
+    <string name="offline_remove_kept">Видалити збережені файли</string>
+    <string name="offline_remove_kept_title">Видалити збережені файли?</string>
+    <string name="offline_remove_kept_text">Усі файли, збережені офлайн, буде видалено з цього телефона, і більше нічого не зберігатиметься. Автоматичні правила вище знову збережуть свої стікери під час наступного завантаження: спершу вимкніть їх, якщо цього не треба.</string>
+    <string name="offline_removed">Збережені файли видалено: %1$s</string>
+
+    <string name="offline_keep_title">Зберегти \"%1$s\" офлайн?</string>
+    <string name="offline_keep_library_title">Зберегти всю бібліотеку офлайн?</string>
+    <string name="offline_estimate_loading">Рахуємо файли</string>
+    <string name="offline_estimate_size">Стікерів: %1$d. Файлів: %2$d, %3$s.</string>
+    <string name="offline_estimate_present">Уже на цьому телефоні: %1$s.</string>
+    <string name="offline_estimate_kind_off">Пропущено, бо їхній тип вимкнено в налаштуваннях: %1$d.</string>
+    <string name="offline_estimate_too_large">Пропущено файлів, більших за найбільший файл: %1$d.</string>
+    <string name="offline_estimate_after">Збережені файли займатимуть %1$s.</string>
+    <string name="offline_estimate_over">Збережені файли займатимуть %1$s, більше за їхнє місце (%2$s): завантаження зупиняться, коли воно заповниться.</string>
+    <string name="offline_estimate_wifi">Завантажується у фоні через Wi-Fi.</string>
+    <string name="offline_estimate_any_network">Завантажується у фоні, також через мобільні дані.</string>
+
+    <string name="offline_keep">Зберегти офлайн</string>
+    <string name="offline_release">Не зберігати офлайн</string>
+    <string name="offline_pack_kept">Збережено офлайн</string>
+    <string name="offline_release_title">Більше не зберігати \"%1$s\" офлайн?</string>
+    <string name="offline_release_library_title">Більше не зберігати всю бібліотеку офлайн?</string>
+    <string name="offline_release_text">Його файли лишаються на телефоні, доки місце не знадобиться.</string>
+    <string name="offline_kept_notice">Зберігаємо \"%1$s\" офлайн</string>
+    <string name="offline_released_notice">\"%1$s\" більше не зберігається офлайн</string>
+    <string name="offline_kept_library_notice">Зберігаємо всю бібліотеку офлайн</string>
+    <string name="offline_released_library_notice">Бібліотека більше не зберігається офлайн</string>
+    <string name="offline_reasons">Доступний офлайн: %1$s</string>
+    <string name="offline_reason_sticker">окремо</string>
+    <string name="offline_reason_pack">разом із паком</string>
+    <string name="offline_reason_library">разом із бібліотекою</string>
+    <string name="offline_reason_used">нещодавно надісланий</string>
+    <string name="offline_reason_liked">вподобаний</string>
+    <string name="offline_reason_own_pack">у вашому паку</string>
+
+    <string name="offline_mark_available">Доступний офлайн</string>
+    <string name="offline_mark_unavailable">Немає на цьому телефоні</string>
+</resources>

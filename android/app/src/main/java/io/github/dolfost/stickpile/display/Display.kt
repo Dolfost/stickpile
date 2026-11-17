@@ -18,6 +18,13 @@ enum class TileField(val startsOn: Boolean = true) {
 
     /** A heart on the items the account liked ([Item.liked]). */
     LIKED,
+
+    /**
+     * A mark on the stickers that also work without the server (kept
+     * offline, or cached), while the server answers. With the server
+     * unreachable the others are dimmed instead, whatever this says.
+     */
+    OFFLINE,
     NAME,
     EMOJIS,
 

@@ -18,4 +18,5 @@ fun LibraryException.kind(): LibraryErrorKind = when (this) {
     is LibraryException.Server -> LibraryErrorKind.SERVER
     is LibraryException.Io -> LibraryErrorKind.IO
     is LibraryException.Other -> LibraryErrorKind.OTHER
+    is LibraryException.NotOnDevice -> LibraryErrorKind.NOT_ON_DEVICE
 }

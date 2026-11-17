@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Texts of keeping stickers on the phone (package offline, docs/offline.md),
+  in the settings, the library and the keyboard. The names start with
+  offline_.
+-->
+<resources>
+    <!-- The settings section. -->
+    <string name="offline_title">Available offline</string>
+    <string name="offline_text">Keep stickers on this phone, so that they send and play without the server. Keep a sticker or a pack from its menu, or everything here.</string>
+    <string name="offline_library">Keep the whole library</string>
+    <string name="offline_library_on">Everything you can see is kept, also what is added later.</string>
+    <string name="offline_library_off">Only what you keep, and the rules below.</string>
+    <string name="offline_auto">Keep automatically</string>
+    <string name="offline_auto_thumbnails">Thumbnails of every sticker</string>
+    <string name="offline_auto_thumbnails_text">The grids are complete without the server. They are small.</string>
+    <string name="offline_auto_used">Stickers you sent lately</string>
+    <!-- %1$d: how many of the last sent are kept. -->
+    <string name="offline_auto_used_count">The last sent from this phone: %1$d</string>
+    <string name="offline_auto_liked">Stickers you liked</string>
+    <string name="offline_auto_own_packs">Your own packs</string>
+    <string name="offline_kinds">With packs, the library and the rules</string>
+    <string name="offline_kinds_text">What is downloaded when a whole pack, the library or a rule keeps it. A sticker you keep by itself is always downloaded whole.</string>
+    <string name="offline_stills">Pictures</string>
+    <string name="offline_animations">GIFs and animations</string>
+    <string name="offline_videos">Videos</string>
+    <string name="offline_sticker_versions">Sticker versions</string>
+    <string name="offline_sticker_versions_text">Also the file sent as a sticker (Telegram).</string>
+    <string name="offline_max_file">Largest file</string>
+    <string name="offline_budget">Space for kept files</string>
+    <string name="offline_budget_text">Downloads stop when it is full; nothing is deleted to make room.</string>
+    <!-- %1$d: megabytes. -->
+    <string name="offline_size_mb">%1$d MB</string>
+    <string name="offline_no_limit">No limit</string>
+    <string name="offline_mobile_data">Use mobile data</string>
+    <string name="offline_mobile_data_text">Off: downloads wait for Wi-Fi or another network that is not metered.</string>
+
+    <!-- Where the downloads stand. -->
+    <string name="offline_progress">Downloads</string>
+    <string name="offline_state_up_to_date">Everything kept is on this phone.</string>
+    <string name="offline_state_nothing">Nothing is kept yet.</string>
+    <string name="offline_state_downloading">Downloading.</string>
+    <string name="offline_state_paused">Paused.</string>
+    <string name="offline_state_waiting_wifi">Waiting for Wi-Fi (and enough free storage).</string>
+    <string name="offline_state_waiting_network">Waiting for a network (and enough free storage).</string>
+    <string name="offline_state_unreachable">The server cannot be reached. The downloads go on after the next sync.</string>
+    <!-- %1$s: the space for kept files, such as 1 GB. -->
+    <string name="offline_state_limit">The space for kept files is full (%1$s). Nothing was deleted: give it more space, or keep less.</string>
+    <string name="offline_state_disk_full">The storage of the phone is full. Nothing was deleted.</string>
+    <!-- %1$s: the size still to download. -->
+    <string name="offline_state_pending">Still to download: %1$s. It goes on after the next sync.</string>
+    <!-- Files and bytes on the phone of those wanted, such as "Files on this phone: 3 of 10 (1 MB of 4 MB)". -->
+    <string name="offline_on_phone">Files on this phone: %1$d of %2$d (%3$s of %4$s)</string>
+    <string name="offline_failed">Could not be downloaded: %1$d</string>
+    <string name="offline_skipped">Left out by the options: %1$d</string>
+    <string name="offline_pause">Pause</string>
+    <string name="offline_resume">Resume</string>
+    <string name="offline_cancel">Stop</string>
+    <string name="offline_download_now">Download now</string>
+    <string name="offline_remove_kept">Remove kept files</string>
+    <string name="offline_remove_kept_title">Remove the kept files?</string>
+    <string name="offline_remove_kept_text">Every file kept offline is deleted from this phone, and nothing stays kept. The automatic rules above keep their stickers again with the next download: turn them off first if you do not want that.</string>
+    <!-- %1$s: the space freed. -->
+    <string name="offline_removed">Kept files removed: %1$s</string>
+
+    <!-- Before keeping a pack or the library: what it takes. -->
+    <!-- %1$s: the pack's name. -->
+    <string name="offline_keep_title">Keep \"%1$s\" offline?</string>
+    <string name="offline_keep_library_title">Keep the whole library offline?</string>
+    <string name="offline_estimate_loading">Counting the files</string>
+    <!-- %1$d: stickers; %2$d: files; %3$s: their size. -->
+    <string name="offline_estimate_size">Stickers: %1$d. Files: %2$d, %3$s.</string>
+    <string name="offline_estimate_present">Already on this phone: %1$s.</string>
+    <string name="offline_estimate_kind_off">Left out, as their kind is off in the settings: %1$d.</string>
+    <string name="offline_estimate_too_large">Files left out, larger than the largest file: %1$d.</string>
+    <string name="offline_estimate_after">Kept files would take %1$s.</string>
+    <!-- %1$s: the size of all kept files then; %2$s: their space. -->
+    <string name="offline_estimate_over">Kept files would take %1$s, more than their space (%2$s): the downloads stop when it is full.</string>
+    <string name="offline_estimate_wifi">It downloads in the background on Wi-Fi.</string>
+    <string name="offline_estimate_any_network">It downloads in the background, also on mobile data.</string>
+
+    <!-- Keeping and releasing from the menus. -->
+    <string name="offline_keep">Keep offline</string>
+    <string name="offline_release">Don\'t keep offline</string>
+    <string name="offline_pack_kept">Kept offline</string>
+    <!-- %1$s: the pack's name. -->
+    <string name="offline_release_title">Stop keeping \"%1$s\" offline?</string>
+    <string name="offline_release_library_title">Stop keeping the whole library offline?</string>
+    <string name="offline_release_text">Its files stay on this phone until the space is needed.</string>
+    <!-- %1$s: the sticker's or pack's name. -->
+    <string name="offline_kept_notice">Keeping \"%1$s\" offline</string>
+    <string name="offline_released_notice">\"%1$s\" is no longer kept offline</string>
+    <string name="offline_kept_library_notice">Keeping the whole library offline</string>
+    <string name="offline_released_library_notice">The library is no longer kept offline</string>
+    <!-- %1$s: why, joined with commas: "with its pack, liked". -->
+    <string name="offline_reasons">Available offline: %1$s</string>
+    <string name="offline_reason_sticker">by itself</string>
+    <string name="offline_reason_pack">with its pack</string>
+    <string name="offline_reason_library">with the library</string>
+    <string name="offline_reason_used">sent lately</string>
+    <string name="offline_reason_liked">liked</string>
+    <string name="offline_reason_own_pack">in your own pack</string>
+
+    <!-- The marks on the tiles (for accessibility services). -->
+    <string name="offline_mark_available">Available offline</string>
+    <string name="offline_mark_unavailable">Not on this phone</string>
+</resources>

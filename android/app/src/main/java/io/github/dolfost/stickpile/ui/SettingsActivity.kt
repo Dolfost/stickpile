@@ -107,10 +107,11 @@ private fun SettingsContent(
     var page by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
     BackHandler(enabled = page != SettingsPage.MAIN) { page = SettingsPage.MAIN }
     val appContext = context.applicationContext
+    val app = StickpileApp.from(appContext)
     val vm = viewModel {
         SettingsViewModel(
             library,
-            background = StickpileApp.from(appContext).scope,
+            background = app.scope,
             onCacheCleared = {
                 Thumbnails.clear()
                 Motions.clear()
@@ -120,12 +121,16 @@ private fun SettingsContent(
             // In the app's scope, also when this screen went half-way.
             onSignedOut = {
                 SyncScheduler.cancel(appContext)
+                // The library removed what the account kept.
+                app.offlineJobs.cancel()
                 Thumbnails.clear()
                 Motions.clear()
                 PreparedFiles.revokeAll()
                 AccountChanges.changed()
             },
-            onSynced = StickpileApp.from(appContext).cacheChanges::after,
+            onSynced = app.cacheChanges::after,
+            offline = app.offline,
+            jobs = app.offlineJobs,
         )
     }
     when (page) {

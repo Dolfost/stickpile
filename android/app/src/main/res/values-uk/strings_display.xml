@@ -26,6 +26,7 @@
     <string name="display_field_copies">Скільки разів скопійовано</string>
     <string name="display_field_likes">Вподобання</string>
     <string name="display_field_quality">Якість</string>
+    <string name="display_field_offline">Доступне офлайн (позначка)</string>
     <string name="display_columns">Стікерів у ряду</string>
     <string name="display_columns_text">Коли телефон вертикально; горизонтально вміщається більше такого ж розміру.</string>
     <string name="display_columns_menu">Стікерів у ряду: %1$d</string>

@@ -14,8 +14,10 @@ import kotlinx.coroutines.flow.update
  * asked for again when [count] moves. Every sync reports to [after]: the
  * app's, the keyboard's and the periodic one; they share one process, so
  * one of these ([io.github.dolfost.stickpile.StickpileApp.cacheChanges]).
+ * A sync that went through also calls [synced]: the offline downloads
+ * follow each sync (docs/offline.md).
  */
-class CacheChanges {
+class CacheChanges(private val synced: () -> Unit = {}) {
     private val changes = MutableStateFlow(0)
 
     /** Moves on after each sync that changed the cache. */
@@ -24,5 +26,6 @@ class CacheChanges {
     /** [state] is what a sync returned: counted when it changed the cache. */
     fun after(state: SyncState) {
         if (state.cacheChanged) changes.update { it + 1 }
+        if (state.synced) synced()
     }
 }

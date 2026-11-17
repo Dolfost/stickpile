@@ -1,6 +1,18 @@
 package io.github.dolfost.stickpile.ui
 
 import io.github.dolfost.stickpile.rust.Account
+import io.github.dolfost.stickpile.rust.CacheCleared
+import io.github.dolfost.stickpile.rust.KeepReason
+import io.github.dolfost.stickpile.rust.OfflineEstimate
+import io.github.dolfost.stickpile.rust.OfflineOptions
+import io.github.dolfost.stickpile.rust.OfflineOutcome
+import io.github.dolfost.stickpile.rust.OfflinePlan
+import io.github.dolfost.stickpile.rust.OfflineScope
+import io.github.dolfost.stickpile.rust.OfflineSkips
+import io.github.dolfost.stickpile.rust.OfflineState
+import io.github.dolfost.stickpile.rust.OfflineStatus
+import io.github.dolfost.stickpile.rust.OfflineTotals
+import io.github.dolfost.stickpile.rust.OfflineUsage
 import io.github.dolfost.stickpile.rust.AuthKind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
@@ -18,6 +30,8 @@ import io.github.dolfost.stickpile.rust.Suggestions
 import io.github.dolfost.stickpile.rust.SyncState
 import io.github.dolfost.stickpile.rust.Target
 import io.github.dolfost.stickpile.rust.UploadFile
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 
 /**
  * A [StickpileLibraryInterface] for the view model tests: every call is
@@ -51,9 +65,34 @@ class FakeLibrary : StickpileLibraryInterface {
     var syncIfDue: suspend () -> SyncState = { syncState }
     var syncState = SyncState(lastSync = null, lastError = null, pendingUsage = 0u, due = false, cacheChanged = false)
     var pendingUsage: UInt = 0u
-    var cacheBytes: () -> ULong = { 0u }
-    var clearCache: () -> ULong = { 0u }
+    var clearCache: () -> CacheCleared = { CacheCleared(0u, 0u, 0u, 0u) }
     var serverUrl = "http://localhost:8080"
+
+    // Keeping offline: a small model of what the library keeps.
+    var options = OfflineOptions()
+    val keeps = mutableListOf<OfflineScope>()
+    var reasons: (String) -> List<KeepReason> = { id ->
+        if (OfflineScope.Sticker(id) in keeps) listOf(KeepReason.STICKER) else emptyList()
+    }
+    var estimate: suspend (OfflineScope) -> OfflineEstimate = { sampleEstimate() }
+    var plan: suspend () -> OfflinePlan = { samplePlan() }
+    var usage: () -> OfflineUsage = { OfflineUsage(0u, 0u, 0u, 0u, 1024uL * 1024u * 1024u) }
+    var removeKept: () -> CacheCleared = { CacheCleared(0u, 0u, 0u, 0u) }
+
+    /** The ids `availableOffline` says yes to. */
+    var available: Set<String> = emptySet()
+    var unreachable = false
+
+    /** The `availableOffline` calls, as "'<package>' <types>" (not in [calls]: every list asks). */
+    val marksAsked = mutableListOf<String>()
+    private val statusFlow = MutableStateFlow(sampleStatus())
+    var status: OfflineStatus
+        get() = statusFlow.value
+        set(value) {
+            statusFlow.value = value
+        }
+    var keepOffline: suspend (OfflineScope) -> Unit = { keeps += it }
+    var releaseOffline: suspend (OfflineScope) -> Unit = { keeps -= it }
 
     private fun unexpected(name: String): Nothing = throw AssertionError("unexpected call: $name")
 
@@ -62,14 +101,79 @@ class FakeLibrary : StickpileLibraryInterface {
         return account.invoke()
     }
 
-    override fun cacheBytes(): ULong {
-        calls += "cacheBytes"
-        return cacheBytes.invoke()
-    }
-
-    override fun clearCache(): ULong {
+    override fun clearCache(): CacheCleared {
         calls += "clearCache"
         return clearCache.invoke()
+    }
+
+    override fun offlineOptions(): OfflineOptions = options
+
+    override fun setOfflineOptions(options: OfflineOptions) {
+        calls += "setOfflineOptions"
+        this.options = options
+    }
+
+    override suspend fun keepOffline(scope: OfflineScope) {
+        calls += "keepOffline $scope"
+        keepOffline.invoke(scope)
+    }
+
+    override suspend fun releaseOffline(scope: OfflineScope) {
+        calls += "releaseOffline $scope"
+        releaseOffline.invoke(scope)
+    }
+
+    override fun offlineKeeps(): List<OfflineScope> = keeps.toList()
+
+    override fun offlineReasons(itemId: String): List<KeepReason> = reasons(itemId)
+
+    override suspend fun offlineEstimate(scope: OfflineScope): OfflineEstimate {
+        calls += "offlineEstimate $scope"
+        return estimate.invoke(scope)
+    }
+
+    override suspend fun offlinePlan(): OfflinePlan = plan.invoke()
+
+    override fun offlineUsage(): OfflineUsage = usage.invoke()
+
+    override fun removeKeptFiles(): CacheCleared {
+        calls += "removeKeptFiles"
+        return removeKept.invoke()
+    }
+
+    override fun availableOffline(
+        itemIds: List<String>,
+        editorPackage: String,
+        acceptedMimeTypes: List<String>,
+        sticker: Boolean,
+    ): List<Boolean> {
+        marksAsked += "'$editorPackage' $acceptedMimeTypes"
+        return itemIds.map { it in available }
+    }
+
+    override fun serverUnreachable(): Boolean = unreachable
+
+    override suspend fun offlineRun(): OfflineOutcome = unexpected("offlineRun")
+
+    override fun offlineStatus(): OfflineStatus = status
+
+    /** Answers at once when the status differs from [seen], else when it does. */
+    override suspend fun offlineStatusChange(seen: OfflineStatus?): OfflineStatus {
+        return statusFlow.first { it != seen }
+    }
+
+    override fun pauseOffline() {
+        calls += "pauseOffline"
+        status = status.copy(paused = true)
+    }
+
+    override fun resumeOffline() {
+        calls += "resumeOffline"
+        status = status.copy(paused = false)
+    }
+
+    override fun cancelOffline() {
+        calls += "cancelOffline"
     }
 
     override suspend fun favorites(limit: UInt): ItemList {
@@ -256,3 +360,47 @@ fun unauthorized() = LibraryException.Unauthorized("401")
 fun unreachable() = LibraryException.Unreachable("offline")
 
 fun invalid(field: String) = LibraryException.InvalidInput(field, "bad $field")
+
+fun totals(files: ULong = 0u, bytes: ULong = 0u, presentFiles: ULong = 0u, presentBytes: ULong = 0u) =
+    OfflineTotals(files, bytes, presentFiles, presentBytes)
+
+val noSkips = OfflineSkips(0u, 0u, 0u, 0u)
+
+fun sampleEstimate(totals: OfflineTotals = totals(10u, 1_000u), items: ULong = 4u, fits: Boolean = true) = OfflineEstimate(
+    totals = totals,
+    items = items,
+    skipped = noSkips,
+    keptBytesAfter = totals.bytes,
+    budget = 1024uL * 1024u * 1024u,
+    fits = fits,
+)
+
+fun samplePlan(totals: OfflineTotals = totals(), items: ULong = 0u) = OfflinePlan(
+    totals = totals,
+    items = items,
+    skipped = noSkips,
+    failed = 0u,
+    budget = 1024uL * 1024u * 1024u,
+    overBudget = false,
+    parts = emptyList(),
+)
+
+fun sampleStatus(
+    state: OfflineState = OfflineState.IDLE,
+    running: Boolean = false,
+    paused: Boolean = false,
+    filesDone: ULong = 0u,
+    filesTotal: ULong = 0u,
+) = OfflineStatus(
+    state = state,
+    filesDone = filesDone,
+    filesTotal = filesTotal,
+    bytesDone = filesDone * 100u,
+    bytesTotal = filesTotal * 100u,
+    skipped = 0u,
+    failed = 0u,
+    parts = emptyList(),
+    message = null,
+    running = running,
+    paused = paused,
+)

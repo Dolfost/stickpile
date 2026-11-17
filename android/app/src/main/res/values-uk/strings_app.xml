@@ -28,6 +28,7 @@
     <string name="app_error_server">Сервер відповів помилкою (%1$d).</string>
     <string name="app_error_storage">Не вдається прочитати або записати дані застосунку на цьому телефоні.</string>
     <string name="app_error_other">Щось пішло не так.</string>
+    <string name="app_error_not_on_device">Цього стікера немає на телефоні, а сервер недоступний. Збережіть його офлайн, щоб мати його без сервера.</string>
     <string name="app_error_not_a_pairing_link">Це посилання не для підключення пристрою до stickpile.</string>
     <string name="app_error_not_a_pairing_qr">Цей QR-код не для підключення пристрою до stickpile. Відскануйте код із розділу Налаштування, Додати пристрій, на вебсторінці свого сервера.</string>
 
@@ -163,11 +164,13 @@
     <string name="settings_theme_dark">Темна</string>
     <string name="settings_theme_white">Біла</string>
     <string name="settings_cache">Збережені зображення</string>
-    <string name="settings_cache_size">На цьому телефоні: %1$s</string>
+    <string name="settings_cache_size">Інші збережені файли: %1$s</string>
+    <string name="settings_cache_kept">Збережено офлайн: %1$s</string>
     <string name="settings_cache_unknown">Не вдається визначити розмір.</string>
-    <string name="settings_cache_text">Мініатюри й файли, збережені для надсилання. Очищення звільняє місце; офлайн-пошук і далі працює, а зображення завантажаться знову, коли знадобляться.</string>
+    <string name="settings_cache_text">Мініатюри й файли, збережені, коли їх надсилали чи відтворювали. Очищення звільняє місце й лишає те, що збережено офлайн; офлайн-пошук і далі працює, а зображення завантажаться знову, коли знадобляться.</string>
     <string name="settings_cache_clear">Очистити</string>
     <string name="settings_cache_cleared">Звільнено %1$s</string>
+    <string name="settings_cache_cleared_kept">Звільнено %1$s. Файли, збережені офлайн, лишаються: %2$d</string>
     <string name="settings_keyboard">Клавіатура стікерів</string>
     <string name="settings_keyboard_setup">Увімкнення й перемикання</string>
     <string name="settings_keyboard_setup_text">Як увімкнути клавіатуру й перемикатися на неї</string>

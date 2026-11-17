@@ -20,5 +20,6 @@ object ImeTexts {
         LibraryErrorKind.SERVER -> R.string.ime_error_server
         LibraryErrorKind.IO -> R.string.ime_error_io
         LibraryErrorKind.INVALID_INPUT, LibraryErrorKind.OTHER -> R.string.ime_error_failed
+        LibraryErrorKind.NOT_ON_DEVICE -> R.string.ime_error_not_on_device
     }
 }

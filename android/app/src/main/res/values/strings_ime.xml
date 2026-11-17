@@ -68,6 +68,9 @@
     <string name="ime_error_server">The server had a problem. Try again later.</string>
     <string name="ime_error_io">Couldn\'t read the saved stickers.</string>
     <string name="ime_error_failed">Something went wrong.</string>
+    <string name="ime_error_not_on_device">Not on this phone, and the server is away. Keep it offline from its menu.</string>
+    <!-- A tile for accessibility services: %1$s is the sticker's name. -->
+    <string name="ime_unavailable_item">%1$s, not on this phone</string>
     <string name="ime_error_no_app">No app to share it with.</string>
 
     <!-- After a pick that could not go into the field directly. -->

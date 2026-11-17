@@ -30,6 +30,7 @@ class FailuresTest {
             LibraryException.Server(503u, "d") to Failure(LibraryErrorKind.SERVER, status = 503),
             LibraryException.Io("d") to Failure(LibraryErrorKind.IO),
             LibraryException.Other("d") to Failure(LibraryErrorKind.OTHER),
+            LibraryException.NotOnDevice("d") to Failure(LibraryErrorKind.NOT_ON_DEVICE),
         )
         cases.forEach { (e, failure) -> assertEquals(e.toString(), failure, Failure.of(e)) }
         assertEquals(Failure(LibraryErrorKind.OTHER), Failure.of(IllegalStateException("not from the library")))
@@ -43,6 +44,16 @@ class FailuresTest {
                 assertTrue("$kind while $doing", message.id != 0)
             }
         }
+    }
+
+    /** A sticker not kept offline, with the server away: explained, not called a network error. */
+    @Test
+    fun aStickerNotOnThePhoneIsExplained() {
+        val notHere = Failure.of(LibraryException.NotOnDevice("grumpy cat: the original file is not on this device"))
+        for (doing in Doing.entries) {
+            assertEquals(Message(R.string.app_error_not_on_device), messageFor(notHere, doing))
+        }
+        assertTrue(messageFor(Failure(LibraryErrorKind.UNREACHABLE), Doing.SHARING).id != R.string.app_error_not_on_device)
     }
 
     @Test

@@ -25,6 +25,7 @@ data class Failure(val kind: LibraryErrorKind, val field: String? = null, val st
             is LibraryException.InvalidInput -> Failure(LibraryErrorKind.INVALID_INPUT, field = e.field)
             is LibraryException.Server -> Failure(LibraryErrorKind.SERVER, status = e.status.toInt())
             is LibraryException.Io -> Failure(LibraryErrorKind.IO)
+            is LibraryException.NotOnDevice -> Failure(LibraryErrorKind.NOT_ON_DEVICE)
             else -> Failure(LibraryErrorKind.OTHER)
         }
     }
@@ -44,6 +45,9 @@ enum class Doing {
     LIKING,
     SYNCING,
     CLEARING_CACHE,
+
+    /** Keeping a sticker, a pack or the library offline, or stopping it. */
+    KEEPING_OFFLINE,
     SIGNING_OUT,
 
     /** Saving the server address before a Tailscale or password sign-in. */
@@ -94,6 +98,7 @@ fun messageFor(failure: Failure, doing: Doing): Message = when (failure.kind) {
     LibraryErrorKind.SERVER -> Message(R.string.app_error_server, listOf(failure.status ?: 0))
     LibraryErrorKind.IO -> Message(R.string.app_error_storage)
     LibraryErrorKind.OTHER -> Message(R.string.app_error_other)
+    LibraryErrorKind.NOT_ON_DEVICE -> Message(R.string.app_error_not_on_device)
 }
 
 /** The text for the kind a sync failed with ([io.github.dolfost.stickpile.rust.SyncState.lastError]). */

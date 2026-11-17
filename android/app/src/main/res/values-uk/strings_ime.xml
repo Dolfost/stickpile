@@ -56,6 +56,8 @@
     <string name="ime_error_server">На сервері сталася помилка. Спробуйте пізніше.</string>
     <string name="ime_error_io">Не вдалося прочитати збережені стікери.</string>
     <string name="ime_error_failed">Щось пішло не так.</string>
+    <string name="ime_error_not_on_device">Його немає на телефоні, а сервер недоступний. Збережіть його офлайн з його меню.</string>
+    <string name="ime_unavailable_item">%1$s, немає на цьому телефоні</string>
     <string name="ime_error_no_app">Немає застосунку, щоб поділитися.</string>
 
     <string name="ime_copied">Скопійовано. Поверніться до своєї клавіатури й вставте його.</string>
