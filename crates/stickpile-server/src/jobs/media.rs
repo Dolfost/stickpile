@@ -179,8 +179,37 @@ pub async fn enrich(state: &AppState, job: &JobRow) -> JobResult {
 
 /// The CLIP part of [`enrich`].
 async fn embed(state: &AppState, media_id: &str) -> Result<serde_json::Value, JobError> {
-    let media_id = media_id.to_string();
-    let thumb = variant_row(state, &media_id, Variant::Thumb)
+    let embedded = embed_media(state, media_id).await?;
+    let fill = AiFill::from_suggestions(&embedded.suggestions);
+    let mut tx = sets::begin(&state.db).await?;
+    store_embedding(&mut tx, media_id, &embedded).await?;
+    let changed = ai_fill::apply(&mut tx, media_id, &fill, None).await?;
+    tx.commit().await.map_err(|e| JobError::Retry(e.to_string()))?;
+
+    index::set_embedding(state, media_id, Some(Arc::from(embedded.embedding)));
+    index::refresh_items(state, &changed).await?;
+    Ok(json!({
+        "model": embedded.model,
+        "keywords": fill.keywords,
+        "emojis": fill.emojis,
+        "vibe": fill.vibe,
+        "items_updated": changed.len(),
+    }))
+}
+
+/// A picture's CLIP embedding with its zero-shot suggestions.
+pub struct Embedded {
+    pub embedding: Vec<f32>,
+    pub suggestions: stickpile_ai::Suggestions,
+    /// The image model that made it.
+    pub model: String,
+}
+
+/// Embed the representative frame of `media_id` (decoded from its stored
+/// thumbnail) and pick its suggestions, on the blocking pool. Needs the AI
+/// backend ([`AppState::ai`]).
+pub async fn embed_media(state: &AppState, media_id: &str) -> Result<Embedded, JobError> {
+    let thumb = variant_row(state, media_id, Variant::Thumb)
         .await?
         .ok_or_else(|| JobError::Fatal("thumbnail missing".into()))?;
     let abs = files::resolve(&state.media_dir(), &thumb.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
@@ -189,44 +218,56 @@ async fn embed(state: &AppState, media_id: &str) -> Result<serde_json::Value, Jo
         .map_err(|e| JobError::Retry(format!("reading thumbnail: {e}")))?;
     let st = state.clone();
     let cfg = state.config.ai.clone();
-    let (embedding, suggestions, model) = tokio::task::spawn_blocking(move || {
-        let ai = st.ai().expect("checked");
+    tokio::task::spawn_blocking(move || {
+        let ai = st
+            .ai()
+            .ok_or_else(|| JobError::Retry("the AI model is not loaded".into()))?;
         let frame =
             stickpile_media::decode_frame(&bytes, &st.media_limits()).map_err(|e| JobError::Fatal(e.to_string()))?;
-        let (emb, sugg) = ai_fill::embed_and_suggest(ai, &cfg, &frame).map_err(|e| JobError::Retry(e.to_string()))?;
-        Ok::<_, JobError>((emb, sugg, ai.image_model_id().to_string()))
+        let (embedding, suggestions) =
+            ai_fill::embed_and_suggest(ai, &cfg, &frame).map_err(|e| JobError::Retry(e.to_string()))?;
+        Ok::<_, JobError>(Embedded {
+            embedding,
+            suggestions,
+            model: ai.image_model_id().to_string(),
+        })
     })
     .await
-    .map_err(|e| JobError::Retry(e.to_string()))??;
+    .map_err(|e| JobError::Retry(e.to_string()))?
+}
 
-    let kw_json = serde_json::to_string(&suggestions.keywords).unwrap_or_else(|_| "[]".into());
-    let em_json = serde_json::to_string(&suggestions.emojis).unwrap_or_else(|_| "[]".into());
-    let fill = AiFill::from_suggestions(&suggestions);
-    let mut tx = sets::begin(&state.db).await?;
-    sqlx::query(
-        "UPDATE media SET embedding = ?, embedding_model = ?, ai_keywords = ?, ai_emojis = ?, ai_vibe = ? WHERE id = ?",
-    )
-    .bind(stickpile_ai::to_blob(&embedding))
-    .bind(&model)
-    .bind(&kw_json)
-    .bind(&em_json)
-    .bind(&fill.vibe)
-    .bind(&media_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| JobError::Retry(e.to_string()))?;
-    let changed = ai_fill::apply(&mut tx, &media_id, &fill, None).await?;
-    tx.commit().await.map_err(|e| JobError::Retry(e.to_string()))?;
+/// Store an embedding and its suggestions on the media row (the caller
+/// updates the search index after the commit).
+pub async fn store_embedding(conn: &mut sqlx::SqliteConnection, media_id: &str, e: &Embedded) -> Result<(), JobError> {
+    store_suggestions(conn, media_id, &e.suggestions).await?;
+    sqlx::query("UPDATE media SET embedding = ?, embedding_model = ? WHERE id = ?")
+        .bind(stickpile_ai::to_blob(&e.embedding))
+        .bind(&e.model)
+        .bind(media_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))?;
+    Ok(())
+}
 
-    index::set_embedding(state, &media_id, Some(Arc::from(embedding)));
-    index::refresh_items(state, &changed).await?;
-    Ok(json!({
-        "model": model,
-        "keywords": fill.keywords,
-        "emojis": fill.emojis,
-        "vibe": fill.vibe,
-        "items_updated": changed.len(),
-    }))
+/// Store the last zero-shot output on the media row (what new items of the
+/// same picture get, [`AiFill::from_media`]).
+pub async fn store_suggestions(
+    conn: &mut sqlx::SqliteConnection,
+    media_id: &str,
+    s: &stickpile_ai::Suggestions,
+) -> Result<(), JobError> {
+    let kw_json = serde_json::to_string(&s.keywords).unwrap_or_else(|_| "[]".into());
+    let em_json = serde_json::to_string(&s.emojis).unwrap_or_else(|_| "[]".into());
+    sqlx::query("UPDATE media SET ai_keywords = ?, ai_emojis = ?, ai_vibe = ? WHERE id = ?")
+        .bind(&kw_json)
+        .bind(&em_json)
+        .bind(s.vibe.as_ref().map(|(v, _)| v.clone()))
+        .bind(media_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))?;
+    Ok(())
 }
 
 /// The OCR part of [`enrich`]: the words of the stored, sanitised original
@@ -245,43 +286,65 @@ async fn read_words(
     let model = reader.model_id().to_string();
     let text = match ai_fill::ocr_of(media, &model) {
         Some(t) => t.to_string(),
-        None => {
-            let original = variant_row(state, &media.id, Variant::Original)
-                .await?
-                .ok_or_else(|| JobError::Fatal("original file missing".into()))?;
-            let abs =
-                files::resolve(&state.media_dir(), &original.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
-            let probe = media.probe();
-            let tools = state.tools.clone();
-            let read = tokio::task::spawn_blocking(move || {
-                let frames = stickpile_media::text_frames(&abs, &probe, &tools).map_err(|e| e.to_string())?;
-                ai_fill::read_text(reader.as_ref(), &frames).map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| JobError::Retry(e.to_string()))?;
-            match read {
-                Ok(t) => {
-                    sqlx::query("UPDATE media SET ocr_text = ?, ocr_model = ? WHERE id = ?")
-                        .bind(&t)
-                        .bind(&model)
-                        .bind(&media.id)
-                        .execute(&state.db)
-                        .await
-                        .map_err(|e| JobError::Retry(e.to_string()))?;
-                    t
-                }
-                Err(e) => {
-                    tracing::warn!(media = %media.id, "reading the text failed: {e}");
-                    return Ok(json!({ "ocr_model": model, "ocr_error": e }));
-                }
+        None => match read_and_store(state, media, reader).await? {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(media = %media.id, "reading the text failed: {e}");
+                return Ok(json!({ "ocr_model": model, "ocr_error": e }));
             }
-        }
+        },
     };
     let mut tx = sets::begin(&state.db).await?;
     let changed = ai_fill::apply_text(&mut tx, &media.id, &text, None).await?;
     tx.commit().await.map_err(|e| JobError::Retry(e.to_string()))?;
     index::refresh_items(state, &changed).await?;
     Ok(json!({ "ocr_model": model, "text": text, "text_items_updated": changed.len() }))
+}
+
+/// Read the words of a media's stored, sanitised original with `reader`
+/// (on the blocking pool) and store the result with the reader's model id,
+/// whatever was stored before. `Ok(Err(message))` when reading failed
+/// (nothing is stored then).
+pub async fn read_and_store(
+    state: &AppState,
+    media: &db::MediaRow,
+    reader: Arc<dyn stickpile_ai::TextReader>,
+) -> Result<Result<String, String>, JobError> {
+    let model = reader.model_id().to_string();
+    let original = variant_row(state, &media.id, Variant::Original)
+        .await?
+        .ok_or_else(|| JobError::Fatal("original file missing".into()))?;
+    let abs = files::resolve(&state.media_dir(), &original.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
+    let probe = media.probe();
+    let tools = state.tools.clone();
+    let read = tokio::task::spawn_blocking(move || {
+        let frames = stickpile_media::text_frames(&abs, &probe, &tools).map_err(|e| e.to_string())?;
+        ai_fill::read_text(reader.as_ref(), &frames).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| JobError::Retry(e.to_string()))?;
+    if let Ok(t) = &read {
+        sqlx::query("UPDATE media SET ocr_text = ?, ocr_model = ? WHERE id = ?")
+            .bind(t)
+            .bind(&model)
+            .bind(&media.id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| JobError::Retry(e.to_string()))?;
+    }
+    Ok(read)
+}
+
+/// Read the stored, sanitised original of a media row (the caller holds
+/// `state.media_lock` shared).
+pub async fn read_original(state: &AppState, media_id: &str) -> Result<Vec<u8>, JobError> {
+    let original = variant_row(state, media_id, Variant::Original)
+        .await?
+        .ok_or_else(|| JobError::Fatal("original file missing".into()))?;
+    let abs = files::resolve(&state.media_dir(), &original.path).ok_or_else(|| JobError::Fatal("bad path".into()))?;
+    tokio::fs::read(&abs)
+        .await
+        .map_err(|e| JobError::Retry(format!("reading the original: {e}")))
 }
 
 /// Enqueue `Enrich` for every referenced media without an embedding from the
