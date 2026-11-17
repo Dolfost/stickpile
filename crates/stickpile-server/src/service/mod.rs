@@ -16,6 +16,7 @@ pub mod members;
 pub mod problems;
 pub mod proposals;
 pub mod publish;
+pub mod recheck;
 pub mod renditions;
 pub mod search;
 pub mod sets;

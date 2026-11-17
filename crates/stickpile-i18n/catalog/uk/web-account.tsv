@@ -134,6 +134,7 @@ Git pull	Оновлення з git
 Git push	Надсилання в git
 Telegram import	Імпорт із Telegram
 Telegram export	Експорт у Telegram
+Recheck	Повторна перевірка
 queued	у черзі
 running	виконується
 done	готово

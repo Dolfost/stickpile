@@ -189,6 +189,21 @@ pub const PROFILES: &str = "/api/v1/profiles";
 /// GET -> [`crate::model::Job`]
 pub const JOB: &str = "/api/v1/jobs/{id}";
 
+// --- rechecks ----------------------------------------------------------------------
+/// GET -> `Vec<`[`crate::model::Recheck`]`>`: the caller's batches (an
+/// admin's include the server-wide ones), newest first. POST
+/// [`crate::model::StartRecheck`] -> Recheck: recheck the caller's own
+/// items (201; 200 with the running batch of the same scope instead).
+/// 404 from servers older than rechecks (0.7.0).
+pub const RECHECKS: &str = "/api/v1/rechecks";
+/// GET -> [`crate::model::Recheck`] (its owner or an admin).
+pub const RECHECK: &str = "/api/v1/rechecks/{id}";
+/// GET -> `Vec<`[`crate::model::RecheckFailure`]`>`: the pictures that failed.
+pub const RECHECK_FAILURES: &str = "/api/v1/rechecks/{id}/failures";
+/// POST -> [`crate::model::Recheck`]: stop it (its owner or an admin);
+/// queued pictures are dropped, a running one finishes.
+pub const RECHECK_CANCEL: &str = "/api/v1/rechecks/{id}/cancel";
+
 // --- admin (role = admin) -----------------------------------------------------------
 /// GET -> `Vec<AdminUser>`; POST [`crate::model::AdminCreateUser`] -> AdminUser
 pub const ADMIN_USERS: &str = "/api/v1/admin/users";
@@ -204,6 +219,10 @@ pub const ADMIN_AUDIT: &str = "/api/v1/admin/audit";
 pub const ADMIN_STORAGE: &str = "/api/v1/admin/storage";
 /// GET `?status=` -> `Vec<Job>`
 pub const ADMIN_JOBS: &str = "/api/v1/admin/jobs";
+/// POST [`crate::model::StartRecheck`] -> [`crate::model::Recheck`]:
+/// recheck every item on the server (201; audited), or the running batch
+/// of the same scope (200).
+pub const ADMIN_RECHECKS: &str = "/api/v1/admin/rechecks";
 
 /// Substitute `{name}` segments in order: `path(ITEM_FILE, &[id, "thumb"])`.
 pub fn path(template: &str, args: &[&str]) -> String {

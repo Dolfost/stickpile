@@ -19,6 +19,7 @@
 //! [`crate::service::publish`] also record their outcome on the set.
 
 pub mod media;
+pub mod recheck;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -236,15 +237,16 @@ pub async fn requeue_interrupted(db: &SqlitePool) -> AppResult<u64> {
     )
 }
 
-/// Delete finished jobs older than `max_age_secs`.
+/// Delete finished jobs older than `max_age_secs`, and rechecks that ended
+/// that long ago (their jobs are among them).
 pub async fn purge_finished(db: &SqlitePool, max_age_secs: i64) -> AppResult<u64> {
-    Ok(
-        sqlx::query("DELETE FROM jobs WHERE status IN ('done', 'failed') AND finished_at < ?")
-            .bind(now() - max_age_secs)
-            .execute(db)
-            .await?
-            .rows_affected(),
-    )
+    let jobs = sqlx::query("DELETE FROM jobs WHERE status IN ('done', 'failed') AND finished_at < ?")
+        .bind(now() - max_age_secs)
+        .execute(db)
+        .await?
+        .rows_affected();
+    let rechecks = crate::service::recheck::purge_finished(db, max_age_secs).await?;
+    Ok(jobs + rechecks)
 }
 
 /// Which jobs a worker takes.
@@ -305,6 +307,7 @@ pub async fn dispatch(state: &AppState, job: &JobRow) -> JobResult {
         Some(JobKind::DiscordExport) => crate::service::discord::export_job(state, job).await,
         Some(JobKind::SignalImport) => crate::service::signal::import_job(state, job).await,
         Some(JobKind::SignalExport) => crate::service::signal::export_job(state, job).await,
+        Some(JobKind::Recheck) => recheck::run(state, job).await,
         Some(JobKind::Other) | None => Err(JobError::Fatal(format!("unknown job kind {:?}", job.kind))),
     }
 }
@@ -320,6 +323,7 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
                 .execute(db)
                 .await?;
             note_publish(db, job, JobStatus::Done, result.as_ref(), None).await;
+            note_recheck(db, job, Ok(result.as_ref())).await;
             scrub(db, job).await;
         }
         Err(JobError::Retry(msg)) if job.attempts < MAX_ATTEMPTS => {
@@ -341,6 +345,7 @@ async fn finish(db: &SqlitePool, job: &JobRow, outcome: JobResult) -> AppResult<
                 .execute(db)
                 .await?;
             note_publish(db, job, JobStatus::Failed, None, Some(&e.to_string())).await;
+            note_recheck(db, job, Err(&e.to_string())).await;
             scrub(db, job).await;
         }
     }
@@ -373,6 +378,18 @@ async fn scrub(db: &SqlitePool, job: &JobRow) {
 async fn note_publish(db: &SqlitePool, job: &JobRow, status: JobStatus, result: Option<&Value>, error: Option<&str>) {
     if let Err(e) = crate::service::publish::record_job(db, job, status, result, error).await {
         tracing::error!(job = %job.id, "recording the publish state: {e}");
+    }
+}
+
+/// A finished `recheck` job counts in its batch
+/// ([`crate::service::recheck::record_job`]); a failure to count it is
+/// logged, the job's own outcome stands.
+async fn note_recheck(db: &SqlitePool, job: &JobRow, outcome: Result<Option<&Value>, &str>) {
+    if job.kind() != Some(JobKind::Recheck) {
+        return;
+    }
+    if let Err(e) = crate::service::recheck::record_job(db, job, outcome).await {
+        tracing::error!(job = %job.id, "counting a recheck job in its batch: {e}");
     }
 }
 

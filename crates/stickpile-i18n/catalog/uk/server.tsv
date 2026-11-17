@@ -135,3 +135,7 @@ the new passwords do not match	нові паролі не збігаються
 the theme must be system, light or dark	тема має бути системною, світлою або темною
 choose a set before the files	виберіть набір перед файлами
 choose a set	виберіть набір
+# Rechecks (POST /api/v1/rechecks): recomputing metadata of many items.
+unknown recheck part	невідома частина повторної перевірки
+unknown recheck mode	невідомий режим повторної перевірки
+this server does not read the words in pictures	цей сервер не читає слова на картинках

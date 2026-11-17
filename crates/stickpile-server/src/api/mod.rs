@@ -11,6 +11,7 @@ pub mod items;
 pub mod misc;
 pub mod openapi;
 pub mod problems;
+pub mod rechecks;
 pub mod sets;
 
 use axum::body::Body;
@@ -116,6 +117,12 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         .route(r::STATS_ME, get(misc::stats_me))
         .route(r::PROFILES, get(misc::profiles))
         .route(r::JOB, get(misc::job))
+        // rechecks
+        .route(r::RECHECKS, get(rechecks::list).post(rechecks::start))
+        .route(r::RECHECK, get(rechecks::get))
+        .route(r::RECHECK_FAILURES, get(rechecks::failures))
+        .route(r::RECHECK_CANCEL, post(rechecks::cancel))
+        .route(r::ADMIN_RECHECKS, post(rechecks::start_server))
         // admin
         .route(r::ADMIN_USERS, get(admin::list_users).post(admin::create_user))
         .route(

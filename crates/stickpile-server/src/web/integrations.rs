@@ -111,6 +111,7 @@ fn kind_label(k: JobKind) -> &'static str {
         JobKind::DiscordExport => t("Discord export"),
         JobKind::SignalImport => t("Signal import"),
         JobKind::SignalExport => t("Signal export"),
+        JobKind::Recheck => t("Recheck"),
         JobKind::Other => t("Job"),
     }
 }

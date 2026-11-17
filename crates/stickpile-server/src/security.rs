@@ -113,6 +113,7 @@ pub struct RateLimiters {
     login_unknown_ip: DefaultKeyedRateLimiter<String>,
     upload_user: DefaultKeyedRateLimiter<String>,
     ai_suggest_user: DefaultKeyedRateLimiter<String>,
+    recheck_user: DefaultKeyedRateLimiter<String>,
     webhook_ip: DefaultKeyedRateLimiter<String>,
 }
 
@@ -126,6 +127,10 @@ const UNKNOWN_IP_KEY: &str = "unknown";
 
 fn per_minute(n: u32) -> Quota {
     Quota::per_minute(NonZeroU32::new(n.max(1)).expect("non-zero"))
+}
+
+fn per_hour(n: u32) -> Quota {
+    Quota::per_hour(NonZeroU32::new(n.max(1)).expect("non-zero"))
 }
 
 fn check(limiter: &DefaultKeyedRateLimiter<String>, key: String) -> AppResult<()> {
@@ -145,6 +150,7 @@ impl RateLimiters {
             )),
             upload_user: RateLimiter::keyed(per_minute(limits.upload_per_minute)),
             ai_suggest_user: RateLimiter::keyed(per_minute(limits.ai_suggest_per_minute)),
+            recheck_user: RateLimiter::keyed(per_hour(limits.recheck_per_hour)),
             webhook_ip: RateLimiter::keyed(per_minute(WEBHOOKS_PER_MINUTE)),
         }
     }
@@ -196,6 +202,12 @@ impl RateLimiters {
         check(&self.ai_suggest_user, user_id.to_string())
     }
 
+    /// One unit per recheck of one's own items that is started
+    /// (`POST /api/v1/rechecks`; not when the same one is running).
+    pub fn check_recheck(&self, user_id: &str) -> AppResult<()> {
+        check(&self.recheck_user, user_id.to_string())
+    }
+
     /// Drop idle keys (called by the periodic cleanup).
     pub fn prune(&self) {
         self.login_ip.retain_recent();
@@ -203,6 +215,7 @@ impl RateLimiters {
         self.login_unknown_ip.retain_recent();
         self.upload_user.retain_recent();
         self.ai_suggest_user.retain_recent();
+        self.recheck_user.retain_recent();
         self.webhook_ip.retain_recent();
     }
 }

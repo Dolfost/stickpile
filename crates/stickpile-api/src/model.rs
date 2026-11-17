@@ -195,6 +195,9 @@ pub enum JobKind {
     SignalImport,
     /// Upload a set as a new Signal sticker pack.
     SignalExport,
+    /// Recompute the parts of one picture a [`Recheck`] asks for. Readers
+    /// older than the kind (0.7.0) see [`JobKind::Other`].
+    Recheck,
     /// A kind this client does not know (added by a newer server), so a
     /// job list still reads. A server never makes one.
     #[serde(other)]
@@ -1487,6 +1490,191 @@ pub struct Job {
 }
 
 // ---------------------------------------------------------------------------
+// Rechecks
+// ---------------------------------------------------------------------------
+
+/// What a [`Recheck`] recomputes. Each is chosen on its own; none ever
+/// changes a value a person gave (docs/ai.md, "Recheck").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RecheckPart {
+    /// The items' AI keywords (CLIP zero-shot).
+    Keywords,
+    /// The items' AI emojis (CLIP zero-shot).
+    Emojis,
+    /// The items' AI vibe (CLIP zero-shot).
+    Vibe,
+    /// The items' AI text: the words in the picture (OCR).
+    Text,
+    /// The picture's CLIP embedding (semantic search).
+    Embedding,
+    /// The picture's quality score and report.
+    Quality,
+    /// The picture's renditions for the chat apps (variants).
+    Renditions,
+    /// A part this reader does not know (added by a newer peer).
+    #[serde(other)]
+    Other,
+}
+
+impl RecheckPart {
+    /// Every part, in this order.
+    pub const ALL: [RecheckPart; 7] = [
+        RecheckPart::Keywords,
+        RecheckPart::Emojis,
+        RecheckPart::Vibe,
+        RecheckPart::Text,
+        RecheckPart::Embedding,
+        RecheckPart::Quality,
+        RecheckPart::Renditions,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecheckPart::Keywords => "keywords",
+            RecheckPart::Emojis => "emojis",
+            RecheckPart::Vibe => "vibe",
+            RecheckPart::Text => "text",
+            RecheckPart::Embedding => "embedding",
+            RecheckPart::Quality => "quality",
+            RecheckPart::Renditions => "renditions",
+            RecheckPart::Other => "other",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<RecheckPart> {
+        RecheckPart::ALL.into_iter().find(|p| p.as_str() == s.trim())
+    }
+
+    /// Needs the CLIP model (the embedding and what is derived from it).
+    pub fn needs_clip(self) -> bool {
+        matches!(
+            self,
+            RecheckPart::Keywords | RecheckPart::Emojis | RecheckPart::Vibe | RecheckPart::Embedding
+        )
+    }
+}
+
+/// How a [`Recheck`] treats what is already there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RecheckMode {
+    /// Compute only what is not there: no embedding or reading from the
+    /// current model, no quality report, renditions missing or outdated,
+    /// an empty field.
+    #[default]
+    Missing,
+    /// Compute every chosen part again and replace the computer's values.
+    Refresh,
+    /// A mode this reader does not know.
+    #[serde(other)]
+    Other,
+}
+
+impl RecheckMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecheckMode::Missing => "missing",
+            RecheckMode::Refresh => "refresh",
+            RecheckMode::Other => "other",
+        }
+    }
+}
+
+/// Whose items a [`Recheck`] covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RecheckScope {
+    /// The items of the sets one user owns.
+    User,
+    /// Every item on the server (admins, or the server itself).
+    Server,
+    /// A scope this reader does not know.
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RecheckState {
+    Running,
+    /// Every picture was rechecked (some may have failed: `failed`).
+    Done,
+    /// Stopped by a person; `done` and `failed` count what ran before.
+    Cancelled,
+    /// Every picture failed.
+    Failed,
+    /// A state this reader does not know.
+    #[serde(other)]
+    Other,
+}
+
+/// `POST /api/v1/rechecks` and `POST /api/v1/admin/rechecks`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StartRecheck {
+    /// The parts to recompute; empty: every part this server can recompute
+    /// now (no CLIP parts without a model, no `text` without a reader).
+    #[serde(default)]
+    pub parts: Vec<RecheckPart>,
+    #[serde(default)]
+    pub mode: RecheckMode,
+    /// Only this set (one of the caller's own for `POST /api/v1/rechecks`).
+    #[serde(default)]
+    pub set_id: Option<String>,
+}
+
+/// A batch that recomputes metadata of many pictures in the background
+/// (one `recheck` job per picture). The counters count pictures.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Recheck {
+    pub id: String,
+    pub scope: RecheckScope,
+    /// Sorted as in [`RecheckPart::ALL`].
+    pub parts: Vec<RecheckPart>,
+    pub mode: RecheckMode,
+    #[serde(default)]
+    pub set_id: Option<String>,
+    /// Who started it; `None`: the server itself (after a model change, or
+    /// for pictures its text reader never read).
+    #[serde(default)]
+    pub requested_by: Option<String>,
+    pub state: RecheckState,
+    /// Pictures in the batch.
+    #[serde(default)]
+    pub total: u64,
+    /// Pictures rechecked.
+    #[serde(default)]
+    pub done: u64,
+    /// Pictures whose recheck failed (`GET /api/v1/rechecks/{id}/failures`).
+    #[serde(default)]
+    pub failed: u64,
+    /// Pictures where something was written.
+    #[serde(default)]
+    pub changed: u64,
+    pub created_at: i64,
+    #[serde(default)]
+    pub finished_at: Option<i64>,
+}
+
+/// One picture whose recheck failed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RecheckFailure {
+    pub media_id: String,
+    /// One of the batch owner's items showing the picture (user scope).
+    #[serde(default)]
+    pub item_id: Option<String>,
+    pub error: String,
+    pub at: i64,
+}
+
+// ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------
 
@@ -2003,6 +2191,90 @@ mod tests {
             pub name: Option<String>,
             pub keywords: Option<Vec<String>>,
         }
+
+        /// `JobKind` of 0.7.0: no `Recheck`.
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum JobKind {
+            Variants,
+            Enrich,
+            GitPull,
+            GitPush,
+            TelegramImport,
+            TelegramExport,
+            WhatsappExport,
+            DiscordImport,
+            DiscordExport,
+            SignalImport,
+            SignalExport,
+            #[serde(other)]
+            Other,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        pub struct Job {
+            pub id: String,
+            pub kind: JobKind,
+            pub status: super::super::JobStatus,
+            pub attempts: u32,
+            pub error: Option<String>,
+            pub subject: Option<String>,
+            pub result: Option<serde_json::Value>,
+            pub created_at: i64,
+            pub started_at: Option<i64>,
+            pub finished_at: Option<i64>,
+        }
+    }
+
+    /// A job list with a recheck job, as a newer server sends it, reads on
+    /// 0.7.0: the recheck job is `Other`, the others keep their kinds.
+    #[test]
+    fn an_older_client_reads_a_recheck_job_as_other() {
+        let job = |id: &str, kind: JobKind| Job {
+            id: id.into(),
+            kind,
+            status: JobStatus::Queued,
+            attempts: 0,
+            error: None,
+            subject: Some("m".into()),
+            result: None,
+            created_at: 1,
+            started_at: None,
+            finished_at: None,
+        };
+        let list = serde_json::to_value(vec![job("a", JobKind::Variants), job("b", JobKind::Recheck)]).unwrap();
+        assert_eq!(list[1]["kind"], "recheck");
+        let old: Vec<v070::Job> = serde_json::from_value(list).unwrap();
+        assert_eq!(old[0].kind, v070::JobKind::Variants);
+        assert_eq!(old[1].kind, v070::JobKind::Other);
+        assert_eq!(old[1].id, "b");
+    }
+
+    /// Recheck types read values a newer peer may add, and leave out what
+    /// they can.
+    #[test]
+    fn recheck_types_read_newer_values() {
+        for p in RecheckPart::ALL {
+            assert_eq!(RecheckPart::parse(p.as_str()), Some(p));
+            assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{}\"", p.as_str()));
+        }
+        assert_eq!(RecheckPart::parse("bogus"), None);
+        let r: StartRecheck = serde_json::from_str(r#"{"parts": ["keywords", "colour"], "mode": "deep"}"#).unwrap();
+        assert_eq!(r.parts, [RecheckPart::Keywords, RecheckPart::Other]);
+        assert_eq!(r.mode, RecheckMode::Other);
+        let r: StartRecheck = serde_json::from_str("{}").unwrap();
+        assert_eq!(r, StartRecheck::default());
+        assert_eq!(r.mode, RecheckMode::Missing);
+        let b: Recheck = serde_json::from_str(
+            r#"{"id": "r", "scope": "galaxy", "parts": ["text"], "mode": "refresh", "state": "paused",
+                "created_at": 5, "priority": 3}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (b.scope, b.state, b.total, b.set_id, b.requested_by),
+            (RecheckScope::Other, RecheckState::Other, 0, None, None)
+        );
     }
 
     fn sample_item() -> Item {

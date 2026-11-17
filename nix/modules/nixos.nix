@@ -333,6 +333,11 @@ in
               AI suggestion requests per user (the upload tray asks once per
               staged file).
             '';
+            recheck_per_hour = opt u32 10 ''
+              Rechecks of one's own items a user may start per hour. Asking
+              while the same recheck runs does not count; admins' server-wide
+              rechecks are not limited.
+            '';
           };
 
           media = section "Media pipeline." {

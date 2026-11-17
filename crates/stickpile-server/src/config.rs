@@ -153,6 +153,9 @@ pub struct LimitsConfig {
     /// AI suggestion requests (`POST /api/v1/ai/suggest`, the upload tray
     /// asks once per staged file), per user.
     pub ai_suggest_per_minute: u32,
+    /// Rechecks of one's own items started (`POST /api/v1/rechecks`), per
+    /// user. Asking while the same recheck runs does not count.
+    pub recheck_per_hour: u32,
 }
 
 impl Default for LimitsConfig {
@@ -166,6 +169,7 @@ impl Default for LimitsConfig {
             login_per_minute: 10,
             upload_per_minute: 120,
             ai_suggest_per_minute: 120,
+            recheck_per_hour: 10,
         }
     }
 }
@@ -440,6 +444,7 @@ impl Config {
         if self.limits.login_per_minute == 0
             || self.limits.upload_per_minute == 0
             || self.limits.ai_suggest_per_minute == 0
+            || self.limits.recheck_per_hour == 0
         {
             return bad("rate limits must be > 0".into());
         }

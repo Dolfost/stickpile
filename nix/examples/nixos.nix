@@ -39,6 +39,7 @@
         login_per_minute = 10;
         upload_per_minute = 120;
         ai_suggest_per_minute = 120;
+        recheck_per_hour = 10;
       };
       media = {
         ffmpeg = "ffmpeg";

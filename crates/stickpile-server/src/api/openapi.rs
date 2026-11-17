@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use super::{admin, ai, auth, collab, integrations, items, misc, problems, sets};
+use super::{admin, ai, auth, collab, integrations, items, misc, problems, rechecks, sets};
 
 struct SecuritySchemes;
 
@@ -123,6 +123,12 @@ impl Modify for SecuritySchemes {
         misc::stats_me,
         misc::profiles,
         misc::job,
+        rechecks::list,
+        rechecks::start,
+        rechecks::get,
+        rechecks::failures,
+        rechecks::cancel,
+        rechecks::start_server,
         admin::list_users,
         admin::create_user,
         admin::update_user,
@@ -147,6 +153,7 @@ impl Modify for SecuritySchemes {
         (name = "integrations", description = "Git packs, Telegram, Discord and Signal import, publishing to several platforms, WhatsApp packs and the Signal-ready zip (background jobs)"),
         (name = "problems", description = "Problems report: duplicates, Telegram blockers, media and metadata issues"),
         (name = "collaboration", description = "Contributors of sets and proposals to other users' sets"),
+        (name = "rechecks", description = "Recompute keywords, emojis, vibe, text, embeddings, quality and renditions of many items in the background"),
         (name = "misc", description = "Health, profiles, jobs, this document"),
     )
 )]
