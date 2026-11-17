@@ -37,8 +37,9 @@ whose source is still `ai`. The item text (`text_source`) has a stricter
 rule, below.
 
 Next to every embedding the server stores `Enricher::model_id()`; a different
-id triggers re-embedding (the server's own [recheck](#recheck) at startup). `Enricher::image_model_id()` is `clip-vit-b32` for
-both text encoders, so switching `text_encoder` does not require
+id triggers re-embedding (the server's own [recheck](#recheck) at
+startup). `Enricher::image_model_id()` is `clip-vit-b32` for both text
+encoders, so switching `text_encoder` does not require
 re-embedding images, only re-running zero-shot suggestions (their prompts
 change). `ZeroShot::vocab_fingerprint()` (16 hex chars) identifies the
 vocabulary that produced a set of suggestions.
