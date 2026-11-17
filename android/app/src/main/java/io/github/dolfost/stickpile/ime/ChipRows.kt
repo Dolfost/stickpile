@@ -1,12 +1,18 @@
 package io.github.dolfost.stickpile.ime
 
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import android.view.LayoutInflater
 import android.view.View
+import androidx.core.text.buildSpannedString
+import androidx.core.text.inSpans
 import androidx.core.view.isNotEmpty
 import androidx.core.view.isVisible
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.color.MaterialColors
 import io.github.dolfost.stickpile.R
+import io.github.dolfost.stickpile.display.HintLabel
 import io.github.dolfost.stickpile.rust.SearchHint
 
 /**
@@ -43,7 +49,7 @@ internal class ChipRows(
         offers.removeAllViews()
         for (hint in hints) {
             val chip = inflater.inflate(R.layout.ime_hint_chip, offers, false) as Chip
-            chip.text = hint.label
+            chip.text = offerText(chip, HintLabel.of(hint))
             chip.isCheckable = true
             chip.isChecked = hint.chosen
             chip.setOnClickListener { onOffer(hint) }
@@ -67,9 +73,25 @@ internal class ChipRows(
         update()
     }
 
+    /** An offer's text: an emoji of `e:` with its name after it, smaller and dimmer. */
+    private fun offerText(chip: Chip, label: HintLabel): CharSequence {
+        val name = label.name ?: return label.text
+        val dim = MaterialColors.getColor(chip, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        return buildSpannedString {
+            append(label.text)
+            append(' ')
+            inSpans(RelativeSizeSpan(NAME_SIZE), ForegroundColorSpan(dim)) { append(name) }
+        }
+    }
+
     private fun update() {
         if (offering && filters.checkedChipId != View.NO_ID) filters.clearCheck()
         offersScroll.isVisible = offering && offers.isNotEmpty()
         filtersScroll.isVisible = !offering && filters.isNotEmpty()
+    }
+
+    private companion object {
+        /** An emoji's name, relative to the chip's text. */
+        const val NAME_SIZE = 0.85f
     }
 }

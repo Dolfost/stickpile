@@ -65,8 +65,11 @@ cover image, else its first sticker).
   typed: the filter keys with their short forms (`tag: (t:)`, `vibe:
   (v:)`, `e:`, ...), the values of the filter being typed (`vibe:sar` and
   `v:sar` offer `sarcastic`), the emojis for `e:`, and for a bare word the
-  tags, vibes and packs containing it (`rea` offers `tag:reaction`). A
-  tap puts it in. The values come from the offline cache: right after
+  tags, vibes and packs containing it (`rea` offers `tag:reaction`). An
+  emoji comes with its English name after it, smaller and dimmer: `e:`
+  alone offers your emojis, most used first, and `e:sk` the emojis named
+  so (💀 skull, ☠️ skull and crossbones, ...), yours first. A tap puts it
+  in (an emoji in place of the name). The values come from the offline cache: right after
   signing in they come once the first sync is over, also for what is
   typed already.
 - **Search in a pack.** With a pack open (Packs tab), the field says
@@ -543,7 +546,10 @@ Behaviour the signatures do not show:
   `e:` (or `emoji:`) the values are emojis labelled with their English
   names (`💀 skull`; the query gets the emoji): the emojis of the cached
   items, most used first, and while a name is typed (`e:sk`) the emojis
-  it selects, the items' first (see [search.md](search.md)). While a
+  it selects, the items' first (see [search.md](search.md)). Only these
+  value labels have a space, so the app's and the keyboard's chips split
+  them at the first one (`display/HintLabel.kt`): the emoji at the chip's
+  size, the name after it in the secondary colour. While a
   bare word is typed: the tags, vibes and packs containing
   it as filters (`rea` offers `tag:reaction`), those starting with it
   first, then the filter keys the word starts. With nothing typed, or a

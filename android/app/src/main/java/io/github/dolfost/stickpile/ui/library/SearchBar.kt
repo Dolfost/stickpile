@@ -23,6 +23,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.display.Display
+import io.github.dolfost.stickpile.display.HintLabel
 import io.github.dolfost.stickpile.rust.SearchHint
 
 /** The entries of the library's menu, in their order. */
@@ -182,8 +184,30 @@ internal fun HintRow(hints: List<SearchHint>, onHint: (SearchHint) -> Unit) {
             FilterChip(
                 selected = hint.chosen,
                 onClick = { onHint(hint) },
-                label = { Text(hint.label, maxLines = 1) },
+                label = { HintText(HintLabel.of(hint)) },
             )
         }
+    }
+}
+
+/** An offer's label: an emoji of `e:` with its name after it, smaller and dimmer. */
+@Composable
+private fun HintText(label: HintLabel) {
+    val name = label.name
+    if (name == null) {
+        Text(label.text, maxLines = 1)
+        return
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label.text, maxLines = 1)
+        Text(
+            name,
+            maxLines = 1,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

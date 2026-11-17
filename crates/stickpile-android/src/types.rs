@@ -284,7 +284,10 @@ pub enum HintKind {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SearchHint {
     /// What to show: `sarcastic`, `tag:reaction`, `vibe:`; an emoji with
-    /// its English name, `💀 skull` (the query gets the emoji alone).
+    /// its English name, `💀 skull` (the query gets the emoji alone). Of
+    /// the [`HintKind::Value`] labels only these have a space (the other
+    /// values are one word), so the apps draw the name apart from the
+    /// emoji at the first one.
     pub label: String,
     /// The whole query once it is taken: the field's new text. Values and
     /// filters end with a space (the next word starts), keys with their
