@@ -1644,6 +1644,19 @@ mod tests {
         });
         assert!(explain(&e).unwrap().contains("stickpile login"));
         assert!(explain(&anyhow!("other")).is_none());
+        let e = anyhow::Error::from(CoreError::NotOnDevice {
+            item: "naahh".into(),
+            variant: Variant::Original,
+            cause: "refused".into(),
+        });
+        assert!(explain(&e)
+            .unwrap()
+            .contains("keep it offline with `stickpile offline keep"));
+        let e = anyhow::Error::from(Hinted {
+            message: "m".into(),
+            hint: "h".into(),
+        });
+        assert_eq!(explain(&e).as_deref(), Some("h"));
     }
 
     #[test]
