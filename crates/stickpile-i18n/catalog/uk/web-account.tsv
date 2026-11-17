@@ -179,3 +179,66 @@ Pack short name (optional)	Коротка назва набору (необов'
 Letters, digits and _, e.g. my_cats; _by_<bot name> is added for you. Empty: the bound pack, or one derived from the slug.	Літери, цифри та _, напр. my_cats; _by_<ім'я бота> додається автоматично. Якщо порожньо: прив'язаний набір або назва, утворена від slug.
 Pack title (optional)	Заголовок набору (необов'язково)
 Publish	Опублікувати
+# Rechecks: "Recheck my stickers" in the settings, a recheck's page, the admin tab (rechecks.rs).
+Recheck my stickers	Повторно перевірити мої стікери
+Let the computer look at your stickers again in the background: their keywords, emojis, vibe, the words in the picture, search by meaning, the quality score and the renditions.	Нехай комп'ютер ще раз перегляне ваші стікери у фоновому режимі: їхні ключові слова, емодзі, настрій, слова на зображенні, пошук за змістом, оцінку якості й варіанти.
+What you wrote or confirmed is never changed.	Те, що ви написали або підтвердили, ніколи не змінюється.
+What to recheck	Що перевірити повторно
+Text in the picture	Текст на зображенні
+Search by meaning	Пошук за змістом
+Quality score	Оцінка якості
+Renditions	Варіанти
+suggested by the AI from the picture	пропонує ШІ за зображенням
+the words written in the picture, read by the computer	слова, написані на зображенні, які прочитав комп'ютер
+what the search compares a query with	з чим пошук порівнює запит
+the quality report on the item page	звіт про якість на сторінці стікера
+the files made for Telegram, Discord and the other chat apps	файли, створені для Telegram, Discord та інших месенджерів
+The AI model is still loading: keywords, emojis, vibe and search by meaning can be rechecked in a few seconds (reload the page).	Модель ШІ ще завантажується: ключові слова, емодзі, настрій і пошук за змістом можна буде перевірити за кілька секунд (перезавантажте сторінку).
+AI is off on this server, so keywords, emojis, vibe and search by meaning cannot be rechecked.	ШІ на цьому сервері вимкнено, тож ключові слова, емодзі, настрій і пошук за змістом повторно перевірити не можна.
+This server does not read the words in pictures, so the text cannot be rechecked.	Цей сервер не читає слова на зображеннях, тож текст повторно перевірити не можна.
+How	Як
+Only what is missing	Лише те, чого бракує
+Everything again	Усе наново
+empty fields, pictures the current AI model or text reader never looked at, missing quality reports and renditions	порожні поля, зображення, яких поточна модель ШІ чи читач тексту ще не бачили, відсутні звіти про якість і варіанти
+replaces what the computer gave before; never what you wrote or confirmed	замінює те, що комп'ютер дав раніше; ніколи не те, що ви написали чи підтвердили
+All my sets	Усі мої набори
+Start the recheck	Почати повторну перевірку
+You can start {n} rechecks an hour; asking for one that is running shows it.	Ви можете запускати {n} повторних перевірок на годину; запит на ту, що вже виконується, просто покаже її.
+Recent rechecks	Останні повторні перевірки
+Started	Початок
+Started by	Хто запустив
+Ended	Завершено
+What	Що
+Pictures	Зображення
+Pictures checked	Перевірено зображень
+Checked	Перевірено
+Changed	Змінено
+Failed	Не вдалося
+cancelled	скасовано
+other	інше
+the server	сервер
+Every sticker of the set "{set}".	Усі стікери набору «{set}».
+Every sticker on the server.	Усі стікери на сервері.
+The stickers of your set "{set}".	Стікери вашого набору «{set}».
+The stickers of all your sets.	Стікери всіх ваших наборів.
+Cancel the recheck	Скасувати повторну перевірку
+You can leave this page: the recheck goes on in the background.	Можна піти з цієї сторінки: повторна перевірка триває у фоновому режимі.
+Nothing was missing: every picture already had what you asked for.	Нічого не бракувало: кожне зображення вже мало те, про що ви просили.
+Finished.	Готово.
+Cancelled. Pictures that were already checked keep their new values.	Скасовано. Зображення, які вже перевірено, зберігають нові значення.
+Every picture failed; see the errors below.	Не вдалося з жодним зображенням; помилки нижче.
+New keywords, emojis, vibes and texts are AI suggestions: on each sticker they carry the AI mark and a Confirm button until you confirm or change them.	Нові ключові слова, емодзі, настрої й тексти є пропозиціями ШІ: на кожному стікері вони мають позначку ШІ та кнопку «Підтвердити», доки ви їх не підтвердите або не зміните.
+Failed pictures	Зображення, з якими не вдалося
+Sticker	Стікер
+picture	зображення
+Recheck this set	Повторно перевірити набір
+Rechecks	Повторні перевірки
+recheck	повторна перевірка
+Recheck every sticker	Повторно перевірити всі стікери
+Look at every sticker on the server again in the background, whoever owns it. Values people wrote or confirmed are never changed. Starting one is recorded in the audit log.	Ще раз переглянути у фоновому режимі всі стікери на сервері, хоч би чиї вони були. Значення, які люди написали або підтвердили, ніколи не змінюються. Запуск записується в журнал аудиту.
+Only one set (optional)	Лише один набір (необов'язково)
+The set's id, from its address (/sets/<id>). Empty: every set.	Ідентифікатор набору з його адреси (/sets/<id>). Порожнє поле: усі набори.
+Server-wide rechecks	Повторні перевірки всього сервера
+Including those the server starts by itself: after a change of the AI model, and for pictures its text reader never read.	Разом із тими, які сервер запускає сам: після зміни моделі ШІ та для зображень, яких його читач тексту ще не читав.
+None yet.	Поки що жодної.
+choose at least one thing to recheck	виберіть хоча б щось одне для повторної перевірки

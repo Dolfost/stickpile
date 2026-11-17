@@ -529,6 +529,9 @@ pub async fn page(
                 }
                 a.button href=(format!("/sets/{}/export", set.id)) { (t("Export")) }
                 a.button href=(format!("/popular?scope=set&set={}", set.id)) { (t("Popular in this set")) }
+                @if is_owner && set.item_count > 0 {
+                    a.button href=(format!("/settings?recheck_set={}#recheck", set.id)) { (t("Recheck this set")) }
+                }
                 @if is_owner { (integrations::set_actions(&state, &ctx, set)) }
             }
             (git_box(set))

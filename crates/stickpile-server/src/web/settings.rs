@@ -1,6 +1,7 @@
 //! Account settings: profile (display name, Telegram user id), theme,
-//! password, TOTP enrolment (QR code as inline SVG), adding a device with a
-//! pairing code (QR code too) and API tokens.
+//! "Recheck my stickers" ([`super::rechecks`]), password, TOTP enrolment
+//! (QR code as inline SVG), adding a device with a pairing code (QR code
+//! too) and API tokens.
 
 use std::fmt::Write as _;
 
@@ -78,6 +79,19 @@ fn role_label(role: &str) -> &str {
 pub struct DoneQuery {
     #[serde(default)]
     done: Option<String>,
+    /// The set "Recheck my stickers" starts with (a set page's "Recheck
+    /// this set").
+    #[serde(default)]
+    recheck_set: Option<String>,
+}
+
+/// The recheck section's state: the set and the choices shown, and the
+/// form's error.
+#[derive(Debug, Clone, Default)]
+struct Recheck<'a> {
+    set: Option<&'a str>,
+    chosen: super::rechecks::Chosen,
+    error: Option<&'a str>,
 }
 
 /// Which section an error belongs to.
@@ -97,8 +111,20 @@ async fn render(
     notice: Option<&str>,
     error: Option<(Section, &str)>,
 ) -> AppResult<Markup> {
+    render_with(state, ctx, notice, error, Recheck::default()).await
+}
+
+async fn render_with(
+    state: &AppState,
+    ctx: &Ctx,
+    notice: Option<&str>,
+    error: Option<(Section, &str)>,
+    recheck: Recheck<'_>,
+) -> AppResult<Markup> {
     let me: UserRow = ui::me(state, &ctx.user).await?;
     let tokens = account::list_tokens(state, &ctx.user).await?;
+    let recheck_section =
+        super::rechecks::settings_section(state, ctx, recheck.set, &recheck.chosen, recheck.error).await?;
     let err = |s: Section| {
         html! { @if let Some((sec, msg)) = error { @if sec == s { (layout::alert("error", msg)) } } }
     };
@@ -186,6 +212,7 @@ async fn render(
                 button.primary type="submit" { (t("Save language")) }
             }
         }
+        (recheck_section)
         section #password aria-labelledby="s-password" {
             h2 #s-password { (t("Password")) }
             (err(Section::Password))
@@ -305,7 +332,18 @@ async fn render(
 }
 
 pub async fn page(State(state): State<AppState>, ctx: Ctx, Query(q): Query<DoneQuery>) -> AppResult<Markup> {
-    render(&state, &ctx, notice_for(q.done.as_deref()), None).await
+    let set = q.recheck_set.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    render_with(
+        &state,
+        &ctx,
+        notice_for(q.done.as_deref()),
+        None,
+        Recheck {
+            set,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 async fn failed(state: &AppState, ctx: &Ctx, section: Section, e: AppError) -> AppResult<Response> {
@@ -315,13 +353,41 @@ async fn failed(state: &AppState, ctx: &Ctx, section: Section, e: AppError) -> A
     // In the request's language when the catalog has the message.
     let msg = capitalize(&t_dyn(&e.message));
     let page = render(state, ctx, None, Some((section, &msg))).await?;
-    let mut resp = (e.status, page).into_response();
-    if let Some(s) = e.retry_after {
+    Ok(with_retry_after((e.status, page).into_response(), e.retry_after))
+}
+
+/// The settings page again with `e` in "Recheck my stickers" (the set
+/// chosen kept): client errors, the rate limit (429) and AI that is off or
+/// loading (503) are shown in the form with the error's status and
+/// `Retry-After`; other server errors are error pages.
+pub(super) async fn recheck_failed(
+    state: &AppState,
+    ctx: &Ctx,
+    set: Option<&str>,
+    chosen: &super::rechecks::Chosen,
+    e: AppError,
+) -> AppResult<Response> {
+    if e.status.is_server_error() && e.status != StatusCode::SERVICE_UNAVAILABLE {
+        return Err(e);
+    }
+    let msg = capitalize(&t_dyn(&e.message));
+    let recheck = Recheck {
+        set,
+        chosen: chosen.clone(),
+        error: Some(&msg),
+    };
+    let page = render_with(state, ctx, None, None, recheck).await?;
+    Ok(with_retry_after((e.status, page).into_response(), e.retry_after))
+}
+
+/// `resp` with `Retry-After: secs` when there is one.
+pub(super) fn with_retry_after(mut resp: Response, secs: Option<u64>) -> Response {
+    if let Some(s) = secs {
         if let Ok(v) = s.to_string().parse() {
             resp.headers_mut().insert(axum::http::header::RETRY_AFTER, v);
         }
     }
-    Ok(resp)
+    resp
 }
 
 #[derive(Debug, Default, Deserialize)]

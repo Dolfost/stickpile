@@ -33,6 +33,7 @@ mod items;
 mod layout;
 mod popular;
 mod problems;
+mod rechecks;
 mod search;
 mod sets;
 mod settings;
@@ -133,6 +134,9 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/pairing", post(settings::pairing_create))
         .route("/settings/tokens", post(settings::token_create))
         .route("/settings/tokens/{id}/revoke", post(settings::token_revoke))
+        .route("/settings/recheck", post(rechecks::start_own))
+        .route("/rechecks/{id}", get(rechecks::page))
+        .route("/rechecks/{id}/cancel", post(rechecks::cancel))
         // admin
         .route("/admin", get(admin::overview))
         .route("/admin/users", get(admin::users).post(admin::create_user))
@@ -147,6 +151,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/admin/invitations/{id}/delete", post(admin::delete_invitation))
         .route("/admin/audit", get(admin::audit))
+        .route("/admin/rechecks", get(rechecks::admin_page).post(rechecks::admin_start))
         // jobs and integrations
         .route("/jobs/{id}", get(integrations::job_status))
         .merge(integrations::routes())

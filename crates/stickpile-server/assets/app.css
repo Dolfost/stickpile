@@ -851,6 +851,8 @@ details.manage { position: relative; }
 .job.job-done { border-left-color: var(--success); }
 .job.job-failed { border-left-color: var(--danger); }
 .job-links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+/* A recheck's progress (rechecks.rs): the bar across the box. */
+#recheck-progress progress { display: block; width: 100%; max-width: 40rem; height: 0.8rem; margin: 0.25rem 0 0.75rem; accent-color: var(--accent); }
 .spinner { display: inline-block; width: 0.9rem; height: 0.9rem; margin-left: 0.5rem; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; vertical-align: -0.1rem; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -22,10 +22,11 @@ use crate::service::users::USERNAME_PATTERN;
 use crate::state::{AiStatus, AppState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
+pub(super) enum Tab {
     Overview,
     Users,
     Invitations,
+    Rechecks,
     Audit,
 }
 
@@ -34,6 +35,7 @@ fn tabs(active: Tab) -> Markup {
         (Tab::Overview, "/admin", t("Overview")),
         (Tab::Users, "/admin/users", t("Users")),
         (Tab::Invitations, "/admin/invitations", t("Invitations")),
+        (Tab::Rechecks, "/admin/rechecks", t("Rechecks")),
         (Tab::Audit, "/admin/audit", t("Audit log")),
     ];
     html! {
@@ -43,6 +45,11 @@ fn tabs(active: Tab) -> Markup {
             }
         }
     }
+}
+
+/// An admin page with the section tabs (for [`super::rechecks`]).
+pub(super) fn page_for(ctx: &AdminCtx, title: &str, tab: Tab, body: Markup) -> Markup {
+    page(ctx, title, tab, body)
 }
 
 fn page(ctx: &AdminCtx, title: &str, tab: Tab, body: Markup) -> Markup {
@@ -99,6 +106,7 @@ fn job_kind_label(k: &str) -> String {
         "discord_export" => t("discord export").to_string(),
         "signal_import" => t("signal import").to_string(),
         "signal_export" => t("signal export").to_string(),
+        "recheck" => t("recheck").to_string(),
         other => other.replace('_', " "),
     }
 }

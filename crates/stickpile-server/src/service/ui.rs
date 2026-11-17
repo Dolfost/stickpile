@@ -115,3 +115,24 @@ pub async fn me(state: &AppState, viewer: &CurrentUser) -> AppResult<db::UserRow
         .await?
         .ok_or_else(|| AppError::unauthorized("account no longer exists"))
 }
+
+/// Names of the viewer's own items among `ids` (the failures of a recheck
+/// link to them), by id; other users' items are left out.
+pub async fn own_item_names(
+    state: &AppState,
+    viewer: &CurrentUser,
+    ids: &[String],
+) -> AppResult<HashMap<String, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT i.id, i.name FROM items i JOIN sets s ON s.id = i.set_id \
+         WHERE s.owner_id = ? AND i.id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(viewer.id())
+    .bind(serde_json::to_string(ids).unwrap_or_else(|_| "[]".into()))
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
