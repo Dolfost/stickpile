@@ -2,9 +2,11 @@
 # docs/ai.md (point `[ai] model_dir` / `services.stickpile.settings.ai.model_dir`
 # at one of these):
 #
-#   english       CLIP ViT-B/32 image + English text tower   (~608 MB)
-#   multilingual  CLIP ViT-B/32 image + multilingual text    (~490 MB)
-#   all           both text encoders                          (~745 MB)
+#   english       CLIP ViT-B/32 image + English text tower   (~621 MB)
+#   multilingual  CLIP ViT-B/32 image + multilingual text    (~503 MB)
+#   all           both text encoders                          (~760 MB)
+#
+# Each includes the OCR models (ocr/, 12.9 MB) for `[ai] ocr`.
 #
 # Usage: `models = import ./nix/models.nix { inherit pkgs; };` then `models.all`.
 # Keep in sync with scripts/fetch-models.sh and `MODEL_FILES` in
@@ -13,6 +15,8 @@
 let
   xenova = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523";
   mclip = "https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/58edf8cada9e398793dca955574a48cbb7f18be2";
+  # RapidOCR's ONNX exports of PaddleOCR PP-OCRv5 (weights Apache-2.0).
+  rapidocr = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0";
 
   file = path: url: hash: {
     name = path;
@@ -42,11 +46,22 @@ let
   # sha256 d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74
   mclipDense = file "multilingual/dense.safetensors" "${mclip}/2_Dense/model.safetensors"
     "sha256-0SVo3HMAlwpNPbtJBorRbNibmYQLdLAm+OSAcelBT3Q=";
+  # sha256 4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae (4819576 bytes)
+  ocrDet = file "ocr/det.onnx" "${rapidocr}/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx"
+    "sha256-TZfESiDTCoGq0IfWo5awj3hsRjV0Kvw5H2Yh9caueK4=";
+  # sha256 90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711 (8074092 bytes)
+  ocrRec = file "ocr/rec.onnx" "${rapidocr}/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx"
+    "sha256-kPdhtL/M4MjFYcDLXIh7CXHT7AHDIWS99zdKNbCYJxE=";
 
+  ocr = [ ocrDet ocrRec ];
   farm = name: files: pkgs.linkFarm name files;
 in
 {
-  english = farm "stickpile-models-english" [ vision clipText clipTokenizer ];
-  multilingual = farm "stickpile-models-multilingual" [ vision mclipModel mclipTokenizer mclipDense ];
-  all = farm "stickpile-models" [ vision clipText clipTokenizer mclipModel mclipTokenizer mclipDense ];
+  english = farm "stickpile-models-english" ([ vision clipText clipTokenizer ] ++ ocr);
+  multilingual = farm "stickpile-models-multilingual" (
+    [ vision mclipModel mclipTokenizer mclipDense ] ++ ocr
+  );
+  all = farm "stickpile-models" (
+    [ vision clipText clipTokenizer mclipModel mclipTokenizer mclipDense ] ++ ocr
+  );
 }

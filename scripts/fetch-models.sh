@@ -4,10 +4,11 @@
 #
 #   scripts/fetch-models.sh [--english | --multilingual | --all] <model_dir>
 #
-#   --english       CLIP ViT-B/32 image + English text tower   (~608 MB, default)
-#   --multilingual  CLIP ViT-B/32 image + multilingual text    (~490 MB)
-#   --all           both text encoders                          (~745 MB)
+#   --english       CLIP ViT-B/32 image + English text tower   (~621 MB, default)
+#   --multilingual  CLIP ViT-B/32 image + multilingual text    (~503 MB)
+#   --all           both text encoders                          (~760 MB)
 #
+# Every set includes the OCR models (ocr/, 12.9 MB) for `[ai] ocr`.
 # Point `[ai] model_dir` at <model_dir>. The Nix equivalent is nix/models.nix.
 # Keep the table below in sync with nix/models.nix and
 # crates/stickpile-ai/src/lib.rs (`MODEL_FILES`); a unit test checks it.
@@ -15,6 +16,7 @@ set -euo pipefail
 
 XENOVA="https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523"
 MCLIP="https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/58edf8cada9e398793dca955574a48cbb7f18be2"
+RAPIDOCR="https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0"
 
 # set  path                              url                                        sha256                                                            bytes
 FILES="
@@ -24,20 +26,22 @@ en    clip-vit-b32/tokenizer.json      $XENOVA/tokenizer.json                   
 ml    multilingual/model.onnx          $MCLIP/onnx/model_qint8_avx512.onnx        3bed77e83926519660b5c0833cb3321cfde952331edec4f7d501c7d384b8a8a7  135336307
 ml    multilingual/tokenizer.json      $MCLIP/tokenizer.json                      5b4e1a8171c81dfd666ae40265b9530c6e0b3d53923fe8ac493dcc84229adf81  1961847
 ml    multilingual/dense.safetensors   $MCLIP/2_Dense/model.safetensors           d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74  1572984
+ocr   ocr/det.onnx                     $RAPIDOCR/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx         4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae  4819576
+ocr   ocr/rec.onnx                     $RAPIDOCR/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx   90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711  8074092
 "
 
 usage() {
-  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
-sets="clip en"
+sets="clip en ocr"
 dir=""
 for arg in "$@"; do
   case "$arg" in
-    --english) sets="clip en" ;;
-    --multilingual) sets="clip ml" ;;
-    --all) sets="clip en ml" ;;
+    --english) sets="clip en ocr" ;;
+    --multilingual) sets="clip ml ocr" ;;
+    --all) sets="clip en ml ocr" ;;
     -h | --help) usage 0 ;;
     -*) echo "unknown option: $arg" >&2; usage 2 ;;
     *) [ -z "$dir" ] || usage 2; dir="$arg" ;;

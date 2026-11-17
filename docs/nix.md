@@ -18,7 +18,7 @@ enough).
 | `packages.<system>.stickpile-cli` | The `stickpile` CLI. |
 | `packages.<system>.stickpile-desktop` | The GTK4/libadwaita popup (wrapGAppsHook4), plus the `.desktop` file, icons and metainfo from `crates/stickpile-desktop/data/` when they exist. |
 | `packages.<system>.container` | OCI image `ghcr.io/dolfost/stickpile:<version>` (`podman load < result`). See [deployment.md](deployment.md#container-image). |
-| `packages.<system>.models`, `models-english`, `models-multilingual` | CLIP model directories (fixed-output downloads, about 750, 610 and 490 MB) from `nix/models.nix`, to point `ai.model_dir` at. Present once that file is tracked. Not built by `nix flake check`. |
+| `packages.<system>.models`, `models-english`, `models-multilingual` | CLIP and OCR model directories (fixed-output downloads, about 760, 621 and 503 MB) from `nix/models.nix`, to point `ai.model_dir` at. Present once that file is tracked. Not built by `nix flake check`. |
 | `nixosModules.default` | `services.stickpile` ([deployment.md](deployment.md#nixos)) |
 | `homeManagerModules.default` | `programs.stickpile`, see [below](#home-manager) |
 | `overlays.default` | `stickpile-server`, `stickpile-cli`, `stickpile-desktop` in `pkgs` |
@@ -210,8 +210,8 @@ value) and, for the server, in `crates/stickpile-server/config.example.toml`.
 
 ## Models
 
-`nix/models.nix` (kept in sync with the AI code) describes the CLIP files as
-fixed-output derivations, in the layout of `docs/ai.md`:
+`nix/models.nix` (kept in sync with the AI code) describes the CLIP and OCR
+files as fixed-output derivations, in the layout of `docs/ai.md`:
 
 ```nix
 services.stickpile.settings.ai = {

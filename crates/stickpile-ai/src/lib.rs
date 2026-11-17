@@ -104,7 +104,16 @@ pub mod layout {
     pub const MCLIP_TOKENIZER: &str = "multilingual/tokenizer.json";
     /// Dense 768->512 projection (`linear.weight` `[512,768]`, no bias, identity activation).
     pub const MCLIP_DENSE: &str = "multilingual/dense.safetensors";
+    /// PaddleOCR PP-OCRv5 mobile text detector (DB), input `x` `[1,3,H,W]`, output `[1,1,H,W]`.
+    pub const OCR_DET: &str = "ocr/det.onnx";
+    /// PaddleOCR PP-OCRv5 mobile Cyrillic recogniser (CTC), input `x` `[N,3,48,W]`,
+    /// output `[N,W/8,852]`; the dictionary is in the model metadata (`character`).
+    pub const OCR_REC: &str = "ocr/rec.onnx";
 }
+
+/// The OCR model files (feature `ocr`), relative to the model dir. Independent
+/// of the text encoder: every fetch set includes them.
+pub const OCR_FILES: [&str; 2] = [layout::OCR_DET, layout::OCR_REC];
 
 impl TextEncoderKind {
     /// Paths (relative to the model dir) that this configuration needs.
@@ -148,6 +157,14 @@ macro_rules! xenova {
         )
     };
 }
+macro_rules! rapidocr {
+    ($file:literal) => {
+        concat!(
+            "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/",
+            $file
+        )
+    };
+}
 macro_rules! mclip {
     ($file:literal) => {
         concat!(
@@ -157,9 +174,10 @@ macro_rules! mclip {
     };
 }
 
-/// Every model file of both configurations (docs/ai.md explains the choice of
-/// fp32 CLIP towers and the qint8 multilingual model).
-pub const MODEL_FILES: [ModelFile; 6] = [
+/// Every model file of both CLIP configurations and the OCR reader (docs/ai.md
+/// explains the choice of fp32 CLIP towers, the qint8 multilingual model and
+/// the OCR models).
+pub const MODEL_FILES: [ModelFile; 8] = [
     ModelFile {
         path: layout::VISION,
         url: xenova!("onnx/vision_model.onnx"),
@@ -195,6 +213,18 @@ pub const MODEL_FILES: [ModelFile; 6] = [
         url: mclip!("2_Dense/model.safetensors"),
         sha256: "d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74",
         size: 1_572_984,
+    },
+    ModelFile {
+        path: layout::OCR_DET,
+        url: rapidocr!("onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx"),
+        sha256: "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae",
+        size: 4_819_576,
+    },
+    ModelFile {
+        path: layout::OCR_REC,
+        url: rapidocr!("onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx"),
+        sha256: "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711",
+        size: 8_074_092,
     },
 ];
 
@@ -233,8 +263,17 @@ pub fn from_blob(b: &[u8]) -> Vec<f32> {
 
 /// Expected files for `opts` that are missing (for `check-config` / startup errors).
 pub fn missing_model_files(model_dir: &Path, text_encoder: TextEncoderKind) -> Vec<PathBuf> {
-    text_encoder
-        .required_files()
+    missing(model_dir, text_encoder.required_files())
+}
+
+/// [`OCR_FILES`] that are missing below `model_dir`. OCR is optional: the
+/// server reads no text when this is not empty.
+pub fn missing_ocr_files(model_dir: &Path) -> Vec<PathBuf> {
+    missing(model_dir, &OCR_FILES)
+}
+
+fn missing(model_dir: &Path, files: &[&str]) -> Vec<PathBuf> {
+    files
         .iter()
         .map(|rel| model_dir.join(rel))
         .filter(|p| !p.is_file())
@@ -297,12 +336,22 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(layout::MCLIP_MODEL)).unwrap();
         assert!(missing_model_files(dir.path(), TextEncoderKind::Multilingual)
             .contains(&dir.path().join(layout::MCLIP_MODEL)));
+
+        // OCR files are their own set, not part of either text encoder.
+        assert_eq!(
+            missing_ocr_files(dir.path()),
+            vec![dir.path().join("ocr/det.onnx"), dir.path().join("ocr/rec.onnx")]
+        );
+        std::fs::create_dir_all(dir.path().join("ocr")).unwrap();
+        std::fs::write(dir.path().join(layout::OCR_DET), b"x").unwrap();
+        assert_eq!(missing_ocr_files(dir.path()), vec![dir.path().join(layout::OCR_REC)]);
     }
 
     #[test]
     fn model_file_table_covers_layout() {
         let mut all: Vec<&str> = TextEncoderKind::Clip.required_files().to_vec();
         all.extend(TextEncoderKind::Multilingual.required_files());
+        all.extend(OCR_FILES);
         all.sort();
         all.dedup();
         let mut table: Vec<&str> = MODEL_FILES.iter().map(|f| f.path).collect();
@@ -316,7 +365,10 @@ mod tests {
                 .sha256
                 .chars()
                 .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
-            assert!(f.url.starts_with("https://huggingface.co/") && f.url.contains("/resolve/"));
+            assert!(
+                (f.url.starts_with("https://huggingface.co/") || f.url.starts_with("https://www.modelscope.cn/"))
+                    && f.url.contains("/resolve/")
+            );
         }
     }
 
