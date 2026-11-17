@@ -1265,6 +1265,69 @@ async fn offline_a_kept_sticker_copies_for_every_target_and_another_is_not_on_de
     session.fetch_variant(kept_item, Variant::Original).await.unwrap();
 }
 
+/// With the server unreachable, a copy whose file is not here takes
+/// another one on the device that the target takes; when there is none,
+/// `NotOnDevice` says how the sticker stands with keeping offline, so a
+/// shell does not tell to keep a kept sticker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn offline_a_copy_falls_back_to_a_kept_file_and_not_on_device_says_why() {
+    use crate::offline::Keeping;
+    let (mut server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    // Generic only: the Telegram sticker WebP is not kept.
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    // The video of `memes` is left out with its pack (videos are off).
+    session.offline_keep(&Scope::Set(items[4].set_id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    // Kept, never downloaded.
+    session.offline_keep(&Scope::Item(items[2].id.clone())).unwrap();
+
+    tokio::task::block_in_place(|| server.kill());
+    let keeping = |r: crate::Result<_>| match r {
+        Err(crate::CoreError::NotOnDevice { keeping, .. }) => keeping,
+        Err(e) => panic!("not NotOnDevice: {e}"),
+        Ok(_) => panic!("it worked"),
+    };
+    let copy = session
+        .prepare_copy(&items[0], TargetApp::Telegram, true)
+        .await
+        .expect("the kept original, which Telegram takes");
+    assert_eq!((copy.variant, copy.sticker), (Variant::Original, false));
+    assert_eq!(copy.warning.as_deref(), Some(crate::session::COPIED_ANOTHER_FILE));
+    assert_eq!(
+        keeping(session.fetch_variant(&items[0], Variant::TgSticker).await.map(drop)),
+        Keeping::OtherFile
+    );
+    assert_eq!(
+        keeping(
+            session
+                .prepare_copy(&items[1], TargetApp::Generic, false)
+                .await
+                .map(drop)
+        ),
+        Keeping::NotKept
+    );
+    assert_eq!(
+        keeping(
+            session
+                .prepare_copy(&items[2], TargetApp::Generic, false)
+                .await
+                .map(drop)
+        ),
+        Keeping::NotYet
+    );
+    assert_eq!(
+        keeping(
+            session
+                .prepare_copy(&items[4], TargetApp::Generic, false)
+                .await
+                .map(drop)
+        ),
+        Keeping::LeftOut
+    );
+}
+
 /// A part file is exactly `<file>.part.<owner>`: a cached file whose own
 /// name holds `.part.` (an item named so) is not one.
 #[test]

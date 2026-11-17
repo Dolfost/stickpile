@@ -241,7 +241,8 @@ mod tests {
             kind(CoreError::NotOnDevice {
                 item: "cat".into(),
                 variant: stickpile_api::Variant::Original,
-                cause: "x".into()
+                cause: "x".into(),
+                keeping: stickpile_core::offline::Keeping::NotKept,
             }),
             LibraryErrorKind::NotOnDevice,
             "explained, not a network error"

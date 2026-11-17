@@ -465,3 +465,33 @@ async fn a_kept_video_inserts_into_an_image_field_offline_as_online() {
         .unwrap();
     assert_eq!(inserted.variant, "discord_gif", "inserted into the field as online");
 }
+
+/// A still kept by itself on a phone that has not sent to Telegram yet
+/// (only Generic's files are kept), inserted into Telegram as a sticker
+/// with the server stopped: the kept original goes in (the sticker WebP is
+/// not here), and the sticker is kept by itself.
+#[tokio::test]
+async fn a_kept_still_inserts_into_telegram_as_a_sticker_offline() {
+    let mut server = MockServer::start();
+    let (still, _) = mixed(&server, 4);
+    let dir = tempfile::tempdir().unwrap();
+    let lib = synced(&server, dir.path()).await;
+    lib.keep_offline(OfflineScope::Sticker {
+        item_id: still.id.clone(),
+    })
+    .await
+    .unwrap();
+    assert!(lib.offline_run().await.unwrap().complete);
+    server.stop();
+    let field = mimes(&["image/gif", "image/*", "image/jpg", "image/png", "image/webp"]);
+    let inserted = lib
+        .prepare(still.id.clone(), "org.telegram.messenger".into(), field, true)
+        .await
+        .expect("the kept original goes in");
+    assert_eq!(inserted.variant, "original");
+    assert!(!inserted.sticker);
+    assert_eq!(
+        lib.offline_reasons(still.id.clone()).unwrap(),
+        vec![KeepReason::Sticker]
+    );
+}

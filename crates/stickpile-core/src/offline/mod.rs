@@ -197,6 +197,30 @@ pub const INSERT_FIELDS: &[&[&str]] = &[
     &["image/*", "video/*"],
 ];
 
+/// How a sticker whose file is not on the device stands with keeping
+/// offline ([`crate::CoreError::NotOnDevice`]): what a shell tells the user
+/// to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Keeping {
+    /// The sticker is not kept offline: keep it while the server is
+    /// reachable.
+    NotKept,
+    /// The sticker is kept and so is this file, which is not downloaded
+    /// yet (or its download failed): run the downloader while the server
+    /// is reachable.
+    NotYet,
+    /// The sticker is kept, but this file is not among what it keeps: a
+    /// chat app that is not among the device's targets (`offline.targets`,
+    /// or the default target and the copy history), or the sticker
+    /// rendition with `offline.sticker_renditions` off.
+    OtherFile,
+    /// The sticker is kept with a pack, the library or an automatic rule,
+    /// and the per-kind options or `offline.max_file_mb` leave this file
+    /// out ([`skip_reason`]).
+    LeftOut,
+}
+
 /// A file a kept item (or pack) needs, where the copy path looks for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WantedFile {

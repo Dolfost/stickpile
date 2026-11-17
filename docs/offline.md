@@ -251,8 +251,19 @@ is on the device.
 
 With the server unreachable, `prepare_copy` and `fetch_variant` of a file
 that is not on the device fail with `CoreError::NotOnDevice { item,
-variant, cause }` (`is_offline()` is true for it too, `is_not_on_device()`
-tells it apart), so a shell explains it instead of naming a network error.
+variant, cause, keeping }` (`is_offline()` is true for it too,
+`is_not_on_device()` tells it apart), so a shell explains it instead of
+naming a network error. `keeping` (`offline::Keeping`) says what to tell
+the user: `NotKept` (keep it while online), `NotYet` (kept, this file too,
+not downloaded yet: run the downloader while online), `OtherFile` (kept,
+but not this file: another chat app than the device's targets, or the
+sticker rendition with `offline.sticker_renditions` off) or `LeftOut`
+(kept with a pack, the library or a rule, whose per-kind options or
+`offline.max_file_mb` leave the file out). Before failing, `prepare_copy`
+copies the best rendition on the device that the target takes (sticker
+first when asked; the Android keyboard's `prepare` does the same with
+`variant_for`), with the warning `session::COPIED_ANOTHER_FILE` (fixed,
+translated in the catalog).
 
 ## The downloader
 

@@ -3,12 +3,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use stickpile_api::{ItemSummary, SetSummary, TargetApp, Variant};
+use stickpile_api::{ItemSummary, SetSummary, TargetApp, Variant, VariantInfo};
 
 use super::run::Run;
 use super::{
-    derive, media_of, orphaned, reasons, AutoKeepConfig, CoverInfo, Device, OfflineControl, OfflineOptions,
-    OfflineOutcome, OfflineStatus, Plan, PlanInput, Reason, RunEnd, Scope, Skipped, Totals,
+    derive, media_of, needs, orphaned, reasons, skip_reason, AutoKeepConfig, CoverInfo, Device, Keeping,
+    OfflineControl, OfflineOptions, OfflineOutcome, OfflineStatus, Plan, PlanInput, Reason, RunEnd, Scope, Skipped,
+    Totals,
 };
 use crate::cache::{safe_component, CachedAccount, EvictReport, SharedCache};
 use crate::client::SearchParams;
@@ -403,6 +404,32 @@ impl Session {
     /// ([`crate::cache::Cache::offline_check_owner`]).
     fn offline_check_owner(&self) -> Result<()> {
         self.cache().offline_check_owner().map(drop)
+    }
+
+    /// How `item`, whose rendition `info` is not on the device, stands with
+    /// keeping offline ([`CoreError::NotOnDevice`]).
+    pub(crate) fn offline_keeping(&self, item: &ItemSummary, info: &VariantInfo) -> Keeping {
+        let reasons = match self.offline_reasons(item) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!("offline reasons of {}: {e}", item.id);
+                return Keeping::NotKept;
+            }
+        };
+        if reasons.is_empty() {
+            return Keeping::NotKept;
+        }
+        let opts = self.offline_options();
+        let Ok(device) = self.offline_device() else {
+            return Keeping::OtherFile;
+        };
+        let rel = clip_rel(item, info);
+        let explicit = reasons.contains(&Reason::Item);
+        match needs(item, &opts, &device).iter().find(|f| f.rel == rel) {
+            None => Keeping::OtherFile,
+            Some(f) if skip_reason(item, f, &opts, explicit).is_some() => Keeping::LeftOut,
+            Some(_) => Keeping::NotYet,
+        }
     }
 
     /// Ask the server what the plan needs beyond the cache: liked items

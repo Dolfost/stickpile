@@ -404,6 +404,8 @@ keep the pack offline (asks first) / stop keeping it	зберігати набі
 # Keeping offline (stickpile-desktop: messages, the Settings page's block)
 Keeping offline needs a server (not in demo mode)	Зберігання офлайн потребує сервера (не в демо-режимі)
 {name} is not on this device and the server is unreachable; keep it offline (K) to copy it without the server	{name} немає на цьому пристрої, а сервер недоступний; збережіть його офлайн (K), щоб копіювати без сервера
+# stickpile_core::session::COPIED_ANOTHER_FILE, a copy's warning
+The file for this app is not on this device; another one it takes was copied	Файлу для цього застосунку немає на цьому пристрої; скопійовано інший, який він приймає
 Other cached files: {n}, {size} (the cache size limit applies).	Інші файли в кеші: {n}, {size} (на них діє обмеження розміру кешу).
 {n} file could not be downloaded; it is tried again on the next run.|{n} files could not be downloaded; they are tried again on the next run.	Не вдалося завантажити {n} файл; його спробують знову наступного разу.|Не вдалося завантажити {n} файли; їх спробують знову наступного разу.|Не вдалося завантажити {n} файлів; їх спробують знову наступного разу.
 Cleared {n} file ({size}); {kept} kept files stayed.|Cleared {n} files ({size}); {kept} kept files stayed.	Очищено {n} файл ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файли ({size}); збережених файлів залишилося: {kept}.|Очищено {n} файлів ({size}); збережених файлів залишилося: {kept}.

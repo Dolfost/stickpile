@@ -70,6 +70,10 @@ pub enum CoreError {
         variant: stickpile_api::Variant,
         /// The network error.
         cause: String,
+        /// Whether the sticker is kept offline, and so why the file is
+        /// missing: not kept, kept but not downloaded yet, or kept without
+        /// this rendition (another chat app, the sticker mode).
+        keeping: offline::Keeping,
     },
     #[error("cache: {0}")]
     Cache(String),

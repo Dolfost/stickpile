@@ -491,3 +491,109 @@ fn the_budget_reached_exits_2_and_keep_all_needs_yes_when_not_interactive() {
     assert_eq!(run["status"]["state"], "limit_reached");
     assert_eq!(originals(&env), 1);
 }
+
+fn webp(seed: u8) -> Vec<u8> {
+    let img = image::RgbaImage::from_fn(16, 16, |x, y| image::Rgba([seed, x as u8, y as u8, 255]));
+    let mut out = Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::WebP).unwrap();
+    out.into_inner()
+}
+
+/// A file the mock takes for a WebM video.
+fn webm(len: usize) -> Vec<u8> {
+    let mut v = vec![0x1A, 0x45, 0xDF, 0xA3];
+    v.resize(len.max(v.len()), 9);
+    v
+}
+
+/// A sticker kept by itself, with the server stopped, copied to a chat app
+/// or in a mode whose rendition is not kept (the default target is
+/// Generic and nothing was copied elsewhere, so only the originals are
+/// kept): a still copies the kept file the app takes too, with a warning; a
+/// WebM video for WhatsApp (which takes MP4 only) cannot, and the hint says
+/// what keeps that file instead of telling to keep a kept sticker. A kept
+/// sticker not downloaded yet says so. (Ported from the behaviour review,
+/// branch `review-offline-behaviour`.)
+#[test]
+fn a_kept_sticker_is_not_told_to_be_kept() {
+    let mut server = MockServer::start();
+    let (still, video, later) = {
+        let mut st = server.state();
+        let set = st.add_set("alice", "mixed", "Mixed", Visibility::Public);
+        let still = st.add_item(&set.id, "still png", &["still"], png(1));
+        st.add_variant(&still.id, stickpile_api::Variant::TgSticker, "image/webp", webp(2));
+        let video = st.add_item(&set.id, "webm video", &["video"], webm(3000));
+        st.add_variant(&video.id, stickpile_api::Variant::Mp4, "video/mp4", mp4(2500));
+        let later = st.add_item(&set.id, "later", &["later"], png(5));
+        (still, video, later)
+    };
+    let env = Env::new(&server, NO_AUTO_THUMBNAILS);
+    env.ok(&["sync"]);
+    env.ok(&["offline", "keep", &still.id]);
+    env.ok(&["offline", "keep", &video.id]);
+    let out = env.run(&["offline", "sync"]);
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    // Kept now, downloaded never.
+    env.ok(&["offline", "keep", &later.id]);
+    server.stop();
+
+    let plain = env.run(&["copy", "--id", &still.id, "--print-path"]);
+    assert_eq!(
+        code(&plain),
+        Some(0),
+        "the plain copy works offline: {}",
+        stderr(&plain)
+    );
+
+    // Telegram as a sticker: the sticker WebP is not kept, the original
+    // PNG (which Telegram takes) goes instead.
+    let out = env.run(&[
+        "copy",
+        "--id",
+        &still.id,
+        "--target",
+        "telegram",
+        "--sticker",
+        "--print-path",
+    ]);
+    let err = stderr(&out);
+    println!("{err}");
+    assert_eq!(code(&out), Some(0), "{err}");
+    assert!(stdout(&out).trim().ends_with("still png.png"), "{}", stdout(&out));
+    assert!(
+        err.contains("warning: The file for this app is not on this device; another one it takes was copied"),
+        "{err}"
+    );
+
+    // WhatsApp takes no WebM: nothing on the device fits.
+    let out = env.run(&["copy", "--id", &video.id, "--target", "whatsapp", "--print-path"]);
+    let err = stderr(&out);
+    println!("{err}");
+    assert_eq!(code(&out), Some(1));
+    assert!(
+        env.ok(&["offline", "keep", &video.id]).contains("Already kept offline"),
+        "kept by itself"
+    );
+    assert!(
+        !err.contains("keep it offline"),
+        "the CLI tells to keep a sticker that is kept: {err}"
+    );
+    assert!(
+        err.contains(
+            "hint: this sticker is kept, but not the mp4 file for whatsapp: list `whatsapp` in `offline.targets`, \
+             then run `stickpile offline sync` while online"
+        ),
+        "{err}"
+    );
+
+    let out = env.run(&["copy", "--id", &later.id, "--print-path"]);
+    let err = stderr(&out);
+    assert_eq!(code(&out), Some(1));
+    assert!(
+        err.contains(
+            "hint: this sticker is kept, but the original file for generic is not on this device yet; \
+             run `stickpile offline sync` while online"
+        ),
+        "{err}"
+    );
+}

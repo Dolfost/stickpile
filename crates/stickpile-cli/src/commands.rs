@@ -11,6 +11,7 @@ use stickpile_core::client::{
     text_ignored, ApiClient, PopularParams, SetArchive, UploadFile, SERVER_TOO_OLD_FOR_TEXTS,
 };
 use stickpile_core::clipboard::serve::spawn_detached;
+use stickpile_core::offline::Keeping;
 use stickpile_core::{session, token, ClientConfig, CoreError, Session};
 
 use crate::cli::*;
@@ -98,12 +99,59 @@ pub fn explain(e: &anyhow::Error) -> Option<String> {
         CoreError::Api { status: 401, .. } => "the server rejected the token; run `stickpile login`",
         CoreError::Api { status: 403, .. } => "your account is not allowed to do this",
         CoreError::Offline(_) => "check `server_url` in the config, or that the server is running",
-        CoreError::NotOnDevice { .. } => {
-            "this sticker is not on this device; keep it offline with `stickpile offline keep <item>` while online"
+        CoreError::NotOnDevice { variant, keeping, .. } => {
+            return Some(not_on_device_hint(*keeping, "<item>", *variant, None, false));
         }
         _ => return None,
     };
     Some(hint.to_string())
+}
+
+/// What to do about a sticker whose file is not on this device
+/// ([`CoreError::NotOnDevice`]): keep it, or, for a kept one, what keeps
+/// the file. `target` and `sticker`: the copy's, when known.
+pub fn not_on_device_hint(
+    keeping: Keeping,
+    item: &str,
+    variant: Variant,
+    target: Option<TargetApp>,
+    sticker: bool,
+) -> String {
+    let file = match target {
+        Some(t) if sticker => format!("the {} file for {} as a sticker", variant.as_str(), t.as_str()),
+        Some(t) => format!("the {} file for {}", variant.as_str(), t.as_str()),
+        None => format!("the {} file", variant.as_str()),
+    };
+    match keeping {
+        Keeping::NotKept => {
+            format!(
+                "this sticker is not on this device; keep it offline with `stickpile offline keep {item}` while online"
+            )
+        }
+        Keeping::NotYet => {
+            format!(
+                "this sticker is kept, but {file} is not on this device yet; run `stickpile offline sync` while online"
+            )
+        }
+        Keeping::OtherFile => {
+            let what = match (target, sticker) {
+                (Some(t), true) => format!(
+                    "list `{}` in `offline.targets` and keep `offline.sticker_renditions` on",
+                    t.as_str()
+                ),
+                (Some(t), false) => format!("list `{}` in `offline.targets`", t.as_str()),
+                (None, _) => {
+                    "list the chat app in `offline.targets` (and `offline.sticker_renditions` for sticker mode)".into()
+                }
+            };
+            format!("this sticker is kept, but not {file}: {what}, then run `stickpile offline sync` while online")
+        }
+        Keeping::LeftOut => format!(
+            "this sticker is kept with a pack, the library or an automatic rule, which leave {file} out \
+             (`offline.stills`, `.animations`, `.videos`, `offline.max_file_mb`); keep the sticker itself with \
+             `stickpile offline keep {item}` while online"
+        ),
+    }
 }
 
 pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
@@ -971,18 +1019,18 @@ async fn copy(ctx: &Ctx, a: CopyArgs) -> Result<()> {
     };
     let prepared = match session.prepare_copy(&item, target, sticker).await {
         Ok(p) => p,
-        // The server is unreachable and the file is not kept: say what to do.
-        Err(e) if e.is_not_on_device() => {
-            return Err(Hinted {
-                message: e.to_string(),
-                hint: format!(
-                    "this sticker is not on this device; keep it offline with `stickpile offline keep {}` while online",
-                    item.id
-                ),
+        // The server is unreachable and the file is not here: say what to do.
+        Err(e) => {
+            if let CoreError::NotOnDevice { variant, keeping, .. } = &e {
+                let hint = not_on_device_hint(*keeping, &item.id, *variant, Some(target), sticker);
+                return Err(Hinted {
+                    message: e.to_string(),
+                    hint,
+                }
+                .into());
             }
-            .into())
+            return Err(e.into());
         }
-        Err(e) => return Err(e.into()),
     };
     if let Some(w) = &prepared.warning {
         eprintln!("warning: {w}");
@@ -1644,14 +1692,35 @@ mod tests {
         });
         assert!(explain(&e).unwrap().contains("stickpile login"));
         assert!(explain(&anyhow!("other")).is_none());
-        let e = anyhow::Error::from(CoreError::NotOnDevice {
-            item: "naahh".into(),
-            variant: Variant::Original,
-            cause: "refused".into(),
-        });
-        assert!(explain(&e)
+        let not_on_device = |keeping| {
+            explain(&anyhow::Error::from(CoreError::NotOnDevice {
+                item: "naahh".into(),
+                variant: Variant::Original,
+                cause: "refused".into(),
+                keeping,
+            }))
             .unwrap()
-            .contains("keep it offline with `stickpile offline keep"));
+        };
+        assert!(not_on_device(Keeping::NotKept).contains("keep it offline with `stickpile offline keep"));
+        // A kept sticker is not told to be kept.
+        for keeping in [Keeping::NotYet, Keeping::OtherFile, Keeping::LeftOut] {
+            let hint = not_on_device(keeping);
+            assert!(hint.starts_with("this sticker is kept"), "{hint}");
+            assert!(!hint.contains("keep it offline"), "{hint}");
+        }
+        assert!(not_on_device(Keeping::NotYet).contains("`stickpile offline sync`"));
+        let hint = not_on_device_hint(
+            Keeping::OtherFile,
+            "x",
+            Variant::TgSticker,
+            Some(TargetApp::Telegram),
+            true,
+        );
+        assert_eq!(
+            hint,
+            "this sticker is kept, but not the tg_sticker file for telegram as a sticker: list `telegram` in \
+             `offline.targets` and keep `offline.sticker_renditions` on, then run `stickpile offline sync` while online"
+        );
         let e = anyhow::Error::from(Hinted {
             message: "m".into(),
             hint: "h".into(),

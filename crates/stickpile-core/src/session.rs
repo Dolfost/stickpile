@@ -21,6 +21,11 @@ use crate::offline::OfflineOptions;
 use crate::usage::{copy_event, FlushReport, UsageQueue};
 use crate::{token, ClientConfig, CoreError, Result};
 
+/// [`PreparedCopy::warning`] of a copy made with the server unreachable
+/// from another file on the device than the one it would download (one the
+/// target takes too). Fixed, so that the clients translate it (catalog).
+pub const COPIED_ANOTHER_FILE: &str = "The file for this app is not on this device; another one it takes was copied";
+
 /// Results of [`Session::search`].
 #[derive(Debug, Clone, Default)]
 pub struct SearchOutcome {
@@ -290,10 +295,24 @@ impl Session {
     }
 
     /// Choose the variant (profiles::choose_variant), materialise it in the
-    /// cache and build the clipboard offers.
+    /// cache and build the clipboard offers. With the server unreachable and
+    /// the chosen rendition not on the device, the best one on the device
+    /// that the target takes is copied instead (with a warning), as the
+    /// Android keyboard inserts; [`CoreError::NotOnDevice`] when there is
+    /// none.
     pub async fn prepare_copy(&self, item: &ItemSummary, target: TargetApp, sticker: bool) -> Result<PreparedCopy> {
         let (variant, is_sticker, warning) = pick_variant(item, target, sticker)?;
-        let (rel, file) = self.materialise(item, &variant).await?;
+        let (variant, is_sticker, warning, (rel, file)) = match self.materialise(item, &variant).await {
+            Ok(here) => (variant, is_sticker, warning, here),
+            Err(e) if e.is_not_on_device() => {
+                let Some((other, other_sticker)) = self.copy_on_device(item, target, sticker) else {
+                    return Err(e);
+                };
+                let here = self.materialise(item, &other).await?;
+                (other, other_sticker, Some(COPIED_ANOTHER_FILE.to_string()), here)
+            }
+            Err(e) => return Err(e),
+        };
         // `[copy]` padding / flattening; the offers below are built from the result.
         let (file, mime) = adjust_copy_file(
             &self.cache,
@@ -353,11 +372,35 @@ impl Session {
         }
     }
 
+    /// The rendition a copy to `target` takes among those on the device
+    /// (sticker first when `sticker`), for [`Session::prepare_copy`] with the
+    /// server unreachable. Only one the target takes: never another
+    /// target's stand-in.
+    fn copy_on_device(&self, item: &ItemSummary, target: TargetApp, sticker: bool) -> Option<(VariantInfo, bool)> {
+        let here: Vec<VariantInfo> = item
+            .variants
+            .iter()
+            .filter(|v| self.variant_on_device(item, v.variant))
+            .cloned()
+            .collect();
+        let shape = ItemShape {
+            kind: item.kind,
+            format: item.format,
+            duration_ms: None,
+            variants: &here,
+        };
+        let flags: &[bool] = if sticker { &[true, false] } else { &[false] };
+        flags
+            .iter()
+            .find_map(|&s| choose_variant(target, &shape, s).ok())
+            .map(|c| (c.variant, c.sticker))
+    }
+
     /// The cache file of a rendition (`clip/<media>.<variant>/<name>.<ext>`)
     /// and its path relative to the cache, downloaded unless cached (kept
     /// offline or not: one store). The download goes before the offline
     /// downloader's. With the server unreachable and the file not here:
-    /// [`CoreError::NotOnDevice`].
+    /// [`CoreError::NotOnDevice`], saying whether the sticker is kept.
     async fn materialise(&self, item: &ItemSummary, variant: &VariantInfo) -> Result<(String, PathBuf)> {
         let rel = clip_rel(item, variant);
         let file = match self.cache.lookup_file(&rel, Some(variant.size_bytes))? {
@@ -372,6 +415,7 @@ impl Session {
                             item: item.name.clone(),
                             variant: variant.variant,
                             cause: e.to_string(),
+                            keeping: self.offline_keeping(item, variant),
                         })
                     }
                     Err(e) => return Err(e),
