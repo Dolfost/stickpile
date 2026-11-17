@@ -171,15 +171,15 @@ fn k_on_a_pack_asks_with_the_estimate_first() {
         outcome: Ok(Estimate {
             items: 4,
             files: 9,
-            bytes: 2_000_000,
-            kept_bytes_after: 2_000_000,
+            bytes: 2 * 1024 * 1024,
+            kept_bytes_after: 2 * 1024 * 1024,
             budget: Some(1_073_741_824),
             ..Estimate::default()
         }),
     });
     let c = m.confirm().expect("asked");
     assert_eq!(c.title, "Keep Dogs offline?");
-    assert!(c.body.starts_with("4 stickers, 9 files, 2.0 MB."), "{}", c.body);
+    assert!(c.body.starts_with("4 stickers, 9 files, 2.0 MiB."), "{}", c.body);
     assert_eq!(c.accept, "Keep offline");
     assert_eq!(*m.status(), Status::Idle);
 
@@ -281,12 +281,12 @@ fn the_library_switch_keeps_after_a_yes_and_releases_at_once() {
     m.handle(Event::Estimated {
         scope: KeepScope::Library,
         outcome: Ok(Estimate {
-            kept_bytes_after: 3_000_000_000,
-            budget: Some(1_000_000_000),
+            kept_bytes_after: 3 << 30,
+            budget: Some(1 << 30),
             ..Estimate::default()
         }),
     });
-    assert!(m.confirm().unwrap().body.contains("over the 1.0 GB allowed"));
+    assert!(m.confirm().unwrap().body.contains("over the 1.0 GiB allowed"));
     let cmds = m.handle(Event::Confirm(true));
     assert_eq!(set_keep(&cmds), Some((KeepScope::Library, true)));
     m.handle(Event::KeepDone {
@@ -321,16 +321,16 @@ fn removing_the_kept_files_asks_first() {
     assert!(m
         .handle(Event::AskRemoveKept {
             files: 12,
-            bytes: 3_000_000
+            bytes: 3 << 20
         })
         .is_empty());
     let c = m.confirm().unwrap();
     assert!(c.destructive);
     assert_eq!(c.title, "Remove kept files?");
     assert_eq!(m.handle(Event::Normal(NormalKey::Char('y'))), [Command::RemoveKept]);
-    m.handle(Event::KeptRemoved(Ok((12, 3_000_000))));
+    m.handle(Event::KeptRemoved(Ok((12, 3 << 20))));
     assert!(m.keeps().is_empty());
-    assert_eq!(m.status().text(), "Removed 12 kept files (3.0 MB)");
+    assert_eq!(m.status().text(), "Removed 12 kept files (3.0 MiB)");
 }
 
 // -- the menu -------------------------------------------------------------------------

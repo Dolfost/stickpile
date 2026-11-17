@@ -715,7 +715,7 @@ fn the_settings_block_keeps_the_library_and_removes_the_kept_files() {
     let o = v.settings.offline.unwrap();
     assert!(!o.library);
     assert_eq!(o.library_label, "Keep everything offline");
-    assert!(o.kept.ends_with("of 1.1 GB allowed."), "{}", o.kept);
+    assert!(o.kept.ends_with("of 1.0 GiB allowed."), "{}", o.kept);
 
     // The sync on opening ran the downloader: the thumbnails are kept.
     h.pump_until("a run of the downloader", |s| {

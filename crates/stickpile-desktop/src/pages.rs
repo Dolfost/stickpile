@@ -204,7 +204,7 @@ mod tests {
             likes_received: Some(0),
             packs: Some(2),
             items: Some(30),
-            storage_bytes: Some(1_536_000),
+            storage_bytes: Some(1_572_864),
             ..Profile::signed_out("http://srv")
         }
     }
@@ -212,12 +212,12 @@ mod tests {
     #[test]
     fn sizes() {
         assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(999), "999 B");
-        assert_eq!(human_bytes(1000), "1.0 KB");
-        assert_eq!(human_bytes(1_536_000), "1.5 MB");
-        assert_eq!(human_bytes(999_999), "1.0 MB");
-        assert_eq!(human_bytes(2_000_000_000), "2.0 GB");
-        assert_eq!(human_bytes(u64::MAX), "18446744.1 TB");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1_572_864), "1.5 MiB");
+        assert_eq!(human_bytes(1_048_575), "1.0 MiB");
+        assert_eq!(human_bytes(2 << 30), "2.0 GiB");
+        assert_eq!(human_bytes(u64::MAX), "16777216.0 TiB");
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
                 "Storage"
             ]
         );
-        assert_eq!(tiles[6].0, "1.5 MB");
+        assert_eq!(tiles[6].0, "1.5 MiB");
 
         let tailnet = Profile {
             auth: AuthKind::Tailnet,

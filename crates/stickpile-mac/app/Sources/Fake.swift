@@ -136,17 +136,17 @@ final class FakePopup: PopupControl {
         let running = fraction != nil
         let state: String
         if paused {
-            state = "Paused: 412 of 1,180 files, 41.0 MB of 132.5 MB."
+            state = "Paused: 412 of 1,180 files, 41.0 MiB of 132.5 MiB."
         } else if running {
-            state = "Downloading: 412 of 1,180 files, 41.0 MB of 132.5 MB."
+            state = "Downloading: 412 of 1,180 files, 41.0 MiB of 132.5 MiB."
         } else {
             state = "Up to date: all 1,180 kept files are on this device."
         }
         return OfflineView(
             title: "On this device", library: library, libraryLabel: "Keep everything offline",
             libraryHelp: "Every sticker you can see, now and later, within the limit of the Offline settings below. Asks first, with what it takes.",
-            kept: "Kept offline: 412 files, 41.0 MB of 1.1 GB allowed.",
-            other: "Other cached files: 37, 2.4 MB (the cache size limit applies).",
+            kept: "Kept offline: 412 files, 41.0 MiB of 1.0 GiB allowed.",
+            other: "Other cached files: 37, 2.4 MiB (the cache size limit applies).",
             state: state, stateWarning: false, fraction: fraction ?? 1, canPause: running && !paused,
             canResume: paused, canCancel: running || paused,
             notes: "2 files could not be downloaded; they are tried again on the next run.\n14 left out by the settings below (kinds, size limit).",
@@ -172,12 +172,12 @@ final class FakePopup: PopupControl {
 
     private static let keepPack = ConfirmView(
         title: "Keep Cats offline?",
-        body: "39 stickers, 82 files, 14.2 MB. 1.1 MB of it is on this device already.\n\nKept files would take 55.2 MB of the 1.1 GB allowed.",
+        body: "39 stickers, 82 files, 14.2 MiB. 1.1 MiB of it is on this device already.\n\nKept files would take 55.2 MiB of the 1.0 GiB allowed.",
         accept: "Keep offline", cancel: "Cancel", destructive: false, hint: "Return: keep offline, Escape: cancel")
 
     private static let removeKept = ConfirmView(
         title: "Remove kept files?",
-        body: "412 kept files (41.0 MB) are deleted, and nothing stays marked to keep offline.\n\nThe automatic rules of the Offline settings download what they cover again; turn them off first to keep nothing.",
+        body: "412 kept files (41.0 MiB) are deleted, and nothing stays marked to keep offline.\n\nThe automatic rules of the Offline settings download what they cover again; turn them off first to keep nothing.",
         accept: "Remove kept files", cancel: "Cancel", destructive: true, hint: "Return: remove, Escape: cancel")
 
     private func meSignedIn() -> MeView {
@@ -649,7 +649,7 @@ final class FakePopup: PopupControl {
         let was = state.confirm
         state.confirm = nil
         if yes, let was {
-            state.footer.status = was.destructive ? "Removed 412 kept files (41.0 MB)" : "Pack Cats is kept offline"
+            state.footer.status = was.destructive ? "Removed 412 kept files (41.0 MiB)" : "Pack Cats is kept offline"
             state.footer.level = .info
         }
         render()
@@ -659,7 +659,7 @@ final class FakePopup: PopupControl {
         if keep {
             state.confirm = ConfirmView(
                 title: "Keep the whole library offline?",
-                body: "1,180 stickers, 2,410 files, 132.5 MB. 41.0 MB of it is on this device already.\n\nKept files would take 140.2 MB of the 1.1 GB allowed.",
+                body: "1,180 stickers, 2,410 files, 132.5 MiB. 41.0 MiB of it is on this device already.\n\nKept files would take 140.2 MiB of the 1.0 GiB allowed.",
                 accept: "Keep offline", cancel: "Cancel", destructive: false, hint: "Return: keep offline, Escape: cancel")
         } else {
             state.settings.offline = offlineBlock(library: false, fraction: nil)
@@ -683,7 +683,7 @@ final class FakePopup: PopupControl {
     }
 
     func clearCache() {
-        state.settings.offline?.message = "Cleared 37 files (2.4 MB); 412 kept files stayed."
+        state.settings.offline?.message = "Cleared 37 files (2.4 MiB); 412 kept files stayed."
         render()
     }
 

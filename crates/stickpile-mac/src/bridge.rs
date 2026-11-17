@@ -311,10 +311,10 @@ pub struct OfflineView {
     pub library: bool,
     pub library_label: String,
     pub library_help: String,
-    /// "Kept offline: 120 files, 45.2 MB of 1.0 GB allowed."; empty before
+    /// "Kept offline: 120 files, 45.2 MiB of 1.0 GiB allowed."; empty before
     /// it is known.
     pub kept: String,
-    /// "Other cached files: 300, 12.1 MB (the cache size limit applies)."
+    /// "Other cached files: 300, 12.1 MiB (the cache size limit applies)."
     pub other: String,
     /// The downloader: "Downloading: 40 of 120 files, ..."; empty before its
     /// first run (hide the line, the bar and its buttons).

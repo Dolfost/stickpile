@@ -77,23 +77,25 @@ pub enum OfflineMark {
     Unavailable,
 }
 
-/// "512 B", "1.5 KB", "12.3 MB", in the current language.
+/// "512 B", "1.5 KiB", "12.3 MiB", in the current language: powers of
+/// 1024, as the options (`offline.max_mb` is MiB) and the CLI count.
 pub fn human_bytes(n: u64) -> String {
-    if n < 1000 {
+    if n < 1024 {
         return tf("{n} B", &[("n", &n)]);
     }
-    let mut v = n as f64 / 1000.0;
+    let mut v = n as f64 / 1024.0;
     let mut unit = 0;
-    while v >= 999.95 && unit < 3 {
-        v /= 1000.0;
+    // 1023.95 and up would print as "1024.0" of the smaller unit.
+    while v >= 1023.95 && unit < 3 {
+        v /= 1024.0;
         unit += 1;
     }
     let v = format!("{v:.1}");
     match unit {
-        0 => tf("{n} KB", &[("n", &v)]),
-        1 => tf("{n} MB", &[("n", &v)]),
-        2 => tf("{n} GB", &[("n", &v)]),
-        _ => tf("{n} TB", &[("n", &v)]),
+        0 => tf("{n} KiB", &[("n", &v)]),
+        1 => tf("{n} MiB", &[("n", &v)]),
+        2 => tf("{n} GiB", &[("n", &v)]),
+        _ => tf("{n} TiB", &[("n", &v)]),
     }
 }
 
@@ -292,14 +294,17 @@ pub(crate) fn note(label: impl Into<String>) -> MenuEntry {
 mod tests {
     use super::*;
 
+    const MIB: u64 = 1024 * 1024;
+
     #[test]
     fn bytes_in_words() {
         assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(999), "999 B");
-        assert_eq!(human_bytes(1000), "1.0 KB");
-        assert_eq!(human_bytes(1_536_000), "1.5 MB");
-        assert_eq!(human_bytes(999_999), "1.0 MB");
-        assert_eq!(human_bytes(2_000_000_000), "2.0 GB");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1536), "1.5 KiB");
+        assert_eq!(human_bytes(3 * MIB / 2), "1.5 MiB");
+        assert_eq!(human_bytes(1024 * MIB), "1.0 GiB", "the default budget");
+        assert_eq!(human_bytes(2_000_000_000), "1.9 GiB");
     }
 
     #[test]
@@ -320,11 +325,11 @@ mod tests {
         let e = Estimate {
             items: 12,
             files: 30,
-            bytes: 3_400_000,
-            present_bytes: 400_000,
+            bytes: 34 * MIB / 10,
+            present_bytes: 400 * 1024,
             skipped: 2,
-            kept_bytes_after: 5_000_000,
-            budget: Some(1_000_000_000),
+            kept_bytes_after: 5 * MIB,
+            budget: Some(1024 * MIB),
         };
         let c = Ask::Keep {
             scope: KeepScope::Set("s1".into()),
@@ -333,15 +338,16 @@ mod tests {
         }
         .view();
         assert_eq!(c.title, "Keep Cats offline?");
-        assert!(c.body.starts_with("12 stickers, 30 files, 3.4 MB."), "{}", c.body);
+        assert!(c.body.starts_with("12 stickers, 30 files, 3.4 MiB."), "{}", c.body);
         assert!(
-            c.body.contains("400.0 KB of it is on this device already."),
+            c.body.contains("400.0 KiB of it is on this device already."),
             "{}",
             c.body
         );
         assert!(c.body.contains("2 files are left out"), "{}", c.body);
         assert!(
-            c.body.ends_with("Kept files would take 5.0 MB of the 1.0 GB allowed."),
+            c.body
+                .ends_with("Kept files would take 5.0 MiB of the 1.0 GiB allowed."),
             "{}",
             c.body
         );
@@ -351,13 +357,13 @@ mod tests {
             scope: KeepScope::Library,
             name: String::new(),
             estimate: Estimate {
-                kept_bytes_after: 2_000_000_000,
+                kept_bytes_after: 2048 * MIB,
                 ..e.clone()
             },
         }
         .view();
         assert_eq!(over.title, "Keep the whole library offline?");
-        assert!(over.body.contains("over the 1.0 GB allowed"), "{}", over.body);
+        assert!(over.body.contains("over the 1.0 GiB allowed"), "{}", over.body);
 
         let unlimited = Ask::Keep {
             scope: KeepScope::Library,
@@ -372,11 +378,11 @@ mod tests {
     fn removing_kept_files_is_destructive() {
         let c = Ask::RemoveKept {
             files: 3,
-            bytes: 2_500_000,
+            bytes: 5 * MIB / 2,
         }
         .view();
         assert!(c.destructive);
-        assert!(c.body.starts_with("3 kept files (2.5 MB) are deleted"), "{}", c.body);
+        assert!(c.body.starts_with("3 kept files (2.5 MiB) are deleted"), "{}", c.body);
         assert_eq!(c.accept, "Remove kept files");
     }
 }

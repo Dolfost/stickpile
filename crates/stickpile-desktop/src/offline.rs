@@ -132,11 +132,11 @@ pub enum PanelNote {
 pub struct PanelView {
     /// The "Keep everything offline" switch.
     pub library: bool,
-    /// "Kept offline: 120 files, 45.2 MB of 1.0 GB."
+    /// "Kept offline: 120 files, 45.2 MiB of 1.0 GiB."
     pub kept: String,
-    /// "Other cached files: 300, 12.1 MB (the cache size limit applies)."
+    /// "Other cached files: 300, 12.1 MiB (the cache size limit applies)."
     pub other: String,
-    /// The downloader: "Downloading: 40 of 120 files, 12.0 of 45.2 MB.";
+    /// The downloader: "Downloading: 40 of 120 files, 12.0 of 45.2 MiB.";
     /// empty before its first run.
     pub state: String,
     /// Draw the state as a problem (limit reached, disk full).
@@ -339,13 +339,15 @@ mod tests {
     use super::*;
     use stickpile_core::offline::{PlanScope, ScopeProgress};
 
+    const MIB: u64 = 1 << 20;
+
     fn status(state: OfflineState, done: u64, total: u64) -> OfflineStatus {
         OfflineStatus {
             state,
             files_done: done,
             files_total: total,
-            bytes_done: done * 1_000_000,
-            bytes_total: total * 1_000_000,
+            bytes_done: done * MIB,
+            bytes_total: total * MIB,
             skipped: 0,
             failed: 0,
             scopes: vec![ScopeProgress {
@@ -390,22 +392,22 @@ mod tests {
         let mut p = Panel {
             usage: Some(OfflineUsage {
                 kept_files: 120,
-                kept_bytes: 45_200_000,
+                kept_bytes: 452 * MIB / 10,
                 other_files: 300,
-                other_bytes: 12_100_000,
-                budget: Some(1_000_000_000),
+                other_bytes: 121 * MIB / 10,
+                budget: Some(1024 * MIB),
             }),
             status: Some(status(OfflineState::Downloading, 40, 120)),
             running: true,
             ..Panel::default()
         };
         let v = p.view(false);
-        assert_eq!(v.kept, "Kept offline: 120 files, 45.2 MB of 1.0 GB allowed.");
+        assert_eq!(v.kept, "Kept offline: 120 files, 45.2 MiB of 1.0 GiB allowed.");
         assert_eq!(
             v.other,
-            "Other cached files: 300, 12.1 MB (the cache size limit applies)."
+            "Other cached files: 300, 12.1 MiB (the cache size limit applies)."
         );
-        assert_eq!(v.state, "Downloading: 40 of 120 files, 40.0 MB of 120.0 MB.");
+        assert_eq!(v.state, "Downloading: 40 of 120 files, 40.0 MiB of 120.0 MiB.");
         assert_eq!(v.fraction.map(|f| (f * 3.0).round()), Some(1.0));
         assert!(v.can_pause && v.can_cancel && !v.can_resume && v.can_remove);
         assert!(v.failures.is_empty() && v.skipped.is_empty());
@@ -426,7 +428,7 @@ mod tests {
         assert!(v.library);
         assert!(v.state_warning);
         assert!(
-            v.state.starts_with("The limit of 1.0 GB is reached: 100 of 120 files"),
+            v.state.starts_with("The limit of 1.0 GiB is reached: 100 of 120 files"),
             "{}",
             v.state
         );
@@ -462,7 +464,7 @@ mod tests {
         p.planned(status(OfflineState::Idle, 0, 14));
         assert_eq!(
             p.view(false).state,
-            "0 of 14 files, 0 B of 14.0 MB on this device; the rest downloads after the next sync."
+            "0 of 14 files, 0 B of 14.0 MiB on this device; the rest downloads after the next sync."
         );
         p.status = Some(status(OfflineState::LimitReached, 10, 20));
         p.planned(status(OfflineState::Idle, 11, 20));
@@ -480,15 +482,15 @@ mod tests {
         let mut p = Panel::default();
         p.cleared(&EvictReport {
             removed_files: 12,
-            freed_bytes: 3_400_000,
+            freed_bytes: 34 * MIB / 10,
             total_bytes: 0,
             kept_files: 40,
-            kept_bytes: 9_000_000,
+            kept_bytes: 9 * MIB,
         });
         let v = p.view(false);
         assert_eq!(
             v.message.as_deref(),
-            Some("Cleared 12 files (3.4 MB); 40 kept files stayed.")
+            Some("Cleared 12 files (3.4 MiB); 40 kept files stayed.")
         );
         assert!(!v.message_error);
         assert!(v.state.is_empty(), "no run yet: no state line");
