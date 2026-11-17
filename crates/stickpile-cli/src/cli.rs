@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use stickpile_api::{GitMode, JobStatus, Role, TargetApp, Visibility};
+use stickpile_api::{GitMode, JobStatus, RecheckMode, RecheckPart, Role, TargetApp, Visibility};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -124,6 +124,11 @@ pub enum Command {
         #[arg(long)]
         wait: bool,
     },
+    /// Recompute keywords, emojis, vibe, the words in the pictures,
+    /// embeddings, quality or renditions of your items in the background
+    /// (every item with --all, admins); a value you gave is never changed.
+    /// Also: recheck list, show, cancel
+    Recheck(RecheckArgs),
     /// Administration (admin role required)
     #[command(subcommand)]
     Admin(AdminCmd),
@@ -153,6 +158,79 @@ pub struct LoginArgs {
     /// for five minutes
     #[arg(long, value_name = "CODE", conflicts_with_all = ["username", "password_file", "totp"])]
     pub code: Option<String>,
+}
+
+#[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+pub struct RecheckArgs {
+    #[command(subcommand)]
+    pub command: Option<RecheckCmd>,
+    #[command(flatten)]
+    pub start: RecheckStart,
+}
+
+/// `stickpile recheck` without a subcommand: start one.
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("what").required(true).args(["parts", "all_parts"])))]
+pub struct RecheckStart {
+    /// What to recompute, comma-separated: keywords, emojis, vibe, text
+    /// (the words in the picture), embedding (for search), quality,
+    /// renditions
+    #[arg(long, value_delimiter = ',', value_parser = parse_recheck_part, value_name = "PARTS")]
+    pub parts: Vec<RecheckPart>,
+    /// Everything the server can recompute now
+    #[arg(long)]
+    pub all_parts: bool,
+    /// missing: only what is not there yet; refresh: compute again and
+    /// replace what the computer gave before
+    #[arg(long, value_enum, default_value = "missing")]
+    pub mode: RecheckModeArg,
+    /// Only this set (id or own slug; with --all, a set id)
+    #[arg(long, value_name = "SET")]
+    pub set: Option<String>,
+    /// Every item on the server, not just yours (admin role)
+    #[arg(long)]
+    pub all: bool,
+    /// Wait until it is over, showing the progress
+    #[arg(long)]
+    pub wait: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RecheckCmd {
+    /// Your rechecks (an admin's include the server-wide ones), newest first
+    List,
+    /// Show a recheck and the pictures that failed
+    Show {
+        id: String,
+        /// Wait until it is over, showing the progress
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Stop a recheck: queued pictures are dropped, one being rechecked finishes
+    Cancel { id: String },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum RecheckModeArg {
+    Missing,
+    Refresh,
+}
+
+impl From<RecheckModeArg> for RecheckMode {
+    fn from(m: RecheckModeArg) -> RecheckMode {
+        match m {
+            RecheckModeArg::Missing => RecheckMode::Missing,
+            RecheckModeArg::Refresh => RecheckMode::Refresh,
+        }
+    }
+}
+
+pub fn parse_recheck_part(s: &str) -> Result<RecheckPart, String> {
+    RecheckPart::parse(s).ok_or_else(|| {
+        let names: Vec<&str> = RecheckPart::ALL.iter().map(|p| p.as_str()).collect();
+        format!("unknown part {s:?} (one of: {})", names.join(", "))
+    })
 }
 
 #[derive(Subcommand, Debug)]
@@ -749,6 +827,20 @@ mod tests {
             &["telegram", "import", "Animals", "--slug", "animals"],
             &["telegram", "export", "cats", "--pack", "cats_by_bot", "--title", "Cats"],
             &["job", "abc", "--wait"],
+            &[
+                "recheck",
+                "--parts",
+                "keywords,emojis",
+                "--mode",
+                "refresh",
+                "--set",
+                "cats",
+                "--wait",
+            ],
+            &["recheck", "--all-parts", "--all"],
+            &["recheck", "list"],
+            &["recheck", "show", "abc", "--wait"],
+            &["recheck", "cancel", "abc"],
             &["admin", "users"],
             &["admin", "invite", "--role", "admin", "--expires-days", "3"],
             &["admin", "audit", "-n", "5"],
@@ -817,6 +909,31 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn recheck_parts_and_subcommands() {
+        let cli = parse(&["recheck", "--parts", "text,keywords", "--parts", "quality"]).unwrap();
+        let Command::Recheck(a) = cli.command else { panic!() };
+        assert!(a.command.is_none());
+        assert_eq!(
+            a.start.parts,
+            [RecheckPart::Text, RecheckPart::Keywords, RecheckPart::Quality]
+        );
+        assert_eq!(a.start.mode, RecheckModeArg::Missing);
+        assert!(!a.start.all && !a.start.wait && !a.start.all_parts);
+        let cli = parse(&["recheck", "cancel", "abc"]).unwrap();
+        let Command::Recheck(a) = cli.command else { panic!() };
+        assert!(matches!(a.command, Some(RecheckCmd::Cancel { id }) if id == "abc"));
+        assert!(parse(&["recheck"]).is_err(), "--parts or --all-parts");
+        assert!(parse(&["recheck", "--all"]).is_err(), "--parts or --all-parts");
+        assert!(parse(&["recheck", "--parts", "keywords", "--all-parts"]).is_err());
+        assert!(parse(&["recheck", "--parts", "colour"])
+            .unwrap_err()
+            .to_string()
+            .contains("unknown part"));
+        assert!(parse(&["recheck", "--all-parts", "--mode", "deep"]).is_err());
+        assert!(parse(&["recheck", "list", "--all-parts"]).is_err());
     }
 
     #[test]

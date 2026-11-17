@@ -541,3 +541,108 @@ fn the_text_field_against_the_real_server() {
         assert_eq!(&hits(&v), want, "{q}");
     }
 }
+
+/// Rechecks from the CLI: started, followed with --wait, listed, shown and
+/// cancelled; parts the server cannot recompute are refused with its
+/// reason; --all is for admins. This server has no AI and no text reader.
+#[test]
+fn rechecks_against_the_real_server() {
+    let server = Server::start();
+    server
+        .rt
+        .block_on(users::create(
+            &server.handle.as_ref().unwrap().state.db,
+            NewUser {
+                username: "root".into(),
+                display_name: None,
+                password: Some(PASSWORD.into()),
+                role: Role::Admin,
+                tailscale_login: None,
+            },
+        ))
+        .unwrap();
+    let env = Env::new(&server.url());
+    std::fs::write(env.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    let pw = env.path("pw");
+    env.ok(&["login", "-u", "alice", "--password-file", pw.to_str().unwrap()]);
+    env.ok(&["sets", "create", "inbox", "--name", "Inbox"]);
+    let (one, two) = (env.path("one.png"), env.path("two.png"));
+    std::fs::write(&one, png(9)).unwrap();
+    std::fs::write(&two, png(10)).unwrap();
+    env.ok(&["upload", "inbox", one.to_str().unwrap(), two.to_str().unwrap()]);
+
+    let out = env.ok(&[
+        "recheck",
+        "--parts",
+        "quality,renditions",
+        "--mode",
+        "refresh",
+        "--wait",
+    ]);
+    assert!(
+        out.contains("Started recheck") && out.contains("(quality,renditions, refresh) of 2 pictures"),
+        "{out}"
+    );
+    assert!(out.contains(": done\n"), "{out}");
+    assert!(out.contains("progress: 2/2 pictures, 0 failed"), "{out}");
+    let list = env.json(&["recheck", "list"]);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(
+        (list[0]["state"].as_str(), list[0]["total"].as_u64()),
+        (Some("done"), Some(2))
+    );
+    let id = list[0]["id"].as_str().unwrap().to_string();
+    let shown = env.json(&["recheck", "show", &id]);
+    assert_eq!(shown["recheck"]["parts"], serde_json::json!(["quality", "renditions"]));
+    assert_eq!(shown["failures"], serde_json::json!([]));
+    let out = env.ok(&["recheck", "list"]);
+    assert!(
+        out.contains(&id) && out.contains("quality,renditions") && out.contains("2/2"),
+        "{out}"
+    );
+    let out = env.ok(&["recheck", "cancel", &id]);
+    assert!(out.contains("is already done"), "{out}");
+
+    // Everything this server can do, in one set: no AI here.
+    let r = env.json(&["recheck", "--all-parts", "--set", "inbox", "--wait"]);
+    assert_eq!(r["parts"], serde_json::json!(["quality", "renditions"]));
+    assert_eq!(r["state"], "done");
+    assert!(r["set_id"].is_string());
+    for (args, why) in [
+        (
+            &["recheck", "--parts", "keywords"][..],
+            "AI is turned off on this server",
+        ),
+        (&["recheck", "--parts", "text"], "does not read the words in pictures"),
+        (&["recheck", "--all-parts", "--all"], "admin role required"),
+        (&["recheck", "show", "nosuchrecheck"], "not found"),
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(why), "{args:?}: {err}");
+    }
+
+    // An admin rechecks the whole server.
+    let admin = Env::new(&server.url());
+    std::fs::write(admin.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    admin.ok(&[
+        "login",
+        "-u",
+        "root",
+        "--password-file",
+        admin.path("pw").to_str().unwrap(),
+    ]);
+    let r = admin.json(&["recheck", "--all-parts", "--all", "--mode", "refresh", "--wait"]);
+    assert_eq!((r["scope"].as_str(), r["total"].as_u64()), (Some("server"), Some(2)));
+    assert_eq!(
+        (r["state"].as_str(), r["requested_by"].as_str()),
+        (Some("done"), Some("root"))
+    );
+    assert_eq!(
+        server.scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'recheck.start'"),
+        1
+    );
+    let list = env.json(&["recheck", "list"]);
+    assert_eq!(list.as_array().unwrap().len(), 2, "alice does not see the server's");
+}

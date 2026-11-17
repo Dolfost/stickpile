@@ -389,6 +389,34 @@ fn server_override_and_admin_wrappers() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("server unreachable"));
 }
 
+/// The mock server, like stickpile 0.7.0, has no rechecks: the CLI says the
+/// server is too old instead of "not found".
+#[test]
+fn recheck_on_a_server_too_old_for_it() {
+    let server = MockServer::start();
+    let env = Env::new(&server.url);
+    std::fs::write(env.path("pw"), "secret\n").unwrap();
+    env.ok(&[
+        "login",
+        "-u",
+        "alice",
+        "--password-file",
+        env.path("pw").to_str().unwrap(),
+    ]);
+    for args in [
+        &["recheck", "--all-parts"][..],
+        &["recheck", "--parts", "keywords", "--all"],
+        &["recheck", "list"],
+        &["recheck", "show", "abc"],
+        &["recheck", "cancel", "abc"],
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("the server is too old for rechecks"), "{args:?}: {err}");
+    }
+}
+
 /// `stickpile copy` through the detached clipboard helper. Needs a display, so
 /// it only runs when `STICKPILE_TEST_X11_DISPLAY` (e.g. `:99` from Xvfb) or
 /// `STICKPILE_TEST_WAYLAND_DISPLAY` (+ `XDG_RUNTIME_DIR`, e.g. headless sway)

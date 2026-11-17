@@ -108,6 +108,7 @@ pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
             let job = client.job(&id).await?;
             show_job(ctx, &client, job, wait).await
         }
+        Command::Recheck(a) => recheck(ctx, a).await,
         Command::Admin(c) => admin(ctx, c).await,
         Command::Backup { dir } => backup(ctx, &dir).await,
         Command::ServeClipboard => unreachable!("handled before the runtime starts"),
@@ -1224,6 +1225,187 @@ async fn show_job(ctx: &Ctx, client: &ApiClient, job: Job, wait: bool) -> Result
         bail!("job {} failed", job.id);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// recheck
+// ---------------------------------------------------------------------------
+
+const RECHECK_POLL: Duration = Duration::from_secs(2);
+const RECHECK_MAX_WAIT: Duration = Duration::from_secs(24 * 3600);
+
+fn parts_text(parts: &[RecheckPart]) -> String {
+    parts.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(",")
+}
+
+/// `3/10 pictures, 1 failed, 2 changed`.
+fn progress_text(r: &Recheck) -> String {
+    format!(
+        "{}/{} pictures, {} failed, {} changed",
+        r.done + r.failed,
+        r.total,
+        r.failed,
+        r.changed
+    )
+}
+
+async fn recheck(ctx: &Ctx, a: RecheckArgs) -> Result<()> {
+    let client = ctx.client()?;
+    match a.command {
+        None => start_recheck(ctx, &client, a.start).await,
+        Some(RecheckCmd::List) => {
+            let list = client.rechecks().await?;
+            if ctx.json {
+                return output::json(&list);
+            }
+            let mut t = Table::new(&[
+                "ID", "SCOPE", "PARTS", "MODE", "STATE", "PROGRESS", "FAILED", "CHANGED", "BY", "CREATED",
+            ]);
+            for r in &list {
+                t.row(vec![
+                    r.id.clone(),
+                    output::name(&r.scope),
+                    parts_text(&r.parts),
+                    output::name(&r.mode),
+                    output::name(&r.state),
+                    format!("{}/{}", r.done + r.failed, r.total),
+                    r.failed.to_string(),
+                    r.changed.to_string(),
+                    r.requested_by.clone().unwrap_or_else(|| "(server)".into()),
+                    output::time(r.created_at),
+                ]);
+            }
+            t.print();
+            Ok(())
+        }
+        Some(RecheckCmd::Show { id, wait }) => {
+            let r = client.recheck(&id).await?;
+            let r = if wait { wait_recheck(ctx, &client, r).await? } else { r };
+            let failures = client.recheck_failures(&id).await?;
+            if ctx.json {
+                return output::json(&json!({ "recheck": r, "failures": failures }));
+            }
+            print_recheck(&r);
+            if !failures.is_empty() {
+                println!();
+                let mut t = Table::new(&["ITEM", "MEDIA", "AT", "ERROR"]);
+                for f in &failures {
+                    t.row(vec![
+                        output::opt(f.item_id.clone()),
+                        f.media_id.clone(),
+                        output::time(f.at),
+                        f.error.clone(),
+                    ]);
+                }
+                t.print();
+            }
+            Ok(())
+        }
+        Some(RecheckCmd::Cancel { id }) => {
+            let r = client.cancel_recheck(&id).await?;
+            if ctx.json {
+                return output::json(&r);
+            }
+            match r.state {
+                RecheckState::Cancelled => println!("Cancelled recheck {} ({}).", r.id, progress_text(&r)),
+                _ => println!(
+                    "Recheck {} is already {} ({}).",
+                    r.id,
+                    output::name(&r.state),
+                    progress_text(&r)
+                ),
+            }
+            Ok(())
+        }
+    }
+}
+
+async fn start_recheck(ctx: &Ctx, client: &ApiClient, s: RecheckStart) -> Result<()> {
+    let set_id = match &s.set {
+        Some(set) => Some(resolve_set(client, set).await?),
+        None => None,
+    };
+    let req = StartRecheck {
+        parts: if s.all_parts { Vec::new() } else { s.parts.clone() },
+        mode: s.mode.into(),
+        set_id,
+    };
+    let started = if s.all {
+        client.admin_start_recheck(&req).await?
+    } else {
+        client.start_recheck(&req).await?
+    };
+    let r = started.recheck;
+    if !ctx.json {
+        let what = format!("{} ({}, {})", r.id, parts_text(&r.parts), output::name(&r.mode));
+        if started.started {
+            println!("Started recheck {what} of {} pictures.", r.total);
+        } else {
+            println!("Recheck {what} is already running: {}.", progress_text(&r));
+        }
+    }
+    let r = if s.wait { wait_recheck(ctx, client, r).await? } else { r };
+    if ctx.json {
+        output::json(&r)?;
+    } else if s.wait {
+        print_recheck(&r);
+    } else if r.state == RecheckState::Running {
+        println!("Follow it with `stickpile recheck show {} --wait`.", r.id);
+    }
+    if s.wait && r.state == RecheckState::Failed {
+        bail!("recheck {} failed (see `stickpile recheck show {}`)", r.id, r.id);
+    }
+    Ok(())
+}
+
+/// Wait for a recheck to end, showing the progress on stderr (in place on
+/// a terminal, a line per change otherwise).
+async fn wait_recheck(ctx: &Ctx, client: &ApiClient, r: Recheck) -> Result<Recheck> {
+    if r.state != RecheckState::Running {
+        return Ok(r);
+    }
+    let tty = std::io::stderr().is_terminal();
+    let mut last = String::new();
+    let r = client
+        .wait_recheck(&r.id, RECHECK_POLL, RECHECK_MAX_WAIT, |r| {
+            if ctx.json {
+                return;
+            }
+            let now = progress_text(r);
+            if now == last {
+                return;
+            }
+            if tty {
+                eprint!("\r{now}   ");
+            } else {
+                eprintln!("{now}");
+            }
+            last = now;
+        })
+        .await?;
+    if tty && !ctx.json {
+        eprintln!();
+    }
+    Ok(r)
+}
+
+fn print_recheck(r: &Recheck) {
+    println!("Recheck {}: {}", r.id, output::name(&r.state));
+    println!("  scope:    {}", output::name(&r.scope));
+    println!("  parts:    {}", parts_text(&r.parts));
+    println!("  mode:     {}", output::name(&r.mode));
+    if let Some(set) = &r.set_id {
+        println!("  set:      {set}");
+    }
+    println!(
+        "  by:       {}",
+        r.requested_by.as_deref().unwrap_or("the server itself")
+    );
+    println!("  progress: {}", progress_text(r));
+    println!("  started:  {}", output::time(r.created_at));
+    if let Some(t) = r.finished_at {
+        println!("  ended:    {}", output::time(t));
+    }
 }
 
 // ---------------------------------------------------------------------------
