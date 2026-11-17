@@ -2,7 +2,8 @@
 
 `stickpile` talks to a stickpile server over its REST API. It handles login,
 sets, import and export of set directories, search, copying to the clipboard,
-usage statistics, git packs, Telegram packs and admin tasks. It shares its
+usage statistics, git packs, Telegram packs, rechecks of metadata and admin
+tasks. It shares its
 configuration file, token and offline cache with the desktop client
 (`stickpile-desktop`). Both are built on the `stickpile-core` crate.
 
@@ -495,6 +496,37 @@ yet: use the web pages (`/discord/import`, `/signal/import`) or the API
 stickpile job <id>          # status, subject, result, error
 stickpile job <id> --wait
 ```
+
+### `recheck`
+
+```sh
+stickpile recheck --parts keywords,emojis,vibe,text [--mode missing|refresh] [--set SET] [--wait]
+stickpile recheck --all-parts [--mode refresh] [--wait]
+stickpile recheck --all-parts --all [--set SET-ID] [--wait]   # every item on the server (admin role)
+stickpile recheck list                  # yours (an admin's include the server-wide ones), newest first
+stickpile recheck show <id> [--wait]    # progress and the pictures that failed
+stickpile recheck cancel <id>
+```
+
+Recomputes metadata of your items in the background (the items of the
+sets you own; with `--set`, one of them). `--parts` takes `keywords`,
+`emojis`, `vibe`, `text` (the words in the picture), `embedding` (for
+search), `quality` and `renditions`; `--all-parts` asks for everything
+the server can recompute now (without AI only `quality` and
+`renditions`). One of the two is required. `--mode missing` (the default)
+computes only what is not there yet; `refresh` computes everything again
+and replaces what the computer gave before. A value you gave is never
+changed. What each part does: [ai.md](ai.md#recheck).
+
+The server answers with the running recheck when the same one runs
+(`Recheck ... is already running`), and limits how many you start
+(`limits.recheck_per_hour`). `--wait` shows the progress on stderr
+(`3/10 pictures, 0 failed, 2 changed`) and prints the result; it fails
+when every picture failed. `--json` prints the `Recheck` (`show`: with
+`failures`). A part the server cannot recompute is refused with its
+reason (for example "AI is turned off on this server"). Against a server
+older than rechecks (0.7.0) every `recheck` command fails with "the server
+is too old for rechecks".
 
 ### `admin` (admin role)
 

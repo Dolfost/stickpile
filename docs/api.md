@@ -96,7 +96,7 @@ Every non-2xx response has an `ApiError` body:
 | `unsupported_media` | 415 | Not an accepted media type (after content sniffing), corrupt file, or a non-JSON body |
 | `rate_limited` | 429 | Too many requests; `Retry-After` gives the seconds to wait |
 | `internal` | 500 | Server error (details only in the server log) |
-| `unavailable` | 503 | AI is off on this server, or its model failed to load (AI suggestions, re-running enrichment) |
+| `unavailable` | 503 | AI is off on this server, or its model failed to load (AI suggestions, re-running enrichment, rechecks); or a recheck of `text` on a server without a text reader |
 | `ai_loading` | 503 | The AI model is still loading: ask again after `Retry-After` seconds (2) |
 
 Content the caller may not read (other users' private sets, their items and
@@ -127,7 +127,8 @@ page (no `cursor`). Removals are recorded as tombstones with an audience:
 When a set becomes public again its tombstones for other users are dropped and
 its items reappear in `items`. Tombstones are purged after 180 days; a client
 that has not synced for that long should resync from scratch. Changes of a
-set's name, slug or visibility and new variants bump `updated_at` of its items.
+set's name, slug or visibility, new variants and a new quality score (a
+[recheck](#rechecks)) bump `updated_at` of its items.
 
 ## Endpoints
 
@@ -619,6 +620,52 @@ Who may propose: anyone who can read the set and is not its owner; not
 for read-only git packs. 404 for sets the caller cannot read, 409 beyond 20
 open proposals per user and set.
 
+### Rechecks
+
+A recheck recomputes metadata of many items in the background: a user's
+items (the items of the sets they own), or every item on the server for an
+admin, either optionally of one set. What each part does and the rules it
+keeps are in [ai.md](ai.md#recheck); it never changes a value a person
+gave. Types in `stickpile_api` (`StartRecheck`, `Recheck`,
+`RecheckFailure`, `RecheckPart`, `RecheckMode`, `RecheckScope`,
+`RecheckState`).
+
+| Method and path | Body -> response | Notes |
+|---|---|---|
+| `POST /api/v1/rechecks` | `StartRecheck` -> `Recheck` (201) | The caller's own items; `set_id` one of their sets (404 if they cannot read it, 403 if it is someone else's). The same scope (set, parts, mode) running: that batch, 200. Rate limited: `limits.recheck_per_hour` new batches per user (429 with `Retry-After`); the running one returned costs nothing. |
+| `POST /api/v1/admin/rechecks` | `StartRecheck` -> `Recheck` (201) | Admins: every item on the server (`set_id`: any set). The same scope running: that batch, 200. Audited (`recheck.start`). |
+| `GET /api/v1/rechecks` | -> `[Recheck]` | The caller's batches, newest first (at most 200); an admin's include the server-wide ones, the server's own too. |
+| `GET /api/v1/rechecks/{id}` | -> `Recheck` | Its owner or an admin; 404 for everyone else. |
+| `GET /api/v1/rechecks/{id}/failures` | -> `[RecheckFailure]` | The pictures that failed (`media_id`, `item_id` for a user's batch, `error`, `at`), oldest first, at most 1000. |
+| `POST /api/v1/rechecks/{id}/cancel` | -> `Recheck` | Its owner or an admin: `state` becomes `cancelled` and the queued pictures are dropped; one being rechecked finishes and is counted. A batch that is over is returned as it is. Cancelling a server-wide one is audited (`recheck.cancel`). |
+
+`StartRecheck` is `{parts, mode, set_id}`, all optional. `parts` lists
+`keywords`, `emojis`, `vibe`, `text`, `embedding`, `quality` and
+`renditions`; none means every part the server can recompute now (the CLIP
+parts with a loaded model, `text` with a text reader, `quality` and
+`renditions` always). A part the server cannot recompute is refused: 503
+`unavailable` (AI off, no text reader) or `ai_loading` while the model
+loads; an unknown part or mode is a 400. `mode` is `missing` (the default:
+only what is not there) or `refresh` (compute again, replace the
+computer's values).
+
+`Recheck` is `{id, scope, parts, mode, set_id, requested_by, state, total,
+done, failed, changed, created_at, finished_at}`. `scope` is `user` or
+`server`; `requested_by` the username, `null` for the server's own
+batches ([ai.md](ai.md#recheck)). The counters count pictures (one
+picture can be several items): `total` in the batch (only those where
+something is missing, in mode `missing`), `done` rechecked, `failed`,
+`changed` where something was written. `state` is `running`, `done` (some
+may have failed), `cancelled` or `failed` (every picture failed); a batch
+with nothing to do is `done` at once. Finished batches are deleted after 30
+days, like jobs.
+
+Every enum has a catch-all for readers (`other`), and every field but the
+id, scope, parts, mode, state and `created_at` reads with a default, so a
+newer server's additions read. A server older than rechecks (0.7.0)
+answers these routes with 404; the CLI then says the server is too old for
+rechecks (`stickpile_core::client::SERVER_TOO_OLD_FOR_RECHECKS`).
+
 ### Admin
 
 All admin routes need the `admin` role: anonymous callers get 401, other users
@@ -638,18 +685,25 @@ see [Problems](#problems)).
 | `GET /api/v1/admin/audit?before=&limit=` | -> `[AuditEntry]` | See [security.md](security.md#audit-log). |
 | `GET /api/v1/admin/storage` | -> `StorageUsage` | Bytes under `media/`, database size (with WAL), per-user bytes (shared media counted for each user). |
 | `GET /api/v1/admin/jobs?status=&limit=` | -> `[Job]` | Newest first; `status` = `queued`, `running`, `done`, `failed`; `limit` default 200, max 1000. |
+| `POST /api/v1/admin/rechecks` | `StartRecheck` -> `Recheck` (201) | See [Rechecks](#rechecks). |
 
 ## Jobs
 
 Background work runs in a database-backed queue with `media.workers`
 workers. Failed jobs are retried with exponential backoff (10 s, 20 s) up to
 3 attempts; permanent errors fail at once. Finished jobs are deleted after 30
-days. `Job.result` is kind-specific:
+days. The queue takes higher priorities first, then the oldest: every kind
+has priority 0 except `recheck` (-10), so uploads, imports and publishing
+made during a large recheck go ahead of it. With two or more workers, the
+first one never takes a `recheck` job, so such work starts at once even
+while the other workers are busy rechecking. `Job.result` is
+kind-specific:
 
 | Kind | Queued by | `result` |
 |---|---|---|
 | `variants` | uploads, imports, restores | `{"variants": [...]}` |
-| `enrich` | uploads, `POST /items/{id}/enrich`, AI start-up | `model`, `keywords`, `emojis`, `vibe`, `items_updated` (CLIP); with a text reader also `ocr_model` and `text`, `text_items_updated`, or `ocr_error` when reading failed (the job still succeeds) |
+| `enrich` | uploads, `POST /items/{id}/enrich` | `model`, `keywords`, `emojis`, `vibe`, `items_updated` (CLIP); with a text reader also `ocr_model` and `text`, `text_items_updated`, or `ocr_error` when reading failed (the job still succeeds) |
+| `recheck` | [rechecks](#rechecks), one job per picture (also the server's own at startup) | `media_id`, `changed`, `parts` (what each part did); `skipped` when the picture or the batch is gone |
 | `git_pull` | binding, `POST /sets/{id}/pull`, webhook, scheduler | `commit`, `changed`; after an import also `version`, `created`, `updated`, `unchanged`, `removed`, `errors`; `pushed` when local edits were pushed instead |
 | `git_push` | every change of a push-mode pack (debounced 5 s) | `pushed`, `committed`, `commit`, `version`, or `skipped` |
 | `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
@@ -659,28 +713,3 @@ days. `Job.result` is kind-specific:
 | `discord_export` | `POST /sets/{id}/publish` | `guild_id`, `guild_name`, `kind` (`sticker` or `emoji`), `url`, `added`, `removed`, `updated`, `unchanged`, `exported`, `skipped` (`[{item_id, name, reason}]`), `notes`, `slots`, `animated_slots`, `premium_tier` |
 | `signal_import` | `POST /signal/import` | `set_id`, `slug`, `title`, `author`, `imported`, `skipped` (`[{sticker_id, reason}]`), `cover`; never the link |
 | `signal_export` | `POST /sets/{id}/publish` | `url` (the new pack's `signal.art` link), `title`, `exported`, `skipped`, `notes` |
-
-## Draft: metadata round
-
-Design note for the metadata round (branch `metadata`); the sections above
-are rewritten from it when the work lands, and this section then goes.
-The text field landed: see [Items](#items),
-[search.md](search.md#query-syntax) and [ai.md](ai.md#ocr-and-the-text-field).
-
-**Recheck** (types in `stickpile_api`, every enum with a `#[serde(other)]`
-catch-all for readers):
-
-- `POST /api/v1/rechecks` `{parts, mode, set_id}`: the caller's own
-  items (a running batch of the same scope is returned instead);
-- `POST /api/v1/admin/rechecks` `{parts, mode, set_id}`: every item,
-  admins only, audited;
-- `GET /api/v1/rechecks`: the caller's batches (an admin's include the
-  server-wide ones), newest first;
-- `GET /api/v1/rechecks/{id}`: `Recheck` {id, scope, parts, mode, set_id,
-  state, total, done, failed, changed, created_at, finished_at};
-- `GET /api/v1/rechecks/{id}/failures`: what failed and why;
-- `POST /api/v1/rechecks/{id}/cancel`.
-
-`JobKind::Recheck` is new; 0.7.0 clients read it as `Other`. A new client
-calling these routes on a 0.7.0 server gets `404` and says the server is
-too old for rechecks.

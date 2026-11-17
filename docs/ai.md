@@ -37,7 +37,7 @@ whose source is still `ai`. The item text (`text_source`) has a stricter
 rule, below.
 
 Next to every embedding the server stores `Enricher::model_id()`; a different
-id triggers re-embedding. `Enricher::image_model_id()` is `clip-vit-b32` for
+id triggers re-embedding (the server's own [recheck](#recheck) at startup). `Enricher::image_model_id()` is `clip-vit-b32` for
 both text encoders, so switching `text_encoder` does not require
 re-embedding images, only re-running zero-shot suggestions (their prompts
 change). `ZeroShot::vocab_fingerprint()` (16 hex chars) identifies the
@@ -403,7 +403,8 @@ only while its source is `ai`; any edit by a person makes it `user` for
 good, clearing included ([api.md](api.md#items)). That is stricter than
 the rule of `keywords`, `emojis`, `vibe` and `name` (fill when empty or
 still `ai`): an empty text a person left stays empty. Every AI write of
-the text goes through `service::ai::apply_text`, whose SQL only touches
+the text goes through `service::ai::apply_text` (for rechecks
+`apply_text_to` and `clear_ai_text`), whose SQL only touches
 `text_source = 'ai'` rows; an import's text goes through
 `ItemText::merged_into` (a directory without a text changes nothing, an
 AI text from a file never replaces a person's).
@@ -462,9 +463,10 @@ frame grab as the representative frame).
   current reader is missing.
 - `POST /api/v1/ai/suggest` reads the posted image and returns `text`
   (nothing stored; a failed read leaves `text` out).
-- Startup does not queue reading of media stored before; a manual
+- At startup the server starts a recheck of its own that reads the media
+  the current reader never read ([Recheck](#recheck)); a manual
   re-enrichment (`POST /api/v1/items/{id}/enrich`) reads a media that was
-  never read.
+  never read, and a recheck of `text` reads again on request.
 
 **Configuration.** `[ai] ocr = true` (the default) reads with
 [the reader](#the-reader) when `ai.enabled`; `false` reads nothing. At
@@ -582,6 +584,12 @@ upgrade, the server moves such keys into the item text at startup
   records the size of each frame it read (`frames()`, `reads()`); the
   server tests (`tests/text.rs`) inject it to check what is read, how
   often, and that a person's text is never overwritten.
+- `tests/recheck.rs` (server) runs rechecks with `MockEnricher` and
+  `MockTextReader`: the batch's counters, dedup, cancel and restart,
+  `missing` against `refresh` per part, a person's values under every
+  write path, user, set and server scope, the queue order (an upload's
+  jobs before the remaining recheck jobs), the audit and rate limit, and
+  the server's own rechecks after a model change and for a new reader.
 - `STICKPILE_TEST_MODEL_DIR=$PWD/models cargo test -p stickpile-ai --release`
   adds the real-model tests (`tests/real_model.rs`):
   - red square vs "a red square" / "a blue square", also in Ukrainian;
@@ -878,34 +886,103 @@ chat: `Мама`, `в мережі`, `Ти поїла? Не забудь шап�
 contours and polygon offsets), so it proves loading and running, not
 accuracy.
 
-## Draft: recheck
+## Recheck
 
-**What.** A user rechecks their own items, an admin the whole server,
-optionally one set. Parts (`RecheckPart`, snake_case): `keywords`,
-`emojis`, `vibe`, `text`, `embedding`, `quality`, `renditions`
-(plus `name` if the server derives one), each chosen on its own. Modes:
-`missing` (default) computes only what is not there (no embedding from
-the current model, no OCR result from the current model, an empty field);
-`refresh` recomputes and replaces AI values. Neither changes a value a
-person gave (the rules above). A user recheck changes only that user's
-items; work on shared media (embedding, OCR, quality, renditions) is
-harmless to the other owners.
+A recheck recomputes metadata of many items in the background, for
+example after a model change or a new vocabulary. A user rechecks their
+own items (the items of the sets they own), an admin every item on the
+server, either optionally one set (`POST /api/v1/rechecks`,
+`POST /api/v1/admin/rechecks`, [api.md](api.md#rechecks); `stickpile
+recheck`, [cli.md](cli.md#recheck)). Code: `service::recheck` (the
+batch) and `jobs::recheck` (one picture).
 
-**The batch.** Table `rechecks` (migration `0015`): id, scope (`user` or
-`server`), requested_by, owner_id (user scope), set_id, parts (JSON),
-mode, state (`running`, `done`, `cancelled`, `failed`), total, done,
-failed, changed, created_at, finished_at; failures in
-`recheck_failures` (recheck_id, item_id or media_id, error). The batch
-fans out to one `JobKind::Recheck` job per media in scope (payload
-`{recheck_id, media_id}`), which updates the counters when it ends. The
-same migration adds `jobs.priority INTEGER NOT NULL DEFAULT 0`; the queue
-claims by `priority DESC, run_after, created_at`, and recheck jobs have a
-negative priority, so uploads (`Variants`, `Enrich`) made during a
-server-wide recheck go first. Jobs persist, so a restart continues
-(`requeue_interrupted`). Cancel marks the batch `cancelled` and deletes
-its queued jobs. Starting the same scope (owner, set, parts, mode) while
-it runs returns the running batch. A server-wide start is audited; user
-starts are rate limited. The startup re-enrichment of media whose
-embedding is from another model (`jobs::media::enqueue_missing_enrichment`)
-becomes a server-scope recheck started by the server itself, so there is
-one mechanism.
+**Parts** (`RecheckPart`), each chosen on its own; the server derives no
+item name, so there is no `name` part:
+
+| Part | `missing` (the default) | `refresh` |
+|---|---|---|
+| `keywords`, `emojis`, `vibe` | The picture has no embedding from the loaded model: it is embedded, and its suggestions fill empty fields and replace the computer's values (they were another model's). Else the stored suggestions fill empty fields only. | The zero-shot runs again from the stored embedding (or a new one, see `embedding`) and its suggestions replace the computer's values. |
+| `text` | The loaded reader never read the picture: it is read, and the text fills texts that are not set and replaces the computer's. Else the stored reading fills texts that are not set. | Read again; the text replaces the computer's, and an empty reading clears it. |
+| `embedding` | Embedded when there is no embedding from the loaded model. | Embedded again. |
+| `quality` | Computed when the picture has no quality report. | Computed again. |
+| `renditions` | Made when they never finished or an older encoder made them (`variants_version`), unless a `variants` job for them is queued. | Made again. |
+
+Neither mode changes a value a person gave. `keywords`, `emojis` and
+`vibe` keep the rule of `service::ai::apply` (now `apply_to`): the
+computer fills an empty field or replaces its own value, never a
+non-empty person's value. `text` keeps its stricter rule: only rows with
+`text_source = 'ai'` are written, through `service::ai::apply_text_to`;
+an empty refreshed reading clears the computer's text through
+`service::ai::clear_ai_text`, still only where `text_source = 'ai'`, and
+`missing` never clears. A refreshed zero-shot without a value (no vibe
+any more) leaves the field as it was. Recomputed values are AI values
+(`*_source = ai`), shown with the AI badge and "Confirm" like any other.
+
+The quality report is computed from the stored original as an upload
+computes it (`stickpile_media::ingest`), against the recommended size of
+the first set in scope showing the picture; a new score moves the
+`updated_at` of the picture's items, so client caches pick it up.
+Renditions are made by the `variants` job's code; the grid thumbnail is
+not remade.
+
+**Scope.** A user's recheck writes only that user's items (of the set, with
+one). Work on the picture itself (embedding, reading, quality report,
+renditions) is stored on the media and shared by every item showing it,
+whoever owns it; it changes no other user's field. A picture in two sets
+of the user is one picture.
+
+**The batch.** A `rechecks` row (migration `0015`: scope `user` or
+`server`, `requested_by` (`NULL`: the server itself), `owner_id`, `set_id`,
+`parts`, `mode`, `state`, `total`, `done`, `failed`, `changed`, times) and
+one `recheck` job per picture in scope (payload `{recheck_id, media_id}`),
+made in one transaction. In mode `missing` only pictures where a chosen
+part is missing get a job; each job checks again. When a job ends (not
+when it is retried) it counts in its batch: `done` (and `changed` when it
+wrote something) or `failed`, with a `recheck_failures` row (the error,
+and for a user's batch one of their items showing the picture). Each part
+runs even when another fails; the job then fails with every part's error.
+The batch is over when `done + failed = total`: `failed` if every picture
+failed, else `done`. Jobs persist, so a restart continues the batch: a job
+left running is queued again (`jobs::requeue_interrupted`). Cancelling sets
+`cancelled` and deletes the batch's queued jobs; one that runs finishes and
+is counted. Asking for the same scope (owner, set, parts, mode) while it
+runs returns the running batch.
+
+**Fairness.** Jobs have a priority (`jobs.priority`, migration `0015`) and
+the queue claims by `priority DESC, run_after, created_at`. Every job is
+queued at 0 except `recheck` jobs (`jobs::RECHECK_PRIORITY`, -10), so the
+`variants` and `enrich` jobs of an upload made during a server-wide
+recheck are claimed before the remaining recheck jobs. That alone would
+still let long recheck jobs (a video's renditions, an animation's reading)
+occupy every worker; so with two or more `media.workers`, worker 0 takes
+only jobs of priority 0 and up (`jobs::Lane::Interactive`) and the
+recheck runs on the others. With one worker, that worker takes
+everything, and new work waits for at most the recheck job that runs.
+
+**Limits and audit.** A user may start `limits.recheck_per_hour` (10)
+rechecks per hour; asking for the running one costs nothing. A
+server-wide start by an admin is audited (`recheck.start`), and so is
+cancelling one (`recheck.cancel`).
+
+**The server's own rechecks.** At startup the server starts server-wide
+rechecks itself (`requested_by` `NULL`), in mode `missing`; this is the
+only mechanism that catches up after a model change (it replaces the
+`enrich` jobs startup queued before):
+
+- when the CLIP model is ready (`service::recheck::start_system_clip`):
+  every picture without an embedding from it gets `embedding`,
+  `keywords`, `emojis` and `vibe`. Such pictures' AI values are another
+  model's, so they are replaced, as re-enrichment always did; a person's
+  never are;
+- with a text reader (`service::recheck::start_system_text`): every
+  picture the reader never read gets `text`.
+
+Pictures an `enrich` job or a running batch of the server with the same
+parts already covers are left out, so a restart adds only what is new;
+with nothing to do, no batch is made.
+
+**Compatibility.** `JobKind::Recheck` is new; a 0.7.0 client reads it as
+`Other`. Every new enum (`RecheckPart`, `RecheckMode`, `RecheckScope`,
+`RecheckState`) has a catch-all for readers, and the optional fields of
+`Recheck` read with defaults. A 0.7.0 server answers the recheck routes
+with 404, and the CLI says the server is too old for rechecks.

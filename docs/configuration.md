@@ -74,6 +74,7 @@ How `tailscale serve` reaches the server. See
 | `login_per_minute` | integer > 0 | `10` | Password logins, token requests, registrations, password and TOTP changes, per client IP and per username. |
 | `upload_per_minute` | integer > 0 | `120` | Upload and import requests per user. |
 | `ai_suggest_per_minute` | integer > 0 | `120` | AI suggestion requests (`POST /api/v1/ai/suggest`) per user. The upload tray asks once per staged file. |
+| `recheck_per_hour` | integer > 0 | `10` | Rechecks of one's own items a user may start per hour (`POST /api/v1/rechecks`, [ai.md](ai.md#recheck)). Asking while the same recheck runs does not count; admins' server-wide rechecks are not limited. |
 
 ## `[media]`
 
@@ -86,7 +87,7 @@ See [media.md](media.md) and [quality.md](quality.md).
 | `ffmpeg_timeout_secs` | integer | `120` | Kill ffmpeg/ffprobe after this long. |
 | `thumb_px` | integer | `256` | Longest side of grid thumbnails (also the frame AI enrichment embeds). |
 | `discord_gif_max_mb` | integer | `10` | Size budget of the `discord_gif` variant. |
-| `workers` | integer > 0 | `2` | Concurrent background jobs (variants, enrichment, git, Telegram). |
+| `workers` | integer > 0 | `2` | Concurrent background jobs (variants, enrichment, git, Telegram, rechecks). With two or more, one worker never takes a recheck job, so uploads and imports start at once during a large recheck ([api.md](api.md#jobs)). |
 | `default_recommended_px` | integer | `512` | Recommended longest side for sets that set none (quality score). |
 | `near_duplicate_distance` | integer 0-32 | `8` | Largest pHash Hamming distance reported as a near-duplicate and used by "find a better version". |
 

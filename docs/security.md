@@ -256,6 +256,7 @@ In-memory GCRA limiters (`governor`, `security.rs`):
 | Pairing-code exchanges (`/auth/pair`) | client IP, the same buckets as password logins (no username: see [Pairing](#pairing)) | `limits.login_per_minute` |
 | Uploads and imports (also Telegram imports) | user | `limits.upload_per_minute` requests |
 | AI suggestions (`/api/v1/ai/suggest`, the upload tray) | user | `limits.ai_suggest_per_minute` requests |
+| Rechecks of one's own items (`POST /api/v1/rechecks`) | user | `limits.recheck_per_hour` new rechecks per hour (asking while the same one runs is not counted) |
 | Git webhook (`/api/v1/hooks/git/{id}`, unauthenticated) | client IP, checked before the signature | 60 per minute |
 
 Every attempt counts, successful or not. Over the limit: 429 `rate_limited`
@@ -292,6 +293,7 @@ IP and JSON details. Writing an entry never fails the action it records.
 | `user.password_reset` | Password reset with `stickpile-server reset-password` (details: `tokens_revoked`, `reset_totp`) |
 | `invitation.create`, `invitation.delete` | Admin invitation management |
 | `set.delete` | A set was deleted |
+| `recheck.start`, `recheck.cancel` | An admin started a server-wide recheck (target: its id; details: `scope`, `parts`, `mode`, `set_id`, `total`), or cancelled one (details: `dropped`, the queued pictures deleted) |
 
 ### No telemetry
 
