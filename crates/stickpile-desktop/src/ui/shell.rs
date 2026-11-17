@@ -683,6 +683,12 @@ impl Shell {
                     this.dispatch(Event::KeyTimeout { seq });
                 });
             }
+            // Keeping offline: the backend does not run it yet.
+            Command::CheckOffline { .. }
+            | Command::LoadKeptReasons { .. }
+            | Command::EstimateKeep { .. }
+            | Command::SetKeep { .. }
+            | Command::RemoveKept => {}
         }
     }
 

@@ -148,6 +148,9 @@ pub fn map_key(k: &KeyPress<'_>, mode: Mode, tab: Tab) -> Option<Event> {
             "ISO_Left_Tab" => return Some(Event::CycleTab { backwards: true }),
             "F1" if !m.shift => return Some(Event::ToggleHelp),
             "F2" if !m.shift => return Some(Event::ToggleSyntax),
+            // The menu of the selected tile (a right click opens a tile's).
+            "Menu" if !tab.is_page() => return Some(Event::OpenMenu(None)),
+            "F10" if m.shift && !tab.is_page() => return Some(Event::OpenMenu(None)),
             _ => {}
         }
     }
@@ -404,6 +407,20 @@ mod tests {
                 assert_eq!(p("F2", NONE), Some(Event::ToggleSyntax));
             }
         }
+    }
+
+    #[test]
+    fn the_menu_key_opens_the_menu_of_the_selected_tile() {
+        for mode in [Mode::Insert, Mode::Normal] {
+            for tab in [Tab::Search, Tab::Recent, Tab::Packs] {
+                let p = |name, mods| press(name, None, mods, mode, tab);
+                assert_eq!(p("Menu", NONE), Some(Event::OpenMenu(None)));
+                assert_eq!(p("F10", SHIFT), Some(Event::OpenMenu(None)));
+            }
+        }
+        // On a page Shift+F10 is the page widgets' own.
+        assert_eq!(press("F10", None, SHIFT, Mode::Insert, Tab::Settings), None);
+        assert_eq!(press("F10", None, NONE, Mode::Insert, Tab::Search), None);
     }
 
     #[test]

@@ -353,3 +353,56 @@ Tab	Tab
 Tab / Shift+Tab: put in the next / previous value	Tab / Shift+Tab: вставити наступне / попереднє значення
 Show item stats	Показувати статистику стікера
 The selected item's pack, format, size, copies, likes and quality in a row above the footer (zi in Normal mode).	Набір, формат, розмір, копіювання, вподобання та якість вибраного стікера в рядку над нижньою панеллю (zi у звичайному режимі).
+# Keeping offline (stickpile-quick: marks, K, the menu of a tile, questions)
+pack {name}	набір {name}
+the whole library	уся бібліотека
+recently used	серед нещодавніх
+liked	серед вподобаних
+your pack	ваш набір
+Remove kept files?	Видалити збережені файли?
+{n} kept file ({size}) is deleted, and nothing stays marked to keep offline.|{n} kept files ({size}) are deleted, and nothing stays marked to keep offline.	Буде видалено {n} збережений файл ({size}), і нічого не залишиться позначеним для зберігання офлайн.|Буде видалено {n} збережені файли ({size}), і нічого не залишиться позначеним для зберігання офлайн.|Буде видалено {n} збережених файлів ({size}), і нічого не залишиться позначеним для зберігання офлайн.
+The automatic rules of the Offline settings download what they cover again; turn them off first to keep nothing.	Автоматичні правила з налаштувань Офлайн знову завантажать те, що охоплюють; щоб нічого не зберігати, спершу вимкніть їх.
+Remove kept files	Видалити збережені файли
+Enter: remove, Esc: cancel	Enter: видалити, Esc: скасувати
+Keep the whole library offline?	Зберігати всю бібліотеку офлайн?
+Keep {name} offline?	Зберігати {name} офлайн?
+{n} sticker, {files} files, {size}.|{n} stickers, {files} files, {size}.	{n} стікер, файлів: {files}, {size}.|{n} стікери, файлів: {files}, {size}.|{n} стікерів, файлів: {files}, {size}.
+{size} of it is on this device already.	{size} із цього вже є на пристрої.
+{n} file is left out by the Offline settings (kinds, size limit).|{n} files are left out by the Offline settings (kinds, size limit).	{n} файл пропущено через налаштування Офлайн (типи, обмеження розміру).|{n} файли пропущено через налаштування Офлайн (типи, обмеження розміру).|{n} файлів пропущено через налаштування Офлайн (типи, обмеження розміру).
+Kept files would take {after} of the {budget} allowed.	Збережені файли займатимуть {after} із дозволених {budget}.
+Kept files would take {after}, over the {budget} allowed: downloads stop at the limit, and nothing is deleted to make room.	Збережені файли займатимуть {after}, більше за дозволені {budget}: завантаження зупиниться на межі, і нічого не буде видалено, щоб звільнити місце.
+Kept files would take {after}; there is no limit.	Збережені файли займатимуть {after}; обмеження немає.
+Keep offline	Зберігати офлайн
+Enter: keep offline, Esc: cancel	Enter: зберігати офлайн, Esc: скасувати
+Offline marks shown	Позначки офлайн показано
+Offline marks hidden	Позначки офлайн приховано
+Counting what {name} takes...	Підрахунок, скільки займе {name}...
+{name} is kept offline	{name} зберігається офлайн
+Pack {name} is kept offline	Набір {name} зберігається офлайн
+The whole library is kept offline	Уся бібліотека зберігається офлайн
+{name} is no longer kept offline	{name} більше не зберігається офлайн
+Pack {name} is no longer kept offline	Набір {name} більше не зберігається офлайн
+The library is no longer kept offline	Бібліотека більше не зберігається офлайн
+Keeping offline failed: {error}	Не вдалося зберегти офлайн: {error}
+Removed {n} kept file ({size})|Removed {n} kept files ({size})	Видалено {n} збережений файл ({size})|Видалено {n} збережені файли ({size})|Видалено {n} збережених файлів ({size})
+Available offline	Доступно офлайн
+Not on this device, and the server is unreachable	Немає на цьому пристрої, а сервер недоступний
+Not on this device	Немає на цьому пристрої
+Open the pack	Відкрити набір
+Copy without sticker mode	Копіювати без режиму стікера
+Copy as a sticker	Копіювати як стікер
+Remove from favorites	Прибрати з вибраного
+Add to favorites	Додати до вибраного
+Open in the browser	Відкрити в браузері
+Stop keeping offline	Не зберігати офлайн
+Also kept offline: {why}	Також зберігається офлайн: {why}
+Kept offline: {why}	Зберігається офлайн: {why}
+Stop keeping {pack} offline	Не зберігати {pack} офлайн
+Keep {pack} offline...	Зберігати {pack} офлайн...
+K	K
+keep the item offline / stop keeping it	зберігати стікер офлайн / більше не зберігати
+Menu, Shift+F10, right click	Menu, Shift+F10, правий клік
+the menu of the selected tile	меню вибраної плитки
+zo	zo
+the marks of what is available offline	позначки того, що доступно офлайн
+keep the pack offline (asks first) / stop keeping it	зберігати набір офлайн (спершу запитає) / більше не зберігати

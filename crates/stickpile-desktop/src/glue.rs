@@ -57,6 +57,7 @@ pub fn model_config(cfg: &ClientConfig) -> ModelConfig {
             vibe: cfg.ui.show_vibe,
             text: cfg.ui.show_text,
             details: cfg.ui.show_details,
+            offline: cfg.ui.show_offline,
         },
         counts: cfg.ui.counts,
         safe_mode: cfg.ui.safe_mode,
@@ -76,6 +77,7 @@ pub fn tile_key(tile: Tile) -> &'static str {
         Tile::Vibe => "ui.show_vibe",
         Tile::Text => "ui.show_text",
         Tile::Details => "ui.show_details",
+        Tile::Offline => "ui.show_offline",
     }
 }
 

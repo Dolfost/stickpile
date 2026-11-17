@@ -21,7 +21,7 @@
 //! [`Tab::default_mode`]; the shell reports focus changes of text fields
 //! ([`Event::TextFocus`]) and moves the focus to match [`Model::mode`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::query::{Is, Query};
@@ -31,6 +31,7 @@ use stickpile_i18n::global::{t, t_dyn, t_template, tf, tp};
 
 use crate::focus::WindowInfo;
 use crate::history::WindowHistory;
+use crate::offline::{Ask, Confirm, Estimate, KeepScope, KeptFor, Menu, MenuAction, OfflineMark};
 use crate::suggest::{resolve, suggest, Suggestions, Vocabulary};
 use crate::tabs::{Mode, PageKey, Tab, View};
 use crate::vim::{Cmd, Fed, NormalKey, Pending};
@@ -107,6 +108,11 @@ pub struct Tiles {
     pub text: bool,
     /// The footer's row of the selection's stats ([`Footer::details`]).
     pub details: bool,
+    /// A mark on the tiles whose file is on the device
+    /// ([`OfflineMark::Available`], `ui.show_offline`). With the server
+    /// unreachable the tiles whose file is not are dimmed whatever this
+    /// says ([`OfflineMark::Unavailable`]).
+    pub offline: bool,
 }
 
 impl Default for Tiles {
@@ -118,6 +124,7 @@ impl Default for Tiles {
             vibe: true,
             text: false,
             details: true,
+            offline: true,
         }
     }
 }
@@ -131,6 +138,7 @@ impl Tiles {
             Tile::Vibe => self.vibe,
             Tile::Text => self.text,
             Tile::Details => self.details,
+            Tile::Offline => self.offline,
         }
     }
 
@@ -142,11 +150,13 @@ impl Tiles {
             Tile::Vibe => self.vibe = on,
             Tile::Text => self.text = on,
             Tile::Details => self.details = on,
+            Tile::Offline => self.offline = on,
         }
     }
 }
 
-/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`, `zv`, `zx`, `zi`).
+/// One thing [`Tiles`] can show or hide (`zf`, `ze`, `zt`, `zv`, `zx`,
+/// `zi`, `zo`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
     Favorites,
@@ -157,16 +167,19 @@ pub enum Tile {
     Text,
     /// The stats row.
     Details,
+    /// The mark of what is on the device.
+    Offline,
 }
 
 impl Tile {
-    pub const ALL: [Tile; 6] = [
+    pub const ALL: [Tile; 7] = [
         Tile::Favorites,
         Tile::Emojis,
         Tile::Tags,
         Tile::Vibe,
         Tile::Text,
         Tile::Details,
+        Tile::Offline,
     ];
 }
 
@@ -408,6 +421,62 @@ pub enum Event {
         item_id: String,
         name: String,
     },
+    // -- keeping offline (docs/offline.md) -------------------------------------------
+    /// What the user keeps on this device, as the shell read it (at the
+    /// start, on every opening, after another account). The model keeps it
+    /// in step with its own keeps and releases.
+    OfflineKeeps(Vec<KeepScope>),
+    /// Answer to [`Command::CheckOffline`]: per item id, whether the file a
+    /// copy needs is on the device.
+    OfflineChecked {
+        generation: u64,
+        outcome: Result<Vec<(String, bool)>, String>,
+    },
+    /// Files arrived on the device (the downloader went on): the marks of
+    /// the shown tiles are looked at again.
+    OfflineFiles,
+    /// Whether the server answers, as the last request to it found.
+    Reachable(bool),
+    /// Keep or stop keeping, from outside the grid (the Settings page's
+    /// "Keep everything" switch): a pack or the library is kept only after
+    /// the estimate and a yes ([`Model::confirm`]).
+    Keep {
+        scope: KeepScope,
+        keep: bool,
+    },
+    /// Answer to [`Command::LoadKeptReasons`].
+    KeptReasons {
+        item_id: String,
+        outcome: Result<Vec<KeptFor>, String>,
+    },
+    /// Answer to [`Command::EstimateKeep`].
+    Estimated {
+        scope: KeepScope,
+        outcome: Result<Estimate, String>,
+    },
+    /// Answer to [`Command::SetKeep`].
+    KeepDone {
+        scope: KeepScope,
+        keep: bool,
+        outcome: Result<(), String>,
+    },
+    /// The Settings page's "Remove kept files": ask first, with what it
+    /// removes.
+    AskRemoveKept {
+        files: u64,
+        bytes: u64,
+    },
+    /// Answer to [`Command::RemoveKept`]: the files and bytes removed.
+    KeptRemoved(Result<(u64, u64), String>),
+    /// The question on screen ([`Model::confirm`]) was answered (its buttons).
+    Confirm(bool),
+    /// Open the menu of a grid cell (a right click on it; `None`: the
+    /// selected one, the Menu key).
+    OpenMenu(Option<usize>),
+    /// An entry of [`Model::menu`] was chosen.
+    MenuChosen(MenuAction),
+    /// The menu went away without a choice.
+    CloseMenu,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -496,6 +565,36 @@ pub enum Command {
         after_ms: u64,
         seq: u64,
     },
+    // -- keeping offline (docs/offline.md) -------------------------------------------
+    /// Whether each item's file for a copy to `target` (with the sticker
+    /// flag `sticker`) is on the device (`Session::available_offline`);
+    /// answer with [`Event::OfflineChecked`]. At most one is in flight.
+    CheckOffline {
+        items: Vec<ItemSummary>,
+        target: TargetApp,
+        sticker: bool,
+        generation: u64,
+    },
+    /// Why the item is kept (`Session::offline_reasons`), for its menu;
+    /// answer with [`Event::KeptReasons`].
+    LoadKeptReasons {
+        item: Box<ItemSummary>,
+    },
+    /// What keeping a pack or the library would take
+    /// (`Session::offline_estimate`); answer with [`Event::Estimated`].
+    EstimateKeep {
+        scope: KeepScope,
+    },
+    /// Keep (`Session::offline_keep`) or stop keeping
+    /// (`Session::offline_release`); answer with [`Event::KeepDone`]. After
+    /// a keep the shell runs the downloader.
+    SetKeep {
+        scope: KeepScope,
+        keep: bool,
+    },
+    /// Delete the kept files and forget what to keep
+    /// (`Session::offline_remove_all`); answer with [`Event::KeptRemoved`].
+    RemoveKept,
 }
 
 /// How the current target app was chosen.
@@ -573,6 +672,30 @@ pub enum Status {
         on: bool,
         hidden: usize,
     },
+    /// Working out what keeping a pack or the library takes.
+    Estimating {
+        name: String,
+    },
+    /// A keep (`keep`) or a release went through.
+    Kept {
+        what: Kept,
+        keep: bool,
+    },
+    /// A keep, a release or an estimate failed (the whole message).
+    KeepFailed(String),
+    /// The kept files were removed.
+    KeptRemoved {
+        files: u64,
+        bytes: u64,
+    },
+}
+
+/// What a keep or a release was for, as [`Status::Kept`] names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kept {
+    Item(String),
+    Pack(String),
+    Library,
 }
 
 impl Status {
@@ -592,8 +715,11 @@ impl Status {
             | Status::EmptyPack
             | Status::Favorite { .. }
             | Status::Tile { .. }
-            | Status::Safe { .. } => Level::Info,
-            Status::Searching | Status::Copying { .. } | Status::Loading => Level::Busy,
+            | Status::Safe { .. }
+            | Status::Kept { .. }
+            | Status::KeptRemoved { .. } => Level::Info,
+            Status::Searching | Status::Copying { .. } | Status::Loading | Status::Estimating { .. } => Level::Busy,
+            Status::KeepFailed(_) => Level::Error,
             Status::Offline => Level::Warning,
             Status::Copied { warning, .. } => {
                 if warning.is_some() {
@@ -665,8 +791,28 @@ impl Status {
                 (Tile::Text, false) => t("Text hidden"),
                 (Tile::Details, true) => t("Item stats shown"),
                 (Tile::Details, false) => t("Item stats hidden"),
+                (Tile::Offline, true) => t("Offline marks shown"),
+                (Tile::Offline, false) => t("Offline marks hidden"),
             }
             .into(),
+            Status::Estimating { name } => tf("Counting what {name} takes...", &[("name", name)]),
+            Status::Kept { what, keep: true } => match what {
+                Kept::Item(name) => tf("{name} is kept offline", &[("name", name)]),
+                Kept::Pack(name) => tf("Pack {name} is kept offline", &[("name", name)]),
+                Kept::Library => t("The whole library is kept offline").into(),
+            },
+            Status::Kept { what, keep: false } => match what {
+                Kept::Item(name) => tf("{name} is no longer kept offline", &[("name", name)]),
+                Kept::Pack(name) => tf("Pack {name} is no longer kept offline", &[("name", name)]),
+                Kept::Library => t("The library is no longer kept offline").into(),
+            },
+            Status::KeepFailed(e) => tf("Keeping offline failed: {error}", &[("error", &t_dyn(e))]),
+            Status::KeptRemoved { files, bytes } => tp(
+                *files,
+                "Removed {n} kept file ({size})",
+                "Removed {n} kept files ({size})",
+            )
+            .replace("{size}", &crate::offline::human_bytes(*bytes)),
             Status::Safe { on: false, .. } => t("Safe mode off: items tagged nsfw are shown").into(),
             Status::Safe { on: true, hidden: 0 } => t("Safe mode on: items tagged nsfw are hidden").into(),
             Status::Safe { on: true, hidden } => tp(
@@ -805,6 +951,8 @@ pub struct Entry {
     /// The viewer liked the item, as far as the model knows: the favorites
     /// it loaded (the Favorites tab's list) and the likes made since.
     pub liked: bool,
+    /// Whether its file is on the device, as the tile shows it.
+    pub offline: OfflineMark,
 }
 
 impl Entry {
@@ -840,6 +988,17 @@ impl Entry {
         if let Some(why) = &self.incompatible {
             s.push_str("\n⚠ ");
             s.push_str(&t_template(why, profiles::INCOMPATIBLE));
+        }
+        match self.offline {
+            OfflineMark::Available => {
+                s.push('\n');
+                s.push_str(t("Available offline"));
+            }
+            OfflineMark::Unavailable => {
+                s.push('\n');
+                s.push_str(t("Not on this device, and the server is unreachable"));
+            }
+            OfflineMark::None => {}
         }
         let text = it.text.trim();
         if !text.is_empty() {
@@ -1139,6 +1298,9 @@ pub struct Model {
     safe: bool,
     /// Items safe mode left out of [`Model::entries`].
     hidden: usize,
+    /// Keeping offline: what is kept, whose files are here, the menu and
+    /// the question (`model/keep.rs`).
+    keep: keep::KeepState,
 }
 
 /// The copy currently being prepared.
@@ -1175,6 +1337,12 @@ fn cancels_pending(event: &Event) -> bool {
             | Event::AcceptSuggestion(_)
             | Event::ToggleFavorite
             | Event::PackBack
+            | Event::Keep { .. }
+            | Event::AskRemoveKept { .. }
+            | Event::Confirm(_)
+            | Event::OpenMenu(_)
+            | Event::MenuChosen(_)
+            | Event::CloseMenu
     )
 }
 
@@ -1224,6 +1392,7 @@ impl Model {
             tiles: cfg.tiles,
             safe: cfg.safe_mode,
             hidden: 0,
+            keep: keep::KeepState::new(cfg.default_target),
             cfg,
         }
     }
@@ -1467,7 +1636,25 @@ impl Model {
         if cancels_pending(&event) {
             self.pending.clear();
         }
+        if let Some(cmds) = self.question_takes(&event) {
+            return cmds;
+        }
+        self.input_closes_menu(&event);
         match event {
+            e @ (Event::OfflineKeeps(_)
+            | Event::OfflineChecked { .. }
+            | Event::OfflineFiles
+            | Event::Reachable(_)
+            | Event::Keep { .. }
+            | Event::KeptReasons { .. }
+            | Event::Estimated { .. }
+            | Event::KeepDone { .. }
+            | Event::AskRemoveKept { .. }
+            | Event::KeptRemoved(_)
+            | Event::Confirm(_)
+            | Event::OpenMenu(_)
+            | Event::MenuChosen(_)
+            | Event::CloseMenu) => self.keep_event(e),
             Event::Open(info) => self.open(info),
             Event::Toggle { popup_active, open } => {
                 if self.visible && popup_active {
@@ -1620,6 +1807,8 @@ impl Model {
             }
             Event::LibraryChanged => {
                 let mut cmds = vec![Command::LoadVocabulary];
+                // A sync may have removed files of the shown items.
+                cmds.extend(self.check_offline());
                 // Results the cache answered may be others now; the server's stay.
                 if self.visible && self.offline && !self.query.trim().is_empty() && self.completion.is_none() {
                     self.generation += 1;
@@ -1743,7 +1932,7 @@ impl Model {
             cmds.extend(self.set_safe(self.cfg.safe_mode));
         }
         if compat {
-            self.refresh_compat();
+            cmds.extend(self.refresh_compat());
         }
         cmds
     }
@@ -1761,10 +1950,14 @@ impl Model {
         if tile == Tile::Favorites && on && self.visible {
             return self.load_favorites().into_iter().collect();
         }
+        if tile == Tile::Offline {
+            self.mark_offline();
+            return self.check_offline().into_iter().collect();
+        }
         Vec::new()
     }
 
-    /// `zf`, `ze`, `zt`, `zv`, `zx`, `zi`.
+    /// `zf`, `ze`, `zt`, `zv`, `zx`, `zi`, `zo`.
     fn toggle_tile(&mut self, tile: Tile) -> Vec<Command> {
         let on = !self.tiles.get(tile);
         let mut cmds = self.set_tile(tile, on);
@@ -1783,6 +1976,7 @@ impl Model {
     }
 
     fn reload(&mut self) -> Vec<Command> {
+        self.forget_offline();
         self.most_used = Listing::default();
         self.favorites = Listing::default();
         self.packs.sets = Listing::default();
@@ -2026,6 +2220,7 @@ impl Model {
             Cmd::Back if self.tab == Tab::Packs => self.pack_back(),
             Cmd::Open if view == View::Packs => self.enter(false),
             Cmd::Tile(tile) => self.toggle_tile(tile),
+            Cmd::Keep => self.keep_key(),
             Cmd::Yank { .. } | Cmd::Space | Cmd::Favorite | Cmd::Browser | Cmd::Back | Cmd::Open => Vec::new(),
         }
     }
@@ -2146,7 +2341,12 @@ impl Model {
                 self.results = r.hits;
                 self.results_target = self.target;
                 self.showing = Showing::Results;
+                let reach_changed = self.results_reached(r.offline);
                 if !shown {
+                    if reach_changed {
+                        self.mark_offline();
+                        return self.check_offline().into_iter().collect();
+                    }
                     return Vec::new();
                 }
                 self.rebuild(Sel::First);
@@ -2362,6 +2562,7 @@ impl Model {
             item: item.clone(),
             matched: Vec::new(),
             liked: false,
+            offline: OfflineMark::None,
         };
         self.entries = match self.tab {
             Tab::Search => match self.showing {
@@ -2380,6 +2581,7 @@ impl Model {
                             item: hit.item.clone(),
                             matched: hit.matched.clone(),
                             liked: false,
+                            offline: OfflineMark::None,
                         }
                     })
                     .collect(),
@@ -2405,6 +2607,7 @@ impl Model {
         for e in &mut self.entries {
             e.liked = self.liked.contains(&e.item.id);
         }
+        self.mark_offline();
         if self.view() == View::Packs {
             let terms = filter_terms(&self.packs.filter);
             self.packs.shown = self
@@ -2447,12 +2650,17 @@ impl Model {
         self.selected = Some(i);
     }
 
-    fn refresh_compat(&mut self) {
+    /// The target app or the sticker flag changed: compatibility, and whose
+    /// files a copy finds on the device, again.
+    fn refresh_compat(&mut self) -> Option<Command> {
         self.rebuild(Sel::Keep);
+        self.check_offline()
     }
 
-    fn thumbnails(&self) -> Vec<Command> {
-        match self.view() {
+    /// The shown cells changed: their thumbnails or covers, and whose
+    /// files are on the device (for the offline marks).
+    fn thumbnails(&mut self) -> Vec<Command> {
+        let mut cmds = match self.view() {
             View::Items if !self.entries.is_empty() => vec![Command::LoadThumbnails {
                 items: self.entries.iter().map(|e| e.item.clone()).collect(),
             }],
@@ -2460,7 +2668,9 @@ impl Model {
                 packs: self.packs.shown.clone(),
             }],
             _ => Vec::new(),
-        }
+        };
+        cmds.extend(self.check_offline());
+        cmds
     }
 
     fn cycle_target(&mut self, backwards: bool) -> Vec<Command> {
@@ -2482,19 +2692,18 @@ impl Model {
         if !changed {
             return Vec::new();
         }
-        self.refresh_compat();
+        let mut cmds: Vec<Command> = self.refresh_compat().into_iter().collect();
         if !self.query.trim().is_empty() {
             // Re-rank with the new target's compatibility hints, right away.
             self.generation += 1;
-            return vec![self.search_command(0)];
+            cmds.push(self.search_command(0));
         }
-        Vec::new()
+        cmds
     }
 
     fn toggle_sticker(&mut self) -> Vec<Command> {
         self.sticker = !self.sticker;
-        self.refresh_compat();
-        Vec::new()
+        self.refresh_compat().into_iter().collect()
     }
 
     /// Switch safe mode: the shown grid is filtered again, and a search
@@ -2862,8 +3071,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// Favorite marks off, so an opening asks only for its own tab's data;
-    /// `tiles_tests` covers them.
+    /// Favorite and offline marks off, so an opening asks only for its own
+    /// tab's data; `tiles_tests` and `keep_tests` cover them.
     pub(crate) fn cfg() -> ModelConfig {
         ModelConfig {
             columns: 4,
@@ -2872,6 +3081,7 @@ pub(crate) mod tests {
             max_results: 10,
             tiles: Tiles {
                 favorites: false,
+                offline: false,
                 ..Tiles::default()
             },
             counts: true,
@@ -3840,6 +4050,7 @@ pub(crate) mod tests {
             incompatible: None,
             matched: vec![],
             liked: false,
+            offline: OfflineMark::None,
         };
         assert_eq!(e.badge(), None);
         assert!(!e.is_animated());
@@ -3906,6 +4117,10 @@ pub(crate) mod tests {
     }
 }
 
+mod keep;
+
+#[cfg(test)]
+mod keep_tests;
 #[cfg(test)]
 mod modal_tests;
 

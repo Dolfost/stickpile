@@ -627,13 +627,16 @@ fn search_results_wait_for_the_search_tab() {
             offline: true,
         }),
     });
-    assert!(cmds.is_empty());
+    // Only what Recent shows is looked at: whose files are here, now that
+    // the server did not answer.
+    assert!(matches!(&cmds[..], [Command::CheckOffline { items, .. }] if items.len() == 2));
     assert_eq!(ids(&m), ["0", "1"]);
     assert!(!m.is_offline(), "offline is about search results");
     let cmds = m.handle(Event::ShowTab(Tab::Search));
     assert_eq!(ids(&m), ["h0", "h1", "h2"]);
     assert_eq!(m.status(), &Status::Offline);
     assert!(!loads_recent(&cmds));
+    // The check of Recent is still out: Search's follows it.
     assert!(matches!(&cmds[..], [Command::LoadThumbnails { items }] if items.len() == 3));
 }
 

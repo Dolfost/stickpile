@@ -96,9 +96,12 @@ pub(crate) enum Cmd {
     Back,
     /// `o`
     Open,
-    /// `zf`, `ze`, `zt`, `zv`, `zx`: show or hide favorite marks, emojis,
-    /// tags, the vibe or the text on the tiles; `zi` the stats row.
+    /// `zf`, `ze`, `zt`, `zv`, `zx`, `zo`: show or hide favorite marks,
+    /// emojis, tags, the vibe, the text or the offline marks on the tiles;
+    /// `zi` the stats row.
     Tile(Tile),
+    /// `K`: keep the selected sticker or pack offline, or stop keeping it.
+    Keep,
 }
 
 /// What feeding a key gave.
@@ -203,6 +206,7 @@ impl Pending {
                 NormalKey::Char('v') => Some(Tile::Vibe),
                 NormalKey::Char('x') => Some(Tile::Text),
                 NormalKey::Char('i') => Some(Tile::Details),
+                NormalKey::Char('o') => Some(Tile::Offline),
                 _ => None,
             };
             return Fed::Run(tile.map(Cmd::Tile).into_iter().collect());
@@ -276,6 +280,7 @@ fn single(key: NormalKey) -> Option<Cmd> {
         NormalKey::Char('T') => Cmd::Target { backwards: true },
         NormalKey::Char('s') => Cmd::Sticker,
         NormalKey::Char('S') => Cmd::Safe,
+        NormalKey::Char('K') => Cmd::Keep,
         NormalKey::Char('?') => Cmd::Help,
         NormalKey::Char('q') => Cmd::Quit,
         NormalKey::Char('-') | NormalKey::Backspace => Cmd::Back,
@@ -316,6 +321,8 @@ pub const HELP: &[HelpSection] = &[
             ("y, Enter", "copy for the target app"),
             ("Y, Shift+Enter", "copy with sticker mode flipped"),
             ("f", "add to / remove from favorites"),
+            ("K", "keep the item offline / stop keeping it"),
+            ("Menu, Shift+F10, right click", "the menu of the selected tile"),
             ("gx", "open the item in the browser"),
             ("t / T", "next / previous target app"),
             ("s", "toggle sticker mode"),
@@ -324,6 +331,7 @@ pub const HELP: &[HelpSection] = &[
                 "zf / ze / zt / zv / zx",
                 "favorite marks / emojis / tags / vibe / text on the tiles",
             ),
+            ("zo", "the marks of what is available offline"),
             ("zi", "the item stats row"),
             ("/", "new search"),
             ("i, a", "edit the query"),
@@ -344,6 +352,7 @@ pub const HELP: &[HelpSection] = &[
         title: "Packs",
         keys: &[
             ("Enter, o", "open the pack"),
+            ("K", "keep the pack offline (asks first) / stop keeping it"),
             ("-, Backspace, Esc", "back to the pack list"),
         ],
     },

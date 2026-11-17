@@ -9,10 +9,13 @@
 //! * [`history`]: per-window "last used here" ordering of recent items.
 //! * [`suggest`]: the values offered while a `key:` filter is typed.
 //! * [`within`]: the search syntax over the items of an opened pack.
+//! * [`offline`]: keeping offline as the popup shows it: marks, the menu of
+//!   a tile, the question before keeping a pack or the library.
 
 pub mod focus;
 pub mod history;
 pub mod model;
+pub mod offline;
 pub mod suggest;
 pub mod tabs;
 pub mod vim;
