@@ -25,7 +25,7 @@
 //! [`Session::offline_run`]: crate::Session::offline_run
 
 pub(crate) mod run;
-mod session;
+pub(crate) mod session;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -146,7 +146,7 @@ pub enum PlanScope {
 /// targets of the copy history, [`crate::Session::offline_device`]) and
 /// whether its grids play animations (the Android app does; the desktop
 /// popups show thumbnails).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Device {
     pub targets: Vec<TargetApp>,
     pub plays_motion: bool,
@@ -906,9 +906,11 @@ pub(crate) fn media_of(rel: &str) -> Option<&str> {
 
 /// The kept files to delete because their item is gone: a kept thumbnail or
 /// rendition whose media no cached item has any more (a sync removed the
-/// item, or its picture was replaced).
-pub(crate) fn orphaned<'a>(kept: impl Iterator<Item = &'a String>, items: &[ItemSummary]) -> HashSet<String> {
-    let media: HashSet<String> = items.iter().map(|i| safe_component(&i.media_id)).collect();
+/// item, or its picture was replaced). `media` is the `media_id` of every
+/// cached item, those this version cannot read included
+/// ([`crate::cache::Cache::item_media`]).
+pub(crate) fn orphaned<'a>(kept: impl Iterator<Item = &'a String>, media: &HashSet<String>) -> HashSet<String> {
+    let media: HashSet<String> = media.iter().map(|m| safe_component(m)).collect();
     kept.filter(|rel| media_of(rel).is_some_and(|m| !media.contains(m)))
         .cloned()
         .collect()

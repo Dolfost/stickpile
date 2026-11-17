@@ -727,13 +727,16 @@ fn eviction_and_clear_cache_never_remove_kept_files() {
     let wanted: std::collections::HashSet<String> = ["clip/k1.original/a.png", "files/thumb/k2.webp"]
         .map(String::from)
         .into();
-    let report = cache.offline_mark(&wanted, &Default::default()).unwrap();
+    let epoch = cache.offline_epoch().unwrap();
+    let none = Default::default();
+    let report = cache.offline_mark(epoch, &wanted, &none, &none).unwrap().unwrap();
     assert_eq!(report.flagged, 1);
     write("files/thumb/k2.webp", 700 * 1024);
     assert!(cache
         .register_kept_file("files/thumb/k2.webp", cache.offline_epoch().unwrap())
         .unwrap());
-    assert_eq!(cache.offline_mark(&wanted, &Default::default()).unwrap().flagged, 0);
+    let report = cache.offline_mark(epoch, &wanted, &none, &none).unwrap().unwrap();
+    assert_eq!(report.flagged, 0);
     // Kept files do not count against the cap: two more files fit...
     write("files/thumb/o1.webp", 400 * 1024);
     cache.register_file("files/thumb/o1.webp").unwrap();
@@ -1246,6 +1249,23 @@ async fn offline_a_kept_sticker_copies_for_every_target_and_another_is_not_on_de
         "{err}"
     );
     session.fetch_variant(kept_item, Variant::Original).await.unwrap();
+}
+
+/// A part file is exactly `<file>.part.<owner>`: a cached file whose own
+/// name holds `.part.` (an item named so) is not one.
+#[test]
+fn only_exact_part_file_names_count() {
+    use crate::cache::part_file_target;
+    assert_eq!(part_file_target("cat.png.part.1234-abcdef"), Some("cat.png"));
+    assert_eq!(part_file_target("cat.png.part.dead"), Some("cat.png"));
+    assert_eq!(part_file_target("cat.png.part.foo.png"), None);
+    assert_eq!(
+        part_file_target(".cat.png.abc.part"),
+        None,
+        "a copy's own temporary file"
+    );
+    assert_eq!(part_file_target("cat.png"), None);
+    assert_eq!(part_file_target(".part.x"), None);
 }
 
 // -- sign-out, server change, older clients ------------------------------------------
@@ -1886,6 +1906,46 @@ async fn review_a_sign_out_by_0_8_0_then_a_new_login_still_removes_the_kept_file
         session.offline_keeps().unwrap(),
         kept(session.cache())
     );
+}
+
+/// The limit of the above (docs/offline.md, "Sign-out and another
+/// server"): 0.8.0 signs out, in again as the same account, and syncs,
+/// all before the new client runs. The cache then looks as after an
+/// ordinary 0.8.0 sync, and the account's own kept files stay kept.
+#[tokio::test]
+async fn a_sign_out_sign_in_and_sync_by_0_8_0_cannot_be_told_apart() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let kept_before = kept(session.cache());
+    let cache = cache_dir(dir.path());
+    {
+        let conn = open_as_0_8_0(&cache);
+        let me: String = conn
+            .query_row("SELECT value FROM meta WHERE key = 'me'", [], |r| r.get(0))
+            .unwrap();
+        let cursor: String = conn
+            .query_row("SELECT value FROM meta WHERE key = 'updated_since'", [], |r| r.get(0))
+            .unwrap();
+        conn.execute_batch(
+            "CREATE TEMP TABLE synced AS SELECT * FROM items;
+             DELETE FROM items; DELETE FROM history; DELETE FROM usage_queue;
+             DELETE FROM meta WHERE key IN ('me', 'updated_since');",
+        )
+        .unwrap();
+        // Login, then a full sync: the same account, items and cursor.
+        conn.execute("INSERT INTO meta(key, value) VALUES ('me', ?1)", [&me])
+            .unwrap();
+        conn.execute_batch("INSERT INTO items SELECT * FROM temp.synced;")
+            .unwrap();
+        conn.execute("INSERT INTO meta(key, value) VALUES ('updated_since', ?1)", [&cursor])
+            .unwrap();
+    }
+    session.sync().await.unwrap();
+    assert_eq!(session.offline_keeps().unwrap(), [Scope::Item(items[0].id.clone())]);
+    assert_eq!(kept(session.cache()), kept_before);
 }
 
 /// Several new clients open a cache 0.8.0 wrote, at the same moment: each

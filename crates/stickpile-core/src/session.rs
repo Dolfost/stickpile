@@ -92,6 +92,9 @@ pub struct Session {
     pub(crate) plays_motion: bool,
     /// Downloads the user asked for, which the offline downloader yields to.
     foreground: Arc<Foreground>,
+    /// This process's offline options as other processes on the cache see
+    /// them ([`Session::offline_refresh`]).
+    pub(crate) offline_peer: crate::offline::session::OfflinePeer,
 }
 
 impl std::fmt::Debug for Session {
@@ -119,6 +122,10 @@ impl Session {
         let cache = Arc::new(cache);
         let usage = Arc::new(UsageQueue::new(cache.clone()));
         let offline_opts = Mutex::new(config.offline.clone());
+        let offline_peer = crate::offline::session::OfflinePeer {
+            id: crate::new_id(),
+            cache: cache.clone(),
+        };
         Ok(Session {
             config,
             client,
@@ -130,6 +137,7 @@ impl Session {
             offline_opts,
             plays_motion: false,
             foreground: Arc::new(Foreground::default()),
+            offline_peer,
         })
     }
 

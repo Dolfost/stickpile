@@ -85,16 +85,22 @@ up to 0.8.0 still opens and uses the cache.
 
 - `files.kept INTEGER NOT NULL DEFAULT 0`, added with `ALTER TABLE` when the
   column is missing (in an immediate transaction, so two processes opening
-  the cache at once do not both add it), with a partial index.
+  the cache at once do not both add it), with a partial index: 0 an
+  ordinary file, 1 kept, 2 kept before a reset and being deleted (see
+  below).
 - `offline_keeps (scope, id, created_at)`: the user's choices (`item`,
   `set`, or `library` with an empty id).
 - `offline_failures (path, item_id, error, attempts, at)`: downloads that
   failed and why.
 - `offline_claims (path, owner, at)`: which process is downloading a file.
-- `meta`: `offline_owner` (the account the kept data belongs to),
-  `offline_epoch` (moves on every reset), `offline_liked` and
-  `offline_covers` (what the downloader last learnt from the server, for
-  plans made offline).
+- `offline_peers (id, at, json)`: the offline options and device of each
+  process that brought the kept files in line in the last 24 hours (one
+  row per `Session`, gone when it ends).
+- `meta`: `offline_owner` (the account the kept data belongs to, set once a
+  sync completed), `offline_epoch` (moves on every reset),
+  `offline_kept_epoch` (the epoch the kept files belong to),
+  `offline_liked` and `offline_covers` (what the downloader last learnt
+  from the server, for plans made offline).
 
 How a kept file is protected:
 
@@ -106,13 +112,37 @@ How a kept file is protected:
   `kept_bytes`).
 - `Cache::offline_reset` (the confirmed "Remove kept files", and part of
   sign-out) deletes the kept files and forgets every keep, failure and
-  claim.
+  claim. In one transaction it forgets, moves the epoch and marks the kept
+  files 2 ("being deleted"); then it deletes them. A process that dies in
+  between leaves them marked, and the next open of the cache, refresh or
+  reset deletes them; one that ran the reset's transaction without marking
+  them (moving the epoch past `offline_kept_epoch`) is caught the same way:
+  every transaction that flags a file first marks the kept files of an
+  older epoch.
+- A file is deleted only together with its row: the check, the unlink and
+  the row's deletion are one immediate transaction. A file that cannot be
+  deleted keeps its row (and its flag), so a later clear, eviction or
+  reset tries again; the reports count only files that went.
 - The flag is recomputed from the plan on every derivation
   (`Session::offline_refresh`, run after every sync, keep and release, and
   at the start of every download run): wanted files that are present are
   flagged, flagged files nothing wants any more are released to the LRU
   (as used now), and the kept files of items a sync removed (no cached
-  item has their media any more) are deleted.
+  item has their media any more, also counting the items this version
+  cannot read) are deleted.
+- A refresh releases only what no process on the cache keeps: the CLI and
+  the popup may run with other options (one read the config before it was
+  edited). Each refresh notes its options and device in `offline_peers`
+  and flags, and keeps from release, what the plans of the other processes
+  noted there in the last 24 hours want (when their options cannot be
+  read, from a newer client, it releases nothing). It releases only files
+  that were kept when its plan was made, and nothing at all when the epoch
+  moved meanwhile (a reset: it derives the plan again). Kept files of
+  items this version cannot read (a newer client stored them) stay kept.
+  A process whose options are older than another's so never hands the
+  other's kept files to the size cap; the price is that a file only an
+  ended process wanted stays kept until its row is 24 hours old (or the
+  process ended cleanly).
 - A kept file's `last_access` is the largest value SQLite holds. The new
   client never reads it for kept files; a client up to 0.8.0, which evicts
   by `last_access` alone, so takes every other file first.
@@ -126,11 +156,16 @@ What an older client does to the new cache, and how it heals:
 | "Clear cache" (Android `clear_cache`) | every file deleted | the same |
 | registers a file again | the row keeps `kept`, `last_access` is lowered | the next refresh sets it back |
 | a wrong-size or missing file | its row is dropped | the next run downloads it |
-| signs out or changes account | items and `me` go, the offline tables stay | the next refresh sees `offline_owner` differ from the cached account (or none) and resets the offline data: kept files deleted, keeps forgotten |
+| signs out or changes account | items, the sync cursor and `me` go, the offline tables stay | the next refresh, sync or login (`Cache::set_me`) sees `offline_owner` differ from the cached account (or none) and resets the offline data: kept files deleted, keeps forgotten |
+| signs out and in again as the same account | as above, then `me` is back at once | the same, as long as 0.8.0 has not synced since: the items and the sync cursor are gone while `offline_owner` is set (it is set only after a completed sync, so a new login's first sync does not look like this) |
+| signs out, in again as the same account, and syncs | items, cursor and `me` are back | cannot be told from an ordinary 0.8.0 sync: the kept files of that same account stay kept |
+| writes `me` or an item this version cannot read (a newer client) | `Cache::me` or the item is unreadable | not a sign-out: the account's id is read from the raw JSON, and a kept file's item counts as there while its row is |
 
 Running the released 0.8.0 CLI on a cache the new client wrote is a
-manual test: `real_0_8_0_cli_on_a_cache_the_new_client_wrote` in
-`tests/offline.rs` (ignored; it needs `STICKPILE_080_CLI`).
+manual test: `real_0_8_0_cli_on_a_cache_the_new_client_wrote` and
+`review_real_0_8_0_cli_upgrade_touch_and_sign_out` in `tests/offline.rs`
+(ignored; they need `STICKPILE_080_CLI`, the binary of `nix build
+github:Dolfost/stickpile/v0.8.0#stickpile-cli`).
 
 ## Options
 
@@ -212,14 +247,24 @@ within a group (copies on this device, then over all users).
   `offline_claims`; another process (the CLI next to the popup) skips a
   fresh claim and looks again later, so no file is fetched twice. A claim
   is renewed every 30 s while its download runs and is stale 120 s after
-  that; the part files of a dead process go when the file is claimed next
-  (thumbnails and covers: when a run starts).
-- A file is written to `<path>.part.<owner>` and renamed into place once
-  its size equals `size_bytes` and its sha256 the server's `ETag`, so an
-  interrupted download leaves nothing that looks complete; the part file is
-  deleted when the download ends any other way, also when the run's future
-  is dropped. Partial bytes are not reused: the next run fetches the file
-  again.
+  that. The part files of a dead process go when a run starts (under
+  `files/thumb`, `files/cover` and `clip/`, those of files no live claim
+  holds), on "Clear cache" and "Remove kept files", and when their file is
+  claimed next. Only names that are exactly `<file>.part.<owner>` count.
+- A file is written to `<path>.part.<owner>`, synced to disk and renamed
+  into place once its size equals `size_bytes` and its sha256 the server's
+  `ETag`, so an interrupted download leaves nothing that looks complete;
+  the part file is deleted when the download ends any other way, also when
+  the run's future is dropped. Partial bytes are not reused: the next run
+  fetches the file again.
+- The rename happens in the immediate transaction that checks the epoch
+  and registers the file as kept (`Cache::install_kept_file`): a reset
+  either comes first (the epoch moved: only the part file is deleted, the
+  run ends `Cancelled`) or after (it finds the file kept and deletes it).
+  A download a reset made stale never replaces nor deletes a file another
+  process kept since; a file found on the device already is registered the
+  same way and never deleted. Before each try, also each retry, the run
+  checks the epoch and its claim again.
 - A `429` makes every download wait as `Retry-After` says (30 s without
   one, at most 10 minutes; at most 5 times per file). Other errors are
   retried after 2 s and 4 s; the third failure counts the file as failed
@@ -247,6 +292,19 @@ within a group (copies on this device, then over all users).
 deletes the kept files and empties the keep, failure and claim tables, with
 the rest of the account's data. A download still running throws its file
 away (`offline_epoch` moved).
+
+A client up to 0.8.0 does not know the offline data: its sign-out drops
+the items, the sync cursor and the cached account, and leaves the kept
+files. The new client completes it (`Cache::offline_check_owner`, run by
+every refresh and by `Cache::set_me`, so before a login stores its
+account): it resets the offline data when no account is cached, when
+another one is, or when the same one is but the items and the sync cursor
+are gone (0.8.0 signed out and in again; its login stores the account at
+once, and `offline_owner` is set only after a completed sync). After a
+0.8.0 sign-out, a sign-in as the same account and a 0.8.0 sync, nothing
+tells the cache from an ordinary 0.8.0 sync: that account's kept files
+stay. A cached account this version cannot read is not taken for a
+sign-out.
 
 ## Clients
 

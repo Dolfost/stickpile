@@ -14,10 +14,12 @@
 //! * `history`: the local copy history (for "recently used").
 //! * `usage_queue`: pending usage events (see [`crate::usage`]).
 //! * Keeping offline ([`crate::offline`], docs/offline.md): `files.kept`
-//!   marks the files kept on the device, which the size cap never evicts
-//!   and "Clear cache" never removes; `offline_keeps` holds what the user
+//!   marks the files kept on the device (1), which the size cap never
+//!   evicts and "Clear cache" never removes, and those a reset is deleting
+//!   (2, [`Cache::offline_reset`]); `offline_keeps` holds what the user
 //!   chose to keep, `offline_failures` the downloads that failed and why,
-//!   `offline_claims` which process is downloading a file. All of it is
+//!   `offline_claims` which process is downloading a file, `offline_peers`
+//!   the offline options of the processes on the cache. All of it is
 //!   additive ([`OFFLINE_FORMAT`]): a client up to 0.8.0 opens and uses the
 //!   cache as before.
 
@@ -57,12 +59,24 @@ pub const ITEM_FORMAT: i64 = 2;
 /// derivation of the offline plan, which flags the wanted files again and
 /// downloads the missing ones ([`Cache::offline_mark`]).
 ///
-/// - 1: `files.kept`, `offline_keeps`, `offline_failures`, `offline_claims`.
+/// - 1: `files.kept`, `offline_keeps`, `offline_failures`, `offline_claims`,
+///   `offline_peers`.
 pub const OFFLINE_FORMAT: i64 = 1;
 /// `files.last_access` of a kept file. A client up to 0.8.0 evicts by
 /// `last_access` alone, so this makes it take every other file first; a kept
 /// file goes back to the current time when it is released.
 const KEPT_ACCESS: i64 = i64::MAX;
+/// `files.kept` of a file a reset is deleting: kept before
+/// [`Cache::offline_reset`] (or before a reset by a process that died
+/// before it deleted its files). Neither kept nor evicted; the next open,
+/// refresh or reset deletes it ([`Cache::offline_finish_reset`]).
+const CONDEMNED: i64 = 2;
+/// A process's offline options in `offline_peers` count this long after it
+/// last brought the kept files in line with them ([`Cache::offline_peer_note`]).
+pub const PEER_TTL_SECS: i64 = 24 * 3600;
+/// A download claim older than this belongs to a process that died (the
+/// downloader renews its claims every 30 s).
+pub const CLAIM_STALE_SECS: i64 = 120;
 /// Copy history rows kept.
 const HISTORY_MAX: i64 = 2000;
 /// Default `limit` for `GET /items` pages.
@@ -120,6 +134,11 @@ CREATE TABLE IF NOT EXISTS offline_claims (
     owner TEXT NOT NULL,
     at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS offline_peers (
+    id TEXT PRIMARY KEY,
+    at INTEGER NOT NULL,
+    json TEXT NOT NULL
+);
 ";
 
 /// Add `files.kept` when the cache lacks it (written by a client up to
@@ -141,7 +160,65 @@ fn ensure_kept_column(conn: &mut Connection) -> rusqlite::Result<()> {
          WHERE CAST(meta.value AS INTEGER) < CAST(excluded.value AS INTEGER)",
         [OFFLINE_FORMAT.to_string()],
     )?;
+    // The epoch the kept files belong to (see `condemn_stale`); a cache
+    // without it starts at the current one.
+    tx.execute(
+        "INSERT OR IGNORE INTO meta(key, value)
+         SELECT 'offline_kept_epoch', COALESCE((SELECT value FROM meta WHERE key = 'offline_epoch'), '0')",
+        [],
+    )?;
     tx.commit()
+}
+
+/// `meta` value `key` as a number (absent or unreadable: 0).
+fn meta_u64(conn: &Connection, key: &str) -> rusqlite::Result<u64> {
+    Ok(conn
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0))
+}
+
+/// The kept files belong to the epoch in `offline_kept_epoch`. When the
+/// epoch moved past it and the kept files were not condemned (a reset by a
+/// process that died in it), condemn them now, before anything is flagged
+/// under the new epoch: they were kept before the reset and are to be
+/// deleted ([`Cache::offline_finish_reset`]). In the caller's immediate
+/// transaction. Returns the epoch.
+fn condemn_stale(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<u64> {
+    let epoch = meta_u64(tx, "offline_epoch")?;
+    if meta_u64(tx, "offline_kept_epoch")? != epoch {
+        tx.execute("UPDATE files SET kept = ?1 WHERE kept = 1", [CONDEMNED])?;
+        tx.execute(
+            "INSERT INTO meta(key, value) VALUES ('offline_kept_epoch', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [epoch.to_string()],
+        )?;
+    }
+    Ok(epoch)
+}
+
+/// The file a downloader's part file `<file>.part.<owner>` belongs to: the
+/// owner is one token (letters, digits, `-`, `_`), so that a file whose own
+/// name holds `.part.` is not taken for one. `None` for other names.
+pub(crate) fn part_file_target(name: &str) -> Option<&str> {
+    let (stem, owner) = name.rsplit_once(".part.")?;
+    let token = !owner.is_empty() && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    (token && !stem.is_empty()).then_some(stem)
+}
+
+/// The cached account as far as this version reads it
+/// ([`Cache::cached_account`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CachedAccount {
+    /// No account is cached: signed out, or not signed in yet.
+    None,
+    /// The account's id and username.
+    Known { id: String, username: String },
+    /// An account is cached, but this version cannot read its id.
+    Unreadable,
 }
 
 /// Result of [`sync`].
@@ -207,12 +284,15 @@ impl Cache {
         conn.execute_batch(SCHEMA)?;
         ensure_kept_column(&mut conn)?;
         conn.execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION}"))?;
-        Ok(Cache {
+        let cache = Cache {
             conn: Mutex::new(conn),
             dir: dir.to_path_buf(),
             max_bytes: max_mb.saturating_mul(1024 * 1024),
             clock: AtomicI64::new(0),
-        })
+        };
+        // What a reset that did not get to delete its files left.
+        cache.offline_finish_reset()?;
+        Ok(cache)
     }
 
     fn db(&self) -> MutexGuard<'_, Connection> {
@@ -273,10 +353,36 @@ impl Cache {
         Ok(self.meta_get("me")?.and_then(|j| serde_json::from_str(&j).ok()))
     }
 
+    /// The cached account's id and username, read without the whole
+    /// [`User`]: a newer client sharing the cache may have stored values
+    /// this version cannot read (a theme or a role added later), which make
+    /// [`Cache::me`] `None` although an account is signed in.
+    pub fn cached_account(&self) -> Result<CachedAccount> {
+        let Some(json) = self.meta_get("me")? else {
+            return Ok(CachedAccount::None);
+        };
+        let value: Option<serde_json::Value> = serde_json::from_str(&json).ok();
+        let field = |name: &str| {
+            value
+                .as_ref()
+                .and_then(|v| v.get(name))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        Ok(match (field("id"), field("username")) {
+            (Some(id), Some(username)) => CachedAccount::Known { id, username },
+            _ => CachedAccount::Unreadable,
+        })
+    }
+
     /// Store `/me`. If a different user was cached before, account data is
-    /// reset first. Returns true if a reset happened.
+    /// reset first. Returns true if a reset happened. Before that, offline
+    /// data a client that does not know it (up to 0.8.0) left behind when
+    /// it signed out is removed ([`Cache::offline_check_owner`]), so that a
+    /// login does not make it pass for the new account's.
     pub fn set_me(&self, user: &User) -> Result<bool> {
-        let reset = matches!(self.me()?, Some(prev) if prev.id != user.id);
+        self.offline_check_owner()?;
+        let reset = matches!(self.cached_account()?, CachedAccount::Known { id, .. } if id != user.id);
         if reset {
             tracing::info!(user = %user.username, "account changed; resetting offline cache");
             self.reset_account_data()?;
@@ -412,6 +518,23 @@ impl Cache {
         Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
     }
 
+    /// The `media_id` of every cached item, also of those this version
+    /// cannot read as an [`ItemSummary`] (a newer client stored a rendition
+    /// or kind this version does not know): what decides whether a kept
+    /// file's item is gone.
+    pub fn item_media(&self) -> Result<HashSet<String>> {
+        let db = self.db();
+        let mut st = db.prepare("SELECT DISTINCT json_extract(json, '$.media_id') FROM items")?;
+        let rows = st.query_map([], |r| r.get::<_, Option<String>>(0))?;
+        let mut out = HashSet::new();
+        for row in rows {
+            if let Some(m) = row? {
+                out.insert(m);
+            }
+        }
+        Ok(out)
+    }
+
     pub fn items(&self) -> Result<Vec<ItemSummary>> {
         let db = self.db();
         let mut st = db.prepare("SELECT json FROM items ORDER BY updated_at DESC, id")?;
@@ -542,7 +665,9 @@ impl Cache {
     /// many ([`EvictReport::kept_files`]). [`Cache::offline_reset`] removes
     /// those.
     pub fn clear_files(&self) -> Result<EvictReport> {
-        self.evict_to(0, None)
+        let report = self.evict_to(0, None)?;
+        self.sweep_part_files(None, CLAIM_STALE_SECS);
+        Ok(report)
     }
 
     /// Delete least-recently-used files that are not kept, except `keep`,
@@ -586,20 +711,26 @@ impl Cache {
         Ok(report)
     }
 
-    /// Delete the row of the cached file `rel` if it matches `cond` (SQL on
-    /// `files`), then the file, pruning its `clip/` directory when it is
-    /// left empty. The row goes first, in one statement with the check, so
-    /// a file another process flags as kept meanwhile is not deleted; a file
-    /// left without a row is only downloaded again when needed. False when
-    /// the row did not match.
+    /// Delete the cached file `rel` if its row matches `cond` (SQL on
+    /// `files`), pruning its `clip/` directory when it is left empty, and
+    /// then its row. The check, the file's deletion and the row's go
+    /// together in one immediate transaction, so a file another process
+    /// flags as kept meanwhile is not deleted; when the file cannot be
+    /// deleted its row stays, and a later clear, eviction or reset tries
+    /// again. True only when the file is gone.
     fn remove_file_where(&self, rel: &str, cond: &str) -> Result<bool> {
-        let deleted = self
-            .db()
-            .execute(&format!("DELETE FROM files WHERE path = ?1 AND {cond}"), [rel])?;
-        if deleted == 0 {
+        let mut db = self.db();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let matches: bool = tx.query_row(
+            &format!("SELECT EXISTS (SELECT 1 FROM files WHERE path = ?1 AND {cond})"),
+            [rel],
+            |r| r.get(0),
+        )?;
+        if !matches || !self.remove_cache_file(rel) {
             return Ok(false);
         }
-        self.remove_cache_file(rel);
+        tx.execute("DELETE FROM files WHERE path = ?1", [rel])?;
+        tx.commit()?;
         Ok(true)
     }
 
@@ -673,14 +804,15 @@ impl Cache {
             .unwrap_or(0))
     }
 
-    /// Every registered file: path -> (size, kept).
+    /// Every registered file: path -> (size, kept). A file a reset is
+    /// deleting does not count as kept.
     pub fn file_index(&self) -> Result<HashMap<String, (u64, bool)>> {
         let db = self.db();
         let mut st = db.prepare("SELECT path, size, kept FROM files")?;
         let rows = st.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                (r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? != 0),
+                (r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? == 1),
             ))
         })?;
         Ok(rows.collect::<rusqlite::Result<HashMap<_, _>>>()?)
@@ -697,83 +829,110 @@ impl Cache {
         Ok(row.is_some() && on_disk(&self.abs(rel), expect_size))
     }
 
-    /// Bring the `kept` flags in line with the offline plan: the registered
-    /// files in `wanted` are flagged (and moved behind every other file in
-    /// LRU order: `last_access` at its largest), the flagged files not in it
-    /// are released to ordinary least-recently-used life (as used now), and
-    /// the files in `delete` (kept files of items a sync removed) are
-    /// deleted. Failures of files no longer wanted are forgotten. One
-    /// transaction for the flags.
-    pub fn offline_mark(&self, wanted: &HashSet<String>, delete: &HashSet<String>) -> Result<MarkReport> {
+    /// Bring the `kept` flags in line with the offline plan made under
+    /// `epoch` ([`Cache::offline_epoch`] when its snapshot was read): the
+    /// registered files in `flag` are flagged (and moved behind every other
+    /// file in LRU order: `last_access` at its largest), the other kept
+    /// files in `release` go back to ordinary least-recently-used life (as
+    /// used now), and the kept files in `delete` (of items a sync removed)
+    /// are deleted. Failures of files not in `flag` are forgotten. `None`, and
+    /// nothing changed, when the epoch moved meanwhile (a reset: the plan
+    /// is out of date). The flags in one immediate transaction.
+    pub fn offline_mark(
+        &self,
+        epoch: u64,
+        flag: &HashSet<String>,
+        release: &HashSet<String>,
+        delete: &HashSet<String>,
+    ) -> Result<Option<MarkReport>> {
         let mut report = MarkReport::default();
+        let now = self.tick();
+        {
+            let mut db = self.db();
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if condemn_stale(&tx)? != epoch {
+                return Ok(None);
+            }
+            tx.execute_batch(
+                "CREATE TEMP TABLE IF NOT EXISTS offline_flag (path TEXT PRIMARY KEY);
+                 CREATE TEMP TABLE IF NOT EXISTS offline_release (path TEXT PRIMARY KEY);
+                 DELETE FROM temp.offline_flag; DELETE FROM temp.offline_release;",
+            )?;
+            {
+                let mut ins = tx.prepare("INSERT OR IGNORE INTO temp.offline_flag(path) VALUES (?1)")?;
+                for rel in flag {
+                    ins.execute([rel])?;
+                }
+                let mut ins = tx.prepare("INSERT OR IGNORE INTO temp.offline_release(path) VALUES (?1)")?;
+                for rel in release.iter().filter(|r| !flag.contains(*r) && !delete.contains(*r)) {
+                    ins.execute([rel])?;
+                }
+            }
+            report.released = tx.execute(
+                "UPDATE files SET kept = 0, last_access = ?1
+                 WHERE kept = 1 AND path IN (SELECT path FROM temp.offline_release)",
+                [now],
+            )?;
+            report.flagged = tx.execute(
+                "UPDATE files SET kept = 1, last_access = ?1
+                 WHERE path IN (SELECT path FROM temp.offline_flag)
+                   AND (kept = 0 OR (kept = 1 AND last_access != ?1))",
+                [KEPT_ACCESS],
+            )?;
+            tx.execute(
+                "DELETE FROM offline_failures WHERE path NOT IN (SELECT path FROM temp.offline_flag)",
+                [],
+            )?;
+            tx.execute_batch("DELETE FROM temp.offline_flag; DELETE FROM temp.offline_release;")?;
+            tx.commit()?;
+        }
         for rel in delete {
             if self.remove_file_where(rel, "kept = 1")? {
                 report.deleted += 1;
             }
         }
-        let now = self.tick();
-        let mut db = self.db();
-        let tx = db.transaction()?;
-        tx.execute_batch(
-            "CREATE TEMP TABLE IF NOT EXISTS offline_wanted (path TEXT PRIMARY KEY); DELETE FROM temp.offline_wanted;",
-        )?;
-        {
-            let mut ins = tx.prepare("INSERT OR IGNORE INTO temp.offline_wanted(path) VALUES (?1)")?;
-            for rel in wanted {
-                ins.execute([rel])?;
-            }
-        }
-        report.released = tx.execute(
-            "UPDATE files SET kept = 0, last_access = ?1
-             WHERE kept = 1 AND path NOT IN (SELECT path FROM temp.offline_wanted)",
-            [now],
-        )?;
-        report.flagged = tx.execute(
-            "UPDATE files SET kept = 1, last_access = ?1
-             WHERE path IN (SELECT path FROM temp.offline_wanted) AND (kept = 0 OR last_access != ?1)",
-            [KEPT_ACCESS],
-        )?;
-        tx.execute(
-            "DELETE FROM offline_failures WHERE path NOT IN (SELECT path FROM temp.offline_wanted)",
-            [],
-        )?;
-        tx.execute("DELETE FROM temp.offline_wanted", [])?;
-        tx.commit()?;
-        Ok(report)
+        Ok(Some(report))
     }
 
-    /// Register a file the offline downloader put in place as kept. False,
-    /// and the file is deleted, when [`Cache::offline_reset`] ran since the
-    /// download started (`epoch` is [`Cache::offline_epoch`] from then).
+    /// Register a file that is in place (a copy fetched it, or another
+    /// process) as kept by the offline downloader. False, and nothing
+    /// changed, when [`Cache::offline_reset`] ran since the download started
+    /// (`epoch` is [`Cache::offline_epoch`] from then): the file is left
+    /// alone, it may be kept under the new epoch.
     pub fn register_kept_file(&self, rel: &str, epoch: u64) -> Result<bool> {
         let size = std::fs::metadata(self.abs(rel))
             .map_err(|e| CoreError::Cache(format!("{}: {e}", self.abs(rel).display())))?
             .len();
-        let current = {
-            let mut db = self.db();
-            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let now: u64 = tx
-                .query_row("SELECT value FROM meta WHERE key = 'offline_epoch'", [], |r| {
-                    r.get::<_, String>(0)
-                })
-                .optional()?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            if now == epoch {
-                tx.execute(
-                    "INSERT INTO files(path, size, last_access, kept) VALUES (?1, ?2, ?3, 1)
-                     ON CONFLICT(path) DO UPDATE SET size = excluded.size, last_access = excluded.last_access, kept = 1",
-                    params![rel, size as i64, KEPT_ACCESS],
-                )?;
-                tx.execute("DELETE FROM offline_failures WHERE path = ?1", [rel])?;
-            }
-            tx.commit()?;
-            now == epoch
-        };
-        if !current {
-            self.remove_cache_file(rel);
+        let mut db = self.db();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if condemn_stale(&tx)? != epoch {
+            return Ok(false);
         }
-        Ok(current)
+        flag_kept(&tx, rel, size)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Put a file the offline downloader fetched into place and register it
+    /// as kept: `part` is renamed to `rel` in the same immediate transaction
+    /// that checks `epoch` ([`Cache::offline_epoch`] when the download
+    /// started), so a reset either comes first (the epoch moved: only `part`
+    /// is deleted, and false) or after (it finds the file kept and deletes
+    /// it). Nothing is overwritten by a download a reset made stale.
+    pub fn install_kept_file(&self, part: &Path, rel: &str, epoch: u64) -> Result<bool> {
+        let dest = self.abs(rel);
+        let mut db = self.db();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if condemn_stale(&tx)? != epoch {
+            drop(tx);
+            let _ = std::fs::remove_file(part);
+            return Ok(false);
+        }
+        std::fs::rename(part, &dest)?;
+        let size = std::fs::metadata(&dest)?.len();
+        flag_kept(&tx, rel, size)?;
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Note that downloading `rel` (a file of `item_id`) failed `attempts`
@@ -851,6 +1010,79 @@ impl Cache {
         Ok(())
     }
 
+    /// Delete the part files (`<file>.part.<owner>`, [`part_file_target`])
+    /// in `files/thumb`, `files/cover` and `clip/*` that no live download
+    /// writes: their file has no claim fresher than `stale_secs` by another
+    /// owner than `owner` (with `None`: by anyone). Returns how many went.
+    /// A killed downloader leaves them; the downloader sweeps when a run
+    /// starts, "Clear cache" and "Remove kept files" too.
+    pub fn sweep_part_files(&self, owner: Option<&str>, stale_secs: i64) -> usize {
+        let mut dirs: Vec<String> = vec!["files/thumb".into(), "files/cover".into()];
+        if let Ok(entries) = std::fs::read_dir(self.abs("clip")) {
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    dirs.push(format!("clip/{}", entry.file_name().to_string_lossy()));
+                }
+            }
+        }
+        let mut removed = 0;
+        for dir in dirs {
+            let Ok(entries) = std::fs::read_dir(self.abs(&dir)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                let Some(target) = part_file_target(&name) else {
+                    continue;
+                };
+                if owner.is_some_and(|o| name.ends_with(&format!(".part.{o}"))) {
+                    continue;
+                }
+                let rel = format!("{dir}/{target}");
+                let live = self
+                    .offline_claimed_by_other(&rel, owner.unwrap_or(""), stale_secs)
+                    .unwrap_or(true);
+                if !live && std::fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+            if dir.starts_with("clip/") {
+                let _ = std::fs::remove_dir(self.abs(&dir)); // only when empty
+            }
+        }
+        removed
+    }
+
+    /// Note that this process (`id`) brings the kept files in line with
+    /// offline options `json` now, forget the processes that have not for
+    /// [`PEER_TTL_SECS`], and return the options of the others, newest
+    /// first. One immediate transaction.
+    pub fn offline_peer_note(&self, id: &str, json: &str) -> Result<Vec<String>> {
+        let now = crate::now_unix();
+        let mut db = self.db();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM offline_peers WHERE at < ?1", [now - PEER_TTL_SECS])?;
+        tx.execute(
+            "INSERT INTO offline_peers(id, at, json) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET at = excluded.at, json = excluded.json",
+            params![id, now, json],
+        )?;
+        let others = {
+            let mut st = tx.prepare("SELECT json FROM offline_peers WHERE id != ?1 ORDER BY at DESC")?;
+            let rows = st.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        tx.commit()?;
+        Ok(others)
+    }
+
+    /// Forget this process's offline options (it ends).
+    pub fn offline_peer_forget(&self, id: &str) -> Result<()> {
+        self.db().execute("DELETE FROM offline_peers WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     /// Files and bytes kept on the device and the others.
     pub fn offline_usage(&self) -> Result<OfflineUsage> {
         let db = self.db();
@@ -878,14 +1110,20 @@ impl Cache {
 
     /// Forget everything kept offline and delete the kept files: what to
     /// keep, the failures, the claims (a download still running throws its
-    /// file away, [`Cache::register_kept_file`]). The confirmed "Remove kept
+    /// file away, [`Cache::install_kept_file`]). The confirmed "Remove kept
     /// files", and part of [`Cache::reset_account_data`]. The automatic
     /// rules are options, not choices, so they keep the files they hold
     /// coming back until they are turned off.
+    ///
+    /// The kept files are condemned (`kept` 2) in the transaction that
+    /// forgets the keeps and moves the epoch, and deleted afterwards
+    /// ([`Cache::offline_finish_reset`]); a process that dies in between
+    /// leaves them condemned, and the next open, refresh or reset deletes
+    /// them.
     pub fn offline_reset(&self) -> Result<EvictReport> {
         {
             let mut db = self.db();
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             tx.execute("DELETE FROM offline_keeps", [])?;
             tx.execute("DELETE FROM offline_failures", [])?;
             tx.execute("DELETE FROM offline_claims", [])?;
@@ -898,23 +1136,102 @@ impl Cache {
                  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)",
                 [],
             )?;
+            condemn_stale(&tx)?;
             tx.commit()?;
         }
-        let kept: Vec<(String, u64)> = {
+        let mut report = self.offline_finish_reset()?;
+        // Downloads that were running are stale now (the epoch moved), and
+        // their claims are gone.
+        self.sweep_part_files(None, CLAIM_STALE_SECS);
+        report.total_bytes = self.unkept_bytes()?;
+        Ok(report)
+    }
+
+    /// Finish what a reset began: condemn the kept files when the epoch
+    /// moved past theirs (a reset by a process that died before it
+    /// condemned them, [`condemn_stale`]), and delete the condemned files
+    /// (one whose deletion fails stays condemned, for the next try).
+    /// Called when the cache opens, by every refresh and by every reset.
+    pub fn offline_finish_reset(&self) -> Result<EvictReport> {
+        let pending = {
             let db = self.db();
-            let mut st = db.prepare("SELECT path, size FROM files WHERE kept = 1")?;
-            let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
+            meta_u64(&db, "offline_kept_epoch")? != meta_u64(&db, "offline_epoch")?
+                || db.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM files WHERE kept = ?1)",
+                    [CONDEMNED],
+                    |r| r.get::<_, bool>(0),
+                )?
         };
         let mut report = EvictReport::default();
-        for (rel, size) in kept {
-            if self.remove_file_where(&rel, "kept = 1")? {
+        if !pending {
+            return Ok(report);
+        }
+        {
+            let mut db = self.db();
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            condemn_stale(&tx)?;
+            tx.commit()?;
+        }
+        let condemned: Vec<(String, u64)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT path, size FROM files WHERE kept = ?1")?;
+            let rows = st.query_map([CONDEMNED], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (rel, size) in condemned {
+            if self.remove_file_where(&rel, &format!("kept = {CONDEMNED}"))? {
                 report.removed_files += 1;
                 report.freed_bytes += size;
             }
         }
-        report.total_bytes = self.unkept_bytes()?;
+        if report.removed_files > 0 {
+            tracing::info!(
+                files = report.removed_files,
+                bytes = report.freed_bytes,
+                "deleted the files kept offline before a reset"
+            );
+        }
         Ok(report)
+    }
+
+    /// The kept data belongs to the account that kept it (`offline_owner`).
+    /// It is reset (kept files deleted, keeps forgotten, true) when it
+    /// belongs to another account than the cached one, or to none:
+    ///
+    /// - no account is cached any more (a client up to 0.8.0 signed out:
+    ///   its sign-out drops the items and the account, not the offline
+    ///   data);
+    /// - another account is cached (such a client signed in as another);
+    /// - the same account is cached, but the items and the sync cursor are
+    ///   gone (such a client signed out and in again, and has not synced
+    ///   since: its login stores the account at once).
+    ///
+    /// A cached account this version cannot read is not a sign-out:
+    /// nothing is reset. The owner is set once a sync completed (the
+    /// cursor is there), so the third case cannot be a new login's first
+    /// sync.
+    pub fn offline_check_owner(&self) -> Result<bool> {
+        let owner = self.meta_get("offline_owner")?;
+        let account = self.cached_account()?;
+        let synced = self.sync_cursor()?.is_some();
+        let reset = match (owner.as_deref(), &account) {
+            (_, CachedAccount::Unreadable) | (None, _) => false,
+            (Some(_), CachedAccount::None) => true,
+            (Some(o), CachedAccount::Known { id, .. }) if o != id => true,
+            (Some(_), CachedAccount::Known { .. }) => !synced && self.item_count()? == 0,
+        };
+        if reset {
+            tracing::info!("offline data of another account (or a signed-out one) found; removing it");
+            self.offline_reset()?;
+        }
+        if let (true, CachedAccount::Known { id, .. }) = (synced, &account) {
+            if reset || owner.is_none() {
+                self.meta_set("offline_owner", id)?;
+            }
+        }
+        Ok(reset)
     }
 
     // -- copy history -------------------------------------------------------------
@@ -1080,6 +1397,18 @@ pub struct MarkReport {
     pub released: usize,
     /// Kept files of removed items, deleted.
     pub deleted: usize,
+}
+
+/// Register `rel` (`size` bytes) as kept, in a transaction that checked the
+/// epoch; its download failures are forgotten.
+fn flag_kept(tx: &rusqlite::Transaction<'_>, rel: &str, size: u64) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT INTO files(path, size, last_access, kept) VALUES (?1, ?2, ?3, 1)
+         ON CONFLICT(path) DO UPDATE SET size = excluded.size, last_access = excluded.last_access, kept = 1",
+        params![rel, size as i64, KEPT_ACCESS],
+    )?;
+    tx.execute("DELETE FROM offline_failures WHERE path = ?1", [rel])?;
+    Ok(())
 }
 
 fn bump_generation(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {

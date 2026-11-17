@@ -5,12 +5,15 @@
 //!   so two processes on one cache (the CLI and the popup) never fetch the
 //!   same file; a claim is renewed while the download runs and goes stale
 //!   when its process dies.
-//! * It is written to `<path>.part.<owner>` and renamed into place once its
-//!   size (and the sha256 the server's `ETag` names) check out, so an
-//!   interrupted download leaves nothing that looks complete. A part file
-//!   is deleted when its download ends any other way, also when the run is
-//!   dropped; one a killed process left behind goes when the file is
-//!   claimed next (thumbnails and covers: when a run starts).
+//! * It is written to `<path>.part.<owner>`, synced to disk and renamed
+//!   into place once its size (and the sha256 the server's `ETag` names)
+//!   check out, so an interrupted download leaves nothing that looks
+//!   complete. The rename happens in the transaction that checks the
+//!   offline epoch ([`crate::cache::Cache::install_kept_file`]): a download
+//!   a reset made stale never replaces a file kept since. A part file is
+//!   deleted when its download ends any other way, also when the run is
+//!   dropped; one a killed process left behind goes when a run starts, or
+//!   when the file is claimed next.
 //! * A `429` is obeyed (every download waits as told); other failures are
 //!   retried with a growing delay, a few times, then the file counts as
 //!   failed with the reason kept (`offline_failures`) and the run goes on.
@@ -35,6 +38,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{watch, Notify};
 
 use super::{Plan, PlanScope};
+use crate::cache::part_file_target;
 use crate::client::{map_reqwest, FileFetch};
 use crate::{CoreError, Session};
 
@@ -273,7 +277,7 @@ impl Default for Tuning {
             rate_limit_waits: 5,
             default_retry_after: Duration::from_secs(30),
             max_retry_after: Duration::from_secs(600),
-            claim_stale_secs: 120,
+            claim_stale_secs: crate::cache::CLAIM_STALE_SECS,
             renew_every: Duration::from_secs(30),
             claim_poll: Duration::from_millis(500),
             foreground_wait: Duration::from_secs(30),
@@ -673,7 +677,10 @@ impl<'a> Run<'a> {
 
     /// Drive the workers until the run ends.
     pub(crate) async fn go(&self) -> OfflineOutcome {
-        self.sweep_parts();
+        // Part files killed downloads left behind.
+        self.session
+            .cache()
+            .sweep_part_files(Some(&self.owner), self.tuning.claim_stale_secs);
         self.publish();
         let workers = (0..self.tuning.concurrency.max(1)).map(|_| self.worker());
         futures::future::join_all(workers).await;
@@ -741,21 +748,38 @@ impl<'a> Run<'a> {
         }
     }
 
-    async fn file(&self, ix: usize) {
+    /// Claim the file for this run; false (and looked at again later) when
+    /// another process holds a fresh claim on it.
+    fn claim(&self, ix: usize) -> Result<bool, Fail> {
         let file = &self.plan.files[ix].file;
-        let cache = self.session.cache();
-        let claimed = match cache.offline_claim(&file.rel, &self.owner, self.tuning.claim_stale_secs) {
-            Ok(c) => c,
-            Err(e) => {
-                self.give_up(ix, Fail::Other(e.to_string()), 1);
-                return;
-            }
-        };
+        let claimed = self
+            .session
+            .cache()
+            .offline_claim(&file.rel, &self.owner, self.tuning.claim_stale_secs)
+            .map_err(|e| Fail::Other(e.to_string()))?;
         if !claimed {
             // Another process is downloading it; look again later.
             let mut st = self.state();
             st.deferred.push((ix, Instant::now() + self.tuning.claim_poll));
-            return;
+        }
+        Ok(claimed)
+    }
+
+    /// Whether the offline data was reset since the run's plan was made.
+    fn reset_since(&self) -> bool {
+        self.session.cache().offline_epoch().is_ok_and(|e| e != self.epoch)
+    }
+
+    async fn file(&self, ix: usize) {
+        let file = &self.plan.files[ix].file;
+        let cache = self.session.cache();
+        match self.claim(ix) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(fail) => {
+                self.give_up(ix, fail, 1);
+                return;
+            }
         }
         let _claim = ClaimGuard {
             session: self.session,
@@ -766,6 +790,7 @@ impl<'a> Run<'a> {
         if cache.file_present(&file.rel, Some(file.size)).unwrap_or(false) {
             match cache.register_kept_file(&file.rel, self.epoch) {
                 Ok(true) => self.done(ix),
+                // Nothing is deleted: it may be kept since the reset.
                 Ok(false) => self.stop(RunEnd::Cancelled, Some("the offline data was reset".into())),
                 Err(e) => match core_fail(e) {
                     Fail::DiskFull(msg) => self.stop(RunEnd::DiskFull, Some(msg)),
@@ -775,7 +800,8 @@ impl<'a> Run<'a> {
             return;
         }
         if file.rel.starts_with("clip/") {
-            // One small directory per rendition; `files/` is swept once per run.
+            // One small directory per rendition, for a process that died
+            // during this run.
             remove_stale_parts(&cache.abs(&file.rel), &self.owner);
         }
         let allowed = if self.state().failed_before.contains(&ix) {
@@ -785,13 +811,31 @@ impl<'a> Run<'a> {
         };
         let (mut attempts, mut waits) = (0u32, 0u32);
         loop {
+            // Before each try: a reset makes the download pointless, and on
+            // a retry another process may have taken the file over (its
+            // claim went stale, or a reset dropped it).
+            if self.reset_since() {
+                self.stop(RunEnd::Cancelled, Some("the offline data was reset".into()));
+                return;
+            }
+            if attempts + waits > 0 {
+                match self.claim(ix) {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(fail) => {
+                        self.give_up(ix, fail, attempts.max(1));
+                        return;
+                    }
+                }
+            }
             let result = tokio::select! {
                 r = self.download(ix) => r,
                 _ = self.interrupted() => Err(Fail::Interrupted),
             };
             let fail = match result {
-                Ok(()) => match cache.register_kept_file(&file.rel, self.epoch) {
+                Ok(mut part) => match cache.install_kept_file(&part.path, &file.rel, self.epoch) {
                     Ok(true) => {
+                        part.armed = false;
                         self.done(ix);
                         return;
                     }
@@ -891,8 +935,9 @@ impl<'a> Run<'a> {
         st.failed_now.insert(ix);
     }
 
-    /// Fetch one file into its part file and rename it into place.
-    async fn download(&self, ix: usize) -> Result<(), Fail> {
+    /// Fetch one file into its part file, checked and synced to disk, for
+    /// [`crate::cache::Cache::install_kept_file`] to put into place.
+    async fn download(&self, ix: usize) -> Result<PartFile, Fail> {
         let file = &self.plan.files[ix].file;
         let cache = self.session.cache();
         let fetched = self
@@ -913,7 +958,7 @@ impl<'a> Run<'a> {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let mut part = PartFile {
+        let part = PartFile {
             path: dest.with_file_name(format!("{name}.part.{}", self.owner)),
             armed: true,
         };
@@ -936,6 +981,8 @@ impl<'a> Run<'a> {
             self.session.foreground().wait_idle(self.tuning.foreground_wait).await;
         }
         out.flush().await.map_err(io_fail)?;
+        // On disk before the rename makes it the file.
+        out.sync_all().await.map_err(io_fail)?;
         drop(out);
         if file.size > 0 && written != file.size {
             return Err(Fail::Other(format!(
@@ -951,56 +998,28 @@ impl<'a> Run<'a> {
                 )));
             }
         }
-        tokio::fs::rename(&part.path, &dest).await.map_err(io_fail)?;
-        part.armed = false;
-        Ok(())
-    }
-}
-
-impl Run<'_> {
-    /// Delete the part files in `files/thumb` and `files/cover` that no live
-    /// download writes: their file has no fresh claim of another process.
-    fn sweep_parts(&self) {
-        let cache = self.session.cache();
-        for dir in ["files/thumb", "files/cover"] {
-            let Ok(entries) = std::fs::read_dir(cache.abs(dir)) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                let Some((stem, _)) = name.split_once(".part.") else {
-                    continue;
-                };
-                let rel = format!("{dir}/{stem}");
-                let live = cache
-                    .offline_claimed_by_other(&rel, &self.owner, self.tuning.claim_stale_secs)
-                    .unwrap_or(true);
-                if !live {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
+        Ok(part)
     }
 }
 
 /// Delete part files of `dest` other processes left behind (the caller holds
-/// the claim, so none of them is still being written).
+/// the claim, so none of them is still being written): exactly
+/// `<name>.part.<owner>` ([`part_file_target`]), not a file whose own name
+/// holds `.part.`.
 fn remove_stale_parts(dest: &Path, owner: &str) {
     let (Some(dir), Some(name)) = (dest.parent(), dest.file_name()) else {
         return;
     };
-    let prefix = format!("{}.part.", name.to_string_lossy());
+    let name = name.to_string_lossy();
+    let mine = format!("{name}.part.{owner}");
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let n = entry.file_name();
         let n = n.to_string_lossy();
-        if let Some(other) = n.strip_prefix(&prefix) {
-            if other != owner {
-                let _ = std::fs::remove_file(entry.path());
-            }
+        if part_file_target(&n) == Some(name.as_ref()) && n != mine {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }

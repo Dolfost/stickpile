@@ -7,13 +7,13 @@ use stickpile_api::{ItemSummary, SetSummary, TargetApp, Variant};
 
 use super::run::Run;
 use super::{
-    derive, orphaned, reasons, AutoKeepConfig, CoverInfo, Device, OfflineControl, OfflineOptions, OfflineOutcome,
-    OfflineStatus, Plan, PlanInput, Reason, RunEnd, Scope, Skipped, Totals,
+    derive, media_of, orphaned, reasons, AutoKeepConfig, CoverInfo, Device, OfflineControl, OfflineOptions,
+    OfflineOutcome, OfflineStatus, Plan, PlanInput, Reason, RunEnd, Scope, Skipped, Totals,
 };
-use crate::cache::EvictReport;
+use crate::cache::{safe_component, CachedAccount, EvictReport, SharedCache};
 use crate::client::SearchParams;
 use crate::session::{clip_rel, pick_variant};
-use crate::{Result, Session};
+use crate::{CoreError, Result, Session};
 
 /// Kept files and the others, on the device.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +55,33 @@ impl Estimate {
 /// Liked items listed for `offline.auto.liked`, at most this many.
 const LIKED_MAX: usize = 2000;
 const LIKED_PAGE: usize = 200;
+
+/// A refresh that found the epoch moved (a reset meanwhile) derives the
+/// plan again, at most this many times.
+const REFRESH_TRIES: usize = 3;
+
+/// This process's entry in the cache's `offline_peers`: the offline options
+/// and device it keeps files for ([`Session::offline_refresh`]). Forgotten
+/// when the session ends.
+pub(crate) struct OfflinePeer {
+    pub(crate) id: String,
+    pub(crate) cache: SharedCache,
+}
+
+impl Drop for OfflinePeer {
+    fn drop(&mut self) {
+        if let Err(e) = self.cache.offline_peer_forget(&self.id) {
+            tracing::debug!("forgetting this process's offline options: {e}");
+        }
+    }
+}
+
+/// What `offline_peers` holds for a process.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct PeerOptions {
+    options: OfflineOptions,
+    device: Device,
+}
 
 impl Session {
     /// Whether this client's grids play animations (the Android app):
@@ -110,9 +137,6 @@ impl Session {
     pub fn offline_keep(&self, scope: &Scope) -> Result<()> {
         self.offline_check_owner()?;
         self.cache().offline_keep(scope)?;
-        if let Some(me) = self.cache().me()? {
-            self.cache().meta_set("offline_owner", &me.id)?;
-        }
         self.offline_refresh().map(drop)
     }
 
@@ -150,18 +174,79 @@ impl Session {
     /// that does not know the flag), files no reason holds any more go back
     /// to the LRU, and the kept files of items a sync removed are deleted.
     /// Runs after every sync ([`Session::sync`]), keep and release.
+    ///
+    /// The cache is shared, and other processes on it (the CLI next to the
+    /// popup) may have other offline options: a file is released only when
+    /// neither this process's options nor those of another process that
+    /// brought the kept files in line within [`crate::cache::PEER_TTL_SECS`]
+    /// want it, and only when it was kept when the plan was made. Kept
+    /// files of items this version cannot read stay kept.
     pub fn offline_refresh(&self) -> Result<Plan> {
+        self.offline_refresh_at().map(|(plan, _)| plan)
+    }
+
+    /// [`Session::offline_refresh`], with the epoch the plan was made and
+    /// the cache brought in line under.
+    fn offline_refresh_at(&self) -> Result<(Plan, u64)> {
+        for _ in 0..REFRESH_TRIES {
+            if let Some(done) = self.offline_refresh_once()? {
+                return Ok(done);
+            }
+        }
+        Err(CoreError::Other(
+            "the offline data was reset again and again meanwhile; try again".into(),
+        ))
+    }
+
+    /// One try of [`Session::offline_refresh_at`]: `None` when the epoch
+    /// moved after the plan was made (nothing was changed then).
+    fn offline_refresh_once(&self) -> Result<Option<(Plan, u64)>> {
         self.offline_check_owner()?;
-        let plan = self.offline_plan()?;
-        let wanted: HashSet<String> = plan.files.iter().map(|f| f.file.rel.clone()).collect();
-        let index = self.cache().file_index()?;
-        let kept = index.iter().filter(|(_, (_, k))| *k).map(|(p, _)| p);
-        let items = self.cache().items()?;
-        let delete: HashSet<String> = orphaned(kept, &items)
+        let cache = self.cache();
+        cache.offline_finish_reset()?;
+        let epoch = cache.offline_epoch()?;
+        let opts = self.offline_options();
+        let device = self.offline_device()?;
+        let items = cache.items()?;
+        let index = cache.file_index()?;
+        let plan = self.plan_from(&opts, &device, None, &items, &index)?;
+        let mut wanted: HashSet<String> = plan.files.iter().map(|f| f.file.rel.clone()).collect();
+        // What the other processes on this cache keep, with their options.
+        let mut hold = false;
+        for peer in self.offline_peers(&opts, &device)? {
+            match peer {
+                Some(p) => wanted.extend(
+                    self.plan_from(&p.options, &p.device, None, &items, &index)?
+                        .files
+                        .into_iter()
+                        .map(|f| f.file.rel),
+                ),
+                None => hold = true,
+            }
+        }
+        let media = cache.item_media()?;
+        let readable: HashSet<String> = items.iter().map(|i| safe_component(&i.media_id)).collect();
+        let unreadable: HashSet<String> = media
+            .iter()
+            .map(|m| safe_component(m))
+            .filter(|m| !readable.contains(m))
+            .collect();
+        let kept: Vec<&String> = index.iter().filter(|(_, (_, k))| *k).map(|(p, _)| p).collect();
+        let release: HashSet<String> = if hold {
+            HashSet::new()
+        } else {
+            kept.iter()
+                .filter(|p| !wanted.contains(**p) && !media_of(p).is_some_and(|m| unreadable.contains(m)))
+                .map(|p| (*p).clone())
+                .collect()
+        };
+        let delete: HashSet<String> = orphaned(kept.iter().copied(), &media)
             .into_iter()
             .filter(|p| !wanted.contains(p))
             .collect();
-        let report = self.cache().offline_mark(&wanted, &delete)?;
+        let Some(report) = cache.offline_mark(epoch, &wanted, &release, &delete)? else {
+            return Ok(None);
+        };
         if report != Default::default() {
             tracing::debug!(
                 flagged = report.flagged,
@@ -170,7 +255,27 @@ impl Session {
                 "offline files brought in line with the plan"
             );
         }
-        Ok(plan)
+        Ok(Some((plan, epoch)))
+    }
+
+    /// Note this process's offline options in the cache, and return those
+    /// of the other processes that brought the kept files in line lately,
+    /// each once and other than these (`None`: options this version cannot
+    /// read, from a newer client).
+    fn offline_peers(&self, opts: &OfflineOptions, device: &Device) -> Result<Vec<Option<PeerOptions>>> {
+        let mine = PeerOptions {
+            options: opts.clone(),
+            device: device.clone(),
+        };
+        let json = serde_json::to_string(&mine).map_err(|e| CoreError::Other(e.to_string()))?;
+        let mut out: Vec<Option<PeerOptions>> = Vec::new();
+        for other in self.cache().offline_peer_note(&self.offline_peer.id, &json)? {
+            let peer = serde_json::from_str::<PeerOptions>(&other).ok();
+            if peer.as_ref() != Some(&mine) && !out.contains(&peer) {
+                out.push(peer);
+            }
+        }
+        Ok(out)
     }
 
     /// What keeping `scope` would take with the current options: its files,
@@ -226,8 +331,9 @@ impl Session {
             }
             tracing::warn!("offline: listing liked items or pack covers: {e}");
         }
-        let epoch = self.cache().offline_epoch()?;
-        let plan = self.offline_refresh()?;
+        // The epoch the plan was made under, after the refresh's own reset
+        // if it made one (the offline data of another account).
+        let (plan, epoch) = self.offline_refresh_at()?;
         let run = Run::new(self, control, plan, epoch);
         Ok(run.go().await)
     }
@@ -282,27 +388,11 @@ impl Session {
 
     // -- internals --------------------------------------------------------------
 
-    /// The kept data belongs to the account that kept it. When the cached
-    /// account is another one, or none while something is kept (a client
-    /// that does not know offline data signed out, or changed account), it
-    /// is reset: kept files deleted, keeps forgotten.
+    /// The kept data belongs to the account that kept it: reset it when a
+    /// client that does not know it signed out, or changed account
+    /// ([`crate::cache::Cache::offline_check_owner`]).
     fn offline_check_owner(&self) -> Result<()> {
-        let cache = self.cache();
-        let me = cache.me()?.map(|u| u.id);
-        let owner = cache.meta_get("offline_owner")?;
-        match (owner.as_deref(), me.as_deref()) {
-            (Some(o), Some(m)) if o == m => {}
-            (None, None) => {}
-            (None, Some(m)) => cache.meta_set("offline_owner", m)?,
-            (Some(_), m) => {
-                tracing::info!("offline data of another account (or a signed-out one) found; removing it");
-                cache.offline_reset()?;
-                if let Some(m) = m {
-                    cache.meta_set("offline_owner", m)?;
-                }
-            }
-        }
-        Ok(())
+        self.cache().offline_check_owner().map(drop)
     }
 
     /// Ask the server what the plan needs beyond the cache: liked items
@@ -394,7 +484,10 @@ impl Session {
         };
         Ok(PlanParts {
             keeps: cache.offline_keeps()?.into_iter().map(|(s, _)| s).collect(),
-            me: cache.me()?.map(|u| u.username),
+            me: match cache.cached_account()? {
+                CachedAccount::Known { username, .. } => Some(username),
+                _ => None,
+            },
             used,
             liked: if opts.auto.liked {
                 self.offline_liked()?
@@ -412,12 +505,25 @@ impl Session {
     /// The plan for `opts`, with `keeps` instead of the stored ones.
     fn plan_with(&self, opts: &OfflineOptions, keeps: Option<&[Scope]>) -> Result<Plan> {
         let device = self.offline_device()?;
+        let items = self.cache().items()?;
+        let index = self.cache().file_index()?;
+        self.plan_from(opts, &device, keeps, &items, &index)
+    }
+
+    /// The plan for `opts` on `device` over `items` and the registered files
+    /// `index`, with `keeps` instead of the stored ones.
+    fn plan_from(
+        &self,
+        opts: &OfflineOptions,
+        device: &Device,
+        keeps: Option<&[Scope]>,
+        items: &[ItemSummary],
+        index: &HashMap<String, (u64, bool)>,
+    ) -> Result<Plan> {
         let mut parts = self.plan_parts(opts)?;
         if let Some(k) = keeps {
             parts.keeps = k.to_vec();
         }
-        let items = self.cache().items()?;
-        let index = self.cache().file_index()?;
         let dir = self.cache().dir().to_path_buf();
         let present = |rel: &str, size: u64| {
             index.contains_key(rel)
@@ -426,7 +532,7 @@ impl Session {
                     .filter(|m| m.is_file())
                     .is_some_and(|m| size == 0 || m.len() == size)
         };
-        let input = parts.input(&items, opts, &device, &present);
+        let input = parts.input(items, opts, device, &present);
         let mut plan = derive(&input);
         let wanted: HashSet<&str> = plan.files.iter().map(|f| f.file.rel.as_str()).collect();
         plan.failures = self

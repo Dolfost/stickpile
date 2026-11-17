@@ -306,7 +306,7 @@ default, `cache_dir` in the client config; on Android the app's
   public), the cached account (`/me`), the local copy history, usage
   events not yet uploaded, and what is kept offline (the chosen stickers,
   packs or library, failed downloads with the server's error text,
-  download claims).
+  download claims, the offline options of the processes using the cache).
 - Files: thumbnails, the renditions that were copied (evicted least
   recently used beyond `cache_max_mb`), and the files kept offline
   (thumbnails, the renditions a copy to the configured chat apps uses, pack
@@ -336,7 +336,14 @@ How they are removed:
   files with the list of what to keep. A client up to 0.8.0 does not know
   the kept files; when it signed out, a newer client sharing the cache
   deletes them the next time it brings its offline files in line (after a
-  sync, a keep or a download run).
+  sync, a keep or a download run) or stores a login, also when 0.8.0 signed
+  in again as the same account meanwhile. Only a sign-out, a sign-in as
+  the same account and a sync, all by 0.8.0 before a newer client runs,
+  cannot be told from an ordinary 0.8.0 sync: that account's own kept
+  files then stay ([offline.md](offline.md#sign-out-and-another-server)).
+  A "Remove kept files" or sign-out interrupted before its files were
+  deleted is finished the next time a client opens the cache; a file that
+  cannot be deleted stays registered and is tried again.
 - Deleting the cache directory removes everything; the clients rebuild it.
 
 ### No telemetry
