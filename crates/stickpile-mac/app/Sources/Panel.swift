@@ -57,6 +57,8 @@ final class PopupView: NSView {
     let mePage = MePage()
     let settingsPage = SettingsPage()
     let help = HelpOverlay()
+    /// The question over the main area (keep a pack, remove kept files).
+    let confirm = ConfirmOverlay()
     let footer = FooterBar()
     let errorPage = ErrorPage()
     private let topLine = NSBox()
@@ -86,6 +88,9 @@ final class PopupView: NSView {
         help.autoresizingMask = [.width, .height]
         help.isHidden = true
         content.addSubview(help)
+        confirm.autoresizingMask = [.width, .height]
+        confirm.isHidden = true
+        content.addSubview(confirm)
         suggest.isHidden = true
         [tabBar, header, suggest, topLine, content, bottomLine, footer, errorPage].forEach(addSubview)
         errorPage.isHidden = true

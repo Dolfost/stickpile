@@ -132,6 +132,95 @@ final class HelpCard: NSView {
     }
 }
 
+/// A question over the main area (keep a pack or the library, remove the
+/// kept files): a card with the title, the text, two buttons and the keys.
+/// It takes every click while it is shown; the keys reach the popup as
+/// always (Return or y answers yes, Escape, n or q no).
+final class ConfirmOverlay: NSView {
+    var onAnswer: ((Bool) -> Void)?
+    private let card = HelpCard()
+    private let title = wrappingLabel("", size: 15, weight: .semibold)
+    private let body = wrappingLabel("", size: 13)
+    private let hint = label("", size: 11, color: .secondaryLabelColor)
+    private let cancel = NSButton(title: "", target: nil, action: nil)
+    private let accept = NSButton(title: "", target: nil, action: nil)
+    private var shown: ConfirmView?
+    private let width: CGFloat = 440
+    private let pad: CGFloat = 20
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        for b in [cancel, accept] {
+            b.bezelStyle = .push
+            b.target = self
+        }
+        cancel.action = #selector(cancelClicked)
+        accept.action = #selector(acceptClicked)
+        hint.alignment = .right
+        [title, body, cancel, accept, hint].forEach(card.addSubview)
+        addSubview(card)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func cancelClicked() { onAnswer?(false) }
+    @objc private func acceptClicked() { onAnswer?(true) }
+
+    func update(_ c: ConfirmView?) {
+        setShown(c != nil)
+        guard let c, c != shown else { return }
+        shown = c
+        title.setText(c.title)
+        body.setText(c.body)
+        cancel.title = c.cancel
+        accept.title = c.accept
+        accept.hasDestructiveAction = c.destructive
+        accept.contentTintColor = c.destructive ? .systemRed : nil
+        accept.keyEquivalent = ""
+        hint.setText(c.hint)
+        needsLayout = true
+    }
+
+    private func height(_ l: NSTextField, _ w: CGFloat) -> CGFloat {
+        ceil(l.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: w, height: 1000)).height)
+    }
+
+    override func layout() {
+        super.layout()
+        let inner = width - 2 * pad
+        let th = height(title, inner)
+        let bh = height(body, inner)
+        title.frame = NSRect(x: pad, y: pad, width: inner, height: th)
+        body.frame = NSRect(x: pad, y: title.frame.maxY + 8, width: inner, height: bh)
+        let buttonsY = body.frame.maxY + 16
+        accept.sizeToFit()
+        cancel.sizeToFit()
+        accept.frame.origin = NSPoint(x: width - pad - accept.frame.width, y: buttonsY)
+        cancel.frame.origin = NSPoint(x: accept.frame.minX - 8 - cancel.frame.width, y: buttonsY)
+        hint.frame = NSRect(x: pad, y: accept.frame.maxY + 8, width: inner, height: 15)
+        let h = hint.frame.maxY + pad - 4
+        card.frame = NSRect(x: floor((bounds.width - width) / 2), y: floor((bounds.height - h) / 2), width: width, height: h)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // The popup under the question, held back.
+        NSColor.black.withAlphaComponent(0.12).setFill()
+        bounds.fill()
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = NSSize(width: 0, height: -3)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.set()
+        Palette.background.setFill()
+        NSBezierPath(roundedRect: card.frame, xRadius: 12, yRadius: 12).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 /// "stickpile cannot start": the error and the config file.
 final class ErrorPage: NSView {
     private let stack = NSStackView()

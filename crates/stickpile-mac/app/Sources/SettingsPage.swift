@@ -163,11 +163,141 @@ final class SettingRowView: NSObject, NSTextFieldDelegate {
     }
 }
 
-/// The Settings tab: groups of rows generated from what Rust sends.
+/// What the "On this device" block asks the popup to do.
+protocol OfflineActions: AnyObject {
+    func offlineKeepLibrary(keep: Bool)
+    func offlinePause()
+    func offlineResume()
+    func offlineCancel()
+    func clearCache()
+    func removeKeptFiles()
+}
+
+/// The "On this device" block (`OfflineView`): keep everything, what is
+/// kept, the downloader with its bar and buttons, the two cache buttons.
+final class OfflineBlockView: NSObject {
+    let group = GroupView()
+    let library = NSSwitch()
+    let libraryRow = FormRow()
+    let usageRow = FormRow()
+    let stateRow = FormRow()
+    let progressRow = FlippedView()
+    let progress = NSProgressIndicator()
+    let pause = NSButton(title: "", target: nil, action: nil)
+    let resume = NSButton(title: "", target: nil, action: nil)
+    let cancel = NSButton(title: "", target: nil, action: nil)
+    let cacheRow = FormRow()
+    let clear = NSButton(title: "", target: nil, action: nil)
+    let remove = NSButton(title: "", target: nil, action: nil)
+    weak var actions: OfflineActions?
+    private var shown: OfflineView?
+
+    override init() {
+        super.init()
+        library.controlSize = .small
+        library.target = self
+        library.action = #selector(libraryChanged)
+        libraryRow.trailing.addArrangedSubview(library)
+        let buttons: [(NSButton, Selector)] = [
+            (pause, #selector(pauseClicked)), (resume, #selector(resumeClicked)), (cancel, #selector(cancelClicked)),
+            (clear, #selector(clearClicked)), (remove, #selector(removeClicked)),
+        ]
+        for (b, action) in buttons {
+            b.bezelStyle = .push
+            b.controlSize = .small
+            b.target = self
+            b.action = action
+            b.setContentHuggingPriority(.required, for: .horizontal)
+        }
+        for b in [pause, resume, cancel] {
+            stateRow.trailing.addArrangedSubview(b)
+        }
+        for b in [clear, remove] {
+            cacheRow.trailing.addArrangedSubview(b)
+        }
+        remove.contentTintColor = .systemRed
+        progress.style = .bar
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 1
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        progressRow.addSubview(progress)
+        NSLayoutConstraint.activate([
+            progress.leadingAnchor.constraint(equalTo: progressRow.leadingAnchor, constant: 12),
+            progress.trailingAnchor.constraint(equalTo: progressRow.trailingAnchor, constant: -12),
+            progress.centerYAnchor.constraint(equalTo: progressRow.centerYAnchor),
+            progressRow.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        // The downloader's line can be long (the limit reached): it wraps,
+        // as the subtitle, with the notes under it.
+        stateRow.title.isHidden = true
+        for row in [libraryRow, usageRow, stateRow, progressRow, cacheRow] as [NSView] {
+            group.box.add(row)
+        }
+    }
+
+    @objc private func libraryChanged() { actions?.offlineKeepLibrary(keep: library.state == .on) }
+    @objc private func pauseClicked() { actions?.offlinePause() }
+    @objc private func resumeClicked() { actions?.offlineResume() }
+    @objc private func cancelClicked() { actions?.offlineCancel() }
+    @objc private func clearClicked() { actions?.clearCache() }
+    @objc private func removeClicked() { actions?.removeKeptFiles() }
+
+    func update(_ o: OfflineView) {
+        guard o != shown else { return }
+        shown = o
+        group.title.setText(o.title)
+        let state: NSControl.StateValue = o.library ? .on : .off
+        if library.state != state { library.state = state }
+        libraryRow.title.setText(o.libraryLabel)
+        libraryRow.setSubtitle(o.libraryHelp)
+        usageRow.title.setText(o.kept)
+        usageRow.setSubtitle(o.other)
+        usageRow.setShown(!o.kept.isEmpty)
+        stateRow.setSubtitle([o.state, o.notes].filter { !$0.isEmpty }.joined(separator: "\n"))
+        stateRow.subtitle.textColor = o.stateWarning ? .systemOrange : .labelColor
+        pause.title = o.pauseLabel
+        resume.title = o.resumeLabel
+        cancel.title = o.cancelLabel
+        pause.setShown(o.canPause)
+        resume.setShown(o.canResume)
+        cancel.setShown(o.canCancel)
+        stateRow.setShown(!o.state.isEmpty || o.canResume)
+        progress.doubleValue = o.fraction ?? 0
+        progressRow.setShown(o.fraction != nil)
+        cacheRow.title.setText(o.cacheTitle)
+        cacheRow.setSubtitle(o.message)
+        cacheRow.subtitle.textColor = o.messageError ? .systemRed : .secondaryLabelColor
+        clear.title = o.clearLabel
+        clear.toolTip = o.clearHelp
+        remove.title = o.removeLabel
+        remove.toolTip = o.removeHelp
+        remove.isEnabled = o.canRemove
+    }
+
+    func stops() -> [PageStop] {
+        var out = [PageStop(highlight: libraryRow, control: .toggle(library))]
+        for b in [pause, resume, cancel] {
+            out.append(PageStop(highlight: b, control: .button(b)))
+        }
+        out.append(PageStop(highlight: clear, control: .button(clear)))
+        out.append(PageStop(highlight: remove, control: .button(remove)))
+        return out
+    }
+}
+
+/// The Settings tab: groups of rows generated from what Rust sends, and
+/// the "On this device" block before the "Offline" group.
 final class SettingsPage: PageView {
     weak var actions: SettingsActions? {
         didSet { rows.forEach { $0.actions = actions } }
     }
+    weak var offlineActions: OfflineActions? {
+        didSet { offline.actions = offlineActions }
+    }
+    private let offline = OfflineBlockView()
+    /// How many rows come before the block (its place among the stops).
+    private var offlineAt = 0
     private var settings: SettingsView?
     private let note = wrappingLabel("", size: 11, color: .secondaryLabelColor)
     private let warnings = wrappingLabel("", size: 11, color: .systemOrange)
@@ -194,10 +324,12 @@ final class SettingsPage: PageView {
 
     override func stops() -> [PageStop] {
         var out: [PageStop] = []
-        for r in rows {
+        for (i, r) in rows.enumerated() {
+            if i == offlineAt { out += offline.stops() }
             out.append(PageStop(highlight: r.row, control: r.control))
             out.append(PageStop(highlight: r.reset, control: .button(r.reset)))
         }
+        if offlineAt >= rows.count { out += offline.stops() }
         return out
     }
 
@@ -215,8 +347,9 @@ final class SettingsPage: PageView {
         saveError.setShown(s.saveError != nil)
 
         let newShape = s.groups.flatMap { g in [g.title] + g.rows.map { "\($0.key) \($0.kind)" } }
+            + ["offline before \(String(describing: s.offlineBefore))"]
         if newShape != shape {
-            rebuild(s.groups)
+            rebuild(s.groups, offlineBefore: s.offlineBefore.map { Int($0) })
             shape = newShape
         } else {
             var i = 0
@@ -229,17 +362,26 @@ final class SettingsPage: PageView {
             }
         }
         groups.forEach { $0.setShown(s.error == nil) }
+        if let o = s.offline { offline.update(o) }
+        offline.group.setShown(s.error == nil && s.offline != nil)
         contentChanged()
     }
 
-    private func rebuild(_ new: [SettingsGroup]) {
+    private func rebuild(_ new: [SettingsGroup], offlineBefore: Int?) {
         groups.forEach {
             column.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
+        column.removeArrangedSubview(offline.group)
+        offline.group.removeFromSuperview()
         groups = []
         rows = []
-        for g in new {
+        offlineAt = Int.max
+        for (i, g) in new.enumerated() {
+            if i == offlineBefore {
+                column.addFullWidth(offline.group)
+                offlineAt = rows.count
+            }
             let view = GroupView(title: g.title)
             for r in g.rows {
                 let row = SettingRowView(r)
@@ -249,6 +391,10 @@ final class SettingsPage: PageView {
             }
             column.addFullWidth(view)
             groups.append(view)
+        }
+        if offlineAt == Int.max {
+            column.addFullWidth(offline.group)
+            offlineAt = rows.count
         }
         resetCursor()
     }

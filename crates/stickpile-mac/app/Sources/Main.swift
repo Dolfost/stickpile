@@ -28,7 +28,8 @@ struct Options {
       --tab NAME           with --show or --snapshot: open on this tab
       --test-pasteboard    copy to a private pasteboard, not the general one
       --fake[=SCENE]       made-up data instead of the driver (items, recent, packs,
-                           pack, many, me, login, settings, help, error)
+                           pack, many, me, login, settings, help, error, offline,
+                           confirm, offline-settings)
       --snapshot OUT.png   open the popup, draw it into OUT.png, quit
       --snapshot-delay S   seconds to wait before the snapshot (default 2)
       --appearance light|dark

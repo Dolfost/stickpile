@@ -29,6 +29,16 @@ protocol PopupControl: AnyObject {
     func openServer()
     func setSetting(key: String, value: SettingValue)
     func resetSetting(key: String)
+    func openMenu(index: UInt32?)
+    func menuChoose(action: MenuChoice)
+    func menuClosed()
+    func confirm(yes: Bool)
+    func offlineKeepLibrary(keep: Bool)
+    func offlinePause()
+    func offlineResume()
+    func offlineCancel()
+    func clearCache()
+    func removeKeptFiles()
 }
 
 extension Popup: PopupControl {}
@@ -37,7 +47,7 @@ extension Popup: PopupControl {}
 ///
 /// Calls into the popup never nest: one made while another runs (from a
 /// render, or a control reacting to one) is queued on the main queue.
-final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unchecked Sendable {
+final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, OfflineActions, @unchecked Sendable {
     let panel: PopupPanel
     let view: PopupView
     let thumbs = ThumbStore()
@@ -71,6 +81,12 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
     var onLanguage: (() -> Void)?
     /// (view, selected, revision) last scrolled to.
     private var scrolledTo: (ViewKind, UInt32?, UInt64)?
+    /// The menu of a tile on screen (or about to be), and where the right
+    /// click was: the grid and the point in its collection view.
+    private var menuShown: MenuView?
+    private var menuAt: (GridView, NSPoint)?
+    /// The actions of the menu on screen, by item tag.
+    private var menuChoices: [MenuChoice] = []
 
     init(testPasteboard: Bool) {
         pasteboard = testPasteboard
@@ -107,6 +123,11 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         for grid in [v.itemsGrid, v.packsGrid] {
             grid.collection.onSelect = { [weak self] i in self?.send { $0.select(index: UInt32(i)) } }
             grid.collection.onActivate = { [weak self] i in self?.send { $0.activate(index: UInt32(i)) } }
+            grid.collection.onMenu = { [weak self, weak grid] i, point in
+                guard let self, let grid else { return }
+                self.menuAt = (grid, point)
+                self.send { $0.openMenu(index: UInt32(i)) }
+            }
             grid.onSize = { [weak self, weak grid] size in
                 guard let self, let grid, !grid.isHidden else { return }
                 self.gridResized(size)
@@ -114,6 +135,8 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         }
         v.mePage.actions = self
         v.settingsPage.actions = self
+        v.settingsPage.offlineActions = self
+        v.confirm.onAnswer = { [weak self] yes in self?.send { $0.confirm(yes: yes) } }
 
         panel.onResignKey = { [weak self] in
             guard let self, !self.hiding, self.panel.isVisible else { return }
@@ -266,6 +289,8 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         v.mePage.setCursor(on: cursor && s.view == .me)
         v.settingsPage.setCursor(on: cursor && s.view == .settings)
         v.help.update(s.help, hint: s.helpHint)
+        v.confirm.update(s.confirm)
+        updateMenu(s.menu)
         v.footer.update(s.footer)
         v.needsLayout = true
         if panel.isVisible {
@@ -420,6 +445,76 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         send { $0.setSetting(key: key, value: value) }
     }
     func resetSetting(key: String) { send { $0.resetSetting(key: key) } }
+
+    // MARK: keeping offline
+
+    func offlineKeepLibrary(keep: Bool) { send { $0.offlineKeepLibrary(keep: keep) } }
+    func offlinePause() { send { $0.offlinePause() } }
+    func offlineResume() { send { $0.offlineResume() } }
+    func offlineCancel() { send { $0.offlineCancel() } }
+    func clearCache() { send { $0.clearCache() } }
+    func removeKeptFiles() { send { $0.removeKeptFiles() } }
+
+    /// The menu of a tile: shown once Rust sends it, outside the render
+    /// (an `NSMenu` runs its own loop until it closes).
+    private func updateMenu(_ m: MenuView?) {
+        guard let m else {
+            menuShown = nil
+            return
+        }
+        guard m != menuShown else { return }
+        menuShown = m
+        DispatchQueue.main.async { [weak self] in self?.popUpMenu(m) }
+    }
+
+    private func popUpMenu(_ m: MenuView) {
+        // Not in snapshot runs: the menu is a window of its own, not drawn there.
+        guard let s = state, s.menu == m, let grid = view.shownGrid, panel.isVisible, !offscreen else {
+            menuShown = nil
+            return
+        }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menuChoices = []
+        let tabs = NSMutableParagraphStyle()
+        tabs.tabStops = [NSTextTab(textAlignment: .right, location: 240)]
+        for e in m.entries {
+            let item = NSMenuItem(title: e.label, action: nil, keyEquivalent: "")
+            if !e.keys.isEmpty {
+                let title = NSMutableAttributedString(string: e.label + "\t",
+                                                      attributes: [.paragraphStyle: tabs, .font: NSFont.menuFont(ofSize: 0)])
+                title.append(NSAttributedString(string: e.keys, attributes: [
+                    .paragraphStyle: tabs, .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor,
+                ]))
+                item.attributedTitle = title
+            }
+            if let action = e.action {
+                item.tag = menuChoices.count
+                menuChoices.append(action)
+                item.target = self
+                item.action = #selector(menuItemChosen(_:))
+            } else {
+                item.isEnabled = false
+            }
+            menu.addItem(item)
+        }
+        // At the click, else (Shift+F10) the middle of the cell.
+        var point = grid.cellCenter(Int(m.index))
+        if let at = menuAt, at.0 === grid { point = at.1 }
+        menuAt = nil
+        let chose = menu.popUp(positioning: nil, at: point, in: grid.collection)
+        if !chose {
+            menuShown = nil
+            send { $0.menuClosed() }
+        }
+    }
+
+    @objc private func menuItemChosen(_ item: NSMenuItem) {
+        guard item.tag >= 0, item.tag < menuChoices.count else { return }
+        let action = menuChoices[item.tag]
+        menuShown = nil
+        send { $0.menuChoose(action: action) }
+    }
 
     /// `ui.theme`: the app's appearance (system follows macOS) and the
     /// OLED black.

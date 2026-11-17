@@ -3,7 +3,10 @@ import AppKit
 /// A stand-in for the Rust popup with made-up data (`--fake[=SCENE]`), to
 /// look at the layouts without a driver or a server. Scenes: items, recent,
 /// packs, pack, many, text (the text line on the tiles), me, login,
-/// settings, help, error.
+/// settings, help, error; and for keeping offline: offline (the marks with
+/// the server unreachable), confirm (the question before keeping a pack),
+/// offline-settings (the "On this device" block). A right click on a tile
+/// opens a made-up menu (not in snapshots: the menu is a window of its own).
 final class FakePopup: PopupControl {
     private weak var ui: PopupController?
     private let scene: String
@@ -92,10 +95,14 @@ final class FakePopup: PopupControl {
     }
 
     /// `text`: the words in the picture on some tiles (the "text" scene).
-    private func makeEntries(_ n: Int, text: Bool = false) -> [EntryView] {
+    /// `unreachable`: the server is gone, the tiles not kept are dimmed
+    /// (the "offline" scene); else some tiles are marked available.
+    private func makeEntries(_ n: Int, text: Bool = false, unreachable: Bool = false) -> [EntryView] {
         (0..<n).map { i in
             let k = i % FakePopup.names.count
             let words = text && i % 3 != 2 ? FakePopup.texts[i % FakePopup.texts.count] : ""
+            let kept = i % 3 == 0 || i == 1
+            let offline: OfflineMark = kept ? .available : (unreachable ? .unavailable : OfflineMark.none)
             return EntryView(
                 id: "item-\(i)", name: FakePopup.names[k],
                 badge: i % 6 == 2 ? "GIF" : (i % 11 == 5 ? "WEBP" : nil),
@@ -105,7 +112,8 @@ final class FakePopup: PopupControl {
                 emojis: i % 3 == 0 ? FakePopup.emojis[k % FakePopup.emojis.count] : "",
                 tags: i % 5 == 0 ? "cat, cute, wave" : "",
                 vibe: i % 4 == 2 ? "sarcastic" : (i % 7 == 3 ? "tired" : ""),
-                text: words)
+                text: words,
+                offline: offline)
         }
     }
 
@@ -118,9 +126,59 @@ final class FakePopup: PopupControl {
         let names = ["Cats", "Reactions", "Work memes", "Telegram favourites", "Animals", "Gifs", "Empty pack"]
         return names.enumerated().map { i, n in
             PackView(id: "pack-\(i)", coverKey: "cover-\(i)", name: n,
-                     detail: "\(12 + i * 7) items - \(i % 2 == 0 ? "alice" : "bob")")
+                     detail: "\(12 + i * 7) items - \(i % 2 == 0 ? "alice" : "bob")", kept: i == 0)
         }
     }
+
+    /// The "On this device" block, as the driver sends it (`fraction`: a
+    /// run in progress).
+    private func offlineBlock(library: Bool, fraction: Double?, paused: Bool = false) -> OfflineView {
+        let running = fraction != nil
+        let state: String
+        if paused {
+            state = "Paused: 412 of 1,180 files, 41.0 MB of 132.5 MB."
+        } else if running {
+            state = "Downloading: 412 of 1,180 files, 41.0 MB of 132.5 MB."
+        } else {
+            state = "Up to date: all 1,180 kept files are on this device."
+        }
+        return OfflineView(
+            title: "On this device", library: library, libraryLabel: "Keep everything offline",
+            libraryHelp: "Every sticker you can see, now and later, within the limit of the Offline settings below. Asks first, with what it takes.",
+            kept: "Kept offline: 412 files, 41.0 MB of 1.1 GB allowed.",
+            other: "Other cached files: 37, 2.4 MB (the cache size limit applies).",
+            state: state, stateWarning: false, fraction: fraction ?? 1, canPause: running && !paused,
+            canResume: paused, canCancel: running || paused,
+            notes: "2 files could not be downloaded; they are tried again on the next run.\n14 left out by the settings below (kinds, size limit).",
+            message: "Clearing leaves the kept files; removing them asks first.", messageError: false, canRemove: true,
+            pauseLabel: "Pause", resumeLabel: "Resume", cancelLabel: "Cancel", cacheTitle: "Cached files",
+            clearLabel: "Clear cache",
+            clearHelp: "Delete the thumbnails and copied files that are not kept; kept files stay",
+            removeLabel: "Remove kept files", removeHelp: "Delete every kept file and forget what to keep (asks first)")
+    }
+
+    private func offlineGroup() -> SettingsGroup {
+        SettingsGroup(title: "Offline", rows: [
+            SettingRow(key: "offline.auto.thumbnails", label: "Keep all thumbnails",
+                       help: "After each sync, fetch every item's thumbnail so the grids are complete offline.",
+                       kind: .bool, value: .bool(value: true), locked: false, resettable: false),
+            SettingRow(key: "offline.videos", label: "Videos",
+                       help: "Download videos when keeping a pack, the library or by an automatic rule.",
+                       kind: .bool, value: .bool(value: false), locked: false, resettable: false),
+            SettingRow(key: "offline.max_mb", label: "Offline limit", help: "MiB that kept files may take (0: no limit).",
+                       kind: .int(min: 0, max: 1_000_000), value: .int(value: 1024), locked: false, resettable: false),
+        ])
+    }
+
+    private static let keepPack = ConfirmView(
+        title: "Keep Cats offline?",
+        body: "39 stickers, 82 files, 14.2 MB. 1.1 MB of it is on this device already.\n\nKept files would take 55.2 MB of the 1.1 GB allowed.",
+        accept: "Keep offline", cancel: "Cancel", destructive: false, hint: "Return: keep offline, Escape: cancel")
+
+    private static let removeKept = ConfirmView(
+        title: "Remove kept files?",
+        body: "412 kept files (41.0 MB) are deleted, and nothing stays marked to keep offline.\n\nThe automatic rules of the Offline settings download what they cover again; turn them off first to keep nothing.",
+        accept: "Remove kept files", cancel: "Cancel", destructive: true, hint: "Return: remove, Escape: cancel")
 
     private func meSignedIn() -> MeView {
         MeView(loading: false, who: "Alice Example", detail: "alice - admin", account: MeAccount(
@@ -166,8 +224,9 @@ final class FakePopup: PopupControl {
         ])
         return SettingsView(error: nil, note: "Changes are saved to ~/Library/Application Support/stickpile/config.toml",
                             path: "/Users/alice/Library/Application Support/stickpile/config.toml",
-                            warnings: ["settings.toml: unknown key ui.colums (skipped)"], groups: [popup, server],
-                            saveError: nil)
+                            warnings: ["settings.toml: unknown key ui.colums (skipped)"],
+                            groups: [popup, offlineGroup(), server], saveError: nil,
+                            offline: offlineBlock(library: false, fraction: nil), offlineBefore: 1)
     }
 
     private func helpSections() -> [HelpSection] {
@@ -201,10 +260,28 @@ final class FakePopup: PopupControl {
 
     private func setScene(_ name: String) {
         var s = FakePopup.base()
-        entries = makeEntries(name == "many" ? 600 : 36, text: name == "text")
+        entries = makeEntries(name == "many" ? 600 : 36, text: name == "text", unreachable: name == "offline")
         packs = makePacks()
         revision += 1
         switch name {
+        case "offline":
+            s.selected = 4
+            s.footer.status = "Copy failed: party-parrot is not on this device and the server is unreachable; keep it offline (K) to copy it without the server"
+            s.footer.level = .error
+            s.footer.details = "party-parrot · Cats · GIF 320×240 · copied 2 times"
+        case "confirm":
+            s.tab = .packs; s.view = .packs; s.title = "Packs"; s.query = ""; s.placeholder = "Filter packs by name"
+            s.selected = 0; s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false
+            s.footer.status = ""; s.footer.details = "Cats · 39 items · by alice"
+            s.confirm = FakePopup.keepPack
+        case "offline-settings":
+            s.tab = .settings; s.view = .settings; s.title = "Settings"; s.hasField = false; s.query = ""
+            s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false; s.footer.details = ""
+            s.footer.status = "The whole library is kept offline"
+            s.settings = SettingsView(error: nil, note: "Changes are saved to ~/Library/Application Support/stickpile/config.toml",
+                                      path: "/Users/alice/Library/Application Support/stickpile/config.toml",
+                                      warnings: [], groups: [offlineGroup()], saveError: nil,
+                                      offline: offlineBlock(library: true, fraction: 0.31), offlineBefore: 0)
         case "recent":
             s.tab = .recent; s.title = "Recent"; s.hasField = false; s.query = ""; s.count = "36 items"
             s.focus = .noField; s.footer.mode = "NORMAL"; s.footer.insert = false; s.footer.pending = "3"
@@ -318,6 +395,15 @@ final class FakePopup: PopupControl {
     func key(key: KeyInput) -> Bool {
         let ch = key.latin ?? key.characters
         let insert = state.footer.insert
+        // A question takes the keys: Return or y yes, Escape, n or q no.
+        if state.confirm != nil {
+            if key.keyCode == 36 || ch == "y" {
+                confirm(yes: true)
+            } else if key.keyCode == 53 || ch == "n" || ch == "q" {
+                confirm(yes: false)
+            }
+            return true
+        }
         switch key.keyCode {
         case 53:
             if state.help != nil {
@@ -508,6 +594,101 @@ final class FakePopup: PopupControl {
                 state.settings.groups[g].rows[r].resettable = false
             }
         }
+        render()
+    }
+
+    // MARK: keeping offline
+
+    func openMenu(index: UInt32?) {
+        guard state.view == .items || state.view == .packs else { return }
+        let i = index ?? state.selected ?? 0
+        state.selected = i
+        if state.view == .packs {
+            state.menu = MenuView(index: i, entries: [
+                MenuEntryView(label: "Open the pack", keys: "o", action: .openPack),
+                MenuEntryView(label: "Keep \(packs[Int(i) % packs.count].name) offline...", keys: "K", action: .keepPack),
+            ])
+        } else {
+            let e = entries[Int(i) % entries.count]
+            var list = [
+                MenuEntryView(label: "Copy", keys: "y", action: .copy),
+                MenuEntryView(label: "Copy as a sticker", keys: "Y", action: .copyFlipped),
+                MenuEntryView(label: e.liked ? "Remove from favorites" : "Add to favorites", keys: "f", action: .favorite),
+                MenuEntryView(label: "Open in the browser", keys: "gx", action: .browser),
+            ]
+            if e.offline == .available {
+                list.append(MenuEntryView(label: "Stop keeping offline", keys: "K", action: .release))
+                list.append(MenuEntryView(label: "Available offline", keys: "", action: nil))
+            } else {
+                list.append(MenuEntryView(label: "Kept offline: pack Cats", keys: "", action: nil))
+                list.append(MenuEntryView(label: "Keep offline", keys: "K", action: .keep))
+            }
+            state.menu = MenuView(index: i, entries: list)
+        }
+        render()
+    }
+
+    func menuChoose(action: MenuChoice) {
+        state.menu = nil
+        switch action {
+        case .keepPack: state.confirm = FakePopup.keepPack
+        case .keep: state.footer.status = "\(entries[Int(state.selected ?? 0)].name) is kept offline"
+        case .release: state.footer.status = "\(entries[Int(state.selected ?? 0)].name) is no longer kept offline"
+        default: state.footer.status = "Chose \(action)"
+        }
+        state.footer.level = .info
+        render()
+    }
+
+    func menuClosed() {
+        state.menu = nil
+        render()
+    }
+
+    func confirm(yes: Bool) {
+        let was = state.confirm
+        state.confirm = nil
+        if yes, let was {
+            state.footer.status = was.destructive ? "Removed 412 kept files (41.0 MB)" : "Pack Cats is kept offline"
+            state.footer.level = .info
+        }
+        render()
+    }
+
+    func offlineKeepLibrary(keep: Bool) {
+        if keep {
+            state.confirm = ConfirmView(
+                title: "Keep the whole library offline?",
+                body: "1,180 stickers, 2,410 files, 132.5 MB. 41.0 MB of it is on this device already.\n\nKept files would take 140.2 MB of the 1.1 GB allowed.",
+                accept: "Keep offline", cancel: "Cancel", destructive: false, hint: "Return: keep offline, Escape: cancel")
+        } else {
+            state.settings.offline = offlineBlock(library: false, fraction: nil)
+        }
+        render()
+    }
+
+    func offlinePause() {
+        state.settings.offline = offlineBlock(library: true, fraction: 0.31, paused: true)
+        render()
+    }
+
+    func offlineResume() {
+        state.settings.offline = offlineBlock(library: true, fraction: 0.31)
+        render()
+    }
+
+    func offlineCancel() {
+        state.settings.offline = offlineBlock(library: true, fraction: nil)
+        render()
+    }
+
+    func clearCache() {
+        state.settings.offline?.message = "Cleared 37 files (2.4 MB); 412 kept files stayed."
+        render()
+    }
+
+    func removeKeptFiles() {
+        state.confirm = FakePopup.removeKept
         render()
     }
 }

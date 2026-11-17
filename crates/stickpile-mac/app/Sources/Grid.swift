@@ -130,16 +130,23 @@ final class FixedGridLayout: NSCollectionViewLayout {
     }
 }
 
-/// The collection view: clicks select and double clicks activate; it
-/// never takes the keyboard focus (the popup handles the keys).
+/// The collection view: clicks select and double clicks activate, a right
+/// click (or Control-click) asks for the cell's menu; it never takes the
+/// keyboard focus (the popup handles the keys).
 final class GridCollectionView: NSCollectionView {
     var onSelect: ((Int) -> Void)?
     var onActivate: ((Int) -> Void)?
+    /// The cell and where in this view the click was.
+    var onMenu: ((Int, NSPoint) -> Void)?
 
     override var acceptsFirstResponder: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            rightMouseDown(with: event)
+            return
+        }
         let p = convert(event.locationInWindow, from: nil)
         guard let index = indexPathForItem(at: p)?.item else { return }
         if event.clickCount == 2 {
@@ -147,6 +154,12 @@ final class GridCollectionView: NSCollectionView {
         } else if event.clickCount == 1 {
             onSelect?(index)
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let index = indexPathForItem(at: p)?.item else { return }
+        onMenu?(index, p)
     }
 
     override func keyDown(with event: NSEvent) {}
@@ -182,6 +195,10 @@ final class GridCell: NSView {
         grid?.mouseDown(with: event)
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        grid?.rightMouseDown(with: event)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let box = bounds.insetBy(dx: 2, dy: 2)
         if selected {
@@ -206,8 +223,9 @@ final class GridCell: NSView {
         let image = thumbs?.image(key)
         if let image {
             let fit = aspectFit(image.size, in: area)
-            let dimmed = entry?.incompatible == true
-            image.draw(in: fit, from: .zero, operation: .sourceOver, fraction: dimmed ? 0.4 : 1,
+            // Not on the device with the server unreachable: barely there.
+            let fraction: CGFloat = entry?.offline == .unavailable ? 0.35 : (entry?.incompatible == true ? 0.4 : 1)
+            image.draw(in: fit, from: .zero, operation: .sourceOver, fraction: fraction,
                        respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         } else {
             NSColor.labelColor.withAlphaComponent(0.06).setFill()
@@ -270,6 +288,7 @@ final class GridCell: NSView {
         if tiles.text, !e.text.isEmpty {
             let font = NSFont.systemFont(ofSize: 9, weight: .medium)
             let bottomUsed = e.incompatible || !(e.badge ?? "").isEmpty || (tiles.tags && !e.tags.isEmpty)
+                || e.offline != OfflineMark.none
             let w = min(inner.width, textWidth(e.text, font) + 10)
             if w > 16 {
                 drawPill(e.text, in: NSRect(x: inner.minX, y: inner.maxY - 15 - (bottomUsed ? 18 : 0), width: w, height: 15),
@@ -283,9 +302,28 @@ final class GridCell: NSView {
             drawPill(badge, in: NSRect(x: inner.maxX - badgeWidth, y: inner.maxY - 15, width: badgeWidth, height: 15),
                      font: font, fg: .white, bg: pillBg, radius: 5)
         }
+        // The offline mark, left of the badge: the file is on the device, or
+        // (the server unreachable) it is not.
+        var markWidth: CGFloat = 0
+        var mark: (String, NSColor)?
+        switch e.offline {
+        case .available: mark = ("arrow.down.circle.fill", .systemGreen)
+        case .unavailable: mark = ("icloud.slash", .systemOrange)
+        case .none: mark = nil
+        }
+        if let m = mark, let icon = symbol(m.0, size: 10, weight: .bold, color: m.1) {
+            markWidth = 20
+            let right = inner.maxX - (badgeWidth > 0 ? badgeWidth + 3 : 0)
+            let r = NSRect(x: right - markWidth, y: inner.maxY - 15, width: markWidth, height: 15)
+            pillBg.setFill()
+            NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
+            let s = icon.size
+            icon.draw(in: NSRect(x: r.midX - s.width / 2, y: r.midY - s.height / 2, width: s.width, height: s.height),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
         if tiles.tags, !e.tags.isEmpty {
             let font = NSFont.systemFont(ofSize: 9, weight: .medium)
-            let room = inner.maxX - bottomLeft - (badgeWidth > 0 ? badgeWidth + 3 : 0)
+            let room = inner.maxX - bottomLeft - (badgeWidth > 0 ? badgeWidth + 3 : 0) - (markWidth > 0 ? markWidth + 3 : 0)
             let w = min(room, textWidth(e.tags, font) + 10)
             if w > 16 {
                 drawPill(e.tags, in: NSRect(x: bottomLeft, y: inner.maxY - 15, width: w, height: 15),
@@ -296,6 +334,15 @@ final class GridCell: NSView {
 
     private func drawPackLabels(below area: NSRect) {
         guard let p = pack else { return }
+        // A kept pack: the mark at the cover's top right.
+        if p.kept, let icon = symbol("arrow.down.circle.fill", size: 10, weight: .bold, color: .systemGreen) {
+            let r = NSRect(x: area.maxX - 23, y: area.minY + 3, width: 20, height: 15)
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
+            let s = icon.size
+            icon.draw(in: NSRect(x: r.midX - s.width / 2, y: r.midY - s.height / 2, width: s.width, height: s.height),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
         let x = bounds.minX + 6
         let w = bounds.width - 12
         let name = NSAttributedString(string: p.name, attributes: lineAttributes(
@@ -418,6 +465,13 @@ final class GridView: NSScrollView, NSCollectionViewDataSource {
         let f = grid.frame(i).insetBy(dx: 0, dy: -grid.inset)
         collection.scrollToVisible(f)
         debug("scroll to \(i): clip \(contentView.bounds), cells \(collection.visibleItems().count)")
+    }
+
+    /// The middle of a cell, in the collection view: where its menu opens
+    /// when no click says where.
+    func cellCenter(_ i: Int) -> NSPoint {
+        let f = grid.frame(i)
+        return NSPoint(x: f.midX, y: f.midY)
     }
 
     func thumbnailReady(_ key: String) {
