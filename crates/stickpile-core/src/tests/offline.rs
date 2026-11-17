@@ -1603,3 +1603,500 @@ async fn real_0_8_0_cli_on_a_cache_the_new_client_wrote() {
     }
     println!("healed: every kept file is back and flagged");
 }
+
+// -- review: data safety (branch review-offline-safety) ---------------------------------
+//
+// Tests written by the data-safety review of the offline round. Those that
+// fail show a bug; the message says what was expected.
+
+/// The part of a stale run's last step that deletes: a download that
+/// started before "Remove kept files" (or a sign-out) in another process
+/// ends after that process kept and downloaded the same file again.
+#[test]
+fn review_a_stale_registration_leaves_a_file_kept_under_the_new_epoch() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 512).unwrap();
+    let rel = "clip/m1.original/cat.png";
+    // Process A's download started now.
+    let stale = cache.offline_epoch().unwrap();
+    // Process B: "Remove kept files", then keeps the sticker again and
+    // downloads it.
+    cache.offline_reset().unwrap();
+    let current = cache.offline_epoch().unwrap();
+    std::fs::create_dir_all(cache.abs(rel).parent().unwrap()).unwrap();
+    std::fs::write(cache.abs(rel), b"the file").unwrap();
+    assert!(cache.register_kept_file(rel, current).unwrap());
+    // A's download of the same file ends (A renamed its copy into place, or
+    // found it present): it must not register it, and must not delete B's.
+    assert!(!cache.register_kept_file(rel, stale).unwrap());
+    assert!(
+        cache.file_present(rel, None).unwrap(),
+        "the file kept under the current epoch was deleted by a stale registration (kept rows: {:?})",
+        kept(&cache)
+    );
+}
+
+/// End to end: the popup (A) downloads a slow file; meanwhile the CLI (B)
+/// runs "Remove kept files", keeps the same sticker and downloads it to
+/// completion. A's stale run then deletes B's kept file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_a_stale_run_does_not_delete_what_another_process_kept_since() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let a = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    let slow = server
+        .state()
+        .add_item(&items[0].set_id, "slow", &[], mp4_bytes(40 * 1024));
+    server
+        .state()
+        .slow_files
+        .insert((slow.id.clone(), Variant::Original), Duration::from_millis(30));
+    a.sync().await.unwrap();
+    let b = Session::open(config_for(&server.url, dir.path())).await.unwrap();
+    b.set_offline_options(plain(&[TargetApp::Generic]));
+    a.offline_keep(&Scope::Item(slow.id.clone())).unwrap();
+    let cache = cache_dir(dir.path());
+    let ca = quick();
+    ca.tune(|t| t.concurrency = 1);
+    let cb = quick();
+    let (oa, ob) = tokio::join!(run(&a, &ca), async {
+        for _ in 0..300 {
+            if part_files(&cache).iter().any(|p| p.contains(".original/")) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            part_files(&cache).iter().any(|p| p.contains(".original/")),
+            "A is downloading the slow original"
+        );
+        b.offline_remove_all().unwrap();
+        b.offline_keep(&Scope::Item(slow.id.clone())).unwrap();
+        run(&b, &cb).await
+    });
+    assert!(ob.is_complete(), "B says everything is on the device: {ob:?}");
+    let plan = b.offline_plan().unwrap();
+    let missing: Vec<&str> = plan.missing().map(|f| f.file.rel.as_str()).collect();
+    assert!(
+        missing.is_empty(),
+        "after A's stale run (ended {:?}) B's kept files are missing: {missing:?}; on disk: {:?}; kept rows: {:?}",
+        oa.end,
+        on_disk(&cache),
+        kept(b.cache())
+    );
+}
+
+/// `Session::offline_run` reads the epoch before `offline_refresh`, which
+/// itself resets the offline data when it belongs to another account (what a
+/// client up to 0.8.0 leaves after switching accounts): the run then throws
+/// its first download away and ends `Cancelled`.
+#[tokio::test]
+async fn review_a_run_whose_refresh_resets_is_not_cancelled() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let mut opts = plain(&[TargetApp::Generic]);
+    opts.auto.thumbnails = true;
+    let session = synced(&server, dir.path(), opts).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    // The kept data belongs to another account than the cached one.
+    session.cache().meta_set("offline_owner", "another-account").unwrap();
+    let out = run(&session, &quick()).await;
+    assert!(
+        out.is_complete(),
+        "the run after the reset should fetch the thumbnails: {:?} {}/{} {:?}",
+        out.end,
+        out.status.files_done,
+        out.status.files_total,
+        out.status.message
+    );
+}
+
+/// The row of a cached file is deleted before the file; when the file
+/// cannot be deleted, the row is gone anyway: the report counts it as
+/// removed and nothing ever deletes it later (0.8.0 kept the row then).
+#[test]
+fn review_a_file_that_could_not_be_deleted_stays_registered() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root ignores directory permissions");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 512).unwrap();
+    let kept_rel = "files/thumb/k.webp";
+    let other_rel = "clip/o.original/o.png";
+    for rel in [kept_rel, other_rel] {
+        std::fs::create_dir_all(cache.abs(rel).parent().unwrap()).unwrap();
+        std::fs::write(cache.abs(rel), b"some bytes").unwrap();
+    }
+    assert!(cache
+        .register_kept_file(kept_rel, cache.offline_epoch().unwrap())
+        .unwrap());
+    cache.register_file(other_rel).unwrap();
+    let mode = |rel: &str, mode: u32| {
+        std::fs::set_permissions(
+            cache.abs(rel).parent().unwrap(),
+            std::fs::Permissions::from_mode(mode),
+        )
+        .unwrap()
+    };
+    mode(kept_rel, 0o555);
+    mode(other_rel, 0o555);
+    let removed = cache.offline_reset().unwrap();
+    let cleared = cache.clear_files().unwrap();
+    mode(kept_rel, 0o755);
+    mode(other_rel, 0o755);
+    assert!(cache.abs(kept_rel).exists() && cache.abs(other_rel).exists());
+    let index = cache.file_index().unwrap();
+    assert!(
+        index.contains_key(kept_rel) && index.contains_key(other_rel),
+        "files still on disk are no longer registered, so no later reset, clear or eviction deletes them \
+         (reset reported {} removed, clear {} removed; index {index:?})",
+        removed.removed_files,
+        cleared.removed_files
+    );
+}
+
+/// Two processes on one cache with different offline options (the popup
+/// with the options it read at start, the CLI with the edited config):
+/// every refresh of the one releases the files the other keeps, and its
+/// size cap then evicts them.
+#[tokio::test]
+async fn review_a_refresh_with_other_options_does_not_hand_kept_files_to_the_cap() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let mut with_videos = plain(&[TargetApp::Generic]);
+    with_videos.videos = true;
+    let a = synced(&server, dir.path(), with_videos).await;
+    a.offline_keep(&Scope::Set(items[3].set_id.clone())).unwrap();
+    assert!(run(&a, &quick()).await.is_complete());
+    let kept_by_a = kept(a.cache());
+    let big = server
+        .state()
+        .add_item(&items[0].set_id, "big", &[], mp4_bytes(1100 * 1024));
+    // B: the same cache, a 1 MiB cap, videos off (the default).
+    let mut config = config_for(&server.url, dir.path());
+    config.cache_max_mb = 1;
+    login_token(&server, dir.path());
+    let b = Session::open(config).await.unwrap();
+    b.set_offline_options(plain(&[TargetApp::Generic]));
+    b.sync().await.unwrap(); // refreshes with B's options
+    let big = b.cache().item(&big.id).unwrap().unwrap();
+    b.prepare_copy(&big, TargetApp::Generic, false).await.unwrap();
+    let plan = a.offline_plan().unwrap();
+    let missing: Vec<&str> = plan.missing().map(|f| f.file.rel.as_str()).collect();
+    assert!(
+        missing.is_empty(),
+        "A's kept files were evicted by B's size cap: {missing:?} (kept by A before: {kept_by_a:?})"
+    );
+}
+
+/// An interrupted "Remove kept files" (the process died after forgetting
+/// the keeps, before deleting the files): the next refresh releases the
+/// kept files to the LRU instead of deleting them.
+#[tokio::test]
+async fn review_an_interrupted_remove_all_still_deletes_the_kept_files() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let cache = cache_dir(dir.path());
+    let kept_files = kept(session.cache());
+    assert!(!kept_files.is_empty());
+    {
+        // `Cache::offline_reset`'s transaction, and then the process dies.
+        let conn = rusqlite::Connection::open(cache.join(crate::cache::DB_FILE)).unwrap();
+        conn.busy_timeout(Duration::from_secs(10)).unwrap();
+        conn.execute_batch(
+            "BEGIN;
+             DELETE FROM offline_keeps; DELETE FROM offline_failures; DELETE FROM offline_claims;
+             DELETE FROM meta WHERE key IN ('offline_owner', 'offline_liked', 'offline_covers');
+             INSERT INTO meta(key, value) VALUES ('offline_epoch', '1')
+               ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT);
+             COMMIT;",
+        )
+        .unwrap();
+    }
+    session.offline_refresh().unwrap();
+    let left: Vec<&String> = kept_files.iter().filter(|p| cache.join(p).exists()).collect();
+    assert!(
+        left.is_empty(),
+        "kept files of the removed keeps stay on disk as ordinary cache files: {left:?}"
+    );
+}
+
+/// What a client up to 0.8.0 does on `stickpile logout` and then `stickpile
+/// login` as the same account: `reset_account_data` without the offline
+/// tables, then `set_me` (login stores `/me` at once). The new client then
+/// sees the kept data's owner equal to the cached account and keeps it,
+/// although docs/security.md says the next refresh deletes it.
+#[tokio::test]
+async fn review_a_sign_out_by_0_8_0_then_a_login_still_removes_the_kept_files() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let me = session.cache().meta_get("me").unwrap().unwrap();
+    let cache = cache_dir(dir.path());
+    {
+        let conn = open_as_0_8_0(&cache);
+        // 0.8.0 `stickpile logout`.
+        conn.execute_batch(
+            "DELETE FROM items; DELETE FROM history; DELETE FROM usage_queue;
+             DELETE FROM meta WHERE key IN ('me', 'updated_since');",
+        )
+        .unwrap();
+        // 0.8.0 `stickpile login` (save_login: set_me).
+        conn.execute("INSERT INTO meta(key, value) VALUES ('me', ?1)", [&me])
+            .unwrap();
+    }
+    session.sync().await.unwrap(); // refreshes
+    assert!(
+        session.offline_keeps().unwrap().is_empty() && kept(session.cache()).is_empty(),
+        "the sign-out is not completed: keeps {:?}, kept files {:?}",
+        session.offline_keeps().unwrap(),
+        kept(session.cache())
+    );
+}
+
+/// The same with the new client's own login (`save_login`: `bind_server`
+/// and `set_me`) after the 0.8.0 sign-out.
+#[tokio::test]
+async fn review_a_sign_out_by_0_8_0_then_a_new_login_still_removes_the_kept_files() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let user = session.cache().me().unwrap().unwrap();
+    let cache = cache_dir(dir.path());
+    {
+        let conn = open_as_0_8_0(&cache);
+        conn.execute_batch(
+            "DELETE FROM items; DELETE FROM history; DELETE FROM usage_queue;
+             DELETE FROM meta WHERE key IN ('me', 'updated_since');",
+        )
+        .unwrap();
+    }
+    session.cache().bind_server(&server.url).unwrap();
+    session.cache().set_me(&user).unwrap();
+    session.sync().await.unwrap();
+    assert!(
+        session.offline_keeps().unwrap().is_empty() && kept(session.cache()).is_empty(),
+        "the sign-out is not completed: keeps {:?}, kept files {:?}",
+        session.offline_keeps().unwrap(),
+        kept(session.cache())
+    );
+}
+
+/// Several new clients open a cache 0.8.0 wrote, at the same moment: each
+/// opens, the column is added once.
+#[test]
+fn review_new_clients_upgrade_a_0_8_0_cache_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let conn = open_as_0_8_0(dir.path());
+        conn.execute(
+            "INSERT INTO files(path, size, last_access) VALUES ('files/thumb/m.webp', 4, 7)",
+            [],
+        )
+        .unwrap();
+    }
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let (dir, barrier) = (dir.path().to_path_buf(), barrier.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                Cache::open(&dir, 512).map(|c| c.file_index().unwrap().len())
+            })
+        })
+        .collect();
+    for h in handles {
+        assert_eq!(h.join().unwrap().unwrap(), 1);
+    }
+    let cache = Cache::open(dir.path(), 512).unwrap();
+    assert_eq!(
+        cache.file_index().unwrap().get("files/thumb/m.webp"),
+        Some(&(4, false))
+    );
+}
+
+/// The released 0.8.0 CLI and the new client on one profile, against the
+/// mock: 0.8.0 writes the cache first (the upgrade), copies a kept sticker
+/// (the flag survives, `last_access` is lowered and restored), signs out and
+/// in again as the same account, signs in as another account, and works
+/// against another server. Run like `real_0_8_0_cli_on_a_cache_the_new_client_wrote`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the released 0.8.0 CLI (STICKPILE_080_CLI)"]
+async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
+    let cli = std::env::var("STICKPILE_080_CLI").expect("STICKPILE_080_CLI");
+    let scratch = std::env::var("STICKPILE_SCRATCH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let dir = tempfile::tempdir_in(&scratch).unwrap();
+    let (server, items) = offline_server();
+    server.state().add_user("bob", "bobsecret", Role::User);
+    let other = MockServer::start();
+    std::fs::write(dir.path().join("alice.pw"), "secret\n").unwrap();
+    std::fs::write(dir.path().join("bob.pw"), "bobsecret\n").unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "server_url = \"{}\"\ntoken_file = \"{}\"\ncache_dir = \"{}\"\ncache_max_mb = 64\n\n[offline.auto]\nthumbnails = false\n",
+            server.url,
+            dir.path().join("state/token").display(),
+            dir.path().join("cache").display()
+        ),
+    )
+    .unwrap();
+    let cache = cache_dir(dir.path());
+    let stickpile = |args: &[&str]| {
+        let out = std::process::Command::new(&cli)
+            .arg("--config")
+            .arg(&config_path)
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_CONFIG_HOME", dir.path().join("xdg-config"))
+            .env("XDG_CACHE_HOME", dir.path().join("xdg-cache"))
+            .env("XDG_STATE_HOME", dir.path().join("xdg-state"))
+            .output()
+            .unwrap();
+        let text = format!(
+            "$ stickpile {}\nexit {}\n{}{}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        println!("{text}");
+        assert!(out.status.success(), "{text}");
+    };
+    let db = || rusqlite::Connection::open(cache.join(crate::cache::DB_FILE)).unwrap();
+    let row = |rel: &str| -> (i64, i64) {
+        db().query_row("SELECT kept, last_access FROM files WHERE path = ?1", [rel], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap()
+    };
+    let config = crate::ClientConfig::load(&config_path).unwrap();
+    let mut violations: Vec<String> = Vec::new();
+
+    // 1. 0.8.0 writes the cache: login, sync, a copy.
+    let alice_pw = dir.path().join("alice.pw");
+    let bob_pw = dir.path().join("bob.pw");
+    let alice_pw = alice_pw.to_str().unwrap();
+    let bob_pw = bob_pw.to_str().unwrap();
+    stickpile(&["--version"]);
+    stickpile(&["login", "-u", "alice", "--password-file", alice_pw]);
+    stickpile(&["sync"]);
+    stickpile(&["copy", "--id", &items[0].id, "--print-path"]);
+    let has_kept: bool = db()
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('files') WHERE name = 'kept')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    println!("0.8.0 cache: files.kept exists: {has_kept}; on disk {:?}", on_disk(&cache));
+    let requests_080 = file_requests(&server);
+
+    // 2. The new client upgrades it and keeps the pack; the copy 0.8.0 made is
+    // flagged, not fetched again.
+    let session = Session::open(config.clone()).await.unwrap();
+    session.sync().await.unwrap();
+    session.offline_keep(&Scope::Set(items[0].set_id.clone())).unwrap();
+    let out = run(&session, &quick()).await;
+    assert!(out.is_complete(), "{out:?}");
+    let requests_now = file_requests(&server);
+    let refetched: Vec<&String> = requests_now[requests_080.len()..]
+        .iter()
+        .filter(|r| requests_080.contains(r))
+        .collect();
+    println!("new client after the upgrade: kept {:?}; fetched again: {refetched:?}", kept(session.cache()));
+    if !refetched.is_empty() {
+        violations.push(format!("files 0.8.0 had cached were fetched again: {refetched:?}"));
+    }
+    let copied = kept(session.cache())
+        .into_iter()
+        .find(|p| p.starts_with(&format!("clip/{}.", items[0].media_id)))
+        .unwrap();
+    println!("kept row of {copied}: {:?}", row(&copied));
+    drop(session);
+
+    // 3. 0.8.0 copies the kept sticker: the flag stays, last_access is lowered;
+    // the new client puts it back.
+    stickpile(&["copy", "--id", &items[0].id, "--print-path"]);
+    let after = row(&copied);
+    println!("after the 0.8.0 copy: {after:?}");
+    if after.0 != 1 {
+        violations.push(format!("0.8.0's copy lost the kept flag of {copied}"));
+    }
+    let session = Session::open(config.clone()).await.unwrap();
+    session.offline_refresh().unwrap();
+    println!("after the new client's refresh: {:?}", row(&copied));
+    assert_eq!(row(&copied), (1, i64::MAX));
+    let kept_before = kept(session.cache());
+    drop(session);
+
+    // 4. 0.8.0 signs out, and in again as the same account.
+    stickpile(&["logout"]);
+    stickpile(&["login", "-u", "alice", "--password-file", alice_pw]);
+    let session = Session::open(config.clone()).await.unwrap();
+    session.sync().await.unwrap();
+    let keeps = session.offline_keeps().unwrap();
+    let left: Vec<&String> = kept_before.iter().filter(|p| cache.join(p).exists()).collect();
+    println!("after 0.8.0 logout + login as alice, the new client sees keeps {keeps:?}, kept files on disk {left:?}");
+    if !keeps.is_empty() || !left.is_empty() {
+        violations.push(format!(
+            "a sign-out by 0.8.0 followed by a login as the same account left keeps {keeps:?} and kept files {left:?}"
+        ));
+    }
+    drop(session);
+
+    // 5. 0.8.0 signs in as bob.
+    stickpile(&["login", "-u", "bob", "--password-file", bob_pw]);
+    let session = Session::open(config.clone()).await.unwrap();
+    session.sync().await.unwrap();
+    let keeps = session.offline_keeps().unwrap();
+    let left: Vec<&String> = kept_before.iter().filter(|p| cache.join(p).exists()).collect();
+    println!("after 0.8.0 login as bob: keeps {keeps:?}, alice's kept files on disk {left:?}");
+    if !keeps.is_empty() || !left.is_empty() {
+        violations.push(format!("another account by 0.8.0 left keeps {keeps:?} and files {left:?}"));
+    }
+    drop(session);
+
+    // 6. Back to alice with the new client, keep, then 0.8.0 talks to another
+    // server.
+    stickpile(&["login", "-u", "alice", "--password-file", alice_pw]);
+    let session = Session::open(config.clone()).await.unwrap();
+    session.sync().await.unwrap();
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let kept_now = kept(session.cache());
+    drop(session);
+    let out = std::process::Command::new(&cli)
+        .arg("--config")
+        .arg(&config_path)
+        .args(["--server", &other.url, "sync"])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    println!(
+        "$ stickpile --server <other> sync\nexit {}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let session = Session::open(config.clone()).await.unwrap();
+    let keeps = session.offline_keeps().unwrap();
+    let left: Vec<&String> = kept_now.iter().filter(|p| cache.join(p).exists()).collect();
+    println!("after 0.8.0 used another server: keeps {keeps:?}, kept files on disk {left:?}");
+    if !keeps.is_empty() || !left.is_empty() {
+        violations.push(format!("a server change by 0.8.0 left keeps {keeps:?} and files {left:?}"));
+    }
+    assert!(violations.is_empty(), "{violations:#?}");
+}
