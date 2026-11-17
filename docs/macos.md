@@ -91,6 +91,34 @@ line breaks kept. The version next to `?`
 opens the project page. Control works as Ctrl too. The vim keys of Normal
 mode work with a Cyrillic layout active.
 
+## Keeping offline
+
+As in the Linux popup ([desktop.md](desktop.md#keeping-offline)), with the
+same rules ([offline.md](offline.md)): `K` keeps the selected sticker
+offline or stops keeping it, `K` on the pack list keeps a pack after a
+question that says what it takes (Return or `y` yes, Escape, `n` or `q`
+no, or the card's buttons), and a right click or Control-click on a tile
+(or Shift+F10, fn+Shift+F10 on most keyboards) opens its menu: copy,
+favorite, open in the browser, keep or stop keeping, and why it is kept.
+A tile whose file is on the Mac has a small download mark (`zo`,
+`ui.show_offline`); with the server unreachable the tiles whose file is
+not here are dimmed with an "unavailable" mark, and choosing one says
+why it does not copy (hover the status for the whole line). The Settings
+tab has the "On this device" block above the Offline group: "Keep
+everything offline", what the kept files take, the downloader with its
+bar, Pause / Resume and Cancel, "Clear cache" and "Remove kept files". The
+app downloads after each successful sync, after a keep and after the
+Offline settings change.
+
+In the bridge: `EntryView.offline` and `PackView.kept` (the marks),
+`ViewState.menu` (shown as an `NSMenu` at the cell; `Popup::menu_choose`
+or `Popup::menu_closed`), `ViewState.confirm` (`Popup::confirm`) and
+`SettingsView.offline` with `offline_before` (the block, and the group it
+goes before; `Popup::offline_keep_library`, `offline_pause`,
+`offline_resume`, `offline_cancel`, `clear_cache`, `remove_kept_files`).
+`Stickpile --fake=offline`, `--fake=confirm` and `--fake=offline-settings`
+show the marks, the question and the block without a driver.
+
 ## Target detection
 
 When the shortcut is pressed, the app reads the frontmost application's

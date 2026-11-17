@@ -200,9 +200,15 @@ the ones you like or unlike since. `zx` (`ui.show_text`) adds the words in
 the picture (the item's text, read by the server or written in the web
 UI) as one line above the tags, its lines joined with " / "; it is off by
 default, because the line covers the picture whose words it repeats.
-Hovering a tile shows its name, pack, emojis and keywords and, after a
-blank line, its text with its line breaks (the first 8 lines or 300
-characters).
+A small download mark at the bottom right says that the file a copy to
+the current target needs is on this device, so the sticker copies with
+the server unreachable ([keeping offline](#keeping-offline)); `zo`
+(`ui.show_offline`, on by default) hides it. With the server unreachable
+the tiles whose file is not here are dimmed with an "unavailable" mark,
+whatever `zo` says. Hovering a tile shows its name, pack, emojis and
+keywords, "Available offline" or "Not on this device, and the server is
+unreachable" when a mark says so, and, after a blank line, its text with
+its line breaks (the first 8 lines or 300 characters).
 
 **Safe mode.** `S` in Normal mode (Ctrl+Shift+S in any mode, or a click on
 "safe" in the footer) hides every item tagged `nsfw`: on every tab, inside
@@ -303,11 +309,13 @@ popup.
 | y, Enter | copy the selected item for the current target, hide |
 | Y, Shift+Enter | copy with sticker mode flipped for this copy |
 | f | add the selected item to favorites, or remove it |
+| K | keep the selected sticker offline, or stop keeping it; on the pack list the selected pack (asks first, with what it takes) |
 | gx | open the selected item in the browser |
 | t / T | next / previous target app |
 | s | toggle sticker mode |
 | S | safe mode: hide or show the items tagged `nsfw` (saved like a setting) |
 | zf / ze / zt / zv / zx | show or hide the favorite hearts / emojis / tags / vibe / text on the tiles (saved like a setting) |
+| zo | show or hide the marks of what is available offline (saved like a setting) |
 | zi | show or hide the selected item's stats row above the footer (saved like a setting) |
 | / | clear the text field and type (from Recent, Most used, Favorites, Me and Settings: a new search) |
 | i, a | back to the text field, text kept (from Recent, Most used and Favorites: to Search) |
@@ -355,6 +363,7 @@ closes it), and `i` edits the row's text or number field. Editing a field
 | Ctrl+T / Ctrl+Shift+T | next / previous target app |
 | Ctrl+S | toggle sticker mode; kept until stickpile-desktop restarts (the footer toggle does the same) |
 | Ctrl+Shift+S | safe mode on / off (as `S`) |
+| Menu, Shift+F10 | the menu of the selected tile (a right click opens a tile's) |
 
 In a text field on Me or Settings only Escape, the tab keys, F1 and F2 are
 taken by the popup; every other key goes to the field.
@@ -554,7 +563,9 @@ list again for the new account.
 ## Settings
 
 The Settings tab edits the keys below plus the everyday ones from the top
-of the file, grouped as Popup, Copying and Server: a switch per boolean,
+of the file, grouped as Popup, Copying, Offline and Server (with the "On
+this device" block of [keeping offline](#keeping-offline) above
+Offline): a switch per boolean,
 a list per choice, a number field (with its range) per number, and a text
 field for the server URL (saved on Enter or when the field loses the
 focus). Every change is saved at once and applied to the running popup:
@@ -573,7 +584,8 @@ a newer popup saved) is skipped with a warning, listed at the top of the
 page; `stickpile config check` fails on it. Clients up to 0.7.0 refuse
 such a key instead, with "unknown field": before going back to 0.7.0, or
 when a 0.7.0 CLI shares the file, reset or remove the keys it does not
-know (`ui.show_text`, which `zx` also saves, is newer than 0.7.0;
+know (`ui.show_text`, which `zx` also saves, is newer than 0.7.0, and
+`ui.show_offline` (`zo`) and `[offline]` are newer than 0.8.0;
 [configuration.md](configuration.md#older-clients-and-newer-keys)).
 
 Where changes go depends on `config.toml`:
@@ -607,6 +619,7 @@ show_emojis = true   # an item's emojis on its tile (ze)
 show_tags = true     # an item's tags on its tile (zt)
 show_vibe = true     # an item's vibe on its tile (zv)
 show_text = false    # the words in an item's picture on its tile, one line (zx)
+show_offline = true  # a mark on the tiles whose file is on this device (zo)
 show_details = true  # the selected item's stats above the footer (zi)
 safe_mode = false    # hide items tagged nsfw (S)
 counts = false       # digits start a count (3j, 5G); tab digits then wait
@@ -629,15 +642,73 @@ sticker preference, focus detection, [pasting](#paste-after-a-pick)).
 Clipboard offer lists, focus rules and paste rules stay in `config.toml`. The layering rules are in
 [configuration.md](configuration.md#settings-saved-from-the-popup).
 
+## Keeping offline
+
+The popup keeps chosen stickers, packs or the whole library on this
+device, so that they copy with the server unreachable; the rules are the
+core's ([offline.md](offline.md)), the same as the CLI's and the Android
+app's. What is kept is chosen on this device and stays here.
+
+- **A sticker.** `K` in Normal mode keeps the selected sticker, and `K`
+  again stops keeping it. The status says "chat cat is kept offline" or
+  "... is no longer kept offline".
+- **A pack.** On the pack list `K` first works out what the pack takes
+  and asks: "Keep Cats offline? 4 stickers, 8 files, 1.5 MB. 49.4 KB of
+  it is on this device already. Kept files would take 1.6 MB of the 1.1 GB
+  allowed." (with a warning when that is over the limit, and how many
+  files the Offline settings leave out). Enter or `y` keeps it, Escape,
+  `n` or `q` does not; the card's buttons do the same. A kept pack has the
+  download mark on its cover, and `K` on it stops keeping it at once.
+- **The menu of a tile.** A right click on a tile, the Menu key or
+  Shift+F10 opens its menu: copy, copy with sticker mode flipped,
+  favorite, open in the browser, and "Keep offline" or "Stop keeping
+  offline", with a line that says why the sticker is kept besides
+  ("Kept offline: pack Cats", "Also kept offline: liked") and whether it
+  is available offline. Inside an opened pack the menu keeps or releases
+  the pack too; on the pack list it opens or keeps the pack.
+- **Everything.** Settings, "On this device", "Keep everything offline":
+  the whole library, now and later, after the same question.
+
+Releasing does not delete anything: the files go back to the ordinary
+cache, where the size limit (`cache_max_mb`) may clear them later.
+
+**Downloads.** The resident popup downloads what is kept and missing
+after every successful sync (when it opens after a pause, and every 10
+minutes in the background), after a keep and after the Offline settings
+change. It never holds up a copy: a copy you ask for goes first. The
+"On this device" block of the Settings page shows:
+
+- the switch "Keep everything offline";
+- what the kept files take, of the limit (`offline.max_mb`), and the
+  other cached files;
+- the downloader: "Downloading: 40 of 120 files, 12.0 MB of 45.2 MB",
+  "Paused", "Waiting for the server", "The limit of 1.1 GB is reached: ...
+  Nothing was deleted; raise the limit below to download the rest", "The
+  disk is full", or "Up to date", with a bar, Pause / Resume and Cancel
+  (a pause holds until resumed; a cancelled run starts afresh after the
+  next sync), how many files failed (tried again on the next run) and how
+  many the settings leave out;
+- "Clear cache", which deletes the thumbnails and copied files that are
+  not kept and says how many kept files stayed, and "Remove kept files",
+  which asks first and then deletes every kept file and forgets what to
+  keep (the automatic rules download what they cover again).
+
+The Offline group under it holds the [options](configuration.md#keeping-stickers-offline)
+(automatic keeping, kinds, limits); a change applies to the running popup.
+
 ## Offline behaviour
 
 - Search falls back to the local cache when the server does not answer
   within `timeout_secs`: metadata-only ranking (no image-content matches),
   and the footer says "Offline — showing cached results".
 - Thumbnails and recently used files are cached under
-  `$XDG_CACHE_HOME/stickpile` up to `cache_max_mb`. An item whose file is
-  cached copies offline; others fail with "Server unreachable and the item
-  is not cached".
+  `$XDG_CACHE_HOME/stickpile` up to `cache_max_mb`, and kept files besides
+  them up to `offline.max_mb`. An item whose file is on the device copies
+  offline. With the server unreachable the tiles whose file is not here
+  are dimmed, and choosing one says why it does not copy: "Copy failed:
+  good dog is not on this device and the server is unreachable; keep it
+  offline (K) to copy it without the server" (hover the footer for the
+  whole line).
 - Copies are recorded locally and uploaded as usage statistics when the
   server is reachable again. The client syncs in the background every 10
   minutes and when the popup opens after a longer pause (failures retry
