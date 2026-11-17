@@ -29,6 +29,7 @@ mod anim_webp;
 mod grey;
 mod jpeg;
 mod raster;
+mod sample;
 mod sniff;
 mod tools;
 mod variants;
@@ -237,6 +238,15 @@ pub fn variants_version(kind: MediaKind) -> i64 {
         MediaKind::Still => 2,
         MediaKind::Animation | MediaKind::Video => 1,
     }
+}
+
+/// The frames to read the words of a stored, sanitised original from
+/// (`original` passed ingest; `probe` is its stored probe): a still as it
+/// is; an animation's first, middle and last frames; a video's frames at
+/// its start, middle and end (needs ffmpeg; a frame ffmpeg cannot find is
+/// left out). Fewer frames when there are fewer, never a frame twice.
+pub fn text_frames(original: &Path, probe: &Probe, tools: &Tools) -> Result<Vec<image::RgbaImage>, MediaError> {
+    sample::text_frames(original, probe, tools)
 }
 
 /// Decode a still (or first frame) for re-processing (e.g. Telegram import of

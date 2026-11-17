@@ -1161,3 +1161,43 @@ fn pack_stickers_from_animations_and_videos() {
     assert_eq!(first.get_pixel(s.side / 6, s.side / 2)[3], 0);
     assert_eq!(first.get_pixel(s.side * 5 / 6, s.side / 2)[3], 255);
 }
+
+// ---------------------------------------------------------------------------
+// Frames for reading the words in a picture
+// ---------------------------------------------------------------------------
+
+#[test]
+fn text_frames_are_the_still_or_first_middle_last() {
+    let e = env();
+    let dir = tempfile::tempdir().unwrap();
+    let store = |name: &str, ing: &Ingested| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, &ing.original).unwrap();
+        p
+    };
+
+    let still = ingest(&png_with_text(&sticker(64, 48)), &opts(), &e.tools).unwrap();
+    let frames = text_frames(&store("still.png", &still), &still.probe, &e.tools).unwrap();
+    assert_eq!(frames.len(), 1);
+    assert!(frames[0] == still.frame);
+
+    let anim = ingest(&noisy_gif(32, 24, 5), &opts(), &e.tools).unwrap();
+    let frames = text_frames(&store("anim.gif", &anim), &anim.probe, &e.tools).unwrap();
+    let all = gif_frames(&anim.original);
+    assert_eq!(all.len(), 5);
+    assert_eq!(frames.len(), 3);
+    for (got, want) in frames.iter().zip([0, 2, 4]) {
+        assert!(got == &all[want].0, "frame {want}");
+    }
+
+    let short = ingest(&animated_webp(32, 24, 2), &opts(), &e.tools).unwrap();
+    let frames = text_frames(&store("short.webp", &short), &short.probe, &e.tools).unwrap();
+    assert_eq!(frames.len(), 2, "two frames: both, once");
+
+    let video = ingest(&mp4_fixture(dir.path(), 2), &opts(), &e.tools).unwrap();
+    let frames = text_frames(&store("video.mp4", &video), &video.probe, &e.tools).unwrap();
+    assert_eq!(frames.len(), 3);
+    assert!(frames.iter().all(|f| f.dimensions() == (160, 120)));
+    assert!(frames[0] != frames[1] && frames[1] != frames[2], "testsrc moves");
+    assert_eq!(std::fs::read_dir(&e.tools.tmp_dir).unwrap().count(), 0);
+}

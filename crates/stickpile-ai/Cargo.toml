@@ -14,6 +14,8 @@ default = ["clip"]
 clip = ["dep:ort", "dep:tokenizers", "dep:safetensors"]
 
 [dependencies]
+# The item text rules (`stickpile_api::text`) for OCR output.
+stickpile-api.workspace = true
 image.workspace = true
 serde.workspace = true
 toml.workspace = true

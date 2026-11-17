@@ -150,38 +150,53 @@ pub(crate) fn representative_frame(
     tools: &Tools,
     dir: &Path,
 ) -> Result<RgbaImage, MediaError> {
-    let png = dir.join("frame.png");
     let at = duration_ms / 10;
     for seek in [at, 0] {
-        let _ = std::fs::remove_file(&png);
-        let mut a = args(&["-ss", &format!("{:.3}", seek as f64 / 1000.0)]);
-        a.extend(input_args(fmt, video, libvpx_alpha));
-        a.extend(args(&[
-            "-map",
-            "0:V:0",
-            "-frames:v",
-            "1",
-            "-an",
-            "-sn",
-            "-dn",
-            "-c:v",
-            "png",
-            "-f",
-            "image2",
-            "-update",
-            "1",
-            "-y",
-        ]));
-        a.push(file_arg(&png));
-        tools::ffmpeg(tools, dir, a, None)?;
-        if let Ok(bytes) = std::fs::read(&png) {
-            if !bytes.is_empty() {
-                return Ok(raster::decode_still(&bytes, MediaFormat::Png, limits)?.to_rgba8());
-            }
+        if let Some(frame) = frame_at(video, fmt, seek, libvpx_alpha, limits, tools, dir)? {
+            return Ok(frame);
         }
         if seek == 0 {
             break;
         }
     }
     Err(MediaError::Invalid("video has no decodable frame".into()))
+}
+
+/// The frame shown at `seek_ms`, decoded through a PNG in `dir`; `None` when
+/// ffmpeg found none there (past the end).
+pub(crate) fn frame_at(
+    video: &Path,
+    fmt: MediaFormat,
+    seek_ms: u64,
+    libvpx_alpha: bool,
+    limits: &Limits,
+    tools: &Tools,
+    dir: &Path,
+) -> Result<Option<RgbaImage>, MediaError> {
+    let png = dir.join("frame.png");
+    let _ = std::fs::remove_file(&png);
+    let mut a = args(&["-ss", &format!("{:.3}", seek_ms as f64 / 1000.0)]);
+    a.extend(input_args(fmt, video, libvpx_alpha));
+    a.extend(args(&[
+        "-map",
+        "0:V:0",
+        "-frames:v",
+        "1",
+        "-an",
+        "-sn",
+        "-dn",
+        "-c:v",
+        "png",
+        "-f",
+        "image2",
+        "-update",
+        "1",
+        "-y",
+    ]));
+    a.push(file_arg(&png));
+    tools::ffmpeg(tools, dir, a, None)?;
+    match std::fs::read(&png) {
+        Ok(bytes) if !bytes.is_empty() => Ok(Some(raster::decode_still(&bytes, MediaFormat::Png, limits)?.to_rgba8())),
+        _ => Ok(None),
+    }
 }

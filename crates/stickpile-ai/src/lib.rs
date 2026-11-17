@@ -5,17 +5,21 @@
 //!
 //! [`Enricher`] is the seam: [`clip::ClipEnricher`] (feature `clip`) today, an
 //! OpenAI-compatible HTTP captioner later, [`mock::MockEnricher`] for tests.
+//! [`ocr::TextReader`] is the seam for reading the words in a picture, with
+//! [`ocr::MockTextReader`] for tests.
 
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "clip")]
 pub mod clip;
 pub mod mock;
+pub mod ocr;
 pub mod preprocess;
 pub mod vocab;
 pub mod zeroshot;
 
 pub use mock::MockEnricher;
+pub use ocr::{MockTextReader, TextLine, TextReader};
 pub use vocab::Vocabulary;
 pub use zeroshot::{Suggestions, ZeroShot, ZeroShotParams};
 
