@@ -2100,3 +2100,108 @@ async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
     }
     assert!(violations.is_empty(), "{violations:#?}");
 }
+
+/// A newer client sharing the cache stored `/me` with a value this version
+/// cannot read (a web theme or a role added later): `Cache::me` is `None`,
+/// and `offline_check_owner` takes that for a sign-out and deletes every
+/// kept file and forgets every keep, at the next keep, release, refresh or
+/// run.
+#[tokio::test]
+async fn review_an_unreadable_cached_account_is_not_a_sign_out() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Item(items[0].id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let kept_before = kept(session.cache());
+    let mut me: serde_json::Value = serde_json::from_str(&session.cache().meta_get("me").unwrap().unwrap()).unwrap();
+    me["theme"] = "oled".into();
+    session.cache().meta_set("me", &me.to_string()).unwrap();
+    // The user keeps another sticker in this (older) client.
+    session.offline_keep(&Scope::Item(items[1].id.clone())).unwrap();
+    let keeps = session.offline_keeps().unwrap();
+    let left: BTreeSet<String> = kept_before
+        .iter()
+        .filter(|p| cache_dir(dir.path()).join(p).exists())
+        .cloned()
+        .collect();
+    assert!(
+        keeps.contains(&Scope::Item(items[0].id.clone())) && left == kept_before,
+        "an unreadable cached /me reset the offline data: keeps now {keeps:?}, kept files left {left:?} of {kept_before:?}"
+    );
+}
+
+/// A newer client sharing the cache stored an item with a rendition this
+/// version does not know (`Variant` has no catch-all): `Cache::items` skips
+/// the row, `orphaned` takes its media for gone, and the refresh deletes the
+/// item's kept files.
+#[tokio::test]
+async fn review_kept_files_of_an_item_this_version_cannot_read_stay() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    session.offline_keep(&Scope::Set(items[0].set_id.clone())).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    let kept_before = kept(session.cache());
+    {
+        let conn = open_as_0_8_0(&cache_dir(dir.path()));
+        let json: String = conn
+            .query_row("SELECT json FROM items WHERE id = ?1", [&items[0].id], |r| r.get(0))
+            .unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v["variants"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"variant": "signal_sticker", "mime": "image/webp", "width": 512, "height": 512, "size_bytes": 100}));
+        conn.execute(
+            "UPDATE items SET json = ?2 WHERE id = ?1",
+            [&items[0].id, &v.to_string()],
+        )
+        .unwrap();
+    }
+    session.offline_refresh().unwrap();
+    let gone: Vec<&String> = kept_before
+        .iter()
+        .filter(|p| !cache_dir(dir.path()).join(p).exists())
+        .collect();
+    assert!(
+        gone.is_empty(),
+        "kept files of an item this version cannot read were deleted: {gone:?}"
+    );
+}
+
+/// A process killed while downloading leaves `<file>.part.<owner>`; it goes
+/// only when the same file is claimed again (thumbnails and covers: when a
+/// run starts). When the file is no longer wanted (released, or its item
+/// removed), nothing ever deletes it: not a run, not "Clear cache", not
+/// "Remove kept files".
+#[tokio::test]
+async fn review_a_dead_process_part_file_of_a_released_file_goes() {
+    let (server, items) = offline_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = synced(&server, dir.path(), plain(&[TargetApp::Generic])).await;
+    let scope = Scope::Item(items[0].id.clone());
+    session.offline_keep(&scope).unwrap();
+    let plan = session.offline_plan().unwrap();
+    let rel = plan
+        .files
+        .iter()
+        .find(|f| f.file.rel.starts_with("clip/"))
+        .unwrap()
+        .file
+        .rel
+        .clone();
+    // The process that downloaded it was killed.
+    let part = session.cache().abs(&format!("{rel}.part.1234-dead"));
+    std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+    std::fs::write(&part, vec![1u8; 4096]).unwrap();
+    session.offline_release(&scope).unwrap();
+    assert!(run(&session, &quick()).await.is_complete());
+    session.clear_cache().unwrap();
+    session.offline_remove_all().unwrap();
+    assert!(
+        !part.exists(),
+        "the part file of a killed download stays for good: {:?}",
+        part_files(&cache_dir(dir.path()))
+    );
+}
