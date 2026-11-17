@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ime
 
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.offline.OfflineMarks
 import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
@@ -83,13 +84,19 @@ internal class ImeLibrary(private val app: StickpileApp) {
     /**
      * Which of [ids] a pick would insert or share with the server away: a
      * rendition for the field (or, failing that, for sharing,
-     * [InsertFlow.SHARE_TYPES]) is on the phone. The marks of the tiles;
+     * [InsertFlow.SHARE_TYPES]) is on the phone, for a plain pick or for
+     * "Send as a sticker" ([OfflineMarks.either]). The marks of the tiles;
      * nothing is downloaded.
      */
     suspend fun availableOffline(ids: List<String>): List<Boolean> {
         val editor = editorPackage
         val types = (fieldTypes + InsertFlow.SHARE_TYPES).distinct()
-        return call { it.availableOffline(ids, editor, types, false) }
+        return call {
+            OfflineMarks.either(
+                it.availableOffline(ids, editor, types, false),
+                it.availableOffline(ids, editor, types, true),
+            )
+        }
     }
 
     /** The lists answer from the cache now: the server was found away lately. */

@@ -495,3 +495,44 @@ async fn a_kept_still_inserts_into_telegram_as_a_sticker_offline() {
         vec![KeepReason::Sticker]
     );
 }
+
+/// A video kept with its pack under `max_file_mb = 1`: only its video
+/// sticker is small enough, so with the server stopped nothing goes into
+/// the field or the share sheet without the sticker flag, and "Send as a
+/// sticker" shares the video sticker. The keyboard marks the tile by both
+/// flags (`ImeLibrary.availableOffline`), so it is not dimmed.
+#[tokio::test]
+async fn a_video_only_its_sticker_is_kept_of_sends_as_a_sticker_offline() {
+    let mut server = MockServer::start();
+    let (_, video) = mixed(&server, 1100);
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    lib.set_offline_options(OfflineOptions {
+        auto_thumbnails: false,
+        videos: true,
+        max_file_mb: 1,
+        ..OfflineOptions::default()
+    });
+    lib.sync_now().await.unwrap();
+    let telegram = "org.telegram.messenger".to_string();
+    // Sent to Telegram before: its files are among the device's.
+    lib.record_use(video.id.clone(), "original".into(), telegram.clone())
+        .unwrap();
+    lib.keep_offline(OfflineScope::Pack {
+        pack_id: video.set_id.clone(),
+    })
+    .await
+    .unwrap();
+    assert!(lib.offline_run().await.unwrap().complete);
+    server.stop();
+    let field = mimes(&["image/gif", "image/*", "image/jpg", "image/png", "image/webp"]);
+    let id = vec![video.id.clone()];
+    let plain = lib.available_offline(id.clone(), telegram.clone(), keyboard(&field), false);
+    let as_sticker = lib.available_offline(id, telegram.clone(), keyboard(&field), true);
+    assert_eq!((plain, as_sticker), (vec![false], vec![true]));
+    let sent = lib
+        .prepare(video.id.clone(), telegram, mimes(&["image/*", "video/*"]), true)
+        .await
+        .unwrap();
+    assert_eq!((sent.variant.as_str(), sent.sticker), ("tg_video_sticker", true));
+}

@@ -80,6 +80,15 @@ class OfflineLabelsTest {
     }
 
     @Test
+    fun theKeyboardMarksWhatWorksAsAStickerOnlyAvailable() {
+        // Plain pick, "Send as a sticker": either one working offline will do.
+        assertEquals(
+            listOf(false, true, true, true),
+            OfflineMarks.either(listOf(false, true, false, true), listOf(false, false, true, true)),
+        )
+    }
+
+    @Test
     fun nothingIsMarkedUntilTheLibraryAnswered() {
         val unknown = OfflineMarks()
         assertEquals(OfflineMark.NONE, unknown.of("a", Display()))

@@ -239,8 +239,10 @@ design; everything below is the app's side of it).
   stickers whose file is not on the phone are dimmed, with a struck-out
   cloud. Choosing one says that it is not on the phone and how to keep it,
   instead of naming a network error. The keyboard marks what a pick would
-  insert into the field (or share) and starts no download of its own for
-  the marks.
+  insert into the field (or share), as a plain pick or with "Send as a
+  sticker" (a video whose only small enough file is its Telegram video
+  sticker is not dimmed), and starts no download of its own for the
+  marks.
 - **Clearing.** "Clear" under "Saved pictures" deletes the other saved
   files and says how many kept files stay; "Remove kept files" (asked
   first) deletes the kept ones and forgets what is kept. Signing out does

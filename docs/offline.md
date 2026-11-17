@@ -375,6 +375,7 @@ The plan for the shells, as in the brief, section 4.9:
   `LibraryError` gets its own kind for `NotOnDevice` (today it maps to
   `Unreachable`).
 - **Android keyboard**: keep and release in the long-press menu, the marks
-  (`variant_on_device` for the rendition it would insert), no settings of
-  its own, no downloads beyond what a pick needs.
+  (whether a rendition it would insert or share is on the phone, for a
+  plain pick or for "Send as a sticker"), no settings of its own, no
+  downloads beyond what a pick needs.
 - **home-manager module**: the `[offline]` options, mirrored (done).
