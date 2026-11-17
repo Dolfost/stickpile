@@ -311,7 +311,12 @@ default, `cache_dir` in the client config; on Android the app's
   recently used beyond `cache_max_mb`), and the files kept offline
   (thumbnails, the renditions a copy to the configured chat apps uses, pack
   covers), which stay until they are released, removed or the account goes,
-  bounded by `offline.max_mb` ([offline.md](offline.md)).
+  bounded by `offline.max_mb` ([offline.md](offline.md)). On Android the
+  kept files also include the rendition the grids play (a GIF, WebP or
+  video), and the app keeps its offline options and whether the downloads
+  are paused in its private preferences (`shared_prefs/offline.xml`, no
+  secret), excluded from backup and device transfer like the rest of its
+  data ([android.md](android.md#keeping-stickers-offline)).
 
 Nothing in the cache is a secret: the API token is a separate file (mode
 `0600`, `token_file`), never in the cache. The files are the pictures the

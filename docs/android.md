@@ -105,7 +105,8 @@ cover image, else its first sticker).
 - **Tap** a sticker to share it; **long press** for its details: the
   pack and owner, the numbers, the vibe, emojis, tags and keywords (a tap
   on one searches for it), the words in the picture as they are, line
-  breaks kept (when it has any), and Share, Like or Unlike, and Open in
+  breaks kept (when it has any), and Share, Like or Unlike, Keep offline
+  ([Keeping stickers offline](#keeping-stickers-offline)), and Open in
   browser (its page in the web UI). The app shows no AI mark on the text:
   the items it gets (`ItemSummary`) do not say who wrote it.
 - The menu also has the search syntax, Sync now and Settings; pulling the
@@ -167,7 +168,11 @@ Using it:
   failing that, it is copied to the clipboard (the keyboard says which).
 - Long press: the sticker's details (pack, numbers, vibe, emojis and tags,
   a tap on one searches for it; the words in the picture, line breaks
-  kept) with Send, Send as a sticker (Telegram), Like or Unlike, and Share.
+  kept; why it is kept offline) with Send, Send as a sticker (Telegram),
+  Like or Unlike, Keep offline or Don't keep offline, and Share. The tiles
+  carry the offline marks of the app ([Keeping stickers
+  offline](#keeping-stickers-offline)); the keyboard has no offline
+  settings of its own.
 - The keyboard button at the top goes back to your keyboard at any time.
 
 Its settings (in the app's settings): the keyboard height (the sticker
@@ -185,6 +190,59 @@ under Settings, "Keyboards that may read your stickers", where you allow
 it after a confirmation that names the app (label and package) and what
 it can read; the confirmation ignores taps that come through another
 app's window drawn over it.
+
+## Keeping stickers offline
+
+Stickers kept offline stay on the phone, so that they insert, share and
+play with the server unreachable ([offline.md](offline.md) has the
+design; everything below is the app's side of it).
+
+- **What to keep.** A sticker: "Keep offline" in its details (a long
+  press, in the app and in the keyboard); "Don't keep offline" there takes
+  it back. A pack: "Keep offline" over the open pack (the Packs tab); it
+  first says what it takes (stickers, files and their size, how much is on
+  the phone already, what the options leave out, and whether it fits the
+  space for kept files), and keeping a pack also keeps what a sync adds to
+  it later; "Kept offline" there stops it, after a confirmation. The whole
+  library: the switch in Settings, "Available offline", with the same
+  estimate first. The details say why a sticker is kept ("Available
+  offline: with its pack, liked"). A sticker kept with its pack or a rule
+  can also be kept by itself; then it stays when the pack goes.
+- **Automatic rules** (Settings): thumbnails of every sticker (on, so the
+  grids are complete offline), the stickers sent last from this phone (off;
+  25 to 2000 of them), the ones you liked (off), your own packs (off).
+- **What packs, the library and the rules download**: pictures and
+  animations (on), videos (off), the sticker versions Telegram sends (on),
+  files up to a largest size (no limit by default), within the space for
+  kept files (1 GB by default; downloads stop when it is full and nothing
+  is deleted to make room). A sticker kept by itself is always downloaded
+  whole. What a sticker needs is the core's: its thumbnail, the file a
+  share or an insert into each chat app it was sent to from this phone
+  uses (and its sticker version), and the GIF or video the grids play.
+- **When it downloads.** In the background (WorkManager), after each sync
+  that went through and after a keep: on Wi-Fi or another network that is
+  not metered, unless "Use mobile data" is on, and not while the phone's
+  storage is low. No notification and no permission of its own; when the
+  system stops the job (the network went, its time ran out) the download
+  stops cleanly and goes on later. Settings shows where it stands
+  (downloading, waiting for Wi-Fi, the server unreachable, the space or the
+  storage full, everything here) with the files and bytes on the phone,
+  and Pause (kept across restarts), Resume, Stop and "Download now".
+- **Marks.** With the server answering, a small green arrow marks the
+  stickers that would also work without it (kept, or saved when they were
+  sent or played); "Available offline (a mark)" in "Sticker info" turns
+  it off like the other tile marks. With the server unreachable, the
+  stickers whose file is not on the phone are dimmed, with a struck-out
+  cloud. Choosing one says that it is not on the phone and how to keep it,
+  instead of naming a network error. The keyboard marks what a pick would
+  insert into the field (or share) and starts no download of its own for
+  the marks.
+- **Clearing.** "Clear" under "Saved pictures" deletes the other saved
+  files and says how many kept files stay; "Remove kept files" (asked
+  first) deletes the kept ones and forgets what is kept. Signing out does
+  both.
+- The kept files live with the rest of the cache in `noBackupFilesDir`,
+  which the system neither backs up nor empties (unlike `cacheDir`).
 
 ## Sharing to stickpile
 
@@ -204,9 +262,11 @@ than 1 GB are left out.
 Account (sign out; an account signed in by its tailnet identity has no
 token to revoke, so it shows "Signed in through Tailscale" and offers to
 change the server instead), sync (sync now, the last sync, uses waiting to
-be sent), the offline cache (its size, clear it, which also revokes every
-prepared file's URI), the [theme](#theme), the sticker info (safe mode, what the tiles show,
-the stickers in a row, when GIFs and videos play), the keyboard's
+be sent), the offline cache (the size of the files kept offline and of
+the others; clearing deletes the others, says how many kept files stay,
+and revokes every prepared file's URI), the [theme](#theme), the sticker info (safe mode, what the tiles show,
+the stickers in a row, when GIFs and videos play), "Available offline"
+([Keeping stickers offline](#keeping-stickers-offline)), the keyboard's
 height, switches and walk-through, the keyboards allowed to read
 stickers, and licences.
 
@@ -222,9 +282,11 @@ colour) on Android 12 and later. A change shows at once in the app; the
 keyboard takes it the next time it opens.
 
 The app syncs in the background every 15 minutes when there is a network
-(WorkManager), and when the app or the keyboard opens. Offline, search, the
+(WorkManager), and when the app or the keyboard opens; after each sync
+that went through, the files kept offline download
+([Keeping stickers offline](#keeping-stickers-offline)). Offline, search, the
 lists and the thumbnails come from the cache, and stickers inserted before
-can be inserted again. When the server stops answering, only the first
+or kept offline can be inserted again. When the server stops answering, only the first
 list waits for it (5 s by default); for the next five minutes the lists
 come from the cache at once, while the server is checked in the
 background every 15 seconds, and once it answers they are live again.
@@ -304,7 +366,8 @@ steps and the notes on reproducible builds are in
 
 The app's own manifest asks for `INTERNET` (the server you configure) and
 `CAMERA` (scanning the pairing QR code, requested on that screen only).
-WorkManager, which runs the background sync, adds `WAKE_LOCK`,
+WorkManager, which runs the background sync and the offline downloads
+(no permission of their own), adds `WAKE_LOCK`,
 `ACCESS_NETWORK_STATE`, `RECEIVE_BOOT_COMPLETED` and `FOREGROUND_SERVICE`
 to the merged manifest, all granted at install time without a prompt; the
 owner chose to keep all four (2026-11-15). AndroidX also declares a
@@ -349,7 +412,8 @@ Rules for the interface:
   `tests/kotlin.rs` (with `--features bindgen`) checks the generated Kotlin.
 - A field added to a record goes last with `#[uniffi(default)]`, so that
   Kotlin written before it still builds (`Suggestions.labels`,
-  `Item.text`, `UploadFile.text`).
+  `Item.text`, `UploadFile.text`, `SyncState.synced`). A variant added
+  to an enum or to `LibraryError` goes last too (`NotOnDevice`).
 - Paths are absolute strings inside the app's private storage.
 - The constructor is synchronous (UniFFI cannot generate async primary
   constructors for Kotlin).
@@ -417,9 +481,33 @@ object StickpileLibrary
   fn pending_usage() -> u32
 
   // cache (no network)
-  fn cache_bytes() throws -> u64                       // thumbnails and prepared files
-  fn clear_cache() throws -> u64                       // deletes them, returns the bytes freed;
+  fn clear_cache() throws -> CacheCleared              // deletes the files not kept offline; says
+                                                       // what it freed and how many kept files stay;
                                                        // the item list (offline search) stays
+
+  // keeping offline (docs/offline.md; no network unless said)
+  fn offline_options() -> OfflineOptions               // in use: those set, else the core's defaults
+  fn set_offline_options(options: OfflineOptions)      // the app's settings; kept across a server change
+  async fn keep_offline(scope: OfflineScope) throws    // flags what is here; offline_run fetches the rest
+  async fn release_offline(scope: OfflineScope) throws // its files become ordinary cached files
+  fn offline_keeps() throws -> List<OfflineScope>      // what the user keeps, oldest first
+  fn offline_reasons(item_id: String) throws -> List<KeepReason>   // empty: not kept
+  async fn offline_estimate(scope: OfflineScope) throws -> OfflineEstimate
+  async fn offline_plan() throws -> OfflinePlan        // totals overall and per scope and rule
+  fn offline_usage() throws -> OfflineUsage            // kept and other files, the budget
+  fn remove_kept_files() throws -> CacheCleared        // the confirmed "Remove kept files"
+  fn available_offline(item_ids: List<String>, editor_package: String,
+                       accepted_mime_types: List<String>, sticker: Boolean) -> List<Boolean>
+                                                       // per item: prepare would work offline
+  fn server_unreachable() -> Boolean                   // the lists answer from the cache now
+  async fn offline_run() throws -> OfflineOutcome      // the downloader (network); stops when the
+                                                       // coroutine is cancelled
+  fn offline_status() -> OfflineStatus
+  async fn offline_status_change(seen: OfflineStatus?) throws -> OfflineStatus
+                                                       // waits until it differs from seen
+  fn pause_offline()
+  fn resume_offline()
+  fn cancel_offline()                                  // ends the run going on
 ```
 
 Records and enums:
@@ -461,14 +549,49 @@ record UploadFile  { path: String, name: String?, keywords: List<String>,
                      text: String? }    // the user's words in the picture; null or blank:
                                         // not sent, the server reads them (default null)
 record SyncState   { last_sync: i64?, last_error: LibraryErrorKind?,
-                     pending_usage: u32, due: Boolean, cache_changed: Boolean }
+                     pending_usage: u32, due: Boolean, cache_changed: Boolean,
+                     synced: Boolean }      // this call ran a sync that went through
+                                            // (default false)
+
+// keeping offline
+enum   OfflineScope { Sticker { item_id: String }, Pack { pack_id: String }, Library }
+enum   KeepReason  { Sticker, Pack, Library, Used, Liked, OwnPack }
+enum   OfflinePart { Thumbnails, Kept { scope: OfflineScope }, Used, Liked, OwnPacks }
+record OfflineOptions { sticker_renditions: Boolean = true, stills: Boolean = true,
+                     animations: Boolean = true, videos: Boolean = false,
+                     max_file_mb: u64 = 0, max_mb: u64 = 1024,
+                     auto_thumbnails: Boolean = true, auto_used: Boolean = false,
+                     auto_used_count: u32 = 200, auto_liked: Boolean = false,
+                     auto_own_packs: Boolean = false, mobile_data: Boolean = false }
+record OfflineTotals { files: u64, bytes: u64, present_files: u64, present_bytes: u64 }
+record OfflineSkips { kind_off: u64, too_large: u64, not_cached: u64, no_rendition: u64 }
+record OfflinePartTotals { part: OfflinePart, name: String?, items: u64, totals: OfflineTotals }
+record OfflinePlan { totals: OfflineTotals, items: u64, skipped: OfflineSkips, failed: u64,
+                     budget: u64?, over_budget: Boolean, parts: List<OfflinePartTotals> }
+record OfflineEstimate { totals: OfflineTotals, items: u64, skipped: OfflineSkips,
+                     kept_bytes_after: u64, budget: u64?, fits: Boolean }
+record OfflineUsage { kept_files: u64, kept_bytes: u64, other_files: u64, other_bytes: u64,
+                     budget: u64? }
+record CacheCleared { removed_files: u64, freed_bytes: u64, kept_files: u64, kept_bytes: u64 }
+enum   OfflineState { Idle, Downloading, Paused, WaitingForNetwork, LimitReached, DiskFull }
+record OfflinePartProgress { part: OfflinePart, name: String?, files_done: u64,
+                     files_total: u64, bytes_done: u64, bytes_total: u64 }
+record OfflineStatus { state: OfflineState, files_done: u64, files_total: u64,
+                     bytes_done: u64, bytes_total: u64, skipped: u64, failed: u64,
+                     parts: List<OfflinePartProgress>, message: String?,
+                     running: Boolean,      // a run goes on in this process
+                     paused: Boolean }
+enum   OfflineEnd  { Complete, Cancelled, WaitingForNetwork, LimitReached, DiskFull,
+                     Unauthorized }
+record OfflineOutcome { end: OfflineEnd, complete: Boolean, status: OfflineStatus }
 
 error  LibraryError {
   NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
   NothingFits,            // prepare: no rendition the field accepts
   InvalidInput { field },  // e.g. a malformed server URL or pairing code
   Server { status: u16 },  // any other HTTP error
-  Io, Other
+  Io, Other,
+  NotOnDevice             // the server unreachable and the file not on this phone
   (every variant also carries detail: String)
 }
 ```
@@ -491,7 +614,12 @@ Behaviour the signatures do not show:
   `token_name` for pairing, `username` for a password login); 403 and other
   statuses are `Server { status }`; cache and SQLite errors are `Io`. The
   constructor gives `InvalidInput` for a path that is not absolute or a
-  config file that is not a valid config.
+  config file that is not a valid config. A file that `prepare` or
+  `motion` needs, not on this phone with the server unreachable, is
+  `NotOnDevice` (the core's `CoreError::NotOnDevice`; up to 0.8.0 it was
+  `Unreachable`), so the app says the sticker is not kept offline instead
+  of naming a network error. The provider reports it as `unreachable`
+  (its contract is unchanged).
 - **Server URLs.** `set_server_url`, `login_pairing` and
   `parse_pairing_link` check and normalise a server URL the same way
   (`stickpile_api::pairing::server_url`): `http` or `https` with a host; no
@@ -603,6 +731,41 @@ Behaviour the signatures do not show:
   the cached rendition `prepare` would use, fetched unless cached; with
   `download` false nothing is fetched and null means not cached (the
   app's "Wi-Fi only"). Like the other file fetches it runs to its end.
+  The rule is the core's `offline::played_rendition` (moved there from
+  this crate unchanged), and the library opens its session with
+  `with_grid_playback(true)`: a sticker kept offline keeps the file the
+  grids play too.
+- **Keeping offline** (docs/offline.md). `keep_offline` and
+  `release_offline` store the choice in the offline cache (this phone
+  only) and flag or release what is on the phone at once; `offline_run`
+  downloads the rest, in the core's order, four at a time, and is what
+  the app's WorkManager job calls. It ends when everything was tried,
+  the server is unreachable (`WaitingForNetwork`: the next run after a
+  sync goes on), the budget or the storage is full, the sign-in is
+  refused, or it is cancelled: by `cancel_offline`, an account or server
+  change, "Remove kept files", or the calling coroutine (WorkManager
+  stopping the job); a dropped run leaves no partial file. Runs never
+  overlap. `pause_offline` holds the downloads until `resume_offline`.
+  The status is one per library: `offline_status` reads it,
+  `offline_status_change(seen)` waits until it differs from what the
+  caller saw (a run's progress, its start and end, a pause, resume or
+  cancel). `set_offline_options` takes the app's settings (the config's
+  `offline.targets` stay; `auto_used_count` is kept within 1 to 2000) and
+  holds them for a new server's session too; until it is called the
+  core's defaults apply, the same as `OfflineOptions()`'s in Kotlin
+  (`tests/interface.rs` checks them). `mobile_data` is the app's: the
+  library does not read it. `clear_cache` deletes only the files not
+  kept; `remove_kept_files` deletes the kept ones and forgets the keeps.
+- **Offline marks and inserting offline.** `available_offline(ids,
+  editor_package, accepted_mime_types, sticker)` says per item whether a
+  rendition `prepare` would choose for that field is on this phone (kept
+  or cached): `variant_for` over the item's renditions that are here
+  (`Session::variant_on_device`). `prepare` with the server unreachable
+  uses the best rendition when it is here, else that one, so a mark and
+  a pick agree. The app asks with no package and `image/*`, `video/*`
+  (what its share uses), the keyboard with the field's package and its
+  types plus those. `server_unreachable` is the fail-fast state above: the
+  lists answer from the cache now.
 - **Pack covers.** `pack_cover` is the pack's own cover image, else its
   cover item's thumbnail (the first item unless one was chosen; offline,
   the first cached item by name), fetched unless cached. Null for a pack
@@ -704,10 +867,25 @@ is one process; these pieces are shared by its parts:
 - `ui.common.AccountChanges`: counts the account changes made away from the
   launcher; the launcher watches it while resumed and asks again who is
   signed in when it moved.
+- `offline.OfflineSettings`: the offline options (the bridge's
+  `OfflineOptions`, whose Kotlin defaults are the core's) and the pause,
+  in the preferences `offline` next to `display` (`OfflinePrefs`, a key
+  each, so an option added later starts at the core's default).
+  `StickpileApp.library` hands them to the library when it opens, the
+  settings when they change. `offline.OfflineScheduler` enqueues
+  `offline.OfflineWorker`, one unique WorkManager job (`stickpile-offline`,
+  an unmetered network unless mobile data is allowed, storage not low),
+  after each sync that went through (`sync.CacheChanges`, `SyncState.synced`),
+  after a keep and when the options change; the worker runs
+  `StickpileLibrary.offline_run` (again when asked during a run, at most
+  five times) and nothing while paused. `offline.OfflineProgress` and
+  `offline.OfflineMarks` decide what the settings and the tiles say, from
+  the library's answers and WorkManager's job (pure, tested on the JVM).
 
 Packages: `ui` (onboarding, the library screen, settings, licences),
 `ime` (the picker keyboard), `provider` (the content provider below),
-`share` (the share target and upload), `sync` (background sync). Strings
+`share` (the share target and upload), `sync` (background sync), `offline`
+(keeping stickers offline: its settings, job and marks). Strings
 are Android resources: English in `res/values/`, Ukrainian in
 `res/values-uk/`, one `strings_<area>.xml` per package group.
 
