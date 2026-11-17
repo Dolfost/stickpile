@@ -128,31 +128,134 @@ pub fn needs_enrich(state: &AppState, m: &MediaRow) -> bool {
     embed || read
 }
 
+/// Which items of a media an AI write reaches: all of them, or those
+/// matching every given field.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ItemFilter<'a> {
+    /// Only this item.
+    pub item: Option<&'a str>,
+    /// Only items of sets this user owns (a user's recheck).
+    pub owner: Option<&'a str>,
+    /// Only items of this set.
+    pub set: Option<&'a str>,
+}
+
+impl<'a> ItemFilter<'a> {
+    /// Just `item`, or every item of the media.
+    pub fn only(item: Option<&'a str>) -> ItemFilter<'a> {
+        ItemFilter {
+            item,
+            ..Default::default()
+        }
+    }
+
+    /// SQL condition on `items` (unaliased), bound by [`Self::bind`].
+    const SQL: &'static str = "(? IS NULL OR id = ?) AND (? IS NULL OR set_id = ?) \
+         AND (? IS NULL OR set_id IN (SELECT id FROM sets WHERE owner_id = ?))";
+
+    fn bind<'q, O>(
+        self,
+        q: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>
+    where
+        'a: 'q,
+    {
+        q.bind(self.item)
+            .bind(self.item)
+            .bind(self.set)
+            .bind(self.set)
+            .bind(self.owner)
+            .bind(self.owner)
+    }
+}
+
+/// Which values of the computer an AI write may replace. Neither ever
+/// replaces a person's value (rule of [`apply`] and [`apply_text`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overwrite {
+    /// Fill empty fields and replace the computer's values: a new reading
+    /// or a new model.
+    AiValues,
+    /// Fill empty fields only (a recheck of what is missing).
+    EmptyOnly,
+}
+
 /// Give the items of `media_id` (or just `only_item`) the text the computer
 /// read, `text`, where their text is still the computer's
 /// (`text_source = 'ai'`). Every AI write of the item text goes through
-/// here, so a text a person wrote, or cleared, is never touched. An empty
-/// `text` (nothing confident read) changes nothing. Bumps the version of
-/// every touched set; returns the ids of changed items.
+/// here or [`apply_text_to`] and [`clear_ai_text`], so a text a person
+/// wrote, or cleared, is never touched. An empty `text` (nothing confident
+/// read) changes nothing. Bumps the version of every touched set; returns
+/// the ids of changed items.
 pub async fn apply_text(
     conn: &mut sqlx::SqliteConnection,
     media_id: &str,
     text: &str,
     only_item: Option<&str>,
 ) -> AppResult<Vec<String>> {
+    apply_text_to(conn, media_id, text, ItemFilter::only(only_item), Overwrite::AiValues).await
+}
+
+/// [`apply_text`] for the items `filter` selects; with
+/// [`Overwrite::EmptyOnly`] only texts that are not set (empty and `ai`)
+/// get it.
+pub async fn apply_text_to(
+    conn: &mut sqlx::SqliteConnection,
+    media_id: &str,
+    text: &str,
+    filter: ItemFilter<'_>,
+    overwrite: Overwrite,
+) -> AppResult<Vec<String>> {
     if text.is_empty() {
         return Ok(Vec::new());
     }
-    let targets: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, set_id FROM items WHERE media_id = ? AND text_source = 'ai' AND text != ? \
-         AND (? IS NULL OR id = ?)",
-    )
-    .bind(media_id)
-    .bind(text)
-    .bind(only_item)
-    .bind(only_item)
-    .fetch_all(&mut *conn)
-    .await?;
+    let only_empty = overwrite == Overwrite::EmptyOnly;
+    let targets: Vec<(String, String)> = filter
+        .bind(
+            sqlx::query_as(&format!(
+                "SELECT id, set_id FROM items WHERE media_id = ? AND text_source = 'ai' AND text != ? \
+                 AND (? = 0 OR text = '') AND {}",
+                ItemFilter::SQL
+            ))
+            .bind(media_id)
+            .bind(text)
+            .bind(only_empty),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+    write_text(conn, targets, text).await
+}
+
+/// Clear the text the computer read before from the items `filter`
+/// selects, where it is still the computer's (`text_source = 'ai'`): a
+/// refreshed reading found no text any more. A person's text, an empty one
+/// included, is never touched. Bumps the version of every touched set;
+/// returns the ids of changed items.
+pub async fn clear_ai_text(
+    conn: &mut sqlx::SqliteConnection,
+    media_id: &str,
+    filter: ItemFilter<'_>,
+) -> AppResult<Vec<String>> {
+    let targets: Vec<(String, String)> = filter
+        .bind(
+            sqlx::query_as(&format!(
+                "SELECT id, set_id FROM items WHERE media_id = ? AND text_source = 'ai' AND text != '' AND {}",
+                ItemFilter::SQL
+            ))
+            .bind(media_id),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+    write_text(conn, targets, "").await
+}
+
+/// Set the text of `targets` (id, set id) to `text` where it is still the
+/// computer's; the guard is in the UPDATE itself.
+async fn write_text(
+    conn: &mut sqlx::SqliteConnection,
+    targets: Vec<(String, String)>,
+    text: &str,
+) -> AppResult<Vec<String>> {
     let t = now();
     let mut changed = Vec::new();
     let mut sets_touched = HashSet::new();
@@ -221,23 +324,40 @@ struct Target {
     vibe_source: String,
 }
 
-/// Fill the items of `media_id` (or just `only_item`) from `fill`. Bumps the
-/// version of every touched set. Returns the ids of changed items.
+/// Fill the items of `media_id` (or just `only_item`) from `fill`: empty
+/// fields and fields still `ai` get the computer's value, a person's value
+/// is never replaced. Bumps the version of every touched set. Returns the
+/// ids of changed items.
 pub async fn apply(
     conn: &mut sqlx::SqliteConnection,
     media_id: &str,
     fill: &AiFill,
     only_item: Option<&str>,
 ) -> AppResult<Vec<String>> {
-    let targets = sqlx::query_as::<_, Target>(
-        "SELECT id, set_id, keywords, keywords_source, emojis, emojis_source, vibe, vibe_source FROM items \
-         WHERE media_id = ? AND (? IS NULL OR id = ?)",
-    )
-    .bind(media_id)
-    .bind(only_item)
-    .bind(only_item)
-    .fetch_all(&mut *conn)
-    .await?;
+    apply_to(conn, media_id, fill, ItemFilter::only(only_item), Overwrite::AiValues).await
+}
+
+/// [`apply`] for the items `filter` selects; with [`Overwrite::EmptyOnly`]
+/// only empty fields are filled. Empty parts of `fill` change nothing.
+pub async fn apply_to(
+    conn: &mut sqlx::SqliteConnection,
+    media_id: &str,
+    fill: &AiFill,
+    filter: ItemFilter<'_>,
+    overwrite: Overwrite,
+) -> AppResult<Vec<String>> {
+    let targets = filter
+        .bind(
+            sqlx::query_as::<_, Target>(&format!(
+                "SELECT id, set_id, keywords, keywords_source, emojis, emojis_source, vibe, vibe_source FROM items \
+                 WHERE media_id = ? AND {}",
+                ItemFilter::SQL
+            ))
+            .bind(media_id),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+    let replace_ai = overwrite == Overwrite::AiValues;
     let mut changed = Vec::new();
     let mut sets_touched = HashSet::new();
     let t = now();
@@ -245,13 +365,15 @@ pub async fn apply(
         let mut keywords = (it.keywords.clone(), it.keywords_source.clone());
         let mut emojis = (it.emojis.clone(), it.emojis_source.clone());
         let mut vibe = (it.vibe.clone(), it.vibe_source.clone());
-        if !fill.keywords.is_empty() && (json_list(&it.keywords).is_empty() || it.keywords_source == "ai") {
+        if !fill.keywords.is_empty()
+            && (json_list(&it.keywords).is_empty() || (replace_ai && it.keywords_source == "ai"))
+        {
             keywords = (to_json_list(&fill.keywords), "ai".into());
         }
-        if !fill.emojis.is_empty() && (json_list(&it.emojis).is_empty() || it.emojis_source == "ai") {
+        if !fill.emojis.is_empty() && (json_list(&it.emojis).is_empty() || (replace_ai && it.emojis_source == "ai")) {
             emojis = (to_json_list(&fill.emojis), "ai".into());
         }
-        if fill.vibe.is_some() && (it.vibe.is_none() || it.vibe_source == "ai") {
+        if fill.vibe.is_some() && (it.vibe.is_none() || (replace_ai && it.vibe_source == "ai")) {
             vibe = (fill.vibe.clone(), "ai".into());
         }
         let differs = keywords != (it.keywords.clone(), it.keywords_source.clone())
