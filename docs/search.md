@@ -368,6 +368,12 @@ expansion works offline if the client ships the vibe vocabulary. When the
 server is reachable, clients use `GET /api/v1/search`
 (`stickpile_api::routes::SEARCH`), which adds the vector side.
 
+One filter differs offline: `is:public`. An `ItemSummary` carries no set
+visibility, so the cache counts every own item as private
+(`cache::doc_for`): offline, `is:public` finds only other people's public
+items, not your own items in public sets. Online the server answers it
+with the sets' visibility.
+
 The values the clients suggest while a `key:` filter is typed
 ([desktop.md](desktop.md#search-suggestions)) come from the same cache, so
 they follow the sync. `Session::sync` tells whether the cached items

@@ -294,7 +294,9 @@ fn queries() -> Vec<(String, Option<BTreeSet<String>>)> {
         ("by:bob x:кря", Some(vec!["duck"])),
         ("-t:nsfw e:😂", Some(vec!["joy"])),
         ("is:mine e:skull", None),
+        // Offline: see `offline_differs`.
         ("is:public text:thoughts", Some(vec!["pub_skull"])),
+        ("is:public e:skull", Some(vec!["pub_skull", "gif"])),
         ("e:skull text:\"no thoughts\"", Some(vec!["pub_skull"])),
         ("sort:recent e:skull", Some(skulls.to_vec())),
         ("x:кіт -tag:nsfw", Some(vec!["ukr", "mixed"])),
@@ -307,6 +309,19 @@ fn queries() -> Vec<(String, Option<BTreeSet<String>>)> {
     out.push((long_value, Some(BTreeSet::new())));
     out.push((too_long, Some(BTreeSet::new())));
     out
+}
+
+/// The queries the offline index answers otherwise by design, and what it
+/// finds instead (docs/search.md, "Offline behaviour"): an `ItemSummary`
+/// carries no set visibility, so the cache counts the viewer's own items
+/// as private and `is:public` finds only other people's public items
+/// offline (bob's `gif`), not alice's in her public set (`pub_skull`).
+fn offline_differs(q: &str) -> Option<BTreeSet<String>> {
+    match q {
+        "is:public text:thoughts" => Some(labels(&[])),
+        "is:public e:skull" => Some(labels(&["gif"])),
+        _ => None,
+    }
 }
 
 fn short(q: &str) -> String {
@@ -346,13 +361,15 @@ async fn server_and_offline_agree_on_the_query_list() {
             }
             Err(code) => (None, format!("HTTP {code}"), false, false),
         };
+        let differs = offline_differs(&q);
         let mut docs = String::from("-");
         if let Some(want) = &want {
-            let ok_off = set(&off) == *want;
+            let want_off = differs.as_ref().unwrap_or(want);
+            let ok_off = set(&off) == *want_off;
             let ok_srv = srv.as_ref().is_none_or(|s| set(s) == *want);
             docs = if ok_off && ok_srv { "ok".into() } else { "WRONG".into() };
             if !ok_off {
-                problems.push(format!("{q:?}: offline {:?}, docs want {want:?}", set(&off)));
+                problems.push(format!("{q:?}: offline {:?}, docs want {want_off:?}", set(&off)));
             }
             if !ok_srv {
                 problems.push(format!(
@@ -362,9 +379,14 @@ async fn server_and_offline_agree_on_the_query_list() {
             }
         }
         // docs/api.md: `q` at most 1000 bytes (400); the offline index has
-        // no such limit. Documented, not counted.
-        let documented = srv.is_none() && q.len() > 1000;
-        if !agree && !documented {
+        // no such limit. docs/search.md: offline `is:public`. Documented,
+        // not counted.
+        let documented = match () {
+            _ if srv.is_none() && q.len() > 1000 => Some("q over 1000 bytes"),
+            _ if differs.is_some() => Some("offline is:public"),
+            _ => None,
+        };
+        if !agree && documented.is_none() {
             problems.push(format!("{q:?}: server {srv_text} / offline {}", off.join(" ")));
         }
         let off_text = if off.len() == all.len() {
@@ -384,9 +406,9 @@ async fn server_and_offline_agree_on_the_query_list() {
             srv_text,
             off_text,
             match (agree, documented) {
-                (true, _) => "yes",
-                (false, true) => "no (documented: q over 1000 bytes)",
-                (false, false) => "NO",
+                (true, _) => "yes".to_string(),
+                (false, Some(why)) => format!("no (documented: {why})"),
+                (false, None) => "NO".to_string(),
             },
             if order { "yes" } else { "no" },
             docs
