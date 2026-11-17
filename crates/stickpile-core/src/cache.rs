@@ -33,7 +33,9 @@ const SCHEMA_VERSION: i64 = 1;
 /// What the cached [`ItemSummary`] JSON holds, kept in `meta` as
 /// `item_format` (absent: 1). [`sync`] lists everything again, once, when
 /// the cache's items are older, and then records this. The table schema
-/// does not change, so an older client can still open the cache.
+/// does not change (only the index `items_without_text` is new), so an
+/// older client can still open the cache; what it writes without `text`
+/// [`sync`] lists again ([`Cache::has_items_without_text`]).
 ///
 /// - 1: up to stickpile 0.7.0.
 /// - 2: `text`, the words in the picture.
@@ -52,6 +54,9 @@ CREATE TABLE IF NOT EXISTS items (
     json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS items_set ON items(set_id);
+-- Items written without `text` (by a client up to 0.7.0 sharing the cache),
+-- so that `sync` finds them in one indexed query.
+CREATE INDEX IF NOT EXISTS items_without_text ON items(id) WHERE json_extract(json, '$.text') IS NULL;
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
@@ -244,6 +249,18 @@ impl Cache {
 
     pub fn set_item_format(&self, format: i64) -> Result<()> {
         self.meta_set("item_format", &format.to_string())
+    }
+
+    /// Whether a cached item lacks `text`: a client up to 0.7.0 sharing
+    /// the cache wrote it (its sync, or an item it got back), and may have
+    /// moved the sync cursor past the item's change. One indexed query
+    /// (`items_without_text`).
+    pub fn has_items_without_text(&self) -> Result<bool> {
+        Ok(self.db().query_row(
+            "SELECT EXISTS (SELECT 1 FROM items WHERE json_extract(json, '$.text') IS NULL)",
+            [],
+            |r| r.get(0),
+        )?)
     }
 
     /// Changes whenever cached items change (also across processes).
@@ -614,10 +631,12 @@ fn bump_generation(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
 /// following `next_cursor` pages, applying `removed`. Without a cursor (first
 /// sync, or after a reset) it is a full listing and cached items that were not
 /// listed are deleted. Items cached in an older [`ITEM_FORMAT`] (fields
-/// missing) are listed again in full the same way, once. The cursor is
+/// missing) are listed again in full the same way, once; so are the items
+/// when one of them lacks `text` (an older client sharing the cache
+/// stored it, and its cursor would skip the item's change). The cursor is
 /// advanced only after the last page.
 pub async fn sync(cache: &Cache, client: &ApiClient, page_limit: u32) -> Result<SyncReport> {
-    let since = if cache.item_format()? < ITEM_FORMAT {
+    let since = if cache.item_format()? < ITEM_FORMAT || cache.has_items_without_text()? {
         None
     } else {
         cache.sync_cursor()?

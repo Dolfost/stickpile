@@ -212,6 +212,47 @@ async fn a_text_an_older_client_synced_first_reaches_the_cache() {
     );
 }
 
+/// The check behind the test above is one query on an index, and lists
+/// again only once: what a 0.7.0 server lists (without `text`) is stored
+/// with an empty text, so it does not make every sync a full one.
+#[tokio::test]
+async fn items_without_text_are_listed_again_once() {
+    let (server, items) = seeded_server();
+    let client = client_for(&server.url, Some(server.state().issue_token("alice", "t")));
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), 16).unwrap();
+    assert!(cache::sync(&cache, &client, 500).await.unwrap().full);
+    assert!(!cache.has_items_without_text().unwrap());
+    let db = rusqlite::Connection::open(dir.path().join(cache::DB_FILE)).unwrap();
+    let plan: Vec<String> = db
+        .prepare("EXPLAIN QUERY PLAN SELECT EXISTS (SELECT 1 FROM items WHERE json_extract(json, '$.text') IS NULL)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(plan.iter().any(|d| d.contains("items_without_text")), "{plan:?}");
+
+    // An item as a 0.7.0 server sends it, without `text`: stored with "".
+    let mut v = serde_json::to_value(cache.item(&items[0].id).unwrap().unwrap()).unwrap();
+    v.as_object_mut().unwrap().remove("text").unwrap();
+    let old: stickpile_api::ItemSummary = serde_json::from_value(v.clone()).unwrap();
+    cache.upsert_items(&[old]).unwrap();
+    assert!(!cache.has_items_without_text().unwrap());
+    assert!(!cache::sync(&cache, &client, 500).await.unwrap().full);
+
+    // An item a 0.7.0 client wrote (here by hand): one full listing.
+    db.execute(
+        "UPDATE items SET json = ?1 WHERE id = ?2",
+        rusqlite::params![v.to_string(), items[0].id],
+    )
+    .unwrap();
+    assert!(cache.has_items_without_text().unwrap());
+    assert!(cache::sync(&cache, &client, 500).await.unwrap().full);
+    assert!(!cache.has_items_without_text().unwrap());
+    assert!(!cache::sync(&cache, &client, 500).await.unwrap().full, "once");
+}
+
 #[test]
 fn server_or_account_change_resets_account_data() {
     let dir = tempfile::tempdir().unwrap();
