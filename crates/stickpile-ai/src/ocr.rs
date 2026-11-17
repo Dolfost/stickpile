@@ -5,9 +5,9 @@
 //! with a confidence, and [`read_frames`] turns what it found in the frames
 //! of a picture into the stored text with the rules every reader shares
 //! ([`clean_lines`]): lines below [`MIN_CONFIDENCE`] dropped, reading order
-//! (top to bottom, left to right), printable text only, a line seen in an
-//! earlier frame not repeated, at most [`stickpile_api::text::MAX_TEXT_CHARS`]
-//! characters. Frames larger than [`MAX_READ_PIXELS`] are scaled down
+//! (top to bottom, left to right), the pieces of one row joined with a
+//! space, printable text only, a line seen in an earlier frame not
+//! repeated, at most [`stickpile_api::text::MAX_TEXT_CHARS`] characters. Frames larger than [`MAX_READ_PIXELS`] are scaled down
 //! first. [`MockTextReader`] stands in for a model in tests.
 
 use std::borrow::Cow;
@@ -115,7 +115,7 @@ pub fn clean_lines(frames: Vec<Vec<TextLine>>, min_confidence: f32) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for lines in frames {
-        let mut kept: Vec<TextLine> = lines
+        let kept: Vec<TextLine> = lines
             .into_iter()
             .filter(|l| l.confidence >= min_confidence)
             .filter_map(|mut l| {
@@ -123,15 +123,14 @@ pub fn clean_lines(frames: Vec<Vec<TextLine>>, min_confidence: f32) -> String {
                 Some(l)
             })
             .collect();
-        reading_order(&mut kept);
         // A line already read in an earlier frame is not repeated; the same
         // line twice in one frame is (`HA` / `HA`).
         let mut this_frame = Vec::new();
-        for l in kept {
-            let key = dedup_key(&l.text);
+        for line in rows(kept) {
+            let key = dedup_key(&line);
             if !seen.contains(&key) {
                 this_frame.push(key);
-                out.push(l.text);
+                out.push(line);
             }
         }
         seen.extend(this_frame);
@@ -156,37 +155,36 @@ fn dedup_key(line: &str) -> String {
     line.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Top to bottom, left to right within a row. A line joins a row when its
-/// vertical centre lies within half a line height of the row's first line.
-/// Lines without boxes keep the reader's order.
-fn reading_order(lines: &mut [TextLine]) {
-    if lines.len() < 2 || lines.iter().any(|l| l.bounds.is_none()) {
-        return;
+/// The text of each row, top to bottom; the pieces of a row (a reader may
+/// find a line as several boxes, word by word) left to right, joined with a
+/// space. A piece joins the row when its vertical centre is less than half
+/// the smaller height away from the centre of the row's first piece (the
+/// rule the OCR evaluation in docs/ai.md scored). Without boxes every piece
+/// is a row, in the reader's order.
+fn rows(lines: Vec<TextLine>) -> Vec<String> {
+    if lines.iter().any(|l| l.bounds.is_none()) {
+        return lines.into_iter().map(|l| l.text).collect();
     }
-    let b = |l: &TextLine| l.bounds.expect("checked");
-    lines.sort_by(|p, q| b(p).centre_y().total_cmp(&b(q).centre_y()));
-    let mut row_of = vec![0usize; lines.len()];
-    let mut row = 0;
-    let mut anchor = b(&lines[0]);
-    for (i, l) in lines.iter().enumerate().skip(1) {
-        let lb = b(l);
-        let reach = anchor.height.max(lb.height) / 2.0;
-        if (lb.centre_y() - anchor.centre_y()).abs() > reach {
-            row += 1;
-            anchor = lb;
-        }
-        row_of[i] = row;
-    }
-    let mut keyed: Vec<(usize, f32, TextLine)> = lines
-        .iter()
-        .cloned()
-        .zip(row_of)
-        .map(|(l, r)| (r, b(&l).x, l))
+    let mut items: Vec<(LineBox, String)> = lines
+        .into_iter()
+        .map(|l| (l.bounds.expect("checked"), l.text))
         .collect();
-    keyed.sort_by(|p, q| p.0.cmp(&q.0).then(p.1.total_cmp(&q.1)));
-    for (slot, (_, _, l)) in lines.iter_mut().zip(keyed) {
-        *slot = l;
+    items.sort_by(|p, q| p.0.centre_y().total_cmp(&q.0.centre_y()).then(p.0.x.total_cmp(&q.0.x)));
+    let mut rows: Vec<(LineBox, Vec<(LineBox, String)>)> = Vec::new();
+    for (b, text) in items {
+        match rows.last_mut() {
+            Some((first, row)) if (b.centre_y() - first.centre_y()).abs() < first.height.min(b.height) / 2.0 => {
+                row.push((b, text));
+            }
+            _ => rows.push((b, vec![(b, text)])),
+        }
     }
+    rows.into_iter()
+        .map(|(_, mut row)| {
+            row.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+            row.into_iter().map(|(_, t)| t).collect::<Vec<_>>().join(" ")
+        })
+        .collect()
 }
 
 /// Model-free [`TextReader`] for tests: returns the same lines for every
@@ -273,7 +271,19 @@ mod tests {
             ]],
             0.5,
         );
-        assert_eq!(got, "left\nright\nmiddle\nbottom");
+        assert_eq!(got, "left right\nmiddle\nbottom");
+        // Word boxes of one caption make one line; a smaller box whose
+        // centre is outside half its height starts its own row.
+        let got = clean_lines(
+            vec![vec![
+                TextLine::new("UKRAINE", 0.9).at(220.0, 12.0, 90.0, 40.0),
+                TextLine::new("GLORY", 0.9).at(0.0, 10.0, 90.0, 40.0),
+                TextLine::new("TO", 0.9).at(110.0, 14.0, 40.0, 36.0),
+                TextLine::new("small print", 0.9).at(0.0, 42.0, 60.0, 10.0),
+            ]],
+            0.5,
+        );
+        assert_eq!(got, "GLORY TO UKRAINE\nsmall print");
         // Without boxes the reader's order stays.
         let got = clean_lines(vec![vec![TextLine::new("b", 0.9), TextLine::new("a", 0.9)]], 0.5);
         assert_eq!(got, "b\na");
