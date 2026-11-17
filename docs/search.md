@@ -122,7 +122,11 @@ whole. Variation selectors (U+FE0F) are dropped, so `❤️` equals `❤`.
 **Tokens.** Text is split on Unicode (UAX #29) word boundaries:
 
 - `_ . :` also separate words (`my_cats`, `file.png`).
-- Apostrophes are removed (`can't` → `cant`, `п'ять` → `пять`).
+- Apostrophes are removed (`can't` → `cant`, `п'ять` → `пять`). One
+  between two letters goes before the text is split, in each form people
+  type it: `'`, `’` (U+2019), `ʼ` (U+02BC) and a backtick (a keyboard
+  without the apostrophe), so `п'ятниця`, `п’ятниця`, `пʼятниця` and
+  ``п`ятниця`` are all the word `пятниця`, in the items and in queries.
 - Each emoji is a token of its own. ZWJ sequences and flags stay whole, and
   skin tones are dropped (`👍🏽` → `👍`).
 

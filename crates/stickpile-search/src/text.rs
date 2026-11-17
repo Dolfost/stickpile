@@ -133,11 +133,34 @@ pub(crate) struct Token {
     pub word: bool,
 }
 
+/// `text` without the apostrophes that sit between two letters, before
+/// it is split into words: UAX #29 keeps a word whole at `'` and U+2019
+/// but splits it at a backtick (``п`ятниця``, typed on a keyboard without
+/// the apostrophe), so every form [`is_apostrophe`] knows goes first.
+fn join_apostrophes(text: &str) -> String {
+    if !text.chars().any(is_apostrophe) {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let inner = is_apostrophe(c)
+            && i > 0
+            && chars[i - 1].is_alphabetic()
+            && chars.get(i + 1).is_some_and(|n| n.is_alphabetic());
+        if !inner {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Normalise and split into word and emoji tokens (UAX #29 word boundaries).
 /// Emoji keep ZWJ sequences and flags whole; skin tones and variation
-/// selectors are dropped. Apostrophes are removed (`can't` -> `cant`).
+/// selectors are dropped. Apostrophes are removed (`can't` -> `cant`,
+/// ``п`ятниця`` -> `пятниця`).
 pub(crate) fn tokenize(text: &str) -> Vec<Token> {
-    let norm = normalize(text);
+    let norm = join_apostrophes(&normalize(text));
     let mut out = Vec::new();
     for seg in norm.split_word_bounds() {
         if seg.chars().any(is_pictographic) {

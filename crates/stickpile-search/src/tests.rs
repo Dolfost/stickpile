@@ -229,6 +229,34 @@ fn tokenize_words_and_emojis() {
     assert!(tokenize(" - !? ").is_empty());
 }
 
+/// The Ukrainian apostrophe as people type it: ASCII, U+2019, U+02BC and
+/// a backtick (a keyboard without it) are one word, whichever is in the
+/// item and whichever in the query. One that does not sit between two
+/// letters is no apostrophe of a word.
+#[test]
+fn every_apostrophe_form_is_the_same_word() {
+    let forms = ["п'ятниця", "п\u{2019}ятниця", "п\u{02BC}ятниця", "п`ятниця"];
+    for f in forms {
+        let words: Vec<String> = tokenize(f).into_iter().map(|t| t.text).collect();
+        assert_eq!(words, ["пятниця"], "{f}");
+    }
+    let ix = index(
+        forms
+            .iter()
+            .enumerate()
+            .map(|(n, f)| with(&format!("form{n}"), |d| d.text = format!("знову {f}!"))),
+    );
+    let all = strs(&["form0", "form1", "form2", "form3"]);
+    for f in forms {
+        for q in [f.to_string(), format!("text:{f}"), format!("x:\"знову {f}\"")] {
+            assert_eq!(sorted_ids(&ix, &q, &alice()), all, "{q}");
+        }
+    }
+    let words = |t: &str| -> Vec<String> { tokenize(t).into_iter().map(|t| t.text).collect() };
+    assert_eq!(words("`code` it's 80's"), ["code", "its", "80", "s"]);
+    assert_eq!(words("rock'n'roll"), ["rocknroll"]);
+}
+
 #[test]
 fn osa_distance() {
     let c = |s: &str| s.chars().collect::<Vec<_>>();
