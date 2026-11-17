@@ -622,10 +622,12 @@ pub async fn lift_text_from_extra(db: &sqlx::SqlitePool) -> AppResult<u64> {
             Err(_) => ItemText::default(),
         }
         .merged_into(cur);
-        sqlx::query("UPDATE items SET text = ?, text_source = ?, extra_toml = ? WHERE id = ?")
+        // `updated_at` moves so that client caches pick the text up.
+        sqlx::query("UPDATE items SET text = ?, text_source = ?, extra_toml = ?, updated_at = ? WHERE id = ?")
             .bind(&text.text)
             .bind(source_str(text.source))
             .bind(table_to_string(&table))
+            .bind(now())
             .bind(&id)
             .execute(db)
             .await?;

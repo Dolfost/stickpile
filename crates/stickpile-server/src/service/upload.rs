@@ -201,9 +201,9 @@ impl ItemText {
         self.text.is_empty() && self.source == FieldSource::Ai
     }
 
-    /// What an item with text `cur` gets from `self` (an import, a restore):
-    /// nothing changes for "not set", and an AI text never replaces a
-    /// person's (the rule of [`crate::service::ai::apply_text`]).
+    /// What an item with text `cur` gets from `self` (an import, or keys an
+    /// older server kept): nothing changes for "not set", and an AI text
+    /// never replaces a person's (the rule of [`crate::service::ai::apply_text`]).
     pub fn merged_into(self, cur: ItemText) -> ItemText {
         if self.is_unset() || (self.source == FieldSource::Ai && cur.source == FieldSource::User) {
             cur

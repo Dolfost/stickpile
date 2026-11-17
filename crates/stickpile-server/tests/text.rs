@@ -709,7 +709,7 @@ async fn texts_an_older_server_kept_as_unknown_keys_are_taken_over() {
         ),
         (&b.id, "text = \"robot\"\ntext_source = \"ai\"\n"),
     ] {
-        sqlx::query("UPDATE items SET extra_toml = ? WHERE id = ?")
+        sqlx::query("UPDATE items SET extra_toml = ?, updated_at = 1 WHERE id = ?")
             .bind(extra)
             .bind(id)
             .execute(&srv.state.db)
@@ -736,6 +736,7 @@ async fn texts_an_older_server_kept_as_unknown_keys_are_taken_over() {
         text_of(&item(&srv, &u, &a.id).await),
         ("from an older server", FieldSource::Ai)
     );
+    assert!(item(&srv, &u, &a.id).await.updated_at > 1, "client caches learn it");
     assert_eq!(text_of(&item(&srv, &u, &b.id).await), ("mine", FieldSource::User));
     assert_eq!(
         stickpile_server::service::transfer::lift_text_from_extra(&srv.state.db)
