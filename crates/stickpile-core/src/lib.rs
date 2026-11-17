@@ -13,6 +13,8 @@
 //!   target, plus CLI clipboard backends (Wayland data-control, X11)
 //! * [`session`] — the high-level facade UI shells use (search with offline
 //!   fallback, thumbnails, prepare a copy, record usage)
+//! * [`offline`] - keeping stickers, packs or the library on the device:
+//!   which files, the plan, the background downloader (docs/offline.md)
 //! * `mock` (feature `mock`) — an in-process axum mock of the REST API for tests
 //!
 //! The popup state machine and focused-window detection live in the
@@ -25,6 +27,7 @@ pub mod config;
 pub mod insert;
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
+pub mod offline;
 pub mod session;
 pub mod settings;
 pub mod sync_policy;
@@ -53,6 +56,21 @@ pub enum CoreError {
     },
     #[error("not logged in (run `stickpile login`)")]
     NotLoggedIn,
+    /// The server is unreachable and the file a copy (or an insert) needs
+    /// is not on this device: the item is not kept offline, or its file is
+    /// still to be downloaded. [`CoreError::is_offline`] is true for it, so
+    /// code that treats an unreachable server alike keeps working; a shell
+    /// says why the sticker is unavailable instead of naming a network
+    /// error.
+    #[error("{item}: the {} file is not on this device and the server is unreachable ({cause})", .variant.as_str())]
+    NotOnDevice {
+        /// The item's name.
+        item: String,
+        /// The rendition that was needed.
+        variant: stickpile_api::Variant,
+        /// The network error.
+        cause: String,
+    },
     #[error("cache: {0}")]
     Cache(String),
     #[error("{0}")]
@@ -62,9 +80,15 @@ pub enum CoreError {
 }
 
 impl CoreError {
-    /// True for [`CoreError::Offline`].
+    /// True for [`CoreError::Offline`] and [`CoreError::NotOnDevice`] (the
+    /// server could not be reached).
     pub fn is_offline(&self) -> bool {
-        matches!(self, CoreError::Offline(_))
+        matches!(self, CoreError::Offline(_) | CoreError::NotOnDevice { .. })
+    }
+
+    /// True for [`CoreError::NotOnDevice`].
+    pub fn is_not_on_device(&self) -> bool {
+        matches!(self, CoreError::NotOnDevice { .. })
     }
     /// HTTP status of an [`CoreError::Api`] error.
     pub fn status(&self) -> Option<u16> {

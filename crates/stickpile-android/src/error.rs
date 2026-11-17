@@ -165,7 +165,7 @@ impl From<CoreError> for LibraryError {
         let detail = redact_urls(&e.to_string());
         match e {
             CoreError::NotLoggedIn => LibraryError::NotSignedIn { detail },
-            CoreError::Offline(_) => LibraryError::Unreachable { detail },
+            CoreError::Offline(_) | CoreError::NotOnDevice { .. } => LibraryError::Unreachable { detail },
             CoreError::Api { status, .. } => match status {
                 401 => LibraryError::Unauthorized { detail },
                 404 => LibraryError::NotFound { detail },

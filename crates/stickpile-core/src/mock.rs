@@ -14,6 +14,9 @@
 //! [`MockState::whatsapp_queued`]) with real `.wastickers` ZIPs of the set's
 //! item thumbnails, at most 30 per pack ([`stored_zip`]). Test hooks: a controllable
 //! clock, page size, artificial delays and forced failures, and a request log.
+//! The file route sends a strong `ETag` (the file's sha256) like the server's,
+//! and can answer `429` with `Retry-After`, fail a file, send a wrong size or
+//! send a file slowly; [`MockServer::kill`] cuts the connections at once.
 //!
 //! The server runs on its own thread and tokio runtime, so it works from both
 //! async and blocking tests; it stops when the [`MockServer`] is dropped.
@@ -131,6 +134,19 @@ pub struct MockState {
     /// Ignore the item text of a `PATCH` or an upload's `meta`, as a
     /// server older than item texts (0.7.0) does.
     pub texts_unsupported: bool,
+    /// Answer this many more `GET /items/{id}/file/{variant}` requests with
+    /// `429 Too Many Requests` and `Retry-After: retry_after_secs`.
+    pub file_429: usize,
+    /// `Retry-After` of those, in seconds (`None`: no header).
+    pub retry_after_secs: Option<u64>,
+    /// (item id, variant) -> the status its file request is answered with
+    /// (and an ApiError body), every time.
+    pub failing_files: HashMap<(String, Variant), u16>,
+    /// Files sent with one byte too many (the `ETag` names the real file).
+    pub wrong_size_files: HashSet<(String, Variant)>,
+    /// (item id, variant) -> pause between 1 KiB chunks of its file: a slow
+    /// download, to interrupt.
+    pub slow_files: HashMap<(String, Variant), Duration>,
 }
 
 impl Default for MockState {
@@ -162,6 +178,11 @@ impl Default for MockState {
             whatsapp_queued: false,
             whatsapp_unsupported: false,
             texts_unsupported: false,
+            file_429: 0,
+            retry_after_secs: Some(1),
+            failing_files: HashMap::new(),
+            wrong_size_files: HashSet::new(),
+            slow_files: HashMap::new(),
         }
     }
 }
@@ -602,7 +623,8 @@ pub struct MockServer {
     pub url: String,
     addr: std::net::SocketAddr,
     state: Shared,
-    running: Option<(tokio::sync::oneshot::Sender<()>, std::thread::JoinHandle<()>)>,
+    /// Sends whether to wait for open connections (`stop`) or not (`kill`).
+    running: Option<(tokio::sync::oneshot::Sender<bool>, std::thread::JoinHandle<()>)>,
 }
 
 fn run(
@@ -610,11 +632,11 @@ fn run(
     addr: std::net::SocketAddr,
 ) -> (
     std::net::SocketAddr,
-    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Sender<bool>,
     std::thread::JoinHandle<()>,
 ) {
     let app = router(state);
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     let (addr_tx, addr_rx) = std::sync::mpsc::channel();
     let thread = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -625,11 +647,21 @@ fn run(
         rt.block_on(async move {
             let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
             addr_tx.send(listener.local_addr().expect("addr")).expect("send addr");
-            let _ = axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = rx.await;
-                })
-                .await;
+            let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel::<()>();
+            let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+                let _ = graceful_rx.await;
+            });
+            let serve = std::future::IntoFuture::into_future(serve);
+            tokio::pin!(serve);
+            tokio::select! {
+                _ = &mut serve => {}
+                graceful = rx => {
+                    if graceful.unwrap_or(true) {
+                        let _ = graceful_tx.send(());
+                        let _ = serve.await;
+                    }
+                }
+            }
         });
         // Dropping the runtime here aborts connections that are still open.
     });
@@ -665,10 +697,21 @@ impl MockServer {
         self.state.clone()
     }
 
-    /// Stop serving (connections are refused) but keep the state.
+    /// Stop serving (connections are refused) but keep the state. Waits for
+    /// the responses being sent.
     pub fn stop(&mut self) {
         if let Some((tx, thread)) = self.running.take() {
-            let _ = tx.send(());
+            let _ = tx.send(true);
+            let _ = thread.join();
+        }
+    }
+
+    /// Go away at once, like a server that lost its network: open
+    /// connections are cut mid-response, new ones refused. The state stays
+    /// ([`MockServer::restart`]).
+    pub fn kill(&mut self) {
+        if let Some((tx, thread)) = self.running.take() {
+            let _ = tx.send(false);
             let _ = thread.join();
         }
     }
@@ -1880,28 +1923,67 @@ async fn delete_item(State(s): State<Shared>, h: HeaderMap, AxPath(id): AxPath<S
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A file as the server's file route sends it: its MIME type and a strong
+/// `ETag` with its sha256. Test hooks: [`MockState::file_429`],
+/// [`MockState::failing_files`], [`MockState::wrong_size_files`],
+/// [`MockState::slow_files`].
 async fn item_file(
     State(s): State<Shared>,
     h: HeaderMap,
     AxPath((id, variant)): AxPath<(String, String)>,
 ) -> HResult<Response> {
-    let st = lock(&s);
-    let u = auth(&st, &h)?;
-    let it = st.items.iter().find(|i| i.item.id == id).ok_or_else(not_found)?;
-    if !st.can_read(&u, &it.item.set_id) {
-        return Err(not_found());
+    let (mut bytes, mime, slow) = {
+        let mut st = lock(&s);
+        let u = auth(&st, &h)?;
+        let v = Variant::parse(&variant).ok_or_else(not_found)?;
+        if st.file_429 > 0 {
+            st.file_429 -= 1;
+            let mut resp = api_err(429, "rate_limited", "too many requests");
+            if let Some(secs) = st.retry_after_secs {
+                resp.headers_mut()
+                    .insert(header::RETRY_AFTER, secs.to_string().parse().expect("header"));
+            }
+            return Err(resp);
+        }
+        if let Some(status) = st.failing_files.get(&(id.clone(), v)) {
+            return Err(api_err(*status, "internal", "this file fails"));
+        }
+        let it = st.items.iter().find(|i| i.item.id == id).ok_or_else(not_found)?;
+        if !st.can_read(&u, &it.item.set_id) {
+            return Err(not_found());
+        }
+        let bytes = it.files.get(&v).ok_or_else(not_found)?.clone();
+        let mime = it
+            .item
+            .media
+            .variants
+            .iter()
+            .find(|x| x.variant == v)
+            .map(|x| x.mime.clone())
+            .unwrap_or_default();
+        let mut bytes = (bytes, false);
+        if st.wrong_size_files.contains(&(id.clone(), v)) {
+            bytes.1 = true;
+        }
+        (bytes, mime, st.slow_files.get(&(id.clone(), v)).copied())
+    };
+    let etag = format!("\"{}\"", hex::encode(sha2::Sha256::digest(&bytes.0)));
+    if bytes.1 {
+        bytes.0.push(0);
     }
-    let v = Variant::parse(&variant).ok_or_else(not_found)?;
-    let bytes = it.files.get(&v).ok_or_else(not_found)?.clone();
-    let mime = it
-        .item
-        .media
-        .variants
-        .iter()
-        .find(|x| x.variant == v)
-        .map(|x| x.mime.clone())
-        .unwrap_or_default();
-    Ok(([(header::CONTENT_TYPE, mime)], Body::from(bytes)).into_response())
+    let body = match slow {
+        None => Body::from(bytes.0),
+        Some(pause) => {
+            let chunks: Vec<bytes::Bytes> = bytes.0.chunks(1024).map(bytes::Bytes::copy_from_slice).collect();
+            let stream = futures::stream::unfold(chunks.into_iter(), move |mut rest| async move {
+                let chunk = rest.next()?;
+                tokio::time::sleep(pause).await;
+                Some((Ok::<_, std::io::Error>(chunk), rest))
+            });
+            Body::from_stream(stream)
+        }
+    };
+    Ok(([(header::CONTENT_TYPE, mime), (header::ETAG, etag)], body).into_response())
 }
 
 fn set_like(s: &Shared, h: &HeaderMap, id: &str, liked: bool) -> HResult<Json<LikeState>> {

@@ -420,8 +420,14 @@ impl ApiClient {
     }
 
     async fn send(&self, rb: RequestBuilder) -> Result<Response> {
+        self.send_as(rb, false).await
+    }
+
+    /// [`ApiClient::send`]; with `pass_429` a `429 Too Many Requests` is
+    /// returned as a response, so that its `Retry-After` can be read.
+    async fn send_as(&self, rb: RequestBuilder, pass_429: bool) -> Result<Response> {
         let Some(reach) = self.reach.clone() else {
-            return self.answer(rb.send().await).await;
+            return self.answer(rb.send().await, pass_429).await;
         };
         let request = rb.build().map_err(map_reqwest)?;
         let _probing = if *request.method() == Method::GET {
@@ -438,7 +444,7 @@ impl ApiClient {
         } else {
             None
         };
-        let result = self.answer(self.http.execute(request).await).await;
+        let result = self.answer(self.http.execute(request).await, pass_429).await;
         reach.record(&result, Instant::now());
         result
     }
@@ -452,15 +458,19 @@ impl ApiClient {
         let client = self.clone();
         runtime.spawn(async move {
             let rb = client.http.get(client.url(routes::HEALTH)).timeout(client.timeout);
-            let result = client.answer(rb.send().await).await;
+            let result = client.answer(rb.send().await, false).await;
             probing.0.record(&result, Instant::now());
             drop(probing);
         });
     }
 
-    /// What a request got back: its response, or the error it means.
-    async fn answer(&self, sent: reqwest::Result<Response>) -> Result<Response> {
+    /// What a request got back: its response, or the error it means (with
+    /// `pass_429`, a `429` is a response).
+    async fn answer(&self, sent: reqwest::Result<Response>, pass_429: bool) -> Result<Response> {
         let resp = sent.map_err(map_reqwest)?;
+        if pass_429 && resp.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Ok(resp);
+        }
         let public = is_public_path(resp.url().path());
         match check_status(resp).await {
             Err(e) if e.status() == Some(401) && !public && !self.has_token() => Err(CoreError::NotLoggedIn),
@@ -917,6 +927,33 @@ impl ApiClient {
         result
     }
 
+    /// A file for the offline downloader ([`crate::offline`]): the response
+    /// of `GET url_path` to stream when the server sends the file, or how
+    /// long a `429` asks to wait. Other errors as for every request.
+    pub(crate) async fn fetch_file(&self, url_path: &str) -> Result<FileFetch> {
+        let rb = self
+            .request(Method::GET, url_path, true)?
+            .timeout(self.transfer_timeout);
+        let resp = self.send_as(rb, true).await?;
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+            let wait = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .map(Duration::from_secs);
+            // Drain the body so the connection can be reused.
+            let _ = resp.bytes().await;
+            return Ok(FileFetch::RateLimited(wait));
+        }
+        let sha256 = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .and_then(etag_sha256);
+        Ok(FileFetch::Body { resp, sha256 })
+    }
+
     pub async fn like(&self, id: &str) -> Result<LikeState> {
         self.json(self.request(Method::PUT, &path(routes::ITEM_LIKE, &[id]), true)?)
             .await
@@ -1151,6 +1188,26 @@ impl ApiClient {
             .collect();
         self.get(routes::ADMIN_JOBS, &q).await
     }
+}
+
+/// What [`ApiClient::fetch_file`] got.
+pub(crate) enum FileFetch {
+    /// The file: the response to stream, and the sha256 its `ETag` names.
+    Body { resp: Response, sha256: Option<String> },
+    /// `429 Too Many Requests`: wait this long (`Retry-After` in seconds;
+    /// `None` without one).
+    RateLimited(Option<Duration>),
+}
+
+/// The sha256 a strong `ETag` of 64 hex digits names (the server's file
+/// route sends the file's sha256 so); `None` for anything else.
+fn etag_sha256(etag: &str) -> Option<String> {
+    let tag = etag.trim();
+    if tag.starts_with("W/") {
+        return None;
+    }
+    let tag = tag.trim_matches('"');
+    (tag.len() == 64 && tag.chars().all(|c| c.is_ascii_hexdigit())).then(|| tag.to_ascii_lowercase())
 }
 
 /// Routes that never need credentials (a 401 there is not "not logged in").

@@ -3,6 +3,7 @@
 
 mod cache_sync;
 mod client;
+mod offline;
 mod session;
 mod usage;
 

@@ -16,6 +16,8 @@ use crate::cache::{self, safe_component, Cache, OfflineIndex, SyncReport};
 use crate::client::{summary_from_detail, summary_from_set_item, ApiClient, SearchParams};
 use crate::clipboard::adjust::adjust_copy_file;
 use crate::clipboard::{build_offers, ClipOffer};
+use crate::offline::run::Foreground;
+use crate::offline::OfflineOptions;
 use crate::usage::{copy_event, FlushReport, UsageQueue};
 use crate::{token, ClientConfig, CoreError, Result};
 
@@ -84,6 +86,12 @@ pub struct Session {
     offline: Mutex<Option<Arc<OfflineIndex>>>,
     runtime: Option<tokio::runtime::Handle>,
     client_name: String,
+    /// `[offline]`, or what the shell set ([`Session::set_offline_options`]).
+    pub(crate) offline_opts: Mutex<OfflineOptions>,
+    /// The grids play animations ([`Session::with_grid_playback`]).
+    pub(crate) plays_motion: bool,
+    /// Downloads the user asked for, which the offline downloader yields to.
+    foreground: Arc<Foreground>,
 }
 
 impl std::fmt::Debug for Session {
@@ -110,6 +118,7 @@ impl Session {
         cache.bind_server(&config.server_url)?;
         let cache = Arc::new(cache);
         let usage = Arc::new(UsageQueue::new(cache.clone()));
+        let offline_opts = Mutex::new(config.offline.clone());
         Ok(Session {
             config,
             client,
@@ -118,7 +127,14 @@ impl Session {
             offline: Mutex::new(None),
             runtime: tokio::runtime::Handle::try_current().ok(),
             client_name: format!("core/{}", env!("CARGO_PKG_VERSION")),
+            offline_opts,
+            plays_motion: false,
+            foreground: Arc::new(Foreground::default()),
         })
+    }
+
+    pub(crate) fn foreground(&self) -> &Arc<Foreground> {
+        &self.foreground
     }
 
     /// Name reported in usage events (`desktop/0.1.0`, `cli/0.1.0`).
@@ -166,13 +182,20 @@ impl Session {
         Ok(self.cache.generation()? != before)
     }
 
-    /// [`Session::sync`] with the item sync report.
+    /// [`Session::sync`] with the item sync report. Afterwards the offline
+    /// plan is derived again ([`Session::offline_refresh`]): what a sync
+    /// added to a kept pack is wanted from now on, and the kept files of
+    /// items it removed are deleted. Downloading is up to the shell
+    /// ([`Session::offline_run`]).
     pub async fn sync_report(&self) -> Result<SyncReport> {
         let me = self.client.me().await?;
         self.cache.set_me(&me)?;
         let report = cache::sync(&self.cache, &self.client, cache::SYNC_PAGE_LIMIT).await?;
         if let Err(e) = self.usage.flush(&self.client).await {
             tracing::debug!("usage flush after sync: {e}");
+        }
+        if let Err(e) = self.offline_refresh() {
+            tracing::warn!("offline files after sync: {e}");
         }
         Ok(report)
     }
@@ -249,6 +272,7 @@ impl Session {
             return Ok(p);
         }
         let abs = self.cache.abs(&rel);
+        let _first = self.foreground.enter();
         self.client.download_item_file(&item.id, Variant::Thumb, &abs).await?;
         self.cache.register_file(&rel)?;
         Ok(abs)
@@ -319,14 +343,28 @@ impl Session {
     }
 
     /// The cache file of a rendition (`clip/<media>.<variant>/<name>.<ext>`)
-    /// and its path relative to the cache, downloaded unless cached.
+    /// and its path relative to the cache, downloaded unless cached (kept
+    /// offline or not: one store). The download goes before the offline
+    /// downloader's. With the server unreachable and the file not here:
+    /// [`CoreError::NotOnDevice`].
     async fn materialise(&self, item: &ItemSummary, variant: &VariantInfo) -> Result<(String, PathBuf)> {
         let rel = clip_rel(item, variant);
         let file = match self.cache.lookup_file(&rel, Some(variant.size_bytes))? {
             Some(p) => p,
             None => {
                 let abs = self.cache.abs(&rel);
-                self.client.download_item_file(&item.id, variant.variant, &abs).await?;
+                let _first = self.foreground.enter();
+                match self.client.download_item_file(&item.id, variant.variant, &abs).await {
+                    Ok(_) => {}
+                    Err(e) if e.is_offline() => {
+                        return Err(CoreError::NotOnDevice {
+                            item: item.name.clone(),
+                            variant: variant.variant,
+                            cause: e.to_string(),
+                        })
+                    }
+                    Err(e) => return Err(e),
+                }
                 self.cache.register_file(&rel)?;
                 abs
             }
@@ -541,6 +579,7 @@ impl Session {
                 return Ok(Some(p));
             }
             let abs = self.cache.abs(&rel);
+            let _first = self.foreground.enter();
             self.client.download(url, &abs).await?;
             self.cache.register_file(&rel)?;
             return Ok(Some(abs));
@@ -563,6 +602,9 @@ impl Session {
         } else {
             self.client.like(item_id).await?
         };
+        if let Err(e) = self.offline_note_like(item_id, state.liked) {
+            tracing::debug!("noting the like for offline keeping: {e}");
+        }
         Ok(state.liked)
     }
 
@@ -777,7 +819,7 @@ fn variant_mime(item: &ItemSummary, v: &VariantInfo) -> String {
 
 /// Where a rendition is kept in the cache, relative to it:
 /// `clip/<media>.<variant>/<name>.<ext>`.
-fn clip_rel(item: &ItemSummary, variant: &VariantInfo) -> String {
+pub(crate) fn clip_rel(item: &ItemSummary, variant: &VariantInfo) -> String {
     format!(
         "clip/{}.{}/{}.{}",
         safe_component(&item.media_id),
