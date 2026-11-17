@@ -52,7 +52,14 @@ pub enum Command {
         set: String,
         #[arg(required = true)]
         files: Vec<PathBuf>,
+        /// The words written in the picture (one file only; `\n` for a line
+        /// break). Without it the server reads them (OCR), if it can
+        #[arg(long, value_name = "TEXT")]
+        text: Option<String>,
     },
+    /// Show or edit one item
+    #[command(subcommand)]
+    Item(ItemCmd),
     /// Import a set directory (set.toml + media files)
     Import {
         dir: PathBuf,
@@ -146,6 +153,23 @@ pub struct LoginArgs {
     /// for five minutes
     #[arg(long, value_name = "CODE", conflicts_with_all = ["username", "password_file", "totp"])]
     pub code: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ItemCmd {
+    /// Show an item: its metadata, the words in the picture and who wrote them
+    Show { item: String },
+    /// Change an item's name or text; what you give becomes yours (an empty
+    /// --text "" clears the text, and the server no longer fills it)
+    #[command(group(ArgGroup::new("change").required(true).multiple(true).args(["name", "text"])))]
+    Edit {
+        item: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// The words written in the picture (`\n` for a line break)
+        #[arg(long, value_name = "TEXT")]
+        text: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -73,7 +73,8 @@ pub async fn run(ctx: &Ctx, command: Command) -> Result<()> {
         Command::Whoami => whoami(ctx).await,
         Command::Config(c) => config_cmd(ctx, c),
         Command::Sets(c) => sets(ctx, c).await,
-        Command::Upload { set, files } => upload(ctx, &set, &files).await,
+        Command::Upload { set, files, text } => upload(ctx, &set, &files, text.as_deref()).await,
+        Command::Item(c) => item(ctx, c).await,
         Command::Import { dir, into } => import(ctx, &dir, into.as_deref()).await,
         Command::Export {
             set,
@@ -462,7 +463,21 @@ fn print_set(d: &SetDetail) {
     t.print();
 }
 
-async fn upload(ctx: &Ctx, set: &str, files: &[PathBuf]) -> Result<()> {
+/// `\n` written as two characters on a command line is a line break.
+fn typed_text(text: &str) -> String {
+    text.replace("\\n", "\n")
+}
+
+async fn upload(ctx: &Ctx, set: &str, files: &[PathBuf], text: Option<&str>) -> Result<()> {
+    if text.is_some() && files.len() != 1 {
+        bail!("--text is the text of one picture: upload one file with it");
+    }
+    let meta = text.map(|t| {
+        vec![UploadMeta {
+            text: Some(typed_text(t)),
+            ..Default::default()
+        }]
+    });
     let client = ctx.client()?;
     let id = resolve_set(&client, set).await?;
     let mut all = Vec::new();
@@ -472,7 +487,7 @@ async fn upload(ctx: &Ctx, set: &str, files: &[PathBuf]) -> Result<()> {
             .iter()
             .map(|p| UploadFile::from_path(p))
             .collect::<Result<Vec<_>, _>>()?;
-        let results = client.upload(&id, parts, None).await?;
+        let results = client.upload(&id, parts, meta.as_deref()).await?;
         for r in &results {
             if r.error.is_some() {
                 failed += 1;
@@ -516,6 +531,64 @@ fn near_duplicate_text(nd: &NearDuplicate) -> String {
         "you already have {what} in set {}: {:?} ({}, distance {})",
         nd.existing.set_slug, nd.existing.name, nd.existing.id, nd.distance
     )
+}
+
+async fn item(ctx: &Ctx, cmd: ItemCmd) -> Result<()> {
+    let client = ctx.client()?;
+    let it = match cmd {
+        ItemCmd::Show { item } => client.item(&item).await?.item,
+        ItemCmd::Edit { item, name, text } => {
+            let req = UpdateItem {
+                name,
+                text: text.as_deref().map(typed_text),
+                ..Default::default()
+            };
+            client.update_item(&item, &req).await?
+        }
+    };
+    if ctx.json {
+        return output::json(&it);
+    }
+    print_item(&it);
+    Ok(())
+}
+
+fn print_item(it: &Item) {
+    let ai = |s: FieldSource| if s == FieldSource::Ai { " (AI)" } else { "" };
+    println!("{}{}", it.name, ai(it.name_source));
+    println!("  id:        {}", it.id);
+    println!("  set:       {}", it.set_id);
+    println!(
+        "  file:      {} {}x{}, {}",
+        it.media.format.extension(),
+        it.media.width,
+        it.media.height,
+        output::bytes(it.media.size_bytes)
+    );
+    if !it.keywords.is_empty() {
+        println!("  keywords:  {}{}", it.keywords.join(", "), ai(it.keywords_source));
+    }
+    if !it.emojis.is_empty() {
+        println!("  emojis:    {}{}", it.emojis.join(" "), ai(it.emojis_source));
+    }
+    if let Some(v) = &it.vibe {
+        println!("  vibe:      {v}{}", ai(it.vibe_source));
+    }
+    if !it.tags.is_empty() {
+        println!("  tags:      {}", it.tags.join(", "));
+    }
+    if !it.text.is_empty() {
+        let mut lines = it.text.lines();
+        println!(
+            "  text:      {}{}",
+            lines.next().unwrap_or_default(),
+            ai(it.text_source)
+        );
+        for l in lines {
+            println!("             {l}");
+        }
+    }
+    println!("  likes:     {}, copies: {}", it.likes, it.copies);
 }
 
 async fn import(ctx: &Ctx, dir: &Path, into: Option<&str>) -> Result<()> {

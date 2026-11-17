@@ -444,3 +444,94 @@ fn export_formats_whatsapp_and_publish() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// The words in the picture: typed at upload and with `item edit`, shown by
+/// `item show`, and searched the same online and offline.
+#[test]
+fn the_text_field_against_the_real_server() {
+    let server = Server::start();
+    let env = Env::new(&server.url());
+    std::fs::write(env.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    let pw = env.path("pw");
+    env.ok(&["login", "-u", "alice", "--password-file", pw.to_str().unwrap()]);
+    env.ok(&["sets", "create", "inbox", "--name", "Inbox"]);
+    let (one, two) = (env.path("one.png"), env.path("two.png"));
+    std::fs::write(&one, png(9)).unwrap();
+    std::fs::write(&two, png(10)).unwrap();
+    let (one, two) = (one.to_str().unwrap(), two.to_str().unwrap());
+
+    let up = env.json(&["upload", "inbox", one, "--text", "No thoughts\\nhead empty"]);
+    let first = up[0]["item"]["id"].as_str().unwrap().to_string();
+    assert_eq!(up[0]["item"]["text"], "No thoughts\nhead empty");
+    assert_eq!(up[0]["item"]["text_source"], "user");
+    let out = env.run(&["upload", "inbox", one, two, "--text", "x"]);
+    assert!(!out.status.success(), "one text, one picture");
+
+    let shown = env.json(&["item", "show", &first]);
+    assert_eq!(shown["text"], "No thoughts\nhead empty");
+    let out = env.ok(&["item", "show", &first]);
+    assert!(
+        out.contains("text:      No thoughts\n             head empty\n"),
+        "{out}"
+    );
+
+    let up = env.json(&["upload", "inbox", two]);
+    let second = up[0]["item"]["id"].as_str().unwrap().to_string();
+    assert_eq!(up[0]["item"]["text"], "");
+    assert_eq!(up[0]["item"]["text_source"], "ai", "not set: the server may fill it");
+    let edited = env.json(&["item", "edit", &second, "--text", "Кіт у мішку"]);
+    assert_eq!(
+        (edited["text"].as_str(), edited["text_source"].as_str()),
+        (Some("Кіт у мішку"), Some("user"))
+    );
+    let renamed = env.json(&["item", "edit", &second, "--name", "kit"]);
+    assert_eq!(renamed["text"], "Кіт у мішку", "other edits keep the text");
+    assert!(
+        !env.run(&["item", "edit", &second]).status.success(),
+        "nothing to change"
+    );
+
+    // The same hits online and from the offline cache.
+    env.ok(&["sync"]);
+    let queries = [
+        "thoughts",
+        "text:\"no thoughts\"",
+        "x:кіт",
+        "-text:empty",
+        "мішку -x:\"head empty\"",
+    ];
+    let hits = |v: &serde_json::Value| -> Vec<(String, Vec<String>)> {
+        let mut out: Vec<(String, Vec<String>)> = v["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                let matched = h["matched"].as_array().unwrap();
+                (
+                    h["item"]["id"].as_str().unwrap().to_string(),
+                    matched.iter().map(|m| m.as_str().unwrap().to_string()).collect(),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let online: Vec<_> = queries
+        .iter()
+        .map(|q| {
+            let v = env.json(&["search", q]);
+            assert_eq!(v["offline"], false);
+            hits(&v)
+        })
+        .collect();
+    assert_eq!(online[0], vec![(first.clone(), vec!["text".to_string()])]);
+    assert_eq!(online[1].len(), 1);
+    assert_eq!(online[2][0].0, second);
+    assert_eq!(online[3].iter().map(|h| &h.0).collect::<Vec<_>>(), vec![&second]);
+    drop(server);
+    for (q, want) in queries.iter().zip(&online) {
+        let v = env.json(&["search", q]);
+        assert_eq!(v["offline"], true);
+        assert_eq!(&hits(&v), want, "{q}");
+    }
+}
