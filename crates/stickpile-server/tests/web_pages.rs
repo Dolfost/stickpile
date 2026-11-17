@@ -193,7 +193,7 @@ async fn set_page_view_options_and_context_menu() {
         menu.contains("<fieldset class=\"view-show\" hidden data-view-show=\"\"><legend>Show</legend>"),
         "{menu}"
     );
-    for part in ["emojis", "keywords", "vibe", "tags", "labels"] {
+    for part in ["emojis", "keywords", "vibe", "tags", "text", "labels"] {
         assert!(
             menu.contains(&format!(
                 "<input type=\"checkbox\" value=\"{part}\" checked data-view-part=\"\">"
@@ -435,7 +435,7 @@ async fn home_recently_copied_have_view_options() {
             "{style}: {menu}"
         );
     }
-    for part in ["set", "emojis", "keywords", "vibe", "tags", "labels"] {
+    for part in ["set", "emojis", "keywords", "vibe", "tags", "text", "labels"] {
         assert!(
             menu.contains(&format!(
                 "<input type=\"checkbox\" value=\"{part}\" checked data-view-part=\"\">"

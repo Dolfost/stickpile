@@ -75,8 +75,9 @@ line of their own at the bottom of the card; the other fields and the
 button row are hidden, the context menu has the actions) or **Grid**
 (thumbnails only, without "⋯": right-click a thumbnail, or focus it and
 press the context-menu key or Shift+F10, for the menu), and which fields
-show: Emojis, Keywords, Vibe, Tags and Labels (the kind, quality and
-"Cover" badges). See [Display options and themes](#display-options-and-themes).
+show: Emojis, Keywords, Vibe, Tags, Text (the words in the picture) and
+Labels (the kind, quality and "Cover" badges). See [Display options and
+themes](#display-options-and-themes).
 
 **Context menu.** Right-click an item card (either view) for its actions:
 
@@ -163,7 +164,8 @@ search or counts.
 
 **"View" on the set page.** A disclosure button in the filter form. Its
 panel has the style (Regular, Compact, Grid) and the "Show" toggles for
-Emojis, Keywords, Vibe, Tags and Labels; the name always shows. Each
+Emojis, Keywords, Vibe, Tags, Text and Labels; the name always shows (the
+toggles start on; Text is a field like the others, below the thumbnail). Each
 option is one tile: a press anywhere on it (the dot or box, the name, the
 hint, the padding) selects it, and the panel stays open for more changes,
 as with arrow keys and Space. The focus then sits on the chosen option.

@@ -17,13 +17,14 @@ use crate::state::AppState;
 
 /// Show/hide toggles of the recently copied items (`hide-{key}` on their
 /// section): the set page's, plus the item's set. The name always shows.
-fn recent_parts() -> [(&'static str, &'static str, &'static str); 6] {
+fn recent_parts() -> [(&'static str, &'static str, &'static str); 7] {
     [
         ("set", t("Set"), ""),
         ("emojis", t("Emojis"), ""),
         ("keywords", t("Keywords"), ""),
         ("vibe", t("Vibe"), ""),
         ("tags", t("Tags"), ""),
+        ("text", t("Text"), t("the words in the picture")),
         ("labels", t("Labels"), t("kind, quality")),
     ]
 }

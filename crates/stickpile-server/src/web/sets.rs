@@ -375,12 +375,13 @@ impl ItemsView {
 
 /// Show/hide toggles of the set page (`hide-{key}` on the items section).
 /// The name always shows; "Labels" are the badges on the thumbnail.
-fn item_parts() -> [(&'static str, &'static str, &'static str); 5] {
+fn item_parts() -> [(&'static str, &'static str, &'static str); 6] {
     [
         ("emojis", t("Emojis"), ""),
         ("keywords", t("Keywords"), ""),
         ("vibe", t("Vibe"), ""),
         ("tags", t("Tags"), ""),
+        ("text", t("Text"), t("the words in the picture")),
         ("labels", t("Labels"), t("kind, quality, cover")),
     ]
 }

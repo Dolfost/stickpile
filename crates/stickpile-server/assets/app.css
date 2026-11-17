@@ -436,6 +436,7 @@ button.icon-btn, .button.icon-btn { width: 1.7rem; height: 1.7rem; min-height: 1
 .items-section.hide-keywords .card.editor .field-keywords:not(.editing),
 .items-section.hide-vibe .card.editor .field-vibe:not(.editing),
 .items-section.hide-tags .card.editor .field-tags:not(.editing),
+.items-section.hide-text .card.editor .field-text:not(.editing),
 .items-section.hide-set .card.editor .field-set,
 .items-section.hide-labels .card.editor .badges { display: none; }
 /* The item's set, on the start page's recently copied cards. */

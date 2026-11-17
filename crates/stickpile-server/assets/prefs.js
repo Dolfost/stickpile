@@ -88,12 +88,12 @@
       hideKey: "stickpile.items.hide",
       // style -> class on the element (none for regular)
       styles: { regular: "", compact: "compact", grid: "view-grid" },
-      parts: ["emojis", "keywords", "vibe", "tags", "labels"],
+      parts: ["emojis", "keywords", "vibe", "tags", "text", "labels"],
       param: "view",
       // Toggles a style has no room for, and why.
       off: {
-        compact: { parts: ["keywords", "vibe", "tags"], note: compactNote },
-        grid: { parts: ["emojis", "keywords", "vibe", "tags"], note: gridNote },
+        compact: { parts: ["keywords", "vibe", "tags", "text"], note: compactNote },
+        grid: { parts: ["emojis", "keywords", "vibe", "tags", "text"], note: gridNote },
       },
     },
     // The start page's recently copied items: the set page's cards with
@@ -103,11 +103,11 @@
       legacyKey: null,
       hideKey: "stickpile.home.hide",
       styles: { regular: "", compact: "compact", grid: "view-grid" },
-      parts: ["set", "emojis", "keywords", "vibe", "tags", "labels"],
+      parts: ["set", "emojis", "keywords", "vibe", "tags", "text", "labels"],
       param: null,
       off: {
-        compact: { parts: ["set", "keywords", "vibe", "tags"], note: compactNote },
-        grid: { parts: ["set", "emojis", "keywords", "vibe", "tags"], note: gridNote },
+        compact: { parts: ["set", "keywords", "vibe", "tags", "text"], note: compactNote },
+        grid: { parts: ["set", "emojis", "keywords", "vibe", "tags", "text"], note: gridNote },
       },
     },
     sets: {
