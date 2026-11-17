@@ -132,6 +132,10 @@ impl Index {
     pub fn get(&self, item_id: &str) -> Option<&Doc> {
         self.store.get(item_id)
     }
+    /// Every indexed doc, in no particular order.
+    pub fn docs(&self) -> impl Iterator<Item = &Doc> {
+        self.store.slots.iter().flatten().map(|s| &s.doc)
+    }
     /// Update the counters of an item without re-indexing text.
     pub fn set_counters(&mut self, item_id: &str, likes: u64, copies: u64) {
         self.store.set_counters(item_id, likes, copies);

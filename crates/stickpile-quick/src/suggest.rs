@@ -55,8 +55,39 @@ pub struct Vocabulary {
     pub me: Option<String>,
 }
 
+/// What one item gives a [`Vocabulary`]: the values its filters match.
+/// The server builds one from its search index, the clients from their
+/// cached [`ItemSummary`]s.
+#[derive(Debug, Clone, Copy)]
+pub struct ItemValues<'a> {
+    pub vibe: Option<&'a str>,
+    pub tags: &'a [String],
+    pub set_slug: &'a str,
+    pub set_name: &'a str,
+    pub owner_username: &'a str,
+    pub emojis: &'a [String],
+}
+
+impl<'a> From<&'a ItemSummary> for ItemValues<'a> {
+    fn from(it: &'a ItemSummary) -> Self {
+        ItemValues {
+            vibe: it.vibe.as_deref(),
+            tags: &it.tags,
+            set_slug: &it.set_slug,
+            set_name: &it.set_name,
+            owner_username: &it.owner_username,
+            emojis: &it.emojis,
+        }
+    }
+}
+
 impl Vocabulary {
     pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemSummary>) -> Vocabulary {
+        Vocabulary::from_values(items.into_iter().map(ItemValues::from))
+    }
+
+    /// [`Vocabulary::from_items`] for items given by their values.
+    pub fn from_values<'a>(items: impl IntoIterator<Item = ItemValues<'a>>) -> Vocabulary {
         #[derive(Default)]
         struct Counts(HashMap<String, u32>);
         impl Counts {
@@ -83,7 +114,7 @@ impl Vocabulary {
         let mut emojis: Vec<(String, u32)> = Vec::new();
         let mut emoji_at: HashMap<String, usize> = HashMap::new();
         for it in items {
-            for e in &it.emojis {
+            for e in it.emojis {
                 let e = e.trim();
                 if e.is_empty() || e.contains(char::is_whitespace) {
                     continue;
@@ -96,17 +127,17 @@ impl Vocabulary {
                     }
                 }
             }
-            if let Some(v) = &it.vibe {
+            if let Some(v) = it.vibe {
                 vibes.add(v);
             }
-            for t in &it.tags {
+            for t in it.tags {
                 tags.add(t);
             }
-            sets.add(&it.set_slug);
+            sets.add(it.set_slug);
             if !it.set_name.trim().eq_ignore_ascii_case(it.set_slug.trim()) {
-                sets.add(&it.set_name);
+                sets.add(it.set_name);
             }
-            owners.add(&it.owner_username);
+            owners.add(it.owner_username);
         }
         // Stable: ties stay in the order first seen.
         emojis.sort_by_key(|e| std::cmp::Reverse(e.1));
