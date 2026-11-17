@@ -4,8 +4,10 @@ import io.github.dolfost.stickpile.StickpileApp
 import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.ItemList
+import io.github.dolfost.stickpile.rust.KeepReason
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.Motion
+import io.github.dolfost.stickpile.rust.OfflineScope
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchHint
@@ -73,6 +75,39 @@ internal class ImeLibrary(private val app: StickpileApp) {
         call { it.recordUse(itemId, variant, editorPackage) }
 
     suspend fun toggleLike(itemId: String): Boolean = call { it.toggleLike(itemId) }
+
+    /** What the field being typed into takes, set by the service on each input start. */
+    @Volatile
+    var fieldTypes: List<String> = emptyList()
+
+    /**
+     * Which of [ids] a pick would insert or share with the server away: a
+     * rendition for the field (or, failing that, for sharing,
+     * [InsertFlow.SHARE_TYPES]) is on the phone. The marks of the tiles;
+     * nothing is downloaded.
+     */
+    suspend fun availableOffline(ids: List<String>): List<Boolean> {
+        val editor = editorPackage
+        val types = (fieldTypes + InsertFlow.SHARE_TYPES).distinct()
+        return call { it.availableOffline(ids, editor, types, false) }
+    }
+
+    /** The lists answer from the cache now: the server was found away lately. */
+    suspend fun serverUnreachable(): Boolean = call { it.serverUnreachable() }
+
+    /** Why the sticker is kept offline (empty: it is not). */
+    suspend fun offlineReasons(itemId: String): List<KeepReason> = call { it.offlineReasons(itemId) }
+
+    /**
+     * Keep the sticker offline by itself, or stop; after a keep the app's
+     * downloads run (its WorkManager job, as the app's settings allow): the
+     * keyboard downloads nothing itself.
+     */
+    suspend fun setKept(itemId: String, keep: Boolean) {
+        val scope = OfflineScope.Sticker(itemId)
+        call { if (keep) it.keepOffline(scope) else it.releaseOffline(scope) }
+        if (keep) app.requestOfflineRun()
+    }
 
     /**
      * Whether an account is signed in, asking the server (for when there is

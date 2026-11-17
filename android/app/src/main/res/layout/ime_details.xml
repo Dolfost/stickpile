@@ -139,6 +139,17 @@
             android:tooltipText="@string/ime_menu_like"
             app:icon="@drawable/ic_heart_outline" />
 
+        <!-- Keep offline, or stop (ime.DetailsPanel sets its icon and label). -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/ime_details_keep"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/offline_keep"
+            android:enabled="false"
+            android:tooltipText="@string/offline_keep"
+            app:icon="@drawable/ic_offline" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ime_details_share"
             style="@style/Widget.Material3.Button.IconButton"

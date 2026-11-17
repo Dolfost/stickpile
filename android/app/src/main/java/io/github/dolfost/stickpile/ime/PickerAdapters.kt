@@ -23,6 +23,8 @@ import io.github.dolfost.stickpile.display.ItemLabels
 import io.github.dolfost.stickpile.display.TileField
 import io.github.dolfost.stickpile.display.TileIcons
 import io.github.dolfost.stickpile.motion.LoopingVideoView
+import io.github.dolfost.stickpile.offline.OfflineMark
+import io.github.dolfost.stickpile.offline.OfflineMarks
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.Pack
 import kotlinx.coroutines.Job
@@ -40,6 +42,9 @@ internal class TileLook(context: Context) {
     /** The side of a grid cell, in pixels: what a moving picture is decoded at, at most. */
     var cellPx: Int = DecodeSize.MAX_THUMBNAIL_PX
     var likedOf: (Item) -> Boolean = { it.liked }
+
+    /** Which stickers work without the server, and whether it is away: the offline marks. */
+    var marks: OfflineMarks = OfflineMarks()
 
     private val iconPx = context.resources.getDimensionPixelSize(R.dimen.ime_tile_icon)
     private val icons: Map<TileField, Drawable> = listOf(TileField.COPIES, TileField.LIKES, TileField.QUALITY)
@@ -90,6 +95,7 @@ internal class ItemsAdapter(
         val badge: ImageView = view.findViewById(R.id.ime_item_badge)
         val nsfw: ImageView = view.findViewById(R.id.ime_item_nsfw)
         val liked: ImageView = view.findViewById(R.id.ime_item_liked)
+        val offline: ImageView = view.findViewById(R.id.ime_item_offline)
         val info: View = view.findViewById(R.id.ime_item_info)
         val lines: Map<TileLine, TextView> = mapOf(
             TileLine.NAME to view.findViewById(R.id.ime_item_name),
@@ -172,6 +178,22 @@ internal class ItemsAdapter(
         holder.badge.isVisible = badge != null
         holder.nsfw.isVisible = display.shows(TileField.BADGES) && item.nsfw && !display.safeMode
         holder.liked.isVisible = display.shows(TileField.LIKED) && look.likedOf(item)
+        val mark = look.marks.of(item.id, display)
+        when (mark) {
+            OfflineMark.AVAILABLE -> holder.offline.setImageResource(TileIcons.OFFLINE)
+            OfflineMark.UNAVAILABLE -> holder.offline.setImageResource(TileIcons.UNAVAILABLE)
+            OfflineMark.NONE -> Unit
+        }
+        holder.offline.isVisible = mark != OfflineMark.NONE
+        // Not on the phone, and the server away: dimmed.
+        val alpha = if (mark == OfflineMark.UNAVAILABLE) UNAVAILABLE_ALPHA else 1f
+        holder.image.alpha = alpha
+        holder.video.alpha = alpha
+        holder.itemView.contentDescription = if (mark == OfflineMark.UNAVAILABLE) {
+            holder.itemView.context.getString(R.string.ime_unavailable_item, item.name)
+        } else {
+            item.name
+        }
         val lines = TileInfo.lines(item, display, look.maxLines)
         for ((line, view) in holder.lines) {
             val shown = line in lines
@@ -188,6 +210,9 @@ internal class ItemsAdapter(
     }
 
     private companion object {
+        /** How visible a sticker that is not on the phone is, with the server away. */
+        const val UNAVAILABLE_ALPHA = 0.35f
+
         /** The payload of a bind that changes only what is shown over the thumbnail. */
         val INFO = Any()
 

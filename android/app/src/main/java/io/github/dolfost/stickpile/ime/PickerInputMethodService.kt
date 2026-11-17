@@ -105,6 +105,7 @@ class PickerInputMethodService : InputMethodService() {
         // Another theme was chosen in the app since the picker was made.
         if (picker != null && pickerTheme != app.display.current.theme) setInputView(onCreateInputView())
         library.editorPackage = info.packageName.orEmpty()
+        library.fieldTypes = EditorInfoCompat.getContentMimeTypes(info).toList()
         val read = readDraft(info)
         draft = InputRestart.draft(restarting, read, draft)
         picker?.start(read?.query, restarting, app.refreshLikes())

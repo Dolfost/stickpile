@@ -30,6 +30,7 @@ import io.github.dolfost.stickpile.display.Columns
 import io.github.dolfost.stickpile.display.Display
 import io.github.dolfost.stickpile.display.DisplaySettings
 import io.github.dolfost.stickpile.display.SafeMode
+import io.github.dolfost.stickpile.offline.OfflineMarks
 import io.github.dolfost.stickpile.provider.kind
 import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
@@ -158,6 +159,7 @@ internal class PickerView(
 
             override fun toggleLike(item: Item) = actions.toggleLike(item)
             override fun share(item: Item) = actions.share(item)
+            override fun keep(item: Item, keep: Boolean) = setKept(item, keep)
             override fun search(query: String) = setQuery(query)
             override fun closed(item: Item) = itemsAdapter.rebind(item.id)
         },
@@ -182,6 +184,9 @@ internal class PickerView(
     private var query = ""
     private var tab = PickerTab.RECENT
     private var items: List<Item> = emptyList()
+
+    /** The list shown came from the cache: the server was away. */
+    private var listOffline = false
     private var resultsFor: String? = null
     private var pack: Pack? = null
     private var keysShown = false
@@ -612,11 +617,15 @@ internal class PickerView(
     private fun display(shown: Shown, top: Boolean = false) {
         when (shown) {
             is Shown.Items -> {
+                // Other stickers: no marks until the library said which work offline.
+                if (shown.items.map { it.id } != items.map { it.id }) look.marks = OfflineMarks()
                 items = shown.items
+                listOffline = shown.offline
                 resultsFor = shown.resultsFor
                 use(gridLayout, itemsAdapter)
                 updateFilters()
                 itemsAdapter.submitList(items) { if (top) grid.scrollToPosition(0) }
+                loadMarks(shown.offline)
                 when {
                     items.isNotEmpty() -> messageBox.visibility = View.GONE
                     shown.hidden > 0 -> showMessage(hiddenText(shown.hidden))
@@ -761,6 +770,61 @@ internal class PickerView(
         syntax.close()
         columns.close()
         details.show(item, likedOf(item))
+        loadReasons(item)
+    }
+
+    // -- keeping offline -------------------------------------------------------------
+
+    /** Why [item] is kept offline, for its details. */
+    private fun loadReasons(item: Item) {
+        scope.launch {
+            val reasons = try {
+                library.offlineReasons(item.id)
+            } catch (_: LibraryException) {
+                return@launch
+            }
+            details.showReasons(item.id, reasons)
+        }
+    }
+
+    /**
+     * Keep [item] offline by itself ([keep]), or stop. The app's job
+     * downloads it; the keyboard itself downloads nothing for it.
+     */
+    private fun setKept(item: Item, keep: Boolean) {
+        scope.launch {
+            try {
+                library.setKept(item.id, keep)
+            } catch (e: LibraryException) {
+                showError(e.kind)
+                return@launch
+            }
+            val text = if (keep) R.string.offline_kept_notice else R.string.offline_released_notice
+            showStatus(context.getString(text, item.name))
+            loadReasons(item)
+            loadMarks()
+        }
+    }
+
+    private var marksJob: Job? = null
+
+    /** Which tiles shown work without the server, and whether it is away: their marks. */
+    private fun loadMarks(offline: Boolean = listOffline) {
+        marksJob?.cancel()
+        val shown = items
+        if (shown.isEmpty()) return
+        val ids = shown.map { it.id }
+        marksJob = scope.launch {
+            val marks = try {
+                OfflineMarks.of(ids, library.availableOffline(ids), offline || library.serverUnreachable())
+            } catch (_: LibraryException) {
+                return@launch
+            }
+            if (items === shown) {
+                look.marks = marks
+                itemsAdapter.refreshTiles()
+            }
+        }
     }
 
     private fun closeDetails() {
