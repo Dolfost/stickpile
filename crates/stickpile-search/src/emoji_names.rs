@@ -245,20 +245,12 @@ impl Emoji {
     }
 }
 
-struct Table {
-    emojis: Vec<Emoji>,
-    /// Indexes into `emojis`, sorted by key.
-    by_key: Vec<u16>,
-}
-
-fn table() -> &'static Table {
-    static TABLE: OnceLock<Table> = OnceLock::new();
+/// The names table, parsed on first use (a few milliseconds). Plain scans
+/// over it are fast enough (a fraction of a millisecond) and keep the
+/// code small: every client carries it.
+fn table() -> &'static [Emoji] {
+    static TABLE: OnceLock<Vec<Emoji>> = OnceLock::new();
     TABLE.get_or_init(|| {
-        let common: HashMap<&str, u16> = NAMES
-            .iter()
-            .enumerate()
-            .map(|(i, (e, _))| (*e, u16::try_from(i).unwrap_or(u16::MAX)))
-            .collect();
         let mut emojis = Vec::new();
         for line in NAMES_TSV.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
             let mut cols = line.split('\t');
@@ -271,17 +263,19 @@ fn table() -> &'static Table {
                 .filter(|w| !w.is_empty())
                 .collect();
             let key = key(glyph);
+            let common = match curated().contains_key(key.as_str()) {
+                true => NAMES.iter().position(|(e, _)| *e == key),
+                false => None,
+            };
             emojis.push(Emoji {
                 glyph,
                 name,
-                common: common.get(key.as_str()).copied().unwrap_or(u16::MAX),
+                common: common.and_then(|i| u16::try_from(i).ok()).unwrap_or(u16::MAX),
                 key: key.into(),
                 words: words.join("|").into(),
             });
         }
-        let mut by_key: Vec<u16> = (0..u16::try_from(emojis.len()).unwrap_or(u16::MAX)).collect();
-        by_key.sort_by(|a, b| emojis[usize::from(*a)].key.cmp(&emojis[usize::from(*b)].key));
-        Table { emojis, by_key }
+        emojis
     })
 }
 
@@ -319,13 +313,8 @@ pub fn is_name(value: &str) -> bool {
 /// The emoji of the table with the [`key`] of `emoji`: the same emoji,
 /// skin tones and variation selectors aside.
 pub fn find(emoji: &str) -> Option<&'static Emoji> {
-    let t = table();
     let k = key(emoji);
-    let i = t
-        .by_key
-        .binary_search_by(|i| (*t.emojis[usize::from(*i)].key).cmp(k.as_str()))
-        .ok()?;
-    Some(&t.emojis[usize::from(t.by_key[i])])
+    table().iter().find(|e| *e.key == *k)
 }
 
 /// The English short name of an emoji (`skull` for 💀, with a variation
@@ -341,7 +330,7 @@ pub fn short_name(emoji: &str) -> Option<&'static str> {
 ///   that starts with it: `skull` selects 💀 (skull) and ☠️ (skull and
 ///   crossbones), also 🩻 (x-ray, keyword skull) and 👲 (person with
 ///   skullcap). Several words must follow each other in one of them, the
-///   last may be cut short: `thumbs_u` selects 👍 and 👎.
+///   last may be cut short: `thumbs_u` selects 👍.
 /// - When that selects none and the name has 4 letters or more, words a
 ///   typo away select instead (a letter wrong, added or left out, or two
 ///   swapped; one in all): `sklul` selects what `skull` does.
@@ -358,25 +347,25 @@ pub fn by_name(name: &str) -> Vec<&'static Emoji> {
         return Vec::new();
     }
     let t = table();
-    let mut found: Vec<(u8, u16, usize)> = t
-        .emojis
+    // (how, common, index) packed in one number to sort by.
+    let rank = |how: u8, e: &Emoji, i: usize| (u64::from(how) << 48) | (u64::from(e.common) << 32) | i as u64;
+    let mut found: Vec<u64> = t
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| matched(&e.words, &want).map(|how| (how, e.common, i)))
+        .filter_map(|(i, e)| matched(&e.words, &want).map(|how| rank(how, e, i)))
         .collect();
     let letters: usize = want.iter().map(|w| w.chars().count()).sum();
     if found.is_empty() && letters >= MIN_TYPO_LETTERS {
         let want: Vec<Vec<char>> = want.iter().map(|w| w.chars().collect()).collect();
         found = t
-            .emojis
             .iter()
             .enumerate()
             .filter(|(_, e)| typo(&e.words, &want))
-            .map(|(i, e)| (TYPO, e.common, i))
+            .map(|(i, e)| rank(TYPO, e, i))
             .collect();
     }
     found.sort_unstable();
-    found.into_iter().map(|(_, _, i)| &t.emojis[i]).collect()
+    found.into_iter().map(|r| &t[(r & 0xFFFF_FFFF) as usize]).collect()
 }
 
 /// [`EXACT`] when `want` are words in a row of one phrase of `words`,
@@ -460,6 +449,6 @@ mod tests {
                 );
             }
         }
-        assert!(table().emojis.len() > 1900);
+        assert!(table().len() > 1900);
     }
 }

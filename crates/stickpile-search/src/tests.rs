@@ -1425,6 +1425,15 @@ fn perf_emoji_names() {
         }
         println!("  {name:<10} {:>10.2?}  emojis={n}", start.elapsed() / runs);
     }
+    // The last emoji of the table, and one it lacks: a whole scan.
+    for emoji in ["🏴\u{e0067}\u{e0062}\u{e0077}\u{e006c}\u{e0073}\u{e007f}", "x"] {
+        let runs = 2000;
+        let start = Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(emoji_names::short_name(std::hint::black_box(emoji)));
+        }
+        println!("  short_name {emoji:?} {:>10.2?}", start.elapsed() / runs);
+    }
 }
 
 /// `cargo test -p stickpile-search --release -- --ignored --nocapture perf_synthetic`
