@@ -161,6 +161,10 @@ pub struct SuggestionView {
     pub words: Vec<String>,
     /// The word the search uses now: drawn highlighted.
     pub chosen: Option<u32>,
+    /// Parallel to `words`: for `e:` the emoji's English name (`skull` for
+    /// 💀), drawn after it, smaller and dimmer; else empty.
+    #[uniffi(default)]
+    pub labels: Vec<String>,
 }
 
 /// One cell of the item grid.

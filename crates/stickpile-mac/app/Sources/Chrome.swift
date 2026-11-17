@@ -5,6 +5,8 @@ import AppKit
 final class TextButton: NSView {
     var number = "" { didSet { if oldValue != number { changed() } } }
     var text = "" { didSet { if oldValue != text { changed() } } }
+    /// Drawn after the text, smaller and dimmer: an emoji's name.
+    var detail = "" { didSet { if oldValue != detail { changed() } } }
     /// Highlighted: the current tab, sticker mode on.
     var current = false { didSet { if oldValue != current { changed() } } }
     var font = NSFont.systemFont(ofSize: 13)
@@ -32,10 +34,18 @@ final class TextButton: NSView {
         [.font: current ? currentFont : font, .foregroundColor: color]
     }
 
+    private var detailAttributes: [NSAttributedString.Key: Any] {
+        [.font: NSFont.systemFont(ofSize: max(font.pointSize - 1.5, 9)),
+         .foregroundColor: NSColor.secondaryLabelColor]
+    }
+
     var fittingWidth: CGFloat {
         var w = ceil((text as NSString).size(withAttributes: textAttributes).width) + 2 * padding
         if !number.isEmpty {
             w += ceil((number as NSString).size(withAttributes: numberAttributes).width) + 5
+        }
+        if !detail.isEmpty {
+            w += ceil((detail as NSString).size(withAttributes: detailAttributes).width) + 4
         }
         return w
     }
@@ -56,8 +66,17 @@ final class TextButton: NSView {
         }
         let t = NSAttributedString(string: text, attributes: textAttributes)
         let s = t.size()
-        t.draw(with: NSRect(x: x, y: box.midY - s.height / 2, width: bounds.width - x - padding + 2, height: s.height),
+        let textWidth = detail.isEmpty ? bounds.width - x - padding + 2 : ceil(s.width)
+        t.draw(with: NSRect(x: x, y: box.midY - s.height / 2, width: textWidth, height: s.height),
                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        if !detail.isEmpty {
+            let d = NSAttributedString(string: detail, attributes: detailAttributes)
+            let ds = d.size()
+            let dx = x + ceil(s.width) + 4
+            d.draw(with: NSRect(x: dx, y: box.midY - ds.height / 2, width: max(bounds.width - dx - padding + 2, 0),
+                                height: ds.height),
+                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
     }
 
     override func updateTrackingAreas() {
@@ -317,6 +336,8 @@ final class SuggestBar: NSView {
         buttons = (s?.words ?? []).enumerated().map { i, word in
             let b = TextButton()
             b.text = word
+            // An emoji of `e:` with its name after it.
+            if let labels = s?.labels, i < labels.count { b.detail = labels[i] }
             b.font = .systemFont(ofSize: 11.5)
             b.currentFont = .systemFont(ofSize: 11.5, weight: .semibold)
             b.padding = 7

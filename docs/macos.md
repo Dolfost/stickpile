@@ -75,7 +75,10 @@ footer shows the selected item's stats (pack, format, size, copies,
 likes, quality) above the mode, the target and the toggles (`zi` hides
 them). While a filter such as `vibe:` is typed, its values are offered in
 a line under the search field (from the offline cache, read again after
-each sync that changed it, so the first opening gets them too); Tab puts
+each sync that changed it, so the first opening gets them too); `e:`
+offers emojis, each with its English name after it in a smaller, dimmer
+font (`e:sk`: 💀 skull, ☠️ skull and crossbones, ...; the bridge's
+`SuggestionView.labels`), and taking one puts the emoji in. Tab puts
 one in (see [search suggestions](desktop.md#search-suggestions)), and F2
 (fn+F2 on most keyboards), `g/` or the Syntax button next to the search field shows
 the search syntax, short keys (`v:` for `vibe:`, `t:` for `tag:`, ...)

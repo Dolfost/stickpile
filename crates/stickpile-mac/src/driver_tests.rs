@@ -519,3 +519,34 @@ fn a_sync_brings_the_values_to_a_filter_already_typed() {
     assert_eq!(v.query, "v:");
     assert!(v.visible);
 }
+
+/// `e:` offers the emojis with their names, for the bar to draw them
+/// side by side.
+#[test]
+fn emoji_offers_carry_their_names() {
+    let server = MockServer::start();
+    {
+        let mut st = server.state();
+        let set = st.add_set("alice", "cats", "Cats", Visibility::Public);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let item = st.add_item(&set.id, "dead", &["dead"], bytes.into_inner());
+        let it = st.items.iter_mut().find(|i| i.item.id == item.id).unwrap();
+        it.item.emojis = vec!["💀".into()];
+    }
+    let h = Harness::against(&server);
+    h.driver.toggle(None, false);
+    h.driver.query_changed("e:sk".into());
+    h.pump_until("the emojis named sk", |s| {
+        s.renders
+            .last()
+            .and_then(|v| v.suggestions.as_ref())
+            .is_some_and(|l| l.words.first().is_some_and(|w| w == "💀"))
+    });
+    let line = h.last().suggestions.unwrap();
+    assert_eq!(line.labels[..2], ["skull", "skull and crossbones"]);
+    assert_eq!(line.labels.len(), line.words.len());
+    assert_eq!(line.chosen, None, "a name is searched as typed");
+}

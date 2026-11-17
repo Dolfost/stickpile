@@ -865,6 +865,7 @@ impl Driver {
                 key: s.key,
                 words: s.words,
                 chosen: s.chosen.map(|i| i as u32),
+                labels: s.labels,
             }),
             footer,
             me: s.me.view(),

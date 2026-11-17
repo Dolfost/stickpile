@@ -350,10 +350,19 @@ final class FakePopup: PopupControl {
         state.query = text
         state.footer.status = text.isEmpty ? "" : "Searching..."
         let last = text.split(separator: " ", omittingEmptySubsequences: false).last.map(String.init) ?? ""
-        state.suggestions = last.hasPrefix("vibe:")
-            ? SuggestionView(key: "vibe:", words: ["sarcastic", "sad", "happy", "tired", "angry", "confused"],
-                             chosen: 0)
-            : nil
+        if last.hasPrefix("vibe:") {
+            state.suggestions = SuggestionView(key: "vibe:",
+                                               words: ["sarcastic", "sad", "happy", "tired", "angry", "confused"],
+                                               chosen: 0, labels: [])
+        } else if last.hasPrefix("e:") {
+            // Emojis with their names, as e:sk offers them.
+            state.suggestions = SuggestionView(key: "e:",
+                                               words: ["\u{1F480}", "\u{2620}\u{FE0F}", "\u{1FA7B}", "\u{1F9A8}"],
+                                               chosen: nil,
+                                               labels: ["skull", "skull and crossbones", "x-ray", "skunk"])
+        } else {
+            state.suggestions = nil
+        }
         render()
     }
 
