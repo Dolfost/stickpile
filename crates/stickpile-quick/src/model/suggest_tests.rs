@@ -44,6 +44,7 @@ fn a_filter_being_typed_offers_its_values_and_searches_the_best() {
             key: "vibe:".into(),
             words: vec!["sad".into(), "sarcastic".into(), "happy".into()],
             chosen: None,
+            labels: vec![String::new(); 3],
         })
     );
     assert_eq!(sent(&cmds).unwrap().0, "cat", "an empty filter is left out");
@@ -58,6 +59,46 @@ fn a_filter_being_typed_offers_its_values_and_searches_the_best() {
 
     m.handle(Event::QueryChanged("cat vibe:sarcastic ".into()));
     assert_eq!(m.suggestions(), None, "a space finishes the filter");
+}
+
+#[test]
+fn emojis_are_offered_with_their_names_and_names_searched_as_typed() {
+    let mut m = opened(cfg(), None);
+    m.handle(Event::VocabularyLoaded(Vocabulary {
+        emojis: vec!["😂".into(), "💀".into()],
+        ..vocab()
+    }));
+    let cmds = m.handle(Event::QueryChanged("cat e:".into()));
+    assert_eq!(
+        m.suggestions(),
+        Some(SuggestionLine {
+            key: "e:".into(),
+            words: vec!["😂".into(), "💀".into()],
+            chosen: None,
+            labels: vec!["face with tears of joy".into(), "skull".into()],
+        })
+    );
+    assert_eq!(sent(&cmds).unwrap().0, "cat", "an empty filter is left out");
+
+    let cmds = m.handle(Event::QueryChanged("cat e:sk".into()));
+    let line = m.suggestions().unwrap();
+    assert_eq!(line.words[..2], ["💀", "☠️"]);
+    assert_eq!(line.labels[..2], ["skull", "skull and crossbones"]);
+    assert_eq!(line.chosen, None, "a name is searched as typed");
+    assert_eq!(sent(&cmds).unwrap().0, "cat e:sk");
+
+    let cmds = tab(&mut m, false);
+    assert_eq!(m.query(), "cat e:💀", "Tab puts the emoji in");
+    assert_eq!(sent(&cmds).unwrap().0, "cat e:💀");
+    tab(&mut m, false);
+    assert_eq!(m.query(), "cat e:☠️");
+
+    m.handle(Event::QueryChanged("cat e:skul".into()));
+    let cmds = m.handle(Event::AcceptSuggestion(1));
+    assert_eq!(m.query(), "cat e:☠️ ", "a click puts it in and finishes the filter");
+    assert_eq!(sent(&cmds).unwrap().0, "cat e:☠️");
+    m.handle(Event::QueryChanged("cat e:💀".into()));
+    assert_eq!(m.suggestions().unwrap().chosen, Some(0), "the emoji typed is chosen");
 }
 
 #[test]

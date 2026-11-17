@@ -247,8 +247,13 @@ pub struct Suggestions {
     /// Best first. Accepting one replaces the typed value with it.
     pub words: Vec<String>,
     /// The index in `words` of the value the search uses now (draw it
-    /// highlighted); `None` while no value is typed.
+    /// highlighted); `None` while no value is typed, and for an emoji name
+    /// (`e:sk`, searched as typed).
     pub chosen: Option<u32>,
+    /// Parallel to `words`: for `e:` the emoji's English name (`skull` for
+    /// 💀), else empty.
+    #[uniffi(default)]
+    pub labels: Vec<String>,
 }
 
 impl From<stickpile_quick::suggest::Suggestions> for Suggestions {
@@ -258,6 +263,7 @@ impl From<stickpile_quick::suggest::Suggestions> for Suggestions {
             key: s.key,
             words: s.words,
             chosen,
+            labels: s.labels,
         }
     }
 }
@@ -277,7 +283,8 @@ pub enum HintKind {
 /// One offer under the search field while a query is typed.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SearchHint {
-    /// What to show: `sarcastic`, `tag:reaction`, `vibe:`.
+    /// What to show: `sarcastic`, `tag:reaction`, `vibe:`; an emoji with
+    /// its English name, `💀 skull` (the query gets the emoji alone).
     pub label: String,
     /// The whole query once it is taken: the field's new text. Values and
     /// filters end with a space (the next word starts), keys with their

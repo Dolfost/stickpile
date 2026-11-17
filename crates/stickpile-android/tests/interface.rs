@@ -77,7 +77,7 @@ const CONTRACT: &[&str] = &[
     "record ItemList { items: List<Item>, offline: Boolean }",
     "record Pack { id: String, slug: String, name: String, owner: String, item_count: u32, mine: Boolean }",
     "record PackList { packs: List<Pack>, offline: Boolean }",
-    "record Suggestions { key: String, words: List<String>, chosen: u32? }",
+    "record Suggestions { key: String, words: List<String>, chosen: u32?, labels: List<String> }",
     "record SearchHint { label: String, query: String, chosen: Boolean, kind: HintKind }",
     "record Motion { path: String, kind: MotionKind, width: u32, height: u32 }",
     "record PairingLink { server_url: String, code: String }",

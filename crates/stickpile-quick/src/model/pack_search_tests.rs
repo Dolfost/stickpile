@@ -87,6 +87,7 @@ fn pack_with(cfg: ModelConfig, visibility: Visibility) -> Model {
         tags: vec!["reaction".into()],
         sets: vec!["cats".into(), "dogs".into()],
         owners: vec!["me".into(), "bob".into()],
+        emojis: vec![],
         me: Some("me".into()),
     }));
     m.handle(Event::PacksLoaded {

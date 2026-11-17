@@ -421,7 +421,8 @@ record ItemList    { items: List<Item>, offline: Boolean }
 record Pack        { id: String, slug: String, name: String, owner: String,
                      item_count: u32, mine: Boolean }
 record PackList    { packs: List<Pack>, offline: Boolean }
-record Suggestions { key: String, words: List<String>, chosen: u32? }
+record Suggestions { key: String, words: List<String>, chosen: u32?,
+                     labels: List<String> }   // for e: the emoji's name, else ""
 enum   HintKind    { Value, Filter, Key }
 record SearchHint  { label: String, query: String, chosen: Boolean, kind: HintKind }
 enum   MotionKind  { Picture, Video }
@@ -538,9 +539,12 @@ Behaviour the signatures do not show:
 - **Hints.** `hints(query)` is what a phone offers under a search field
   instead of the desktop's Tab completion; each hint carries the whole
   query it makes. While a `key:value` filter is typed: its values, ranked
-  as `suggestions` ranks them, `chosen` on the one the search uses. While
-  `e:` (or `emoji:`) is typed: the emojis of the cached items, most used
-  first. While a bare word is typed: the tags, vibes and packs containing
+  as `suggestions` ranks them, `chosen` on the one the search uses. For
+  `e:` (or `emoji:`) the values are emojis labelled with their English
+  names (`💀 skull`; the query gets the emoji): the emojis of the cached
+  items, most used first, and while a name is typed (`e:sk`) the emojis
+  it selects, the items' first (see [search.md](search.md)). While a
+  bare word is typed: the tags, vibes and packs containing
   it as filters (`rea` offers `tag:reaction`), those starting with it
   first, then the filter keys the word starts. With nothing typed, or a
   space at the end: the keys `tag:`, `vibe:`, `e:`, `set:`, `by:`,

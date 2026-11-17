@@ -3,9 +3,10 @@
 //! complete with, so each offer carries the whole query it makes.
 //!
 //! - While a `key:value` filter is typed (`vibe:sar`, `-tag:`), its values,
-//!   as [`suggest::suggest`] ranks them for the desktop's suggestion line.
-//! - While `e:` (or `emoji:`) is typed, the emojis of the cached items,
-//!   most used first.
+//!   as [`suggest::suggest`] ranks them for the desktop's suggestion line;
+//!   for `e:` (or `emoji:`) the emojis, labelled with their names
+//!   (`💀 skull`): the emojis of the cached items, most used first, and
+//!   while a name is typed (`e:sk`) the emojis it selects.
 //! - While a bare word is typed (`rea`), the filters whose value contains
 //!   it (`tag:reaction`, `vibe:really`, `set:reactions`), and the filter
 //!   keys it starts (`t` offers `tag:` and `type:`).
@@ -13,8 +14,6 @@
 //!
 //! A key offered shows its one-letter form too (`tag: (t:)`); the short
 //! keys work as the long ones (`v:sar` offers what `vibe:sar` does).
-
-use std::collections::HashMap;
 
 use stickpile_api::query::Key;
 use stickpile_api::ItemSummary;
@@ -34,32 +33,17 @@ const MIN_WORD: usize = 2;
 /// The filter keys offered, in this order.
 pub const KEYS: [&str; 8] = ["tag:", "vibe:", "e:", "set:", "by:", "type:", "is:", "sort:"];
 
-/// The words the hints offer: the suggestion vocabulary and the emojis.
+/// The words the hints offer: the suggestion vocabulary, the emojis of
+/// the items included ([`Vocabulary::emojis`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Words {
     pub vocab: Vocabulary,
-    /// The emojis of the items, most used first.
-    pub emojis: Vec<String>,
 }
 
 impl Words {
-    pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemSummary> + Clone) -> Words {
-        let mut counts: HashMap<&str, (u32, usize)> = HashMap::new();
-        for it in items.clone() {
-            for e in &it.emojis {
-                let e = e.trim();
-                if !e.is_empty() && !e.contains(char::is_whitespace) {
-                    let next = counts.len();
-                    counts.entry(e).or_insert((0, next)).0 += 1;
-                }
-            }
-        }
-        let mut emojis: Vec<(&str, (u32, usize))> = counts.into_iter().collect();
-        // Most used first; ties in the order first seen.
-        emojis.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.1 .1.cmp(&b.1 .1)));
+    pub fn from_items<'a>(items: impl IntoIterator<Item = &'a ItemSummary>) -> Words {
         Words {
             vocab: Vocabulary::from_items(items),
-            emojis: emojis.into_iter().map(|(e, _)| e.to_string()).collect(),
         }
     }
 }
@@ -84,18 +68,20 @@ pub fn hints(query: &str, words: &Words) -> Vec<SearchHint> {
         Some(rest) => ("-", rest),
         None => ("", token),
     };
-    if let Some((key, typed)) = bare.split_once(':') {
-        if key.eq_ignore_ascii_case("e") || key.eq_ignore_ascii_case("emoji") {
-            return emojis(before, &token[..token.len() - typed.len()], typed, &words.emojis);
-        }
+    if bare.contains(':') {
         return match suggest::suggest(query, &words.vocab) {
             Some(s) => {
                 let chosen = s.chosen();
                 s.words
                     .iter()
+                    .zip(&s.labels)
                     .enumerate()
-                    .map(|(i, w)| SearchHint {
-                        label: w.clone(),
+                    .map(|(i, (w, name))| SearchHint {
+                        // An emoji with its name: `💀 skull`.
+                        label: match name.is_empty() {
+                            true => w.clone(),
+                            false => format!("{w} {name}"),
+                        },
                         query: format!("{}{w} ", &query[..s.start]),
                         chosen: chosen == Some(i),
                         kind: HintKind::Value,
@@ -146,22 +132,6 @@ fn key_label(key: &str) -> String {
     }
 }
 
-/// The emojis for `e:<typed>`: all of them while none is typed, else those
-/// starting with what is typed (an emoji of several code points).
-fn emojis(before: &str, key: &str, typed: &str, emojis: &[String]) -> Vec<SearchHint> {
-    emojis
-        .iter()
-        .filter(|e| typed.is_empty() || (e.starts_with(typed) && e.as_str() != typed))
-        .take(MAX_HINTS)
-        .map(|e| SearchHint {
-            label: e.clone(),
-            query: format!("{before}{key}{e} "),
-            chosen: false,
-            kind: HintKind::Value,
-        })
-        .collect()
-}
-
 /// The filters whose value contains the bare word `typed`: the tags, vibes
 /// and packs, those starting with it first, each list in its order of use.
 fn values(before: &str, neg: &str, typed: &str, vocab: &Vocabulary) -> Vec<SearchHint> {
@@ -202,9 +172,9 @@ pub(crate) mod tests {
                 tags: vec!["reaction".into(), "nsfw".into(), "cat".into()],
                 sets: vec!["cats".into(), "reactions".into()],
                 owners: vec!["alice".into()],
+                emojis: vec!["😂".into(), "🐱".into(), "❤️".into(), "💀".into()],
                 me: None,
             },
-            emojis: vec!["😂".into(), "🐱".into(), "❤️".into()],
         }
     }
 
@@ -274,15 +244,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn emoji_filters_offer_the_emojis() {
+    fn emoji_filters_offer_the_emojis_with_their_names() {
         let h = hints("cat e:", &words());
-        assert_eq!(labels(&h), vec!["😂", "🐱", "❤️"]);
-        assert_eq!(query_of(&h, "🐱"), "cat e:🐱 ");
+        assert_eq!(
+            labels(&h),
+            vec!["😂 face with tears of joy", "🐱 cat face", "❤️ red heart", "💀 skull"]
+        );
+        assert_eq!(query_of(&h, "🐱 cat face"), "cat e:🐱 ", "the emoji goes in");
+        assert!(h.iter().all(|h| h.kind == HintKind::Value && !h.chosen));
         let h = hints("-emoji:", &words());
-        assert_eq!(query_of(&h, "😂"), "-emoji:😂 ");
+        assert_eq!(query_of(&h, "😂 face with tears of joy"), "-emoji:😂 ");
         let h = hints("e:❤", &words());
-        assert_eq!(labels(&h), vec!["❤️"], "the selector completes the heart");
-        assert!(hints("e:😂", &words()).is_empty(), "already typed");
+        assert_eq!(labels(&h), vec!["❤️ red heart"], "the selector completes the heart");
+        assert!(h[0].chosen, "the same emoji");
+        let h = hints("e:😂", &words());
+        assert_eq!(labels(&h), vec!["😂 face with tears of joy"]);
+        assert!(h[0].chosen);
+    }
+
+    #[test]
+    fn an_emoji_name_offers_the_emojis_it_selects() {
+        let h = hints("cat e:sk", &words());
+        assert_eq!(h[0].label, "💀 skull", "the own one first");
+        assert_eq!(h[0].query, "cat e:💀 ");
+        assert_eq!(h[1].label, "☠️ skull and crossbones");
+        assert_eq!(h.len(), MAX_HINTS);
+        assert!(h.iter().all(|h| !h.chosen), "a name is searched as typed");
+        let s = suggest::suggest("cat e:sk", &words().vocab).unwrap();
+        let glyphs: Vec<String> = h
+            .iter()
+            .map(|h| h.label.split(' ').next().unwrap().to_string())
+            .collect();
+        assert_eq!(glyphs, s.words, "the desktop's offers");
+        let h = hints("e:SKLUL", &words());
+        assert_eq!(
+            labels(&h),
+            vec!["💀 skull", "☠️ skull and crossbones", "🩻 x-ray"],
+            "typos as the search forgives them"
+        );
+        assert!(hints("e:xqzv", &words()).is_empty());
     }
 
     #[test]
@@ -336,7 +336,7 @@ pub(crate) mod tests {
         };
         let items = [item(&["🐱", "😂"]), item(&["😂", " "]), item(&["😂", "🐶"])];
         let w = Words::from_items(items.iter());
-        assert_eq!(w.emojis, vec!["😂", "🐱", "🐶"]);
+        assert_eq!(w.vocab.emojis, vec!["😂", "🐱", "🐶"]);
     }
 
     pub(crate) fn summary() -> ItemSummary {

@@ -157,6 +157,7 @@ const RECORDS: &[(&str, &[&str])] = &[
             "key: kotlin.String",
             "words: List<kotlin.String>",
             "chosen: kotlin.UInt?",
+            "labels: List<kotlin.String> = listOf()",
         ],
     ),
     ("PairingLink", &["serverUrl: kotlin.String", "code: kotlin.String"]),

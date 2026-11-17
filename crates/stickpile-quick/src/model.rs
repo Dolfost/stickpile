@@ -174,6 +174,9 @@ pub struct SuggestionLine {
     pub words: Vec<String>,
     /// The word the search uses now (Tab puts in the next one).
     pub chosen: Option<usize>,
+    /// Parallel to `words`: for `e:` the emoji's name (`skull` for 💀, to
+    /// draw beside it), else empty ([`Suggestions::labels`]).
+    pub labels: Vec<String>,
 }
 
 /// Tab is cycling through the values of [`Suggestions`].
@@ -1230,6 +1233,7 @@ impl Model {
                 key: c.line.key.clone(),
                 words: c.line.words.clone(),
                 chosen: Some(c.index),
+                labels: c.line.labels.clone(),
             });
         }
         let s = suggest(text, vocab)?;
@@ -1237,6 +1241,7 @@ impl Model {
             chosen: s.chosen(),
             key: s.key,
             words: s.words,
+            labels: s.labels,
         })
     }
     /// The text field that searches on this tab, with the values it
