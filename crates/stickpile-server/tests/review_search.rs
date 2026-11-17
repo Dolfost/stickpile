@@ -416,7 +416,6 @@ async fn server_and_offline_agree_on_the_query_list() {
         .unwrap();
     }
     println!("{table}");
-    let _ = std::fs::write("/data/stickpile/.claude/scratch/review-search/query-table.md", &table);
     assert!(
         problems.is_empty(),
         "{} problems:\n{}",
@@ -535,7 +534,6 @@ async fn every_surface_offers_the_same_values() {
         .unwrap();
     }
     println!("{table}");
-    let _ = std::fs::write("/data/stickpile/.claude/scratch/review-search/suggest-table.md", &table);
     assert!(
         problems.is_empty(),
         "{} disagreements:\n{}",
@@ -663,6 +661,5 @@ async fn the_search_inside_a_pack_agrees_with_the_server() {
         .unwrap();
     }
     println!("{table}");
-    let _ = std::fs::write("/data/stickpile/.claude/scratch/review-search/within-table.md", &table);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
