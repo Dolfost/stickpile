@@ -168,6 +168,11 @@ pub struct Item {
     /// favorites last read (`StickpileLibrary.favorites`) and the likes
     /// changed here since. False until the favorites were read once.
     pub liked: bool,
+    /// The words written in the picture, line breaks kept (`\n`); read by
+    /// the server (OCR) or written by a person. Empty when it has none,
+    /// and from a server before the text field (0.7.0).
+    #[uniffi(default)]
+    pub text: String,
 }
 
 impl Item {
@@ -192,6 +197,7 @@ impl Item {
             copies: i.copies,
             nsfw: stickpile_quick::model::is_nsfw(i),
             liked,
+            text: i.text.clone(),
         }
     }
 }
@@ -357,6 +363,11 @@ pub struct UploadFile {
     pub name: Option<String>,
     pub keywords: Vec<String>,
     pub emojis: Vec<String>,
+    /// The words in the picture, as the person typed them (line breaks
+    /// kept): the user's text. `None` or blank: not sent, so the server
+    /// reads them itself when it can (OCR). At most 2000 characters.
+    #[uniffi(default)]
+    pub text: Option<String>,
 }
 
 /// Where the background sync stands.

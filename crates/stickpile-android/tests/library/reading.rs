@@ -442,8 +442,9 @@ async fn pack_search_online_offline_and_unknown() {
     );
 }
 
-/// What the tiles show: the owner, the format, the nsfw tag, the
-/// account's likes once the favorites were read, and the item's page.
+/// What the tiles show: the owner, the format, the nsfw tag, the words in
+/// the picture, the account's likes once the favorites were read, and the
+/// item's page.
 #[tokio::test]
 async fn items_carry_what_the_tiles_show() {
     let (server, items) = seeded_server();
@@ -451,6 +452,7 @@ async fn items_carry_what_the_tiles_show() {
         let mut st = server.state();
         let grumpy = st.items.iter_mut().find(|m| m.item.id == items[0].id).unwrap();
         grumpy.item.tags = vec!["fun".into(), " NSFW ".into()];
+        st.set_text(&items[0].id, "NO THOUGHTS\nhead empty", stickpile_api::FieldSource::Ai);
     }
     let dir = tempfile::tempdir().unwrap();
     let lib = signed_in(&server, dir.path());
@@ -463,6 +465,8 @@ async fn items_carry_what_the_tiles_show() {
     assert!(!gif.nsfw);
     assert_eq!((grumpy.owner.as_str(), grumpy.format), ("alice", MediaFormat::Png));
     assert_eq!(gif.format, MediaFormat::Gif);
+    assert_eq!(grumpy.text, "NO THOUGHTS\nhead empty", "line breaks kept");
+    assert_eq!(gif.text, "", "none");
     assert!(!grumpy.liked && !gif.liked, "the favorites were never read");
 
     // The favorites are saved under the account the cache knows: after a sync.

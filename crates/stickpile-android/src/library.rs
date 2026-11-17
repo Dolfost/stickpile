@@ -1247,7 +1247,8 @@ impl StickpileLibrary {
     /// return the new item, or the one already in the pack with the same
     /// content. To upload several, call this once per file. Throws
     /// `InvalidInput` (field `file`) when the server refuses the file (not
-    /// a picture or video it takes, too large), `NotFound` for a pack that
+    /// a picture or video it takes, too large) or its details (a text over
+    /// 2000 characters, say), `NotFound` for a pack that
     /// is not the account's, `Io` when the file cannot be read. The file is
     /// streamed from disk, never read into memory whole.
     pub async fn upload(&self, set_id: String, file: UploadFile) -> Result<Item, LibraryError> {
@@ -1272,6 +1273,8 @@ impl StickpileLibrary {
                 name: file.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
                 keywords: listed(file.keywords),
                 emojis: listed(file.emojis),
+                // A blank text is not sent: the server reads the picture.
+                text: file.text.filter(|t| !t.trim().is_empty()),
                 ..UploadMeta::default()
             };
             let results = session

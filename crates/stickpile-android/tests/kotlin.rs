@@ -118,6 +118,7 @@ const RECORDS: &[(&str, &[&str])] = &[
             "copies: kotlin.ULong",
             "nsfw: kotlin.Boolean",
             "liked: kotlin.Boolean",
+            "text: kotlin.String = \"\"",
         ],
     ),
     ("ItemList", &["items: List<Item>", "offline: kotlin.Boolean"]),
@@ -179,6 +180,7 @@ const RECORDS: &[(&str, &[&str])] = &[
             "name: kotlin.String?",
             "keywords: List<kotlin.String>",
             "emojis: List<kotlin.String>",
+            "text: kotlin.String? = null",
         ],
     ),
     (

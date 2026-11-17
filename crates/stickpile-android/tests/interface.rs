@@ -73,7 +73,7 @@ const CONTRACT: &[&str] = &[
     "record Item { id: String, name: String, set_id: String, set_name: String, owner: String, \
      emojis: List<String>, keywords: List<String>, vibe: String?, tags: List<String>, kind: MediaKind, \
      format: MediaFormat, width: u32, height: u32, quality: u32?, likes: u64, copies: u64, nsfw: Boolean, \
-     liked: Boolean }",
+     liked: Boolean, text: String }",
     "record ItemList { items: List<Item>, offline: Boolean }",
     "record Pack { id: String, slug: String, name: String, owner: String, item_count: u32, mine: Boolean }",
     "record PackList { packs: List<Pack>, offline: Boolean }",
@@ -83,7 +83,8 @@ const CONTRACT: &[&str] = &[
     "record PairingLink { server_url: String, code: String }",
     "record Prepared { path: String, mime_type: String, display_name: String, target: Target, variant: String, \
      sticker: Boolean }",
-    "record UploadFile { path: String, name: String?, keywords: List<String>, emojis: List<String> }",
+    "record UploadFile { path: String, name: String?, keywords: List<String>, emojis: List<String>, \
+     text: String? }",
     "record SyncState { last_sync: i64?, last_error: LibraryErrorKind?, pending_usage: u32, due: Boolean, \
      cache_changed: Boolean }",
     // enums

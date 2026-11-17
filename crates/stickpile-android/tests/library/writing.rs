@@ -1,7 +1,8 @@
 //! `record_use`, `toggle_like`, `upload` and the pairing input helpers.
 
 use stickpile_android::{LibraryErrorKind, PairingLink, Target, UploadFile};
-use stickpile_api::{TargetApp, Variant};
+use stickpile_api::{FieldSource, TargetApp, Variant};
+use stickpile_core::mock::MockServer;
 
 use super::*;
 
@@ -99,6 +100,13 @@ async fn toggle_like_flips_and_needs_the_server() {
     );
 }
 
+/// Who wrote the text of the item `id` on the server.
+fn text_source(server: &MockServer, id: &str) -> FieldSource {
+    let st = server.state();
+    let it = st.items.iter().find(|i| i.item.id == id).expect("item");
+    it.item.text_source
+}
+
 #[tokio::test]
 async fn upload_adds_one_file_to_a_pack() {
     let (mut server, items) = seeded_server();
@@ -112,6 +120,7 @@ async fn upload_adds_one_file_to_a_pack() {
         name: Some(" shrug ".into()),
         keywords: vec!["meh".into(), " ".into()],
         emojis: vec!["🤷".into()],
+        text: Some(" whatever\r\nidk ".into()),
     };
 
     let item = lib.upload(memes.clone(), upload.clone()).await.unwrap();
@@ -119,6 +128,8 @@ async fn upload_adds_one_file_to_a_pack() {
     assert_eq!(item.set_id, memes);
     assert_eq!(item.set_name, "Memes");
     assert_eq!(item.keywords, vec!["meh"]);
+    assert_eq!(item.text, "whatever\nidk", "the user's text, cleaned by the server");
+    assert_eq!(text_source(&server, &item.id), FieldSource::User);
     assert_eq!((item.width, item.height), (30, 30));
     let found = lib.search("shrug".into(), Target::Generic, 5).await.unwrap();
     assert_eq!(ids(&found.items), vec![item.id.clone()]);
@@ -131,12 +142,14 @@ async fn upload_adds_one_file_to_a_pack() {
         name: None,
         keywords: vec![],
         emojis: vec![],
+        text: Some(" \n ".into()),
         ..upload.clone()
     };
-    assert_eq!(
-        lib.upload(memes.clone(), unnamed).await.unwrap().name,
-        "upload-1234.tmp"
-    );
+    let unnamed = lib.upload(memes.clone(), unnamed).await.unwrap();
+    assert_eq!(unnamed.name, "upload-1234.tmp");
+    // A blank text is not sent: it stays the server's to read.
+    assert_eq!(unnamed.text, "");
+    assert_eq!(text_source(&server, &unnamed.id), FieldSource::Ai);
 
     // Not a picture.
     let junk = dir.path().join("notes.txt");
@@ -198,6 +211,7 @@ async fn upload_sends_the_file_as_it_is_on_disk() {
         name: None,
         keywords: vec![],
         emojis: vec![],
+        text: None,
     };
     let item = lib.upload(items[3].set_id.clone(), upload).await.unwrap();
     assert_eq!((item.name.as_str(), item.width, item.height), ("noise", 300, 300));
