@@ -754,6 +754,11 @@ impl Driver {
                     } else {
                         String::new()
                     },
+                    text: if tiles.text {
+                        model::text_line(&e.item)
+                    } else {
+                        String::new()
+                    },
                 })
                 .collect()
         });
@@ -854,6 +859,7 @@ impl Driver {
                 emojis: tiles.emojis,
                 tags: tiles.tags,
                 vibe: tiles.vibe,
+                text: tiles.text,
             },
             help: m.help_page().map(|page| help(page, m.config().counts)),
             help_hint: match m.help_page() {

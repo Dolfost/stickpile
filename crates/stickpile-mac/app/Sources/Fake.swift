@@ -2,7 +2,8 @@ import AppKit
 
 /// A stand-in for the Rust popup with made-up data (`--fake[=SCENE]`), to
 /// look at the layouts without a driver or a server. Scenes: items, recent,
-/// packs, pack, many, me, login, settings, help, error.
+/// packs, pack, many, text (the text line on the tiles), me, login,
+/// settings, help, error.
 final class FakePopup: PopupControl {
     private weak var ui: PopupController?
     private let scene: String
@@ -36,7 +37,7 @@ final class FakePopup: PopupControl {
             tab: .search, view: .items, focus: .field, title: "Search", hasField: true, query: "cat",
             placeholder: "Search, or try e:... set:cats type:gif vibe:tired", count: "", back: false,
             entriesRevision: 0, entries: nil, packs: nil, selected: 0, columns: 6, thumbPx: 128,
-            tiles: Tiles(favorites: true, emojis: true, tags: true, vibe: true), help: nil,
+            tiles: Tiles(favorites: true, emojis: true, tags: true, vibe: true, text: false), help: nil,
             helpHint: "? or Esc closes this", suggestions: nil,
             footer: Footer(mode: "INSERT", insert: true, pending: "", target: "Telegram",
                            targetHint: "auto: com.tdesktop.Telegram", sticker: .off, stickerLabel: "sticker: off",
@@ -90,19 +91,28 @@ final class FakePopup: PopupControl {
         return rep.representation(using: .png, properties: [:])
     }
 
-    private func makeEntries(_ n: Int) -> [EntryView] {
+    /// `text`: the words in the picture on some tiles (the "text" scene).
+    private func makeEntries(_ n: Int, text: Bool = false) -> [EntryView] {
         (0..<n).map { i in
             let k = i % FakePopup.names.count
+            let words = text && i % 3 != 2 ? FakePopup.texts[i % FakePopup.texts.count] : ""
             return EntryView(
                 id: "item-\(i)", name: FakePopup.names[k],
                 badge: i % 6 == 2 ? "GIF" : (i % 11 == 5 ? "WEBP" : nil),
-                tooltip: "\(FakePopup.names[k])\nPack: Cats\n\(FakePopup.emojis[k % FakePopup.emojis.count]) cat, cute",
+                tooltip: "\(FakePopup.names[k])\nPack: Cats\n\(FakePopup.emojis[k % FakePopup.emojis.count]) cat, cute"
+                    + (words.isEmpty ? "" : "\n\n" + words.replacingOccurrences(of: " / ", with: "\n")),
                 incompatible: i % 9 == 7, liked: i % 4 == 1,
                 emojis: i % 3 == 0 ? FakePopup.emojis[k % FakePopup.emojis.count] : "",
                 tags: i % 5 == 0 ? "cat, cute, wave" : "",
-                vibe: i % 4 == 2 ? "sarcastic" : (i % 7 == 3 ? "tired" : ""))
+                vibe: i % 4 == 2 ? "sarcastic" : (i % 7 == 3 ? "tired" : ""),
+                text: words)
         }
     }
+
+    /// Tile text lines as the driver sends them (" / " between lines).
+    private static let texts = [
+        "NO THOUGHTS / head empty", "me when the build is green", "КОЛИ В П'ЯТНИЦЮ / о 17:59",
+    ]
 
     private func makePacks() -> [PackView] {
         let names = ["Cats", "Reactions", "Work memes", "Telegram favourites", "Animals", "Gifs", "Empty pack"]
@@ -191,7 +201,7 @@ final class FakePopup: PopupControl {
 
     private func setScene(_ name: String) {
         var s = FakePopup.base()
-        entries = makeEntries(name == "many" ? 600 : 36)
+        entries = makeEntries(name == "many" ? 600 : 36, text: name == "text")
         packs = makePacks()
         revision += 1
         switch name {
@@ -211,6 +221,8 @@ final class FakePopup: PopupControl {
             s.footer.status = "Searching..."; s.footer.level = .busy
         case "many":
             s.selected = 599; s.footer.status = "600 results"
+        case "text":
+            s.tiles.text = true; s.footer.status = "Text shown"
         case "me":
             s.tab = .me; s.view = .me; s.title = "Me"; s.hasField = false; s.query = ""; s.focus = .noField
             s.footer.mode = "NORMAL"; s.footer.insert = false; s.me = meSignedIn(); s.footer.status = ""

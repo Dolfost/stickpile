@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use stickpile_api::Visibility;
+use stickpile_api::{FieldSource, Visibility};
 use stickpile_core::mock::MockServer;
 
 use crate::bridge::*;
@@ -518,6 +518,43 @@ fn a_sync_brings_the_values_to_a_filter_already_typed() {
     let v = h.last();
     assert_eq!(v.query, "v:");
     assert!(v.visible);
+}
+
+/// The words in the picture: in the tooltip with their line breaks, and
+/// on the tile as one line once `zx` turns it on (off by default), saved
+/// as `ui.show_text`.
+#[test]
+fn the_text_is_in_the_tooltip_and_zx_draws_it_on_the_tile() {
+    let server = MockServer::start();
+    {
+        let mut st = server.state();
+        let set = st.add_set("alice", "cats", "Cats", Visibility::Public);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let item = st.add_item(&set.id, "empty head", &["cat"], bytes.into_inner());
+        st.set_text(&item.id, "NO THOUGHTS\nhead empty", FieldSource::Ai);
+    }
+    let h = Harness::against(&server);
+    h.driver.toggle(None, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("the item", |s| s.entries.len() == 1);
+    let v = h.last();
+    assert!(!v.tiles.text, "off by default");
+    let e = h.ui.seen.lock().unwrap().entries[0].clone();
+    assert_eq!(e.text, "");
+    assert!(e.tooltip.ends_with("\n\nNO THOUGHTS\nhead empty"), "{}", e.tooltip);
+
+    assert!(h.key(53, "\u{1b}"));
+    assert!(h.key(6, "z"));
+    assert!(h.key(7, "x"));
+    h.pump_until("the text on the tile", |s| {
+        s.entries.first().is_some_and(|e| e.text == "NO THOUGHTS / head empty")
+    });
+    assert!(h.last().tiles.text);
+    let config = std::fs::read_to_string(&h.config).unwrap();
+    assert!(config.contains("show_text = true"), "{config}");
 }
 
 /// `e:` offers the emojis with their names, for the bar to draw them

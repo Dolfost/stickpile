@@ -175,7 +175,8 @@ pub struct EntryView {
     pub name: String,
     /// "GIF", "WEBP", "ANIM", "VIDEO" for anything that moves.
     pub badge: Option<String>,
-    /// Several lines: name, pack, emojis and keywords, why it does not fit.
+    /// Several lines: name, pack, emojis and keywords, why it does not fit,
+    /// then the words in the picture.
     pub tooltip: String,
     /// The item cannot go to the target app as it is: draw it dimmed.
     pub incompatible: bool,
@@ -187,6 +188,10 @@ pub struct EntryView {
     pub tags: String,
     /// The item's vibe label (only when [`Tiles::vibe`] is on).
     pub vibe: String,
+    /// The words in the picture on one line, " / " between its lines (only
+    /// when [`Tiles::text`] is on).
+    #[uniffi(default)]
+    pub text: String,
 }
 
 /// One cell of the pack list.
@@ -207,6 +212,9 @@ pub struct Tiles {
     pub emojis: bool,
     pub tags: bool,
     pub vibe: bool,
+    /// The words in the picture (`ui.show_text`, `zx`; off by default).
+    #[uniffi(default)]
+    pub text: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

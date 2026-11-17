@@ -83,7 +83,11 @@ one in (see [search suggestions](desktop.md#search-suggestions)), and F2
 (fn+F2 on most keyboards), `g/` or the Syntax button next to the search field shows
 the search syntax, short keys (`v:` for `vibe:`, `t:` for `tag:`, ...)
 included. Inside an opened pack the field searches the pack's items with
-the whole syntax, as on Linux ([Packs](desktop.md#normal-mode)). The version next to `?`
+the whole syntax, as on Linux ([Packs](desktop.md#normal-mode)). The tiles
+show what the Linux popup's do, and `zx` (`ui.show_text`, off by default)
+adds the words in the picture as one line above the tags (the bridge's
+`EntryView.text` and `Tiles.text`); a tile's tooltip ends with its text,
+line breaks kept. The version next to `?`
 opens the project page. Control works as Ctrl too. The vim keys of Normal
 mode work with a Cyrillic layout active.
 

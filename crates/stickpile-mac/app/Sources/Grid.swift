@@ -161,7 +161,7 @@ final class GridItem: NSCollectionViewItem {
     }
 }
 
-/// One tile, drawn in one go: selection, thumbnail, emojis, vibe, heart, tags, badge.
+/// One tile, drawn in one go: selection, thumbnail, emojis, vibe, heart, text, tags, badge.
 final class GridCell: NSView {
     enum Kind { case items, packs }
 
@@ -171,7 +171,7 @@ final class GridCell: NSView {
     var pack: PackView?
     var selected = false { didSet { if oldValue != selected { needsDisplay = true } } }
     var thumbPx: CGFloat = 128
-    var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true)
+    var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true, text: false)
     weak var thumbs: ThumbStore?
     weak var grid: GridCollectionView?
 
@@ -266,6 +266,16 @@ final class GridCell: NSView {
             warn.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             bottomLeft = r.maxX + 3
         }
+        // The words in the picture, one line above the bottom row.
+        if tiles.text, !e.text.isEmpty {
+            let font = NSFont.systemFont(ofSize: 9, weight: .medium)
+            let bottomUsed = e.incompatible || !(e.badge ?? "").isEmpty || (tiles.tags && !e.tags.isEmpty)
+            let w = min(inner.width, textWidth(e.text, font) + 10)
+            if w > 16 {
+                drawPill(e.text, in: NSRect(x: inner.minX, y: inner.maxY - 15 - (bottomUsed ? 18 : 0), width: w, height: 15),
+                         font: font, fg: .white, bg: pillBg, radius: 5)
+            }
+        }
         var badgeWidth: CGFloat = 0
         if let badge = e.badge, !badge.isEmpty {
             let font = NSFont.systemFont(ofSize: 9, weight: .bold)
@@ -321,7 +331,7 @@ final class GridView: NSScrollView, NSCollectionViewDataSource {
     private(set) var packs: [PackView] = []
     private(set) var selected: Int?
     private var thumbPx: CGFloat = 128
-    private var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true)
+    private var tiles = Tiles(favorites: true, emojis: true, tags: true, vibe: true, text: false)
     /// The usable size changed (width and height without the insets).
     var onSize: ((NSSize) -> Void)?
 
