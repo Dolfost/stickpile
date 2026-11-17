@@ -313,10 +313,11 @@ default, `cache_dir` in the client config; on Android the app's
   covers), which stay until they are released, removed or the account goes,
   bounded by `offline.max_mb` ([offline.md](offline.md)). On Android the
   kept files also include the rendition the grids play (a GIF, WebP or
-  video), and the app keeps its offline options and whether the downloads
-  are paused in its private preferences (`shared_prefs/offline.xml`, no
-  secret), excluded from backup and device transfer like the rest of its
-  data ([android.md](android.md#keeping-stickers-offline)).
+  video) and those the keyboard inserts into the usual fields, and the app
+  keeps its offline options and whether the downloads are paused in its
+  private preferences (`shared_prefs/offline.xml`, no secret), excluded
+  from backup and device transfer like the rest of its data
+  ([android.md](android.md#keeping-stickers-offline)).
 
 Nothing in the cache is a secret: the API token is a separate file (mode
 `0600`, `token_file`), never in the cache. The files are the pictures the

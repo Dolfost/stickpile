@@ -90,6 +90,8 @@ pub struct Session {
     pub(crate) offline_opts: Mutex<OfflineOptions>,
     /// The grids play animations ([`Session::with_grid_playback`]).
     pub(crate) plays_motion: bool,
+    /// It inserts into text fields ([`Session::with_inserts`]).
+    pub(crate) inserts: bool,
     /// Downloads the user asked for, which the offline downloader yields to.
     foreground: Arc<Foreground>,
     /// This process's offline options as other processes on the cache see
@@ -136,6 +138,7 @@ impl Session {
             client_name: format!("core/{}", env!("CARGO_PKG_VERSION")),
             offline_opts,
             plays_motion: false,
+            inserts: false,
             foreground: Arc::new(Foreground::default()),
             offline_peer,
         })

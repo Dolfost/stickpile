@@ -216,9 +216,13 @@ design; everything below is the app's side of it).
   files up to a largest size (no limit by default), within the space for
   kept files (1 GB by default; downloads stop when it is full and nothing
   is deleted to make room). A sticker kept by itself is always downloaded
-  whole. What a sticker needs is the core's: its thumbnail, the file a
-  share or an insert into each chat app it was sent to from this phone
-  uses (and its sticker version), and the GIF or video the grids play.
+  whole. What a sticker needs is the core's: its thumbnail,
+  for each chat app it was sent to from this phone (and the one an
+  unknown app counts as) the file a share uses and the files the keyboard
+  inserts into the usual fields (one that takes any picture, one that
+  takes only PNG and GIF, one only PNG; with and without "Send as a
+  sticker"), so a kept sticker inserts offline as it does online (a video
+  into a picture field as its GIF), and the GIF or video the grids play.
 - **When it downloads.** In the background (WorkManager), after each sync
   that went through and after a keep: on Wi-Fi or another network that is
   not metered, unless "Use mobile data" is on, and not while the phone's

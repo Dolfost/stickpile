@@ -371,3 +371,97 @@ async fn a_sticker_kept_before_it_is_cached_is_named_kept() {
         vec![false]
     );
 }
+
+// -- inserting a kept sticker offline as online (ported from the behaviour
+// review, branch `review-offline-behaviour`) ------------------------------------
+
+/// A file the mock takes for an MP4 video.
+fn mp4_bytes(len: usize) -> Vec<u8> {
+    let mut v = b"\0\0\0\x18ftypmp42\0\0\0\0mp42isom".to_vec();
+    v.resize(len.max(v.len()), 7);
+    v
+}
+
+/// A file the mock takes for a WebM video.
+fn webm_bytes(len: usize) -> Vec<u8> {
+    let mut v = vec![0x1A, 0x45, 0xDF, 0xA3];
+    v.resize(len.max(v.len()), 9);
+    v
+}
+
+/// alice's public pack `mixed`, its renditions shaped like the server's: a
+/// PNG still with its Telegram sticker, and an MP4 video with its Discord
+/// GIF and its video sticker (each `video_kb` long, for the size limit).
+fn mixed(server: &MockServer, video_kb: usize) -> (ItemSummary, ItemSummary) {
+    let mut st = server.state();
+    let set = st.add_set("alice", "mixed", "Mixed", Visibility::Public);
+    let still = st.add_item(&set.id, "still png", &["still"], png_bytes(20, 20, 1));
+    st.add_variant(&still.id, Variant::TgSticker, "image/webp", webp_bytes(16, 16, 2));
+    let video = st.add_item(&set.id, "mp4 video", &["video"], mp4_bytes(video_kb * 1024));
+    let mut gif = gif_bytes(4, 5);
+    gif.resize(gif.len().max(video_kb * 1024), 0);
+    st.add_variant(&video.id, Variant::DiscordGif, "image/gif", gif);
+    st.add_variant(&video.id, Variant::TgVideoSticker, "video/webm", webm_bytes(800));
+    let summary = |id: &str| {
+        let item = st.items.iter().find(|m| m.item.id == id).unwrap();
+        st.summary(&item.item)
+    };
+    (summary(&still.id), summary(&video.id))
+}
+
+/// The keyboard's types: the field's and the share sheet's
+/// (`ImeLibrary.availableOffline`).
+fn keyboard(field: &[String]) -> Vec<String> {
+    let mut out = field.to_vec();
+    out.extend(mimes(&["image/*", "video/*"]));
+    out
+}
+
+/// A video kept by itself, inserted online into Telegram's image field as
+/// its Discord GIF: with the server stopped the keyboard inserts the same
+/// GIF (kept for the inserts), not only the share sheet's MP4, and the
+/// tile is marked available.
+#[tokio::test]
+async fn a_kept_video_inserts_into_an_image_field_offline_as_online() {
+    let mut server = MockServer::start();
+    let (_, video) = mixed(&server, 4);
+    let dir = tempfile::tempdir().unwrap();
+    let lib = synced(&server, dir.path()).await;
+    let telegram = "org.telegram.messenger".to_string();
+    let field = mimes(&["image/gif", "image/*", "image/jpg", "image/png", "image/webp"]);
+    // Online: the Discord GIF; the use puts Telegram into the copy history.
+    let online = lib
+        .prepare(video.id.clone(), telegram.clone(), field.clone(), false)
+        .await
+        .unwrap();
+    assert_eq!(online.variant, "discord_gif");
+    lib.record_use(video.id.clone(), online.variant.clone(), telegram.clone())
+        .unwrap();
+    lib.keep_offline(OfflineScope::Sticker {
+        item_id: video.id.clone(),
+    })
+    .await
+    .unwrap();
+    assert!(lib.offline_run().await.unwrap().complete);
+    // What the insert fetched is kept: "Clear cache" leaves it.
+    lib.clear_cache().unwrap();
+
+    server.stop();
+    let marked = lib.available_offline(vec![video.id.clone()], telegram.clone(), keyboard(&field), false);
+    assert_eq!(marked, [true], "the keyboard marks it available");
+    let shared = lib
+        .prepare(
+            video.id.clone(),
+            telegram.clone(),
+            mimes(&["image/*", "video/*"]),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(shared.variant, "original", "the share sheet gets the MP4");
+    let inserted = lib
+        .prepare(video.id.clone(), telegram.clone(), field.clone(), false)
+        .await
+        .unwrap();
+    assert_eq!(inserted.variant, "discord_gif", "inserted into the field as online");
+}

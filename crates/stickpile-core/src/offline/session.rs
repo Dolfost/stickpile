@@ -92,6 +92,15 @@ impl Session {
         self
     }
 
+    /// Whether this client inserts into text fields (the Android keyboard,
+    /// [`crate::variant_for`]): kept items then also keep what an insert
+    /// into the usual fields picks ([`super::INSERT_FIELDS`]), so a kept
+    /// sticker inserts offline as it does online.
+    pub fn with_inserts(mut self, inserts: bool) -> Session {
+        self.inserts = inserts;
+        self
+    }
+
     /// The offline options in use: `[offline]` of the config, or what
     /// [`Session::set_offline_options`] set.
     pub fn offline_options(&self) -> OfflineOptions {
@@ -129,6 +138,7 @@ impl Session {
         Ok(Device {
             targets,
             plays_motion: self.plays_motion,
+            inserts: self.inserts,
         })
     }
 

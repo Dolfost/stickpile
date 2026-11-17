@@ -143,13 +143,16 @@ pub enum PlanScope {
 
 /// What a device does with kept stickers: the chat apps it copies to
 /// (resolved: [`OfflineOptions::targets`], or the default target and the
-/// targets of the copy history, [`crate::Session::offline_device`]) and
-/// whether its grids play animations (the Android app does; the desktop
-/// popups show thumbnails).
+/// targets of the copy history, [`crate::Session::offline_device`]),
+/// whether its grids play animations and whether it inserts into text
+/// fields (the Android app and its keyboard do both; the desktop popups
+/// show thumbnails and copy).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Device {
     pub targets: Vec<TargetApp>,
     pub plays_motion: bool,
+    #[serde(default)]
+    pub inserts: bool,
 }
 
 /// What a kept file is for.
@@ -161,11 +164,38 @@ pub enum FileRole {
     /// What a copy to `target` uses, with or without the sticker flag
     /// ([`crate::Session::prepare_copy`]).
     Copy { target: TargetApp, sticker: bool },
+    /// What an insert into a text field of `target` uses, with or without
+    /// the sticker flag, for one of [`INSERT_FIELDS`] ([`crate::variant_for`]).
+    Insert { target: TargetApp, sticker: bool },
     /// What the grid plays ([`played_rendition`]).
     Played,
     /// A kept pack's cover in the pack lists ([`crate::Session::pack_cover`]).
     Cover,
 }
+
+/// The text fields an inserting device ([`Device::inserts`]) keeps a kept
+/// sticker's insert for, as a field lists the MIME types it takes
+/// (`EditorInfoCompat.getContentMimeTypes`); what [`crate::variant_for`]
+/// picks depends only on which types are covered, so each entry stands for
+/// every list that covers the same:
+///
+/// - `image/*`: also the usual chat field (`image/gif, image/*, image/jpg,
+///   image/png, image/webp`): a still's original, an animation's GIF or
+///   WebP, a video's GIF.
+/// - `image/png, image/gif`: a WebP still's PNG, a WebP animation's GIF.
+/// - `image/png`: a field for stills only.
+/// - `image/*, video/*`: what the keyboard shares when the field takes
+///   nothing (`InsertFlow.SHARE_TYPES`), and a field that takes videos.
+///
+/// Which lists the chat apps really give is not recorded yet
+/// (docs/android-input.md); a field that covers other types may insert
+/// another rendition offline, or share.
+pub const INSERT_FIELDS: &[&[&str]] = &[
+    &["image/*"],
+    &["image/png", "image/gif"],
+    &["image/png"],
+    &["image/*", "video/*"],
+];
 
 /// A file a kept item (or pack) needs, where the copy path looks for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,11 +312,14 @@ pub fn played_rendition(item: &ItemSummary) -> Option<(&VariantInfo, Playback)> 
 /// thumbnail; for each target, the rendition a copy chooses
 /// ([`pick_variant`], as [`crate::Session::prepare_copy`] does), and with
 /// [`OfflineOptions::sticker_renditions`] also the one it chooses with the
-/// sticker flag; on a device that plays animations, the
-/// [`played_rendition`]. One entry per file (a file several targets use
-/// lists every role). The per-kind options and `max_file_mb` are not
-/// applied here: they decide what pack, library and automatic keeping
-/// download ([`skip_reason`]); a sticker kept by itself gets all of these.
+/// sticker flag; on a device that inserts into text fields, for each
+/// target and each of [`INSERT_FIELDS`] the rendition an insert picks
+/// ([`crate::variant_for`], with and without the sticker flag likewise);
+/// on a device that plays animations, the [`played_rendition`]. One entry
+/// per file (a file several targets use lists every role). The per-kind
+/// options and `max_file_mb` are not applied here: they decide what pack,
+/// library and automatic keeping download ([`skip_reason`]); a sticker
+/// kept by itself gets all of these.
 pub fn needs(item: &ItemSummary, opts: &OfflineOptions, device: &Device) -> Vec<WantedFile> {
     let mut out: Vec<WantedFile> = vec![WantedFile::thumbnail(item, FileRole::Thumbnail)];
     let mut add = |file: WantedFile| match out.iter_mut().find(|f| f.rel == file.rel) {
@@ -299,12 +332,12 @@ pub fn needs(item: &ItemSummary, opts: &OfflineOptions, device: &Device) -> Vec<
         }
         None => out.push(file),
     };
+    let flags: &[bool] = if opts.sticker_renditions {
+        &[false, true]
+    } else {
+        &[false]
+    };
     for &target in &device.targets {
-        let flags: &[bool] = if opts.sticker_renditions {
-            &[false, true]
-        } else {
-            &[false]
-        };
         for &sticker in flags {
             if let Ok((info, is_sticker, _)) = pick_variant(item, target, sticker) {
                 // With the sticker flag on a target without stickers the
@@ -320,6 +353,28 @@ pub fn needs(item: &ItemSummary, opts: &OfflineOptions, device: &Device) -> Vec<
                         sticker: is_sticker,
                     },
                 ));
+            }
+        }
+    }
+    if device.inserts {
+        let fields: Vec<Vec<String>> = INSERT_FIELDS
+            .iter()
+            .map(|f| f.iter().map(|m| m.to_string()).collect())
+            .collect();
+        for &target in &device.targets {
+            for field in &fields {
+                for &sticker in flags {
+                    if let Some(choice) = crate::insert::variant_for(item, target, field, sticker) {
+                        add(WantedFile::rendition(
+                            item,
+                            &choice.variant,
+                            FileRole::Insert {
+                                target,
+                                sticker: choice.sticker,
+                            },
+                        ));
+                    }
+                }
             }
         }
     }

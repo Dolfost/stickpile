@@ -13,7 +13,7 @@ use super::*;
 use crate::cache::Cache;
 use crate::offline::{
     needs, played_rendition, Device, FileRole, OfflineControl, OfflineOptions, OfflineOutcome, OfflineState, PlanScope,
-    Playback, Reason, RunEnd, Scope, SkipReason,
+    Playback, Reason, RunEnd, Scope, SkipReason, INSERT_FIELDS,
 };
 use crate::session::pick_variant;
 
@@ -188,58 +188,70 @@ fn needs_per_target_and_kind() {
             ],
             TargetApp::ALL.to_vec(),
         ] {
-            for sticker_renditions in [false, true] {
-                for plays_motion in [false, true] {
-                    let opts = OfflineOptions {
-                        sticker_renditions,
-                        ..opts.clone()
-                    };
-                    let device = Device {
-                        targets: targets.clone(),
-                        plays_motion,
-                    };
-                    let got = needs(item, &opts, &device);
-                    // The thumbnail first, each file once.
-                    assert_eq!(got[0].variant, Variant::Thumb);
-                    assert_eq!(got[0].rel, "files/thumb/m1.webp");
-                    let rels: BTreeSet<&str> = got.iter().map(|f| f.rel.as_str()).collect();
-                    assert_eq!(rels.len(), got.len(), "no duplicates");
-                    // What a copy uses, for every target and flag.
-                    let mut want: BTreeSet<Variant> = BTreeSet::from([Variant::Thumb]);
-                    for &t in &targets {
-                        want.insert(pick_variant(item, t, false).unwrap().0.variant);
-                        if sticker_renditions {
-                            let (v, is_sticker, _) = pick_variant(item, t, true).unwrap();
-                            if is_sticker {
-                                want.insert(v.variant);
-                            }
-                        }
-                    }
-                    if plays_motion {
-                        if let Some((v, _)) = played_rendition(item) {
+            for (sticker_renditions, plays_motion, inserts) in (0..8).map(|b| (b & 1 != 0, b & 2 != 0, b & 4 != 0)) {
+                let opts = OfflineOptions {
+                    sticker_renditions,
+                    ..opts.clone()
+                };
+                let device = Device {
+                    targets: targets.clone(),
+                    plays_motion,
+                    inserts,
+                };
+                let got = needs(item, &opts, &device);
+                // The thumbnail first, each file once.
+                assert_eq!(got[0].variant, Variant::Thumb);
+                assert_eq!(got[0].rel, "files/thumb/m1.webp");
+                let rels: BTreeSet<&str> = got.iter().map(|f| f.rel.as_str()).collect();
+                assert_eq!(rels.len(), got.len(), "no duplicates");
+                // What a copy uses, for every target and flag.
+                let mut want: BTreeSet<Variant> = BTreeSet::from([Variant::Thumb]);
+                for &t in &targets {
+                    want.insert(pick_variant(item, t, false).unwrap().0.variant);
+                    if sticker_renditions {
+                        let (v, is_sticker, _) = pick_variant(item, t, true).unwrap();
+                        if is_sticker {
                             want.insert(v.variant);
                         }
                     }
-                    let variants: BTreeSet<Variant> = got.iter().map(|f| f.variant).collect();
-                    assert_eq!(
-                        variants, want,
-                        "{:?} {targets:?} {sticker_renditions} {plays_motion}",
-                        item.kind
-                    );
-                    for f in &got[1..] {
-                        assert!(
-                            f.rel.starts_with(&format!("clip/m1.{}/cat.", f.variant.as_str())),
-                            "{}",
-                            f.rel
-                        );
-                        let size = item
-                            .variants
-                            .iter()
-                            .find(|v| v.variant == f.variant)
-                            .unwrap()
-                            .size_bytes;
-                        assert_eq!(f.size, size);
+                }
+                if plays_motion {
+                    if let Some((v, _)) = played_rendition(item) {
+                        want.insert(v.variant);
                     }
+                }
+                if inserts {
+                    // What an insert into each of the usual fields picks.
+                    for &t in &targets {
+                        for field in INSERT_FIELDS {
+                            let field: Vec<String> = field.iter().map(|m| m.to_string()).collect();
+                            for sticker in [false, sticker_renditions] {
+                                if let Some(c) = crate::variant_for(item, t, &field, sticker) {
+                                    want.insert(c.variant.variant);
+                                }
+                            }
+                        }
+                    }
+                }
+                let variants: BTreeSet<Variant> = got.iter().map(|f| f.variant).collect();
+                assert_eq!(
+                    variants, want,
+                    "{:?} {targets:?} {sticker_renditions} {plays_motion} {inserts}",
+                    item.kind
+                );
+                for f in &got[1..] {
+                    assert!(
+                        f.rel.starts_with(&format!("clip/m1.{}/cat.", f.variant.as_str())),
+                        "{}",
+                        f.rel
+                    );
+                    let size = item
+                        .variants
+                        .iter()
+                        .find(|v| v.variant == f.variant)
+                        .unwrap()
+                        .size_bytes;
+                    assert_eq!(f.size, size);
                 }
             }
         }
@@ -254,6 +266,7 @@ fn needs_per_target_and_kind() {
             &Device {
                 targets: targets.to_vec(),
                 plays_motion,
+                inserts: false,
             },
         )
         .into_iter()
@@ -291,6 +304,7 @@ fn needs_per_target_and_kind() {
     let device = Device {
         targets: vec![TargetApp::Telegram],
         plays_motion: false,
+        inserts: false,
     };
     assert!(!needs(&still, &opts, &device)
         .iter()

@@ -55,6 +55,23 @@ it, for the plan, the estimate and every client:
   `stickpile_api::profiles::choose_variant`), and with
   `offline.sticker_renditions` also the one it chooses with the sticker
   flag (`clip/<media>.<variant>/<name>.<ext>`);
+- on a device that inserts into text fields (the Android keyboard:
+  `Session::with_inserts(true)`), for each target app the rendition an
+  insert picks (`crate::variant_for`, limited by the MIME types the field
+  lists), with and without the sticker flag likewise, for each of the
+  fields of `offline::INSERT_FIELDS`: `image/*` (also the usual chat
+  field, `image/gif, image/*, image/jpg, image/png, image/webp`), `image/png,
+  image/gif`, `image/png`, and `image/*, video/*` (the keyboard's share
+  sheet). So a kept sticker inserts offline as it does online: a video
+  into an image field as its GIF, a WebP still into a field that takes
+  PNG and GIF as its PNG, a WebP animation there as its GIF. On the
+  behaviour review's items (one of each shape, the sizes measured on the
+  demo library, `tests/offline_clients.rs`), summed over six chat apps,
+  this takes 62.2 MB instead of 37.0 MB (+68%): a WebP still and a WebP
+  animation 0.6 MB more per app (their PNG, their GIF), a video 1.5 MB more
+  (its GIF); PNG stills and GIF animations nothing more. Which lists the
+  chat apps really give is not recorded yet (docs/android-input.md); a
+  field that covers other types may insert another rendition offline;
 - on a device whose grids play animations (the Android app:
   `Session::with_grid_playback(true)`), the rendition played,
   `offline::played_rendition`: the Android rule moved into the core
@@ -200,8 +217,9 @@ and works without a server unless said otherwise.
 | Call | What it does |
 |---|---|
 | `Session::with_grid_playback(bool)` | The client's grids play animations (Android): keep the played rendition too |
+| `Session::with_inserts(bool)` | The client inserts into text fields (the Android keyboard): keep what an insert into the usual fields picks too |
 | `Session::offline_options()` / `set_offline_options(opts)` | The options in use (`[offline]` of the config, or what the shell set) |
-| `Session::offline_device()` | The resolved targets and playback, as `needs` gets them |
+| `Session::offline_device()` | The resolved targets, playback and inserting, as `needs` gets them |
 | `Session::offline_keep(&scope)` / `offline_release(&scope)` | Keep or release a scope; flags or releases what is on the device at once |
 | `Session::offline_keeps()` | The kept scopes, oldest first |
 | `Session::offline_reasons(&item)` | Why an item is kept (empty: it is not) |

@@ -630,13 +630,16 @@ impl Inner {
 }
 
 /// The session for `config`. The app's grids play GIFs and videos
-/// (`motion`), so a sticker kept offline keeps the file they play too.
+/// (`motion`), and its keyboard inserts into text fields (`prepare`), so a
+/// sticker kept offline keeps the file they play and the files the usual
+/// fields take too.
 async fn open_session(config: ClientConfig) -> Result<Session, LibraryError> {
     Ok(Session::open(config)
         .await?
         .with_client_name(crate::client_name())
         .with_fail_fast(FAIL_FAST)
-        .with_grid_playback(true))
+        .with_grid_playback(true)
+        .with_inserts(true))
 }
 
 impl StickpileLibrary {
