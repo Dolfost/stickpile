@@ -120,7 +120,20 @@ fn input_from_meta(filename: &str, meta: &ItemMeta) -> AppResult<ItemInput> {
 }
 
 /// Update an existing item's metadata to `input`; true if anything changed.
-async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &ItemInput) -> AppResult<bool> {
+/// The item is read again inside a write transaction, so that the text
+/// rule ([`ItemText::merged_into`]) sees what is stored now: a text a
+/// person typed while the import ran is never replaced by the file's AI
+/// text. (The other fields are the directory's, as before.)
+async fn apply_meta(db: &sqlx::SqlitePool, item_id: &str, input: &ItemInput) -> AppResult<bool> {
+    let mut tx = sets::begin(db).await?;
+    let Some(cur) = sqlx::query_as::<_, ItemFull>(&format!("{} WHERE i.id = ?", hydrate::ITEM_FULL_SELECT))
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        // Removed meanwhile: nothing to update.
+        return Ok(false);
+    };
     let cur_text = ItemText {
         text: cur.text.clone(),
         source: source(&cur.text_source),
@@ -161,8 +174,9 @@ async fn apply_meta(conn: &mut sqlx::SqliteConnection, cur: &ItemFull, input: &I
     .bind(&input.extra_toml)
     .bind(now())
     .bind(&cur.id)
-    .execute(conn)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(true)
 }
 
@@ -298,8 +312,7 @@ pub async fn import_bundle_into(
                 });
                 continue;
             }
-            let mut conn = state.db.acquire().await?;
-            if apply_meta(&mut conn, cur, &input).await? {
+            if apply_meta(&state.db, &cur.id, &input).await? {
                 report.updated += 1;
                 changed = true;
             } else {
@@ -321,11 +334,7 @@ pub async fn import_bundle_into(
                     });
                     continue;
                 }
-                let cur = hydrate::fetch_one(&state.db, &added.item_id)
-                    .await?
-                    .ok_or_else(AppError::not_found)?;
-                let mut conn = state.db.acquire().await?;
-                if apply_meta(&mut conn, &cur, &input).await? {
+                if apply_meta(&state.db, &added.item_id, &input).await? {
                     report.updated += 1;
                     changed = true;
                 } else {
