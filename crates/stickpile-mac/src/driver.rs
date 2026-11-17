@@ -731,7 +731,7 @@ impl Driver {
                     let outcome = out
                         .unwrap_or_else(|| Err(t("internal error (see log)").into()))
                         .map(|r| (r.removed_files as u64, r.freed_bytes));
-                    d.lock().panel.message = None;
+                    d.lock().panel.note = None;
                     d.dispatch(Event::KeptRemoved(outcome));
                     d.refresh_usage();
                 });

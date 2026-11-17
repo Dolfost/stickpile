@@ -113,9 +113,18 @@ pub struct Panel {
     pub status: Option<OfflineStatus>,
     pub running: bool,
     pub paused: bool,
-    /// What the last action of the block did ("Cleared 12 files..."), and
-    /// whether it failed.
-    pub message: Option<(String, bool)>,
+    /// What the last action of the block did, said in the language of the
+    /// moment it is shown.
+    pub note: Option<PanelNote>,
+}
+
+/// The answer to the last action of the block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PanelNote {
+    /// "Clear cache" went through.
+    Cleared(EvictReport),
+    /// An action failed (the whole message).
+    Failed(String),
 }
 
 /// The block in words, for the shells to draw.
@@ -196,8 +205,17 @@ impl Panel {
                     &[("n", &skipped)],
                 )
             },
-            message: self.message.as_ref().map(|(m, _)| m.clone()),
-            message_error: self.message.as_ref().is_some_and(|(_, e)| *e),
+            message: self.note.as_ref().map(|n| match n {
+                PanelNote::Cleared(r) => tp(
+                    r.removed_files as u64,
+                    "Cleared {n} file ({size}); {kept} kept files stayed.",
+                    "Cleared {n} files ({size}); {kept} kept files stayed.",
+                )
+                .replace("{size}", &human_bytes(r.freed_bytes))
+                .replace("{kept}", &r.kept_files.to_string()),
+                PanelNote::Failed(e) => e.clone(),
+            }),
+            message_error: matches!(self.note, Some(PanelNote::Failed(_))),
             can_remove: self.usage.is_some_and(|u| u.kept_files > 0) || library,
         }
     }
@@ -224,18 +242,11 @@ impl Panel {
 
     /// "Clear cache" went through.
     pub fn cleared(&mut self, r: &EvictReport) {
-        let text = tp(
-            r.removed_files as u64,
-            "Cleared {n} file ({size}); {kept} kept files stayed.",
-            "Cleared {n} files ({size}); {kept} kept files stayed.",
-        )
-        .replace("{size}", &human_bytes(r.freed_bytes))
-        .replace("{kept}", &r.kept_files.to_string());
-        self.message = Some((text, false));
+        self.note = Some(PanelNote::Cleared(r.clone()));
     }
 
     pub fn failed(&mut self, error: String) {
-        self.message = Some((error, true));
+        self.note = Some(PanelNote::Failed(error));
     }
 }
 
