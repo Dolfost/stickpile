@@ -528,6 +528,12 @@ fn the_text_field_against_the_real_server() {
     assert_eq!(online[1].len(), 1);
     assert_eq!(online[2][0].0, second);
     assert_eq!(online[3].iter().map(|h| &h.0).collect::<Vec<_>>(), vec![&second]);
+    // Clearing: an empty --text, the user's (not synced: offline answers as before).
+    let cleared = env.json(&["item", "edit", &second, "--text", ""]);
+    assert_eq!(
+        (cleared["text"].as_str(), cleared["text_source"].as_str()),
+        (Some(""), Some("user"))
+    );
     drop(server);
     for (q, want) in queries.iter().zip(&online) {
         let v = env.json(&["search", q]);
