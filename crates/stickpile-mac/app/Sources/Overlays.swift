@@ -115,7 +115,7 @@ final class HelpOverlay: NSView {
         shadow.shadowOffset = NSSize(width: 0, height: -3)
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
         shadow.set()
-        NSColor.windowBackgroundColor.setFill()
+        Palette.background.setFill()
         NSBezierPath(roundedRect: card.frame, xRadius: 12, yRadius: 12).fill()
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -125,7 +125,7 @@ final class HelpCard: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
-        NSColor.windowBackgroundColor.setFill()
+        Palette.background.setFill()
         path.fill()
         NSColor.separatorColor.setStroke()
         path.stroke()

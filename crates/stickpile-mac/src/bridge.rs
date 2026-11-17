@@ -359,6 +359,8 @@ pub struct ViewState {
     pub config_path: String,
     /// The current language's code (`en`, `uk`); every text in here is in it.
     pub language: String,
+    /// `ui.theme`: `system`, `dark`, `oled` or `white`.
+    pub theme: String,
     pub tabs: Vec<TabLabel>,
     pub tab: TabId,
     pub view: ViewKind,

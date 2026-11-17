@@ -46,6 +46,13 @@ settings that only exist on macOS: the shortcut and "Launch at login".
    the same token file.
 3. Press the shortcut (**Option+Space** by default) in a chat app.
 
+## Theme
+
+Settings tab, Popup, **Theme** (`ui.theme`): System follows the macOS
+Appearance setting, Dark and White keep the popup dark or light, and
+OLED is the dark appearance on pure black instead of the translucent
+material ([configuration.md](configuration.md#popup-theme)).
+
 ## Files
 
 | | |

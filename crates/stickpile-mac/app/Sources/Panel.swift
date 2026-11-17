@@ -175,11 +175,31 @@ final class PopupBackground: NSVisualEffectView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// OLED covers the material with the black backdrop; the others show it.
+    func paletteChanged() {
+        backdrop.isHidden = !Palette.oled
+        redrawAll(self)
+    }
+}
+
+/// Every view under `view` draws again (a palette change is not an appearance change).
+func redrawAll(_ view: NSView) {
+    view.needsDisplay = true
+    view.subviews.forEach(redrawAll)
 }
 
 final class Backdrop: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        Palette.background.setFill()
         dirtyRect.fill()
     }
+}
+
+/// The popup's colours for `ui.theme`: OLED draws on pure black where the
+/// other themes have the window colour (and the material).
+enum Palette {
+    static var oled = false
+    /// What the popup is drawn on.
+    static var background: NSColor { oled ? .black : .windowBackgroundColor }
 }

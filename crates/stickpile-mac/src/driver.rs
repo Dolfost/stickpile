@@ -820,6 +820,7 @@ impl Driver {
             error,
             config_path: s.config_path.display().to_string(),
             language: stickpile_i18n::global::get().code().to_string(),
+            theme: s.cfg.ui.theme.as_str().to_string(),
             tabs: Tab::ALL
                 .iter()
                 .map(|t| TabLabel {

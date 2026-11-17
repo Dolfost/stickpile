@@ -129,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = mainMenu()
         controller = PopupController(testPasteboard: options.testPasteboard)
         controller.offscreen = options.snapshot != nil
+        controller.appearanceFixed = options.appearance != nil
         let popup: PopupControl
         if let scene = options.fake {
             popup = FakePopup(ui: controller, scene: scene)

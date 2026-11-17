@@ -31,6 +31,7 @@ final class FakePopup: PopupControl {
         ViewState(
             visible: false, error: nil, configPath: "~/Library/Application Support/stickpile/config.toml",
             language: "en",
+            theme: ProcessInfo.processInfo.environment["STICKPILE_FAKE_THEME"] ?? "system",
             tabs: tabs.enumerated().map { TabLabel(tab: $1.0, label: $1.1, number: UInt8($0 + 1)) },
             tab: .search, view: .items, focus: .field, title: "Search", hasField: true, query: "cat",
             placeholder: "Search, or try e:... set:cats type:gif vibe:tired", count: "", back: false,

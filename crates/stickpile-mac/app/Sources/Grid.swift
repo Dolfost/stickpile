@@ -198,7 +198,7 @@ final class GridCell: NSView {
             ring.stroke()
             let edge = NSBezierPath(roundedRect: box.insetBy(dx: 3.75, dy: 3.75), xRadius: 6.25, yRadius: 6.25)
             edge.lineWidth = 1.5
-            NSColor.windowBackgroundColor.setStroke()
+            Palette.background.setStroke()
             edge.stroke()
         }
         let side = max(8, min(thumbPx, bounds.width - cellExtra, bounds.height - cellExtra - (kind == .packs ? packLabels : 0)))

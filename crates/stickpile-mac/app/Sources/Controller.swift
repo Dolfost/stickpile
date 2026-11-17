@@ -64,6 +64,10 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
     }
     /// The language the app's own texts are in; `onLanguage` runs when it changes.
     private var language = ""
+    /// `ui.theme` as last applied.
+    private var theme = ""
+    /// `--appearance` chose light or dark (snapshots): `ui.theme` leaves it.
+    var appearanceFixed = false
     var onLanguage: (() -> Void)?
     /// (view, selected, revision) last scrolled to.
     private var scrolledTo: (ViewKind, UInt32?, UInt64)?
@@ -231,6 +235,10 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
             language = s.language
             v.relabel()
             onLanguage?()
+        }
+        if s.theme != theme {
+            theme = s.theme
+            applyTheme()
         }
         v.showError(s.error, configPath: s.configPath)
         v.tabBar.update(tabs: s.tabs, current: s.tab)
@@ -413,6 +421,20 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
     }
     func resetSetting(key: String) { send { $0.resetSetting(key: key) } }
 
+    /// `ui.theme`: the app's appearance (system follows macOS) and the
+    /// OLED black.
+    private func applyTheme() {
+        if !appearanceFixed {
+            switch theme {
+            case "dark", "oled": NSApp.appearance = NSAppearance(named: .darkAqua)
+            case "white": NSApp.appearance = NSAppearance(named: .aqua)
+            default: NSApp.appearance = nil
+            }
+        }
+        Palette.oled = theme == "oled"
+        (panel.contentView as? PopupBackground)?.paletteChanged()
+    }
+
     // MARK: snapshot
 
     /// Draw the panel's content into a PNG (no screen recording needed): the
@@ -422,7 +444,7 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
         guard let content = panel.contentView else { return false }
         let backdrop = (content as? PopupBackground)?.backdrop
         backdrop?.isHidden = false
-        defer { backdrop?.isHidden = true }
+        defer { backdrop?.isHidden = !Palette.oled }
         content.layoutSubtreeIfNeeded()
         content.displayIfNeeded()
         CATransaction.flush()
@@ -435,7 +457,7 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, @unc
                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
             ctx.scaleBy(x: scale, y: scale)
             content.effectiveAppearance.performAsCurrentDrawingAppearance {
-                ctx.setFillColor(NSColor.windowBackgroundColor.cgColor)
+                ctx.setFillColor(Palette.background.cgColor)
                 ctx.fill(CGRect(origin: .zero, size: bounds.size))
             }
             layer.render(in: ctx)
