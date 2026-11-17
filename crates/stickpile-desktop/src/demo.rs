@@ -603,8 +603,9 @@ impl Backend for DemoBackend {
         })
     }
 
-    fn sync(self: Arc<Self>) -> BoxFut<Result<(), String>> {
-        Box::pin(async { Ok(()) })
+    /// The files were read at the start: nothing to pull, nothing changes.
+    fn sync(self: Arc<Self>) -> BoxFut<Result<bool, String>> {
+        Box::pin(async { Ok(false) })
     }
 
     fn most_used(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>> {
@@ -826,7 +827,7 @@ mod tests {
                 .unwrap();
             b.clone().record_copy(item, p).await.unwrap();
             assert_eq!(b.clone().recent(5).await.len(), 1);
-            b.clone().sync().await.unwrap();
+            assert!(!b.clone().sync().await.unwrap(), "the demo's files do not change");
             let mp4 = b.find("clip.mp4").unwrap().summary.clone();
             assert!(b.clone().thumbnail(mp4).await.is_err());
 

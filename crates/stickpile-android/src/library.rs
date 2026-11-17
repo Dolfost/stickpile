@@ -584,14 +584,14 @@ impl Inner {
             let mut status = lock(&self.sync);
             status.policy.finished(Instant::now(), result.is_ok());
             match &result {
-                Ok(()) => {
+                Ok(_) => {
                     status.last_ok = Some(now_unix());
                     status.last_error = None;
                 }
                 Err(e) => status.last_error = Some(e.kind()),
             }
         }
-        result.map(|()| self.sync_state())
+        result.map(|_| self.sync_state())
     }
 }
 

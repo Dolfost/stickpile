@@ -1258,11 +1258,14 @@ impl Driver {
         let Some(b) = self.backend() else { return };
         self.lock().sync.started(now);
         self.spawn(b.sync(), |d, out| {
-            let ok = matches!(out, Some(Ok(())));
-            if let Some(Err(e)) = out {
+            let ok = matches!(out, Some(Ok(_)));
+            if let Some(Err(e)) = &out {
                 tracing::debug!("sync: {e}");
             }
             d.lock().sync.finished(Instant::now(), ok);
+            if matches!(out, Some(Ok(true))) {
+                d.dispatch(Event::LibraryChanged);
+            }
         });
     }
 

@@ -219,6 +219,11 @@ what is typed so far: its start first, then
 anywhere in the value, then with a typo or two forgiven, so `vibe:sarcstic`
 and `vibe:sacr` still offer `sarcastic`. The line pushes the grid down
 instead of covering it, and goes away with the space after the value.
+The values are read from the cache when the popup opens and again after
+every sync that changed the cache, so the first opening after a start
+offers them too once its sync is over (before, the cache is still
+empty): a line already shown takes them in place, with the text as
+typed.
 
 The search does not wait for the value to be finished: a half-typed or
 misspelled value is searched as its best match (the highlighted one), so

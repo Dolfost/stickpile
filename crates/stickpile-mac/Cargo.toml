@@ -37,3 +37,5 @@ url.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 image.workspace = true
+# In-process mock server for the driver against the real core.
+stickpile-core = { workspace = true, features = ["mock"] }

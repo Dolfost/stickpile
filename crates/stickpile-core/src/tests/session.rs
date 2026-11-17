@@ -82,12 +82,18 @@ async fn offline_index_is_rebuilt_after_sync() {
     let (server, items) = seeded_server();
     let dir = tempfile::tempdir().unwrap();
     let session = session_for(&server, dir.path()).await;
-    session.sync().await.unwrap();
+    assert!(session.sync().await.unwrap(), "the first sync fills the cache");
     assert!(session.search_offline("brandnew", None, 5).unwrap().hits.is_empty());
+    assert!(
+        !session.sync().await.unwrap(),
+        "nothing new: the items sent again as they were change nothing"
+    );
     let set_id = items[0].set_id.clone();
     server.state().add_item(&set_id, "brandnew", &[], png_bytes(4, 4, 99));
-    session.sync().await.unwrap();
+    assert!(session.sync().await.unwrap());
     assert_eq!(session.search_offline("brandnew", None, 5).unwrap().hits.len(), 1);
+    server.state().delete_item(&items[0].id);
+    assert!(session.sync().await.unwrap(), "a removed item changes it too");
 }
 
 #[tokio::test]

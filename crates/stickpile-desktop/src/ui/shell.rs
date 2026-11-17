@@ -1421,11 +1421,14 @@ impl Shell {
         let Some(b) = self.backend() else { return };
         self.sync.borrow_mut().started(now);
         self.spawn(b.sync(), |this, out| {
-            let ok = matches!(out, Some(Ok(())));
-            if let Some(Err(e)) = out {
+            let ok = matches!(out, Some(Ok(_)));
+            if let Some(Err(e)) = &out {
                 tracing::debug!("sync: {e}");
             }
             this.sync.borrow_mut().finished(Instant::now(), ok);
+            if matches!(out, Some(Ok(true))) {
+                this.dispatch(Event::LibraryChanged);
+            }
             this.update_page();
         });
     }

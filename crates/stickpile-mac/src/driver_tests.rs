@@ -5,6 +5,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use stickpile_api::Visibility;
+use stickpile_core::mock::MockServer;
+
 use crate::bridge::*;
 use crate::driver::Driver;
 
@@ -98,11 +101,31 @@ impl Harness {
         for name in extra {
             png(&media.join(name), [10, 10, 10]);
         }
+        Harness::start(serial, dir, "", Some(&media))
+    }
+
+    /// Against `server`, signed in as alice, with an empty cache.
+    fn against(server: &MockServer) -> Harness {
+        let serial = serial();
+        let dir = tempfile::tempdir().unwrap();
+        let token = server.state().issue_token("alice", "mac test");
+        stickpile_core::token::write_token(&dir.path().join("token"), &token).unwrap();
+        Harness::start(serial, dir, &format!("server_url = {:?}\n", server.url), None)
+    }
+
+    /// The driver on a config in `dir` that starts with `head`, for the
+    /// demo files in `media` or else the configured server.
+    fn start(
+        serial: std::sync::MutexGuard<'static, ()>,
+        dir: tempfile::TempDir,
+        head: &str,
+        media: Option<&Path>,
+    ) -> Harness {
         let config = dir.path().join("config.toml");
         std::fs::write(
             &config,
             format!(
-                "cache_dir = {:?}\ntoken_file = {:?}\n[ui]\nlanguage = \"en\"\nstart_tab = \"search\"\nstart_mode = \"insert\"\n",
+                "{head}cache_dir = {:?}\ntoken_file = {:?}\n[ui]\nlanguage = \"en\"\nstart_tab = \"search\"\nstart_mode = \"insert\"\n",
                 dir.path().join("cache"),
                 dir.path().join("token")
             ),
@@ -116,7 +139,7 @@ impl Harness {
         let driver = Driver::new(
             StartOptions {
                 config_path: Some(config.display().to_string()),
-                demo_dir: Some(media.display().to_string()),
+                demo_dir: media.map(|m| m.display().to_string()),
                 log_file: None,
                 system_languages: vec!["uk-UA".into()],
             },
@@ -464,4 +487,35 @@ fn a_bad_config_is_shown() {
     driver.start();
     let v = ui.seen.lock().unwrap().renders.last().cloned().unwrap();
     assert!(v.error.unwrap().contains("server_url"));
+}
+
+/// The first opening after a start finds the cache empty: a filter typed
+/// before the sync is over gets its values when the sync brings them, with
+/// the query as typed.
+#[test]
+fn a_sync_brings_the_values_to_a_filter_already_typed() {
+    let server = MockServer::start();
+    {
+        let mut st = server.state();
+        let set = st.add_set("alice", "cats", "Cats", Visibility::Public);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let item = st.add_item(&set.id, "grumpy cat", &["cat"], bytes.into_inner());
+        let it = st.items.iter_mut().find(|i| i.item.id == item.id).unwrap();
+        it.item.vibe = Some("sarcastic".into());
+    }
+    let h = Harness::against(&server);
+    h.driver.toggle(None, false);
+    h.driver.query_changed("v:".into());
+    h.pump_until("the values the sync brought", |s| {
+        s.renders
+            .last()
+            .and_then(|v| v.suggestions.as_ref())
+            .is_some_and(|l| l.words == ["sarcastic"])
+    });
+    let v = h.last();
+    assert_eq!(v.query, "v:");
+    assert!(v.visible);
 }

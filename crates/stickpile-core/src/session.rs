@@ -155,9 +155,15 @@ impl Session {
         &self.cache
     }
 
-    /// Pull item metadata changes into the cache and flush queued usage events.
-    pub async fn sync(&self) -> Result<()> {
-        self.sync_report().await.map(|_| ())
+    /// Pull item metadata changes into the cache and flush queued usage
+    /// events. Returns whether the cached items changed (new, changed or
+    /// removed items, or another account's dropped): what a client worked
+    /// out from them, such as the values its search suggests, is then out
+    /// of date.
+    pub async fn sync(&self) -> Result<bool> {
+        let before = self.cache.generation()?;
+        self.sync_report().await?;
+        Ok(self.cache.generation()? != before)
     }
 
     /// [`Session::sync`] with the item sync report.

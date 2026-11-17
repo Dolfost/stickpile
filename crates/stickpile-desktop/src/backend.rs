@@ -164,7 +164,10 @@ pub trait Backend: Send + Sync + 'static {
         sticker: bool,
     ) -> BoxFut<Result<PreparedCopy, String>>;
     fn record_copy(self: Arc<Self>, item: ItemSummary, prepared: PreparedCopy) -> BoxFut<Result<(), String>>;
-    fn sync(self: Arc<Self>) -> BoxFut<Result<(), String>>;
+    /// Pull the library's changes into the offline cache; `true` when the
+    /// cache changed (the popup then loads its suggestions again, see
+    /// [`stickpile_quick::model::Event::LibraryChanged`]).
+    fn sync(self: Arc<Self>) -> BoxFut<Result<bool, String>>;
     /// The viewer's most copied items, most first.
     fn most_used(self: Arc<Self>, limit: usize) -> BoxFut<Result<Vec<ItemSummary>, String>>;
     /// Items the viewer liked.
@@ -383,7 +386,7 @@ impl Backend for CoreBackend {
         })
     }
 
-    fn sync(self: Arc<Self>) -> BoxFut<Result<(), String>> {
+    fn sync(self: Arc<Self>) -> BoxFut<Result<bool, String>> {
         Box::pin(async move {
             let r = self.session.sync().await;
             self.track(r, |_| true, UNREACHABLE())
@@ -646,7 +649,10 @@ mod tests {
         let b = backend(&rt, config_for(&server.url, dir.path()));
         assert!(b.has_token());
         rt.block_on(async {
-            b.clone().sync().await.unwrap();
+            assert!(b.clone().vocabulary().await.sets.is_empty(), "nothing cached yet");
+            assert!(b.clone().sync().await.unwrap(), "the first sync fills the cache");
+            assert_eq!(b.clone().vocabulary().await.sets, ["cats"]);
+            assert!(!b.clone().sync().await.unwrap(), "nothing new on the server");
             let r = b.clone().search("cat".into(), TargetApp::Discord, 10).await.unwrap();
             assert!(!r.offline);
             let ids: Vec<_> = r.hits.iter().map(|h| h.item.id.as_str()).collect();
