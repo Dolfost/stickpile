@@ -5,7 +5,9 @@ use axum::Json;
 use serde::Deserialize;
 use stickpile_api::profiles::{all_profiles, TargetProfile};
 use stickpile_api::routes as r;
-use stickpile_api::{ApiError, Job, Popular, SearchResults, TargetApp, UsageAck, UsageBatch, UserStats};
+use stickpile_api::{
+    ApiError, Job, Popular, SearchResults, SearchSuggestions, TargetApp, UsageAck, UsageBatch, UserStats,
+};
 use utoipa::IntoParams;
 
 use crate::auth::CurrentUser;
@@ -65,6 +67,43 @@ pub async fn search(
         target,
     };
     Ok(Json(search::search(&state, &user, params).await?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SuggestQuery {
+    /// The query as typed (`cat vibe:sar`, `e:sk`).
+    #[serde(default)]
+    pub q: String,
+    /// Where the caret is: a byte offset in `q` (default: its end). The
+    /// filter being typed is the one that ends there.
+    pub cursor: Option<usize>,
+}
+
+/// The values offered for the `key:value` filter being typed, as the
+/// popups offer them: the vibes, tags, packs, owners and emojis of the
+/// items the caller can search (most used first) and the words of `type:`,
+/// `is:` and `sort:`; for `e:` emojis with their English names, also while
+/// a name is typed (`e:sk`). `null` when no filter is being typed or
+/// nothing matches.
+#[utoipa::path(get, path = r::SEARCH_SUGGEST, tag = "search", params(SuggestQuery),
+    responses((status = 200, body = Option<SearchSuggestions>), (status = 400, body = ApiError)), security(("bearer" = []), ("session" = [])))]
+pub async fn search_suggest(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<SuggestQuery>,
+) -> AppResult<Json<Option<SearchSuggestions>>> {
+    if q.q.len() > 1000 {
+        return Err(AppError::bad_request("query too long"));
+    }
+    let typed = match q.cursor {
+        Some(at) => {
+            q.q.get(..at)
+                .ok_or_else(|| AppError::bad_request("cursor is not a character boundary in q"))?
+        }
+        None => &q.q,
+    };
+    Ok(Json(search::suggest(&state, &user, typed).await?))
 }
 
 /// Report copy events (idempotent by event id).

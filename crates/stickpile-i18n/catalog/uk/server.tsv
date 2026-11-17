@@ -9,6 +9,7 @@ no file part in the request	у запиті немає частини з фай�
 send exactly one image	надішліть рівно одне зображення
 webhook payload too large	дані вебхука завеликі
 query too long	запит задовгий
+cursor is not a character boundary in q	cursor не вказує на межу символу в q
 severity must be error, warning or info	severity має бути error, warning або info
 an invitation code is required	потрібен код запрошення
 invalid credentials	неправильні облікові дані

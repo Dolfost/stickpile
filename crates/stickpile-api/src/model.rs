@@ -1367,6 +1367,32 @@ pub struct SearchResults {
     pub semantic: bool,
 }
 
+/// The values offered while a `key:value` filter is typed (`vibe:sar`,
+/// `e:sk`), as the popups offer them under their search field
+/// (`GET /api/v1/search/suggest`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SearchSuggestions {
+    /// The filter as typed, with its colon and a leading `-`: `vibe:`,
+    /// `-tag:`, `e:`.
+    pub key: String,
+    /// The value typed so far (up to the cursor).
+    pub typed: String,
+    /// Byte offset in the query where the value starts: taking a word puts
+    /// it in place of `typed`.
+    pub start: u64,
+    /// Best first. For `e:` emojis: taking one puts the emoji in, also
+    /// while its name is typed (`e:sk` -> `e:💀`).
+    pub words: Vec<String>,
+    /// Parallel to `words`: for `e:` each emoji's English name (`skull`
+    /// for 💀), else empty.
+    pub labels: Vec<String>,
+    /// Index in `words` of the value a half-typed or misspelled filter
+    /// stands for; none while nothing is typed and for an emoji name,
+    /// which the search matches as typed.
+    pub chosen: Option<u32>,
+}
+
 // ---------------------------------------------------------------------------
 // Usage, ratings, stats
 // ---------------------------------------------------------------------------

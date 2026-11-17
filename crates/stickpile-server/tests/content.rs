@@ -6,8 +6,8 @@ use common::{gif_anim, jpeg, png, png_near, TestServer, TestUser};
 use reqwest::Method;
 use serde_json::json;
 use stickpile_api::{
-    routes, FieldSource, ImportReport, Item, ItemDetail, ItemPage, ItemSummary, LikeState, MediaFormat, MediaKind, Set,
-    SetDetail, SetSummary, UploadResult, Visibility,
+    routes, FieldSource, ImportReport, Item, ItemDetail, ItemPage, ItemSummary, LikeState, MediaFormat, MediaKind,
+    SearchSuggestions, Set, SetDetail, SetSummary, UploadResult, Visibility,
 };
 
 fn now() -> i64 {
@@ -429,6 +429,100 @@ async fn search_and_sync_visibility() {
     // Without updated_since there are no tombstones.
     let page: ItemPage = srv.get(&w.owner, routes::ITEMS).await.expect(200).json();
     assert!(page.removed.is_empty());
+}
+
+/// `GET /api/v1/search/suggest` with `q` and maybe `cursor`.
+fn suggest_url(q: &str, cursor: Option<usize>) -> String {
+    let mut params = form_urlencoded::Serializer::new(String::new());
+    params.append_pair("q", q);
+    if let Some(c) = cursor {
+        params.append_pair("cursor", &c.to_string());
+    }
+    format!("{}?{}", routes::SEARCH_SUGGEST, params.finish())
+}
+
+async fn suggest(srv: &TestServer, user: &TestUser, q: &str) -> Option<SearchSuggestions> {
+    srv.get(user, &suggest_url(q, None)).await.expect(200).json()
+}
+
+/// The search field's offers: the values of the items the caller can
+/// search, emojis with their names, as the popups offer them.
+#[tokio::test]
+async fn search_suggest_offers_the_values_of_searchable_items() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let mine = srv.create_set(&alice, "mine", Visibility::Private).await;
+    srv.upload(
+        &alice,
+        &mine.id,
+        vec![("a.png", png(1)), ("b.png", png(2)), ("c.png", png(3))],
+        Some(json!([
+            {"emojis": ["💀"], "vibe": "sarcastic", "tags": ["reaction"]},
+            {"emojis": ["😂", "💀"], "vibe": "sad"},
+            {"emojis": ["🐱", "😂", "💀"], "vibe": "sad"},
+        ])),
+    )
+    .await
+    .expect(200);
+    let public = srv.create_set(&bob, "bobs", Visibility::Public).await;
+    let hidden = srv.create_set(&bob, "secret", Visibility::Private).await;
+    srv.upload(
+        &bob,
+        &public.id,
+        vec![("d.png", png(4))],
+        Some(json!([{"vibe": "happy"}])),
+    )
+    .await
+    .expect(200);
+    srv.upload(
+        &bob,
+        &hidden.id,
+        vec![("e.png", png(5))],
+        Some(json!([{"vibe": "hush"}])),
+    )
+    .await
+    .expect(200);
+
+    // e: alone: the own emojis, most used first, each with its name.
+    let s = suggest(&srv, &alice, "cat e:").await.unwrap();
+    assert_eq!((s.key.as_str(), s.typed.as_str(), s.start), ("e:", "", 6));
+    assert_eq!(s.words, ["💀", "😂", "🐱"]);
+    assert_eq!(s.labels, ["skull", "face with tears of joy", "cat face"]);
+    assert_eq!(s.chosen, None);
+    // A name: the emojis it selects, the own ones first; never chosen (the
+    // search matches the name itself).
+    let s = suggest(&srv, &alice, "e:sk").await.unwrap();
+    assert_eq!(s.words[..2], ["💀", "☠️"]);
+    assert_eq!(s.labels[..2], ["skull", "skull and crossbones"]);
+    assert_eq!((s.typed.as_str(), s.chosen), ("sk", None));
+    // Values: the own ones and public ones, never another's private ones.
+    let s = suggest(&srv, &alice, "cat vibe:").await.unwrap();
+    assert_eq!(s.words, ["sad", "happy", "sarcastic"]);
+    assert!(s.labels.iter().all(String::is_empty));
+    let s = suggest(&srv, &bob, "vibe:").await.unwrap();
+    assert_eq!(s.words, ["happy", "hush"]);
+    // A half-typed value: the one the search would use is chosen.
+    let s = suggest(&srv, &alice, "-v:sar").await.unwrap();
+    assert_eq!((s.key.as_str(), s.start, s.chosen), ("-v:", 3, Some(0)));
+    assert_eq!(s.words[0], "sarcastic");
+    assert_eq!(suggest(&srv, &alice, "type:an").await.unwrap().words, ["animated"]);
+    // Nothing to offer: no filter typed, or a space after it.
+    assert_eq!(suggest(&srv, &alice, "cat").await, None);
+    assert_eq!(suggest(&srv, &alice, "vibe:sad ").await, None);
+    assert_eq!(suggest(&srv, &alice, "vibe:zzzzzz").await, None);
+
+    // The filter that ends at the cursor (a byte offset).
+    let s: Option<SearchSuggestions> = srv
+        .get(&alice, &suggest_url("e:💀 vibe:sa type:gif", Some(14)))
+        .await
+        .expect(200)
+        .json();
+    let s = s.unwrap();
+    assert_eq!((s.key.as_str(), s.typed.as_str(), s.start), ("vibe:", "sa", 12));
+    srv.get(&alice, &suggest_url("e:💀", Some(3))).await.expect(400);
+    srv.get(&alice, &suggest_url("e:", Some(9))).await.expect(400);
+    srv.anon_get(&suggest_url("e:", None)).await.expect(401);
 }
 
 #[tokio::test]

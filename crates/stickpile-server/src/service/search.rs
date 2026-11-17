@@ -6,7 +6,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use stickpile_api::query::{Is, Query};
-use stickpile_api::{SearchHit, SearchResults, TargetApp};
+use stickpile_api::{SearchHit, SearchResults, SearchSuggestions, TargetApp};
+use stickpile_quick::suggest::{self, ItemValues, Vocabulary};
 use stickpile_search::{SearchOptions, Viewer};
 
 use crate::auth::CurrentUser;
@@ -173,4 +174,47 @@ pub async fn search(state: &AppState, viewer: &CurrentUser, params: SearchParams
         query: query.to_string(),
         semantic,
     })
+}
+
+/// The values offered for the `key:value` filter at the end of `typed`
+/// ([`stickpile_quick::suggest::suggest`]), from the items the viewer can
+/// search: the ones the popups have in their cache.
+pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> AppResult<Option<SearchSuggestions>> {
+    // No filter being typed: nothing to look up.
+    let token = typed.rsplit(char::is_whitespace).next().unwrap_or_default();
+    if !token.contains(':') {
+        return Ok(None);
+    }
+    let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
+    let st = state.clone();
+    let me = viewer.id().to_string();
+    let typed = typed.to_string();
+    let found = tokio::task::spawn_blocking(move || {
+        let vocab = {
+            let index = st.index.read().unwrap_or_else(|e| e.into_inner());
+            Vocabulary::from_values(
+                index
+                    .docs()
+                    .filter(|d| authz::searchable(&me, &d.owner_id, d.visibility, member_sets.contains(&d.set_id)))
+                    .map(|d| ItemValues {
+                        vibe: d.vibe.as_deref(),
+                        tags: &d.tags,
+                        set_slug: &d.set_slug,
+                        set_name: &d.set_name,
+                        owner_username: &d.owner_username,
+                        emojis: &d.emojis,
+                    }),
+            )
+        };
+        suggest::suggest(&typed, &vocab)
+    })
+    .await?;
+    Ok(found.map(|s| SearchSuggestions {
+        chosen: s.chosen().and_then(|i| u32::try_from(i).ok()),
+        key: s.key,
+        typed: s.typed,
+        start: s.start as u64,
+        words: s.words,
+        labels: s.labels,
+    }))
 }

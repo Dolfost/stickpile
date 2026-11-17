@@ -4135,6 +4135,7 @@ dependencies = [
  "stickpile-gitpack",
  "stickpile-i18n",
  "stickpile-media",
+ "stickpile-quick",
  "stickpile-search",
  "stickpile-setfmt",
  "stickpile-signal",

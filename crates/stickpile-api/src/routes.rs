@@ -174,6 +174,10 @@ pub const AI_SUGGEST: &str = "/api/v1/ai/suggest";
 // --- search, usage, stats ----------------------------------------------------------
 /// GET `?q=<query>&limit=&offset=&target=<TargetApp>` -> [`crate::model::SearchResults`]
 pub const SEARCH: &str = "/api/v1/search";
+/// GET `?q=<query as typed>&cursor=<byte offset>` ->
+/// `Option<`[`crate::model::SearchSuggestions`]`>`: the values offered for
+/// the `key:value` filter being typed, as the popups offer them.
+pub const SEARCH_SUGGEST: &str = "/api/v1/search/suggest";
 /// POST [`crate::model::UsageBatch`] -> [`crate::model::UsageAck`]
 pub const USAGE: &str = "/api/v1/usage";
 /// GET `?scope=server|mine|set&set=<id>&window=day|week|month|all&limit=` -> [`crate::model::Popular`]

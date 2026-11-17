@@ -117,6 +117,7 @@ impl Modify for SecuritySchemes {
         collab::thumb,
         ai::suggest,
         misc::search,
+        misc::search_suggest,
         misc::usage,
         misc::popular,
         misc::stats_me,

@@ -110,6 +110,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         )
         // search, usage, stats
         .route(r::SEARCH, get(misc::search))
+        .route(r::SEARCH_SUGGEST, get(misc::search_suggest))
         .route(r::USAGE, post(misc::usage))
         .route(r::POPULAR, get(misc::popular))
         .route(r::STATS_ME, get(misc::stats_me))
