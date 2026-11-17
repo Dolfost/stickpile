@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
-use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats};
+use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats, Variant};
 use stickpile_core::cache::EvictReport;
 use stickpile_core::offline::{
     OfflineControl, OfflineOptions, OfflineOutcome, OfflineState, OfflineStatus, OfflineUsage, RunEnd,
@@ -18,7 +18,7 @@ use stickpile_core::offline::{
 use stickpile_core::session::{self, Listing};
 use stickpile_core::{CoreError, PreparedCopy, Session};
 use stickpile_i18n::global::{t, tf};
-use stickpile_quick::model::Results;
+use stickpile_quick::model::{target_name, Results};
 use stickpile_quick::offline::{Estimate, KeepScope, KeptFor, Skips};
 use stickpile_quick::suggest::Vocabulary;
 
@@ -302,6 +302,29 @@ fn describe_with(e: &CoreError, offline: &str) -> String {
     }
 }
 
+/// A copy of a kept sticker, with the server unreachable, needs a rendition
+/// that is not on the device: not downloaded yet, or not kept for this app
+/// or as a sticker. Unlike an unkept sticker's message, it does not send
+/// the user to `K`, which would release the sticker.
+pub fn kept_not_here(name: &str, variant: Variant, target: TargetApp, sticker: bool) -> String {
+    let args: [(&str, &dyn std::fmt::Display); 3] = [
+        ("name", &name),
+        ("rendition", &variant.as_str()),
+        ("app", &target_name(target)),
+    ];
+    if sticker {
+        tf(
+            "{name} is kept offline, but its {rendition} file for {app} as a sticker is not on this device: it is not downloaded yet, or not kept for stickers to {app} (offline.targets, offline.sticker_renditions); the server is unreachable",
+            &args,
+        )
+    } else {
+        tf(
+            "{name} is kept offline, but its {rendition} file for {app} is not on this device: it is not downloaded yet, or not kept for {app} (offline.targets); the server is unreachable",
+            &args,
+        )
+    }
+}
+
 // The messages, in the current language when they are made.
 #[allow(non_snake_case)]
 fn NOT_LOGGED_IN() -> &'static str {
@@ -490,6 +513,16 @@ impl Backend for CoreBackend {
     ) -> BoxFut<Result<PreparedCopy, String>> {
         Box::pin(async move {
             let r = self.session.prepare_copy(&item, target, sticker).await;
+            if let Err(CoreError::NotOnDevice {
+                item: name, variant, ..
+            }) = &r
+            {
+                // Kept already: `K` would release it, so say what is missing.
+                if self.session.offline_reasons(&item).is_ok_and(|r| !r.is_empty()) {
+                    self.reached(false);
+                    return Err(kept_not_here(name, *variant, target, sticker));
+                }
+            }
             self.track(r, |_| false, ITEM_NOT_CACHED())
         })
     }
@@ -1315,6 +1348,67 @@ mod tests {
             "{body}"
         );
         assert!(!body.contains("files are left out"), "{body}");
+    }
+
+    /// A sticker kept by itself, the server unreachable, copied to an app
+    /// or in a sticker mode whose rendition is not kept here (Telegram's
+    /// sticker WebP, on a device whose default target is Generic): the
+    /// popup says what is missing and does not send the user to `K`, which
+    /// releases a kept sticker. A sticker that is not kept gets the `K`
+    /// advice.
+    #[test]
+    fn a_kept_sticker_offline_is_not_told_to_keep_it() {
+        let mut server = MockServer::start();
+        let (_set_id, items) = mixed(&server);
+        let (still, gif) = (items[0].clone(), items[1].clone());
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        rt.block_on(async {
+            b.clone().sync().await.unwrap();
+            b.clone()
+                .offline_set(KeepScope::Item(still.id.clone()), true)
+                .await
+                .unwrap();
+            let out = b.clone().offline_run(OfflineControl::new()).await.unwrap();
+            assert!(out.is_complete(), "{out:?}");
+        });
+        server.stop();
+        rt.block_on(async {
+            assert_eq!(
+                b.clone().offline_reasons(still.clone()).await.unwrap(),
+                [KeptFor::Item]
+            );
+            match b.clone().prepare_copy(still.clone(), TargetApp::Telegram, true).await {
+                // A core that falls back to another kept rendition the app takes.
+                Ok(p) => assert_ne!(p.variant, stickpile_api::Variant::TgSticker),
+                Err(e) => {
+                    assert!(!e.contains("(K)"), "K would release it: {e}");
+                    assert_eq!(
+                        e,
+                        "still png is kept offline, but its tg_sticker file for Telegram as a sticker is not on this device: it is not downloaded yet, or not kept for stickers to Telegram (offline.targets, offline.sticker_renditions); the server is unreachable"
+                    );
+                }
+            }
+            assert_eq!(b.reachable(), Some(false));
+            let err = b
+                .clone()
+                .prepare_copy(gif.clone(), TargetApp::Generic, false)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err,
+                "gif animation is not on this device and the server is unreachable; keep it offline (K) to copy it without the server"
+            );
+        });
+    }
+
+    #[test]
+    fn the_message_of_a_kept_sticker_names_the_missing_file() {
+        assert_eq!(
+            kept_not_here("cat", stickpile_api::Variant::Original, TargetApp::Discord, false),
+            "cat is kept offline, but its original file for Discord is not on this device: it is not downloaded yet, or not kept for Discord (offline.targets); the server is unreachable"
+        );
     }
 
     #[test]
