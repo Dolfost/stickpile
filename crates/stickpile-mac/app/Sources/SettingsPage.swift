@@ -215,6 +215,7 @@ final class OfflineBlockView: NSObject {
         for b in [clear, remove] {
             cacheRow.trailing.addArrangedSubview(b)
         }
+        remove.hasDestructiveAction = true
         remove.contentTintColor = .systemRed
         progress.style = .bar
         progress.isIndeterminate = false
@@ -372,8 +373,12 @@ final class SettingsPage: PageView {
             column.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        column.removeArrangedSubview(offline.group)
-        offline.group.removeFromSuperview()
+        // Only an arranged view may be removed: NSStackView raises otherwise
+        // (the block is not in the column before the first rebuild).
+        if column.arrangedSubviews.contains(offline.group) {
+            column.removeArrangedSubview(offline.group)
+            offline.group.removeFromSuperview()
+        }
         groups = []
         rows = []
         offlineAt = Int.max
