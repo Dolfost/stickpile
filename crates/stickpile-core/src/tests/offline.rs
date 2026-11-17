@@ -1735,11 +1735,7 @@ fn review_a_file_that_could_not_be_deleted_stays_registered() {
         .unwrap());
     cache.register_file(other_rel).unwrap();
     let mode = |rel: &str, mode: u32| {
-        std::fs::set_permissions(
-            cache.abs(rel).parent().unwrap(),
-            std::fs::Permissions::from_mode(mode),
-        )
-        .unwrap()
+        std::fs::set_permissions(cache.abs(rel).parent().unwrap(), std::fs::Permissions::from_mode(mode)).unwrap()
     };
     mode(kept_rel, 0o555);
     mode(other_rel, 0o555);
@@ -1919,10 +1915,7 @@ fn review_new_clients_upgrade_a_0_8_0_cache_at_once() {
         assert_eq!(h.join().unwrap().unwrap(), 1);
     }
     let cache = Cache::open(dir.path(), 512).unwrap();
-    assert_eq!(
-        cache.file_index().unwrap().get("files/thumb/m.webp"),
-        Some(&(4, false))
-    );
+    assert_eq!(cache.file_index().unwrap().get("files/thumb/m.webp"), Some(&(4, false)));
 }
 
 /// The released 0.8.0 CLI and the new client on one profile, against the
@@ -2002,7 +1995,10 @@ async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
             |r| r.get(0),
         )
         .unwrap();
-    println!("0.8.0 cache: files.kept exists: {has_kept}; on disk {:?}", on_disk(&cache));
+    println!(
+        "0.8.0 cache: files.kept exists: {has_kept}; on disk {:?}",
+        on_disk(&cache)
+    );
     let requests_080 = file_requests(&server);
 
     // 2. The new client upgrades it and keeps the pack; the copy 0.8.0 made is
@@ -2017,7 +2013,10 @@ async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
         .iter()
         .filter(|r| requests_080.contains(r))
         .collect();
-    println!("new client after the upgrade: kept {:?}; fetched again: {refetched:?}", kept(session.cache()));
+    println!(
+        "new client after the upgrade: kept {:?}; fetched again: {refetched:?}",
+        kept(session.cache())
+    );
     if !refetched.is_empty() {
         violations.push(format!("files 0.8.0 had cached were fetched again: {refetched:?}"));
     }
@@ -2066,7 +2065,9 @@ async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
     let left: Vec<&String> = kept_before.iter().filter(|p| cache.join(p).exists()).collect();
     println!("after 0.8.0 login as bob: keeps {keeps:?}, alice's kept files on disk {left:?}");
     if !keeps.is_empty() || !left.is_empty() {
-        violations.push(format!("another account by 0.8.0 left keeps {keeps:?} and files {left:?}"));
+        violations.push(format!(
+            "another account by 0.8.0 left keeps {keeps:?} and files {left:?}"
+        ));
     }
     drop(session);
 
@@ -2096,7 +2097,9 @@ async fn review_real_0_8_0_cli_upgrade_touch_and_sign_out() {
     let left: Vec<&String> = kept_now.iter().filter(|p| cache.join(p).exists()).collect();
     println!("after 0.8.0 used another server: keeps {keeps:?}, kept files on disk {left:?}");
     if !keeps.is_empty() || !left.is_empty() {
-        violations.push(format!("a server change by 0.8.0 left keeps {keeps:?} and files {left:?}"));
+        violations.push(format!(
+            "a server change by 0.8.0 left keeps {keeps:?} and files {left:?}"
+        ));
     }
     assert!(violations.is_empty(), "{violations:#?}");
 }
