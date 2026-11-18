@@ -460,3 +460,45 @@ starts with it (the typo pass); `short_name` under 1 us.
 The vector side is a linear scan over the visible, filtered documents. It is
 the most expensive part, and fine at this scale. If libraries grow well past
 100k items, an ANN index would replace the scan behind the same API.
+
+## Draft: fuzzy `text:` and text word suggestions
+
+Design note for the text-search round (branch `text-search`); the sections
+above are rewritten from it when the work lands, and this section then goes.
+
+**Matching `text:` (`x:`).** Each word of a `text:` value matches a word of
+the item's text (`TEXT` field) through the same candidate tiers plain words
+use (`Store::candidates`), restricted to `TEXT`: exact; prefix from the
+first letter (`x:l` finds "lol"); squashed (`x:naah` finds "naahh");
+typos by optimal string alignment, 1 edit from 4 letters and 2 from 7, none
+when the word has a digit (`x:lool` finds "lol"); substring from 3 letters
+(`x:oli` finds "КОЛИВ", a word OCR joined). A quoted value of several words
+matches consecutive words of one text, each word by its tiers, and only the
+last word may be a prefix (`x:"no thou"` finds "NO THOUGHTS"; `x:"fix the b"`
+finds "FIX THE BUG"). `-text:` excludes items with an exact or prefix match
+only, never a typo or substring. Results of a query with a `text:` filter
+are ordered by the best tier the filter matched (exact, prefix, squashed,
+typo, substring), then as today, unless `sort:` is given; the match label
+stays `text`. One implementation in `stickpile-search`: the server, the
+offline index of the clients and the in-pack search (`stickpile_quick::within`)
+answer the same.
+
+**Suggesting text words.** `Field::Text` (`x:`, `text:`, `-x:`) offers the
+words of the `TEXT` field of the items the viewer can search (own items,
+member sets, public sets: never a word only in someone else's private
+sticker), each counted once per item, most common first among the words the
+typed value reaches by `ranked`'s order (prefix, substring, typo); words
+shorter than 2 letters and pure numbers are not offered; `x:` alone offers
+the most common words. The words are read from the search index (the
+`TEXT` postings and the ordered vocabulary) through one public API in
+`stickpile-search` that the server, the desktop popup, the Mac driver and
+Android share; `Vocabulary` does not copy the texts. Choosing an offer
+inserts the word and a space, as for tags. `resolve` leaves `text:` values
+as typed (the matching forgives them; `x:lo` is not narrowed to one word).
+A client sending a half-typed `x:` value to a 0.8.1 server gets that
+server's exact-word answer.
+
+**Speed (rule 8).** On 50,000 items with realistic texts, release build:
+each suggest call (server endpoint, desktop popup, Android bridge) under
+10 ms, and `text:` filtering no slower than twice a plain-word search of
+the same length.
