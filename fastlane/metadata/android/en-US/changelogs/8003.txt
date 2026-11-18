@@ -1,0 +1,1 @@
+No changes in the app. The server now downloads the AI models it needs by itself on first start, so the words in pictures and the image search work without setting the models up by hand.
