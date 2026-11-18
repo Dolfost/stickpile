@@ -35,7 +35,7 @@ more than the API allows.
 | `/sets/{id}/settings` | The set form, with the **cover** chosen from the set's thumbnails ("First item" by default) or its own cover image, then the **Cover image** form (upload, crop, replace, remove; see [Set covers](#set-covers)), plus "Delete this set…". Read-only git packs only offer deletion. A contributor who may edit the pack gets an "Edit pack" page with the name, description and cover. The set page itself lists the **Contributors** for the owner (permissions to tick, Remove, and "Add a contributor") and for contributors (with Leave). |
 | `/items/{id}` | Large preview (`<img>` for stills and animations, `<video controls loop muted>` for videos), copy and download, like, metadata with inline editing (the text, the words in the picture, shown with its line breaks), "Re-run AI" (when AI is ready), "Move to" another of your sets, delete, the apps that cannot take the item, the quality report table, near-duplicates in your library, "Find a better version", and every variant with a download link. |
 | `/upload` | Upload files to one of your sets; import a set folder or an export `.tar` as a new set. |
-| `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet (`text:"no thoughts"` or `x:` finds the words in the picture, which plain words match too), and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
+| `/search?q=` | The same hybrid search as `GET /api/v1/search`, a collapsible syntax cheat-sheet (`text:"no thoughts"` or `x:` finds the words in the picture, which plain words match too; typos and words inside longer words count, and the last may be just its start: `x:l` finds "lol"), and whether semantic search is on. Results update while you type (htmx) and "More results" appends the next page. |
 | `/popular` | Most copied, most liked and trending side by side, never blended. Scope: whole server, your items, or one set (`?scope=set&set=…`, linked from the set page). The window (day, week, month, all) applies to "most copied". |
 | `/stats` | Your totals, a bar chart of copies per day for 30 days (inline SVG with a hover title per bar and a screen-reader table), your most copied items and the apps you paste into. |
 | `/problems` | Problems in all your sets, grouped by set, with filters by severity and kind; admins also get "Whole server". The set page has the same list for one set at its bottom (`/sets/{id}/problems` without JavaScript). See [Problems](#problems). |
@@ -253,12 +253,20 @@ wins.
   first, the words of `type:`, `is:` and `sort:`, and for `e:` emojis with
   their English names (`e:` alone: the emojis of your own items, most
   used first; `e:sk`: 💀 skull, ☠️ skull and crossbones, ..., those your
-  items use first, then others). The server matches
+  items use first, then others), and for `x:` (or `text:`, `-x:`) the
+  words written in the pictures of the items you can search (`x:` alone:
+  those on the most items; `x:l`: lol, love, ...; then the words a value
+  is inside and those a typo away), shown as the index keeps them: lower
+  case, without accents or apostrophes (`x:п'ят` offers `пятниця`). A
+  word only someone else's private sticker has is never offered. The
+  server matches
   and ranks them (`GET /api/v1/search/suggest`, the popups' Rust code);
   suggest.js only asks, 120 ms after typing pauses, and draws the answer
   in the `:` suggestions' list. The highlight starts on the value a
   half-typed filter stands for (`vibe:sar`: sarcastic), none for an emoji
-  name, which the search matches itself. Up/Down move it; Tab, or Enter on
+  name, which the search matches itself, and for `x:` only on a word typed
+  whole: the search takes a `text:` value as typed (`x:lo` finds lol and
+  love). Up/Down move it; Tab, or Enter on
   a highlighted value, puts it in place of what is typed (an emoji in
   place of its name) with a space, and the results follow; a click does
   the same. Enter without a highlight, or on the value already typed,

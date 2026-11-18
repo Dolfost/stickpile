@@ -224,8 +224,8 @@ Pack covers on the pack list are not filtered.
 ### Search suggestions
 
 While a filter is typed in the search field (`vibe:`, `tag:`, `-tag:`,
-`set:`, `by:`, `type:`, `is:`, `sort:`, `e:`, or the short `v:`, `t:`, `s:`,
-`b:`), a line under the field offers its
+`set:`, `by:`, `type:`, `is:`, `sort:`, `e:`, `text:`, or the short `v:`,
+`t:`, `s:`, `b:`, `x:`), a line under the field offers its
 values: the vibes, tags, packs and owners of the items you can see (from
 the offline cache), most used first, and the fixed words of `type:`, `is:`
 and `sort:`. Inside a pack the pack's own values come first. They match
@@ -233,6 +233,8 @@ what is typed so far: its start first, then
 anywhere in the value, then with a typo or two forgiven, so `vibe:sarcstic`
 and `vibe:sacr` still offer `sarcastic`. The line pushes the grid down
 instead of covering it, and goes away with the space after the value.
+At most 12 values are offered; a line longer than the popup is cut at
+its right edge and scrolls to keep the value Tab chose in view.
 The values are read from the cache when the popup opens and again after
 every sync that changed the cache, so the first opening after a start
 offers them too once its sync is over (before, the cache is still
@@ -252,9 +254,25 @@ typos included, so `e:skull` alone finds the stickers with any skull
 emoji. The line sets no font of its own, so fontconfig draws the emoji
 with a colour emoji font (Noto Color Emoji, say) when one is installed.
 
+`x:` (or `text:`, `-x:`) offers the words written in the pictures, read
+from the offline cache's search index as you type: `x:` alone the words
+on the most items, and letters the words starting so (`x:l`: lol, love),
+then those they are inside (`x:оли`: колив), then those a typo away, the
+words on the most items first in each group ([search.md](search.md#suggestions)).
+The words are shown as the index keeps them, lower case and without
+accents or apostrophes (`x:п'ят` offers `пятниця`); taking one puts it in
+with a space (`x:lol `), and it finds the stickers whatever way the word
+is written on them. Inside a pack the pack's words come first. The cache
+holds only items you can search, so no word of someone else's private
+sticker is offered; the words come from the cache with any server.
+
 The search does not wait for the value to be finished: a half-typed or
 misspelled value is searched as its best match (the highlighted one), so
-`vibe:sar` already shows the sarcastic stickers. The short keys go out
+`vibe:sar` already shows the sarcastic stickers. A `text:` value is the
+exception: it is searched as typed, since the search itself matches the
+start of its last word, typos and words inside longer words (`x:lo`
+finds lol and love, not only the highlighted word), and nothing is
+highlighted until a word is typed whole. The short keys go out
 long (`v:sar` as `vibe:sarcastic`), so an older server understands them
 too. Tab puts the highlighted
 value into the field, and pressing it again goes on to the next one
@@ -264,7 +282,8 @@ the filter. Without a filter being typed, Tab switches tabs as before.
 F2 (or `g/` in Normal mode, or the Syntax button next to the search
 field) shows the whole search syntax over the popup, as `?` shows the
 keys. It lists the short keys: `v:` is `vibe:`, `t:` is `tag:`, `s:` is
-`set:`, `b:` is `by:` and `e:` is `emoji:` ([search.md](search.md#query-syntax)).
+`set:`, `b:` is `by:`, `x:` is `text:` and `e:` is `emoji:`
+([search.md](search.md#query-syntax)).
 
 ## Keys
 
@@ -385,7 +404,9 @@ pack), and dragging an item drops the file itself into the target (useful
 for Telegram stickers and when an app ignores pasted file references).
 The search syntax of the server works in
 the query: `e:😂`, `set:cats`, `type:gif`, `vibe:tired`, `q>70`,
-`text:"no thoughts"` (the words in the picture), and the short keys
+`text:"no thoughts"` (the words in the picture; typos and words inside
+longer words count, and the last may be just its start: `x:l` finds
+"lol"), and the short keys
 `v:tired`, `t:reaction`, `s:cats`, `b:alice`, `x:кіт`
 ([search.md](search.md#query-syntax)).
 

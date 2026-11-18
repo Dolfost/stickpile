@@ -63,8 +63,11 @@ cover image, else its first sticker).
 - **Search** as on the desktop ([search syntax](#search-syntax)); results
   follow the typing. Under the field the app offers what fits what is
   typed: the filter keys with their short forms (`tag: (t:)`, `vibe:
-  (v:)`, `e:`, ...), the values of the filter being typed (`vibe:sar` and
-  `v:sar` offer `sarcastic`), the emojis for `e:`, and for a bare word the
+  (v:)`, `e:`, `text: (x:)`, ...), the values of the filter being typed
+  (`vibe:sar` and `v:sar` offer `sarcastic`), the emojis for `e:`, the
+  words written in the pictures for `x:` (`x:` alone: those on the most
+  stickers; `x:l`: lol, love, ...; shown lower case, without accents or
+  apostrophes: `x:п'ят` offers `пятниця`), and for a bare word the
   tags, vibes and packs containing it (`rea` offers `tag:reaction`). An
   emoji comes with its English name after it, smaller and dimmer: `e:`
   alone offers the emojis of your own stickers (not of other people's
@@ -118,17 +121,21 @@ cover image, else its first sticker).
 typos are forgiven), `e:😂`,
 `e:skull` (an emoji whose English name or keyword starts so, typos
 forgiven), `vibe:tired`, `tag:reaction`, `set:cats`, `by:alice`,
-`text:"no thoughts"` (these words in the picture, one after another),
-`type:gif` (gif,
+`text:"no thoughts"` (these words in the picture, one after another;
+typos and words inside longer words count, and the last may be just its
+start: `x:l` finds "lol"), `type:gif` (gif,
 png, webp, jpeg, mp4, webm, still, animated, video), `is:mine`,
 `is:liked`, `is:public`, `q>70`, `likes>=2`, `copies<5`, `sort:likes`
 (relevance, recent, likes, copies, quality); `tag:a tag:b` is either; a
 leading `-` leaves out (`-tag:nsfw`). `v:`, `t:`, `s:`, `b:` and `x:` are
 short for `vibe:`, `tag:`, `set:`, `by:` and `text:` (`v:tired -t:nsfw`). A misspelled
-or half-typed filter value searches for the closest one. With a pack (in
+or half-typed filter value searches for the closest one (a `text:` value
+is searched as typed). With a pack (in
 the keyboard: a set) open, the search looks only inside it, with all of
 this. Under the field, `e:` offers emojis with their names (`e:` alone:
 yours; `e:sk`: the emojis named so, yours first); one puts the emoji in.
+`x:` offers the words in the pictures, those on the most stickers first;
+one puts the word in.
 The app and the keyboard show this list from their menus
 ([search.md](search.md#query-syntax)).
 
@@ -678,9 +685,12 @@ Behaviour the signatures do not show:
   sends again as they were do not count); false from `sync_state` and
   when no sync was due.
 - **Search** resolves a half-typed `key:value` filter to its best
-  suggestion, as the desktop popup does. The one-letter keys `v:`, `t:`,
-  `s:`, `b:` (and `e:`) are `vibe:`, `tag:`, `set:`, `by:` (and
-  `emoji:`); the query goes to the server with them written long, so a
+  suggestion, as the desktop popup does, except `e:` and `text:` values,
+  which go as typed (the search matches an emoji name, and the start of
+  the last word of a text, typos included, itself). The one-letter keys
+  `v:`, `t:`, `s:`, `b:`, `x:` (and `e:`) are `vibe:`, `tag:`, `set:`,
+  `by:`, `text:` (and `emoji:`); the query goes to the server with them
+  written long, except `e:`, so a
   server older than them reads them too. Reads (search, account, favorites, most used, packs, pack
   items, pack search) stop when the calling coroutine is cancelled;
   writes and file fetches run to their end.
@@ -708,16 +718,22 @@ Behaviour the signatures do not show:
   names (`💀 skull`; the query gets the emoji): the emojis of the cached
   items the cache's account owns (all cached items' while it does not
   know the account), most used first, and while a name is typed (`e:sk`)
-  the emojis it selects, those first (see [search.md](search.md)). Only these
-  value labels have a space, so the app's and the keyboard's chips split
+  the emojis it selects, those first (see [search.md](search.md)). For
+  `x:` (or `text:`) the values are the words written on the cached items,
+  read from the cache's search index as they are typed (`x:lo` offers
+  `lol`, `love`; [search.md](search.md#suggestions)), each one word as
+  the index keeps it (`пятниця` for `x:п'ят`); the search takes the
+  value as typed, so `chosen` is only on a word typed whole. Only the
+  emoji labels have a space, so the app's and the keyboard's chips split
   them at the first one (`display/HintLabel.kt`): the emoji at the chip's
   size, the name after it in the secondary colour. While a
   bare word is typed: the tags, vibes and packs containing
   it as filters (`rea` offers `tag:reaction`), those starting with it
-  first, then the filter keys the word starts. With nothing typed, or a
-  space at the end: the keys `tag:`, `vibe:`, `e:`, `set:`, `by:`,
-  `type:`, `is:`, `sort:`; a key's label shows its one-letter form
-  (`tag: (t:)`, `vibe: (v:)`, `set: (s:)`, `by: (b:)`), its `query` is the
+  first, then the filter keys the word starts (`t` offers `tag:`,
+  `text:` and `type:`). With nothing typed, or a space at the end: the
+  keys `tag:`, `vibe:`, `e:`, `text:`, `set:`, `by:`, `type:`, `is:`,
+  `sort:`; a key's label shows its one-letter form (`tag: (t:)`, `vibe:
+  (v:)`, `text: (x:)`, `set: (s:)`, `by: (b:)`), its `query` is the
   long key. A short key being typed (`v:sar`) offers what the long one
   does, and the key stays as typed. A leading `-` stays on what is
   offered; inside an unfinished phrase nothing is. The words come from
