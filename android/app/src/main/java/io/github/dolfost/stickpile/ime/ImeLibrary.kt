@@ -84,9 +84,13 @@ internal class ImeLibrary(private val app: StickpileApp) {
     /**
      * Which of [ids] a pick would insert or share with the server away: a
      * rendition for the field (or, failing that, for sharing,
-     * [InsertFlow.SHARE_TYPES]) is on the phone, for a plain pick or for
-     * "Send as a sticker" ([OfflineMarks.either]). The marks of the tiles;
-     * nothing is downloaded.
+     * [InsertFlow.SHARE_TYPES]) is on the phone, sent as a sticker or not
+     * ([OfflineMarks.either]): a tap and the details' other button make
+     * both between them, whichever "Prefer stickers" gives the tap
+     * ([SendChoice]). With it on, that is just what a tap inserts: the
+     * sticker flag keeps the usual files after the sticker ones (pinned in
+     * the core), so what works without the flag works with it. The marks
+     * of the tiles; nothing is downloaded.
      */
     suspend fun availableOffline(ids: List<String>): List<Boolean> {
         val editor = editorPackage

@@ -47,7 +47,8 @@ data class OfflineMarks(
          * without and with the sticker flag, parallel lists): a sticker is
          * available when a pick works either way, since "Send as a
          * sticker" may work offline when a plain pick does not (only the
-         * sticker rendition is kept), and the other way round.
+         * sticker rendition is kept), and the other way round. The same
+         * whichever of the two a tap makes ("Prefer stickers").
          */
         fun either(plain: List<Boolean>, asSticker: List<Boolean>): List<Boolean> =
             plain.zip(asSticker) { a, b -> a || b }

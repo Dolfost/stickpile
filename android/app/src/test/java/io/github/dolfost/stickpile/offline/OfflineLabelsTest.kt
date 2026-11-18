@@ -89,6 +89,21 @@ class OfflineLabelsTest {
     }
 
     @Test
+    fun withPreferStickersOnTheKeyboardMarksWhatATapInserts() {
+        // The library's answers for four stickers, without and with the
+        // sticker flag. The core keeps the usual files after the sticker
+        // ones, so what works without the flag works with it
+        // (the_sticker_flag_only_puts_the_sticker_renditions_first).
+        val plain = listOf(false, false, true, true)
+        val asSticker = listOf(false, true, true, true)
+        val off = OfflineMarks.either(plain, asSticker)
+        // "Prefer stickers" on: a tap sends with the flag, the details' other button without.
+        val on = OfflineMarks.either(asSticker, plain)
+        assertEquals(off, on)
+        assertEquals(asSticker, on)
+    }
+
+    @Test
     fun nothingIsMarkedUntilTheLibraryAnswered() {
         val unknown = OfflineMarks()
         assertEquals(OfflineMark.NONE, unknown.of("a", Display()))

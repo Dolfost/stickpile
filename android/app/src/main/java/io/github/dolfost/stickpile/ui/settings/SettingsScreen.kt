@@ -391,7 +391,13 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
     // The preferences file is read on first use: off the main thread.
     val loaded by produceState<KeyboardValues?>(null) {
         value = withContext(Dispatchers.IO) {
-            KeyboardValues(settings.searchDraft, settings.deleteDraft, settings.stayOpen, settings.heightPercent)
+            KeyboardValues(
+                settings.searchDraft,
+                settings.deleteDraft,
+                settings.stayOpen,
+                settings.heightPercent,
+                settings.preferStickers,
+            )
         }
     }
     SectionHeader(stringResource(R.string.settings_keyboard))
@@ -406,6 +412,7 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
     var deleteDraft by remember { mutableStateOf(values.deleteDraft) }
     var stayOpen by remember { mutableStateOf(values.stayOpen) }
     var height by remember { mutableIntStateOf(values.heightPercent) }
+    var preferStickers by remember { mutableStateOf(values.preferStickers) }
     ListItem(
         headlineContent = { Text(stringResource(R.string.settings_keyboard_height)) },
         supportingContent = { Text(stringResource(R.string.settings_keyboard_height_text, PickerHeight.DEFAULT)) },
@@ -421,6 +428,14 @@ private fun KeyboardSection(onKeyboardSetup: () -> Unit) {
             .padding(horizontal = 16.dp)
             .semantics { stateDescription = "$height%" },
     )
+    SwitchItem(
+        stringResource(R.string.settings_keyboard_prefer_stickers),
+        stringResource(R.string.settings_keyboard_prefer_stickers_text),
+        preferStickers,
+    ) {
+        preferStickers = it
+        settings.preferStickers = it
+    }
     SwitchItem(
         stringResource(R.string.settings_keyboard_search_draft),
         stringResource(R.string.settings_keyboard_search_draft_text),
@@ -453,6 +468,7 @@ private data class KeyboardValues(
     val deleteDraft: Boolean,
     val stayOpen: Boolean,
     val heightPercent: Int,
+    val preferStickers: Boolean,
 )
 
 /** A switch with its title and explanation; the whole row toggles it. */

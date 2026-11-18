@@ -66,6 +66,7 @@
     <string name="ime_menu_like">Вподобати</string>
     <string name="ime_menu_unlike">Скасувати вподобання</string>
     <string name="ime_menu_send_sticker">Надіслати як стікер</string>
+    <string name="ime_menu_send_picture">Надіслати як зображення</string>
     <string name="ime_menu_share">Поділитися</string>
     <string name="ime_liked">Вподобано.</string>
     <string name="ime_unliked">Вподобання скасовано.</string>

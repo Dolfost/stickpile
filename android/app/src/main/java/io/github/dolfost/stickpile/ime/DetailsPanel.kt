@@ -25,9 +25,10 @@ import kotlinx.coroutines.Job
  * it), its name, set and owner, format and size, the numbers, its vibe,
  * emojis and tags as chips that search for them, and the words in the
  * picture (line breaks kept); and the buttons to
- * send it (as a picture or as a sticker), like or unlike it, keep it
- * offline or stop (why it is kept is among the facts), share it, or
- * close the panel. It shows all of it, whatever the tiles show.
+ * send it (Send as a tap does, and the other way: as a sticker, or as a
+ * picture when a tap sends stickers, [SendChoice]), like or unlike it,
+ * keep it offline or stop (why it is kept is among the facts), share it,
+ * or close the panel. It shows all of it, whatever the tiles show.
  */
 internal class DetailsPanel(
     private val view: View,
@@ -62,6 +63,10 @@ internal class DetailsPanel(
     private val text: TextView = view.findViewById(R.id.ime_details_text)
     private val like: MaterialButton = view.findViewById(R.id.ime_details_like)
     private val keep: MaterialButton = view.findViewById(R.id.ime_details_keep)
+    private val other: MaterialButton = view.findViewById(R.id.ime_details_other)
+
+    /** "Prefer stickers" as it was when the panel opened: what Send and [other] send. */
+    private var preferStickers = false
 
     /** Why the item shown is kept offline; null until the library said. */
     private var reasons: List<KeepReason>? = null
@@ -74,8 +79,10 @@ internal class DetailsPanel(
         private set
 
     init {
-        view.findViewById<View>(R.id.ime_details_send).setOnClickListener { item?.let { listener.send(it, false) } }
-        view.findViewById<View>(R.id.ime_details_sticker).setOnClickListener { item?.let { listener.send(it, true) } }
+        view.findViewById<View>(R.id.ime_details_send).setOnClickListener {
+            item?.let { listener.send(it, SendChoice.tap(preferStickers)) }
+        }
+        other.setOnClickListener { item?.let { listener.send(it, SendChoice.other(preferStickers)) } }
         view.findViewById<View>(R.id.ime_details_share).setOnClickListener { item?.let(listener::share) }
         view.findViewById<View>(R.id.ime_details_close).setOnClickListener { close() }
         like.setOnClickListener { item?.let(listener::toggleLike) }
@@ -86,7 +93,9 @@ internal class DetailsPanel(
         }
     }
 
-    fun show(item: Item, liked: Boolean) {
+    /** Shows [item]; [preferStickers]: a tap sends stickers ([ImeSettings.preferStickers]). */
+    fun show(item: Item, liked: Boolean, preferStickers: Boolean) {
+        showOther(preferStickers)
         if (this.item?.id != item.id) {
             thumbnailJob?.cancel()
             motionJob?.cancel()
@@ -120,6 +129,15 @@ internal class DetailsPanel(
         this.reasons = reasons
         facts.text = facts(shown, liked)
         showKeep()
+    }
+
+    /** The other way to send, as [SendChoice] says for [preferStickers]. */
+    private fun showOther(preferStickers: Boolean) {
+        this.preferStickers = preferStickers
+        other.setIconResource(SendChoice.otherIcon(preferStickers))
+        val label = context.getString(SendChoice.otherLabel(preferStickers))
+        other.contentDescription = label
+        other.tooltipText = label
     }
 
     /** The keep button as the reasons say: keep, or stop keeping (disabled until known). */

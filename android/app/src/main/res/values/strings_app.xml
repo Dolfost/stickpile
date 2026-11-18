@@ -214,6 +214,8 @@
     <string name="settings_keyboard_search_draft_text">Text already in the field (one line, up to 60 characters) is the search.</string>
     <string name="settings_keyboard_delete_draft">Delete what you typed</string>
     <string name="settings_keyboard_delete_draft_text">When a sticker found from it goes in, the typed text goes away.</string>
+    <string name="settings_keyboard_prefer_stickers">Prefer stickers (Telegram)</string>
+    <string name="settings_keyboard_prefer_stickers_text">A tap sends the sticker version instead of the picture. A long press still offers the picture.</string>
     <string name="settings_keyboard_stay_open">Stay open</string>
     <string name="settings_keyboard_stay_open_text">After a sticker goes in, stay on the sticker keyboard instead of switching back.</string>
     <string name="settings_keyboard_height">Keyboard height</string>

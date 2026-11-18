@@ -760,8 +760,9 @@ internal class PickerView(
 
     private fun pickFromDraft(): Boolean = PickerSearch.fromDraft(draftQuery, query, resultsFor)
 
+    /** A tap sends as a sticker or not as "Prefer stickers" says ([SendChoice]), read each time. */
     private fun onItemClick(item: Item) {
-        if (!busy) actions.pick(item, sticker = false, fromDraft = pickFromDraft())
+        if (!busy) actions.pick(item, sticker = SendChoice.tap(settings.preferStickers), fromDraft = pickFromDraft())
     }
 
     private fun onItemLongClick(item: Item) {
@@ -769,7 +770,7 @@ internal class PickerView(
         hideKeys()
         syntax.close()
         columns.close()
-        details.show(item, likedOf(item))
+        details.show(item, likedOf(item), settings.preferStickers)
         loadReasons(item)
     }
 

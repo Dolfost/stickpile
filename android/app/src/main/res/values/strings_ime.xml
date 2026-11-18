@@ -81,6 +81,8 @@
     <string name="ime_menu_like">Like</string>
     <string name="ime_menu_unlike">Unlike</string>
     <string name="ime_menu_send_sticker">Send as sticker</string>
+    <!-- Instead of ime_menu_send_sticker when a tap sends stickers (settings_keyboard_prefer_stickers). -->
+    <string name="ime_menu_send_picture">Send as a picture</string>
     <string name="ime_menu_share">Share</string>
     <string name="ime_liked">Liked.</string>
     <string name="ime_unliked">Like removed.</string>

@@ -121,8 +121,12 @@
             android:layout_height="wrap_content"
             android:text="@string/ime_details_send" />
 
+        <!--
+          The other way to send: as a sticker, or as a picture when a tap
+          sends stickers (ime.DetailsPanel sets its icon and label).
+        -->
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/ime_details_sticker"
+            android:id="@+id/ime_details_other"
             style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="48dp"
             android:layout_height="48dp"

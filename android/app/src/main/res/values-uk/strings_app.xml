@@ -178,6 +178,8 @@
     <string name="settings_keyboard_search_draft_text">Текст, який уже є в полі (один рядок, до 60 символів), стає пошуком.</string>
     <string name="settings_keyboard_delete_draft">Видаляти введене</string>
     <string name="settings_keyboard_delete_draft_text">Коли вставлено стікер, знайдений за цим текстом, текст зникає.</string>
+    <string name="settings_keyboard_prefer_stickers">Надавати перевагу стікерам (Telegram)</string>
+    <string name="settings_keyboard_prefer_stickers_text">Дотик надсилає версію-стікер замість зображення. Довге натискання й далі пропонує зображення.</string>
     <string name="settings_keyboard_stay_open">Залишатися відкритою</string>
     <string name="settings_keyboard_stay_open_text">Після вставлення стікера залишатися на клавіатурі стікерів, а не перемикатися назад.</string>
     <string name="settings_keyboard_height">Висота клавіатури</string>

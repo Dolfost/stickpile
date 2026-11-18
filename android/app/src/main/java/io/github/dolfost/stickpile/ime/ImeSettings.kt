@@ -26,6 +26,15 @@ class ImeSettings(context: Context) {
         get() = prefs.getBoolean(STAY_OPEN, false)
         set(value) = prefs.edit { putBoolean(STAY_OPEN, value) }
 
+    /**
+     * A tap sends Telegram (and its forks) the sticker version, as "Send
+     * as a sticker" does; the details then offer the picture instead
+     * ([SendChoice]). The desktop's `prefer_stickers`; off by default.
+     */
+    var preferStickers: Boolean
+        get() = prefs.getBoolean(PREFER_STICKERS, false)
+        set(value) = prefs.edit { putBoolean(PREFER_STICKERS, value) }
+
     /** The letters of the picker's search keys ([KeyLayout.tag]); null until one is chosen. */
     var searchLayout: String?
         get() = prefs.getString(SEARCH_LAYOUT, null)
@@ -44,6 +53,7 @@ class ImeSettings(context: Context) {
         const val SEARCH_DRAFT = "search_draft"
         const val DELETE_DRAFT = "delete_draft"
         const val STAY_OPEN = "stay_open"
+        const val PREFER_STICKERS = "prefer_stickers"
         const val SEARCH_LAYOUT = "search_layout"
         const val HEIGHT_PERCENT = "height_percent"
     }
