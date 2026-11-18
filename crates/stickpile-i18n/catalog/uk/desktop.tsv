@@ -308,6 +308,8 @@ search syntax	синтаксис пошуку
 put in the next / previous offered value	вставити наступне / попереднє запропоноване значення
 e:, e:sk	e:, e:sk
 emojis with their names: yours, then those named so; one puts the emoji in	емодзі з назвами: ваші, потім ті, що так звуться; вибране вставляє емодзі
+x:, x:lo	x:, x:lo
+the words in the pictures, those on the most items first; one puts the word in	слова на картинках, спершу ті, що є на найбільшій кількості стікерів; вибране вставляє слово
 Suggestions	Підказки
 cat "big chungus"	cat "big chungus"
 words and phrases in the name, keywords, emojis, vibe, tags, pack and the words in the picture; typos are forgiven	слова й фрази в назві, ключових словах, емодзі, настрої, тегах, наборі й тексті на картинці; друкарські помилки не заважають
@@ -323,7 +325,7 @@ in this pack (its slug or name)	у цьому наборі (його slug або
 by:alice	by:alice
 in a pack of this user	у наборі цього користувача
 text:"no thoughts"	text:"no thoughts"
-has these words in the picture, one after another	має ці слова на картинці, одне за одним
+has these words in the picture, one after another; typos and words inside longer words count, and the last may be just its start (x:l finds lol)	має ці слова на картинці, одне за одним; друкарські помилки й слова всередині довших теж підходять, а останнє може бути лише початком (x:l знаходить lol)
 v: t: s: b: x:	v: t: s: b: x:
 short for vibe: tag: set: by: text:	скорочено vibe: tag: set: by: text:
 type:gif	type:gif

@@ -400,7 +400,7 @@ pub const SYNTAX: &[HelpSection] = &[
             ("by:alice", "in a pack of this user"),
             (
                 "text:\"no thoughts\"",
-                "has these words in the picture, one after another",
+                "has these words in the picture, one after another; typos and words inside longer words count, and the last may be just its start (x:l finds lol)",
             ),
             ("v: t: s: b: x:", "short for vibe: tag: set: by: text:"),
             ("type:gif", "gif, png, webp, jpeg, mp4, webm, still, animated, video"),
@@ -425,6 +425,10 @@ pub const SYNTAX: &[HelpSection] = &[
             (
                 "e:, e:sk",
                 "emojis with their names: yours, then those named so; one puts the emoji in",
+            ),
+            (
+                "x:, x:lo",
+                "the words in the pictures, those on the most items first; one puts the word in",
             ),
             ("Tab / Shift+Tab", "put in the next / previous offered value"),
             (
