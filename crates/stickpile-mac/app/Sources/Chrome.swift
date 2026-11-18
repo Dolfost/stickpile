@@ -305,7 +305,7 @@ final class HeaderBar: NSView, NSSearchFieldDelegate {
 }
 
 /// The values offered for the filter being typed (`vibe:sar`), in one line
-/// under the header; what does not fit is left out.
+/// under the header; what does not fit is left out, except the chosen one.
 final class SuggestBar: NSView {
     static let height: CGFloat = 24
     var onAccept: ((Int) -> Void)?
@@ -359,9 +359,19 @@ final class SuggestBar: NSView {
         x += keyWidth + 4
         let hintWidth = hint.textWidth
         let right = bounds.width - 12 - hintWidth - 6
-        for b in buttons {
-            let w = b.fittingWidth
-            b.isHidden = x + w > right
+        // Tab may choose a value past the right edge (the words written on
+        // the items can be long: x:un): the values before it give way, from
+        // the first, until it fits.
+        let widths = buttons.map(\.fittingWidth)
+        var first = 0
+        if let chosen = buttons.firstIndex(where: \.current) {
+            while first < chosen, x + widths[first...chosen].reduce(0, { $0 + $1 + 2 }) - 2 > right {
+                first += 1
+            }
+        }
+        for (i, b) in buttons.enumerated() {
+            let w = widths[i]
+            b.isHidden = i < first || x + w > right
             guard !b.isHidden else { continue }
             b.frame = NSRect(x: x, y: 0, width: w, height: h)
             x += w + 2
