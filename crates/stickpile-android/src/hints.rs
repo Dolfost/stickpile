@@ -7,7 +7,9 @@
 //!   for `e:` (or `emoji:`) the emojis, labelled with their names
 //!   (`💀 skull`): the emojis of the viewer's own cached items, most used
 //!   first, and while a name is typed (`e:sk`) the emojis it selects,
-//!   the viewer's first.
+//!   the viewer's first; for `x:` (or `text:`) the words written on the
+//!   cached items, read from the cache's index (`x:lo` offers `lol`,
+//!   `love`), the value searched as typed.
 //! - While a bare word is typed (`rea`), the filters whose value contains
 //!   it (`tag:reaction`, `vibe:really`, `set:reactions`), and the filter
 //!   keys it starts (`t` offers `tag:` and `type:`).
@@ -16,8 +18,11 @@
 //! A key offered shows its one-letter form too (`tag: (t:)`); the short
 //! keys work as the long ones (`v:sar` offers what `vibe:sar` does).
 
+use std::sync::Arc;
+
 use stickpile_api::query::Key;
 use stickpile_api::ItemSummary;
+use stickpile_core::cache::OfflineIndex;
 use stickpile_quick::suggest::{self, Vocabulary};
 
 use crate::types::{HintKind, SearchHint};
@@ -32,10 +37,11 @@ const MAX_WORD_HINTS: usize = 8;
 const MIN_WORD: usize = 2;
 
 /// The filter keys offered, in this order.
-pub const KEYS: [&str; 8] = ["tag:", "vibe:", "e:", "set:", "by:", "type:", "is:", "sort:"];
+pub const KEYS: [&str; 9] = ["tag:", "vibe:", "e:", "text:", "set:", "by:", "type:", "is:", "sort:"];
 
 /// The words the hints offer: the suggestion vocabulary, the emojis of
-/// the viewer's items included ([`Vocabulary::emojis`]).
+/// the viewer's items included ([`Vocabulary::emojis`]), and the index the
+/// words written on the items are read from ([`Vocabulary::texts`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Words {
     pub vocab: Vocabulary,
@@ -44,10 +50,21 @@ pub struct Words {
 impl Words {
     /// The words of `items` (the cache) for the viewer with the username
     /// `me`: `e:` offers the emojis of `me`'s items (all while `me` is not
-    /// known), as the desktop does ([`Vocabulary::for_viewer`]).
+    /// known), as the desktop does ([`Vocabulary::for_viewer`]). No words
+    /// of texts: see [`Words::for_index`].
     pub fn for_viewer<'a>(items: impl IntoIterator<Item = &'a ItemSummary>, me: Option<&str>) -> Words {
         Words {
             vocab: Vocabulary::for_viewer(items, me),
+        }
+    }
+
+    /// The words of the cache's items as [`Words::for_viewer`] gives them,
+    /// `x:` offering the words written on them, read from `index` as they
+    /// are typed (as the desktop's backend does).
+    pub fn for_index(index: Arc<OfflineIndex>, me: Option<&str>) -> Words {
+        let words = Words::for_viewer(index.items(), me);
+        Words {
+            vocab: words.vocab.with_texts(index),
         }
     }
 }
@@ -200,6 +217,7 @@ pub(crate) mod tests {
                 "tag: (t:)",
                 "vibe: (v:)",
                 "e:",
+                "text: (x:)",
                 "set: (s:)",
                 "by: (b:)",
                 "type:",
@@ -315,7 +333,8 @@ pub(crate) mod tests {
     #[test]
     fn a_word_offers_the_keys_it_starts() {
         let h = hints("t", &words());
-        assert_eq!(labels(&h), vec!["tag: (t:)", "type:"]);
+        assert_eq!(labels(&h), vec!["tag: (t:)", "text: (x:)", "type:"]);
+        assert_eq!(query_of(&h, "text: (x:)"), "text:");
         assert_eq!(query_of(&h, "type:"), "type:");
         let h = hints("cat -ta", &words());
         assert_eq!(labels(&h), vec!["-tag: (t:)"]);

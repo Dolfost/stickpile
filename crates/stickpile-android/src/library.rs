@@ -481,9 +481,10 @@ impl Inner {
         }
         let vocabulary = match session.offline_index() {
             Ok(index) => {
-                // `e:` offers the emojis of the viewer's own items.
+                // `e:` offers the emojis of the viewer's own items; `x:`
+                // reads the words of the texts from the index itself.
                 let me = session.cache().me().ok().flatten().map(|u| u.username);
-                Arc::new(Words::for_viewer(index.items(), me.as_deref()))
+                Arc::new(Words::for_index(index, me.as_deref()))
             }
             Err(e) => {
                 tracing::debug!("no suggestions from the cache: {e}");
@@ -1096,9 +1097,9 @@ impl StickpileLibrary {
 
     /// The values to offer while a `key:value` filter is typed at the end of
     /// `query` (`vibe:sar`, `-tag:`, `set:ca`): the vibes, tags, packs and
-    /// owners of the cached items, and the fixed words of `type:`, `is:` and
-    /// `sort:`. `None` when the end of `query` is no such filter (no
-    /// network).
+    /// owners of the cached items, the words written on them for `x:`
+    /// (`text:`), and the fixed words of `type:`, `is:` and `sort:`. `None`
+    /// when the end of `query` is no such filter (no network).
     pub fn suggestions(&self, query: String) -> Option<Suggestions> {
         let session = self.inner.session();
         suggest::suggest(&query, &self.inner.vocabulary(&session).vocab).map(Suggestions::from)
@@ -1112,12 +1113,16 @@ impl StickpileLibrary {
     ///   as `suggestions` ranks them, the one the search uses `chosen`;
     /// - `e:` (or `emoji:`): the emojis of the viewer's own cached items,
     ///   most used first;
+    /// - `x:` (or `text:`): the words written on the cached items, those
+    ///   in the most items first; while a word is typed (`x:lo`) the words
+    ///   it starts, has inside or is a typo of; the search takes the value
+    ///   as typed (`chosen` only on the word typed whole);
     /// - a bare word (`rea`): the tags, vibes and packs containing it as
     ///   filters (`tag:reaction`), those starting with it first, then the
-    ///   filter keys the word starts (`t`: `tag:`, `type:`);
+    ///   filter keys the word starts (`t`: `tag:`, `text:`, `type:`);
     /// - nothing, or a space at the end: the filter keys `tag:`, `vibe:`,
-    ///   `e:`, `set:`, `by:`, `type:`, `is:`, `sort:`, labelled with their
-    ///   one-letter forms (`tag: (t:)`).
+    ///   `e:`, `text:`, `set:`, `by:`, `type:`, `is:`, `sort:`, labelled
+    ///   with their one-letter forms (`tag: (t:)`, `text: (x:)`).
     ///
     /// The one-letter keys work as the long ones (`v:sar` as `vibe:sar`).
     /// A leading `-` (leave out) stays on what is offered. Inside an

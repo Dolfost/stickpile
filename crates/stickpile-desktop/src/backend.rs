@@ -200,7 +200,8 @@ pub trait Backend: Send + Sync + 'static {
     /// other clients follow the one chosen here.
     fn set_account_language(self: Arc<Self>, code: Option<String>) -> BoxFut<Result<(), String>>;
     /// The values the search suggests: the vibes, tags, packs and owners of
-    /// the items the viewer can see (the offline cache).
+    /// the items the viewer can see (the offline cache), and for `x:` the
+    /// words written on them, read from the cache's index as they are typed.
     fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary>;
 
     // -- keeping offline (docs/offline.md); the demo has none ------------------------
@@ -474,7 +475,8 @@ impl Backend for CoreBackend {
                 // opened pack.
                 let me = self.session.cache().me().ok().flatten().map(|u| u.username);
                 match self.session.offline_index() {
-                    Ok(index) => Vocabulary::for_viewer(index.items(), me.as_deref()),
+                    // `x:` reads the words of the texts from the index itself.
+                    Ok(index) => Vocabulary::for_viewer(index.items(), me.as_deref()).with_texts(index),
                     Err(e) => {
                         tracing::debug!("no suggestions from the cache: {e}");
                         Vocabulary {
@@ -1015,6 +1017,50 @@ mod tests {
             offers: vec![],
             warning: None,
         }
+    }
+
+    /// `x:` offers the words written on the items alice can search (her
+    /// own, bob's public ones), read from the cache's index; never a word
+    /// that only bob's private sticker has (rule 6 of the text-search
+    /// round). The popup's suggestion line takes the word with a space.
+    #[test]
+    fn text_words_come_from_the_items_the_viewer_can_search() {
+        let (server, items) = world();
+        {
+            let mut st = server.state();
+            for (item, text) in [
+                (&items[0], "ZANY grumpy"),
+                (&items[3], "zebra"),
+                (&items[4], "zyzzyva zebra"),
+            ] {
+                st.items.iter_mut().find(|i| i.item.id == item.id).unwrap().item.text = text.into();
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        rt.block_on(async {
+            assert!(b.clone().sync().await.unwrap());
+            let vocab = b.clone().vocabulary().await;
+            let words = |q: &str| stickpile_quick::suggest::suggest(q, &vocab).map(|s| s.words);
+            assert_eq!(
+                words("x:z").unwrap(),
+                ["zany", "zebra"],
+                "bob's private zebra not counted"
+            );
+            assert_eq!(words("x:").unwrap(), ["grumpy", "zany", "zebra"]);
+            assert_eq!(words("x:zyz"), None, "only in bob's private sticker");
+            assert_eq!(words("text:zyzzyva"), None);
+            assert_eq!(vocab, b.clone().vocabulary().await, "the same index while the cache is");
+
+            let mut m = stickpile_quick::Model::new(stickpile_quick::ModelConfig::default());
+            m.handle(stickpile_quick::Event::Open(stickpile_quick::OpenInfo::default()));
+            m.handle(stickpile_quick::Event::VocabularyLoaded(vocab));
+            m.handle(stickpile_quick::Event::QueryChanged("x:ze".into()));
+            assert_eq!(m.suggestions().unwrap().words, ["zebra"]);
+            m.handle(stickpile_quick::Event::AcceptSuggestion(0));
+            assert_eq!(m.query(), "x:zebra ");
+        });
     }
 
     #[test]

@@ -111,6 +111,42 @@ async fn search_uses_the_suggested_filter_value() {
     assert_eq!(q, 1);
 }
 
+/// `x:` offers the words written on the items alice can search (her own,
+/// bob's public ones), read from the cache's index; never a word that only
+/// bob's private sticker has (rule 6 of the text-search round).
+#[tokio::test]
+async fn text_hints_offer_the_words_of_the_items_the_viewer_can_search() {
+    let (server, items) = seeded_server();
+    {
+        let mut st = server.state();
+        let secret = st.add_set("bob", "secret", "Secret", Visibility::Private);
+        let hidden = st.add_item(&secret.id, "hidden", &["dog"], png_bytes(8, 8, 9));
+        for (id, text) in [
+            (&items[0].id, "ZANY grumpy"),
+            (&items[4].id, "zebra"),
+            (&hidden.id, "zyzzyva zebra"),
+        ] {
+            st.items.iter_mut().find(|i| i.item.id == *id).unwrap().item.text = text.into();
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    lib.sync_now().await.unwrap();
+    let labels = |q: &str| -> Vec<String> { lib.hints(q.into()).into_iter().map(|h| h.label).collect() };
+    assert_eq!(labels("x:z"), ["zany", "zebra"], "bob's private zebra not counted");
+    assert_eq!(labels("text:"), ["grumpy", "zany", "zebra"]);
+    assert!(labels("x:zyz").is_empty(), "only in bob's private sticker");
+    assert!(lib.suggestions("x:zyzzyva".into()).is_none());
+    let h = lib.hints("cat -x:ze".into());
+    assert_eq!(
+        (h[0].label.as_str(), h[0].query.as_str(), h[0].chosen, h[0].kind),
+        ("zebra", "cat -x:zebra ", false, HintKind::Value)
+    );
+    let s = lib.suggestions("x:ZEBRA".into()).unwrap();
+    assert_eq!((s.words[0].as_str(), s.chosen), ("zebra", Some(0)), "typed whole");
+    assert!(lib.hints(String::new()).iter().any(|h| h.label == "text: (x:)"));
+}
+
 #[tokio::test]
 async fn suggestions_come_from_the_cache() {
     let (server, _) = seeded_server();

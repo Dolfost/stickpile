@@ -7,7 +7,10 @@
 //! app builds its words from `OfflineIndex::items()`, a `HashMap`, so
 //! the order the items come in is not the server's.
 
+use std::sync::Arc;
+
 use stickpile_api::ItemSummary;
+use stickpile_core::cache::OfflineIndex;
 use stickpile_quick::suggest::{self, Vocabulary};
 
 use super::tests::summary;
@@ -51,7 +54,7 @@ fn fixture_items() -> Vec<ItemSummary> {
     out
 }
 
-const PREFIXES: [&str; 17] = [
+const PREFIXES: [&str; 25] = [
     "e:",
     "cat e:",
     "e:sk",
@@ -69,15 +72,26 @@ const PREFIXES: [&str; 17] = [
     "x:",
     "text:",
     "x:кі",
+    "x:l",
+    "x:LOL",
+    "-x:thou",
+    "x:thoguhts",
+    "x:ко",
+    "x:оли",
+    "x:п'ят",
+    "x:zy",
 ];
 
 /// The hints for a `key:` prefix are the desktop's offers: an emoji with
-/// its name, the query with the emoji in, `chosen` where the desktop's is.
+/// its name, the query with the emoji in, `chosen` where the desktop's is;
+/// for `x:` the words of the cached texts, read from the offline index.
 #[test]
 fn hints_are_the_desktops_offers_for_the_review_prefixes() {
     let items = fixture_items();
-    let words = Words::for_viewer(items.iter(), Some("alice"));
-    let vocab = Vocabulary::for_viewer(&items, Some("alice"));
+    let index = Arc::new(OfflineIndex::build(items.clone(), Some("alice"), 1));
+    let words = Words::for_index(index.clone(), Some("alice"));
+    let vocab = Vocabulary::for_viewer(&items, Some("alice")).with_texts(index);
+    assert!(!hints("x:", &words).is_empty() && hints("x:zy", &words).is_empty());
     let mut table = String::from("| typed | Android hints (fixture order) |\n|---|---|\n");
     for p in PREFIXES {
         let h = hints(p, &words);
