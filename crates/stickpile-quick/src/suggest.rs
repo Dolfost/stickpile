@@ -23,12 +23,22 @@
 //!
 //! The one-letter keys work as the long ones (`v:sar` as `vibe:sar`, see
 //! `stickpile_api::query::Key`); the key stays as typed.
+//!
+//! `x:` (`text:`) offers the words written on the items the viewer can
+//! search, read from the search index on each keystroke
+//! ([`Vocabulary::texts`], `stickpile_search::Index::text_words`): those
+//! the typed value starts, has inside or is a typo or two away from, in
+//! that order, each group the words in the most items first; nothing
+//! typed, the words in the most items. A `text:` value goes out as typed:
+//! the search forgives a half-typed or misspelled word itself.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::sync::Arc;
 
 use stickpile_api::query::Key;
 use stickpile_api::ItemSummary;
-use stickpile_search::emoji_names;
+use stickpile_search::{emoji_names, offer_tier, text_word, TextWords};
 
 /// Values offered in the line at most.
 pub const MAX_SUGGESTIONS: usize = 12;
@@ -63,6 +73,77 @@ pub struct Vocabulary {
     /// means where the client searches by itself (inside an opened pack,
     /// see [`crate::within`]). `None`: `is:mine` finds nothing there.
     pub me: Option<String>,
+    /// Where `x:` finds the words written on the items: the index the
+    /// viewer's search reads ([`Texts`]); none: `x:` offers nothing.
+    pub texts: Texts,
+}
+
+/// The words written on the items, for `x:`: the index the viewer's search
+/// reads (a client's offline index, the items of an opened pack), asked on
+/// each keystroke ([`TextWords`]), so the texts are not copied here. Two
+/// are equal when they read the same index.
+#[derive(Clone, Default)]
+pub struct Texts(Option<Arc<dyn TextWords>>);
+
+impl Texts {
+    pub fn new(words: Arc<dyn TextWords>) -> Texts {
+        Texts(Some(words))
+    }
+
+    pub fn get(&self) -> Option<&dyn TextWords> {
+        self.0.as_deref()
+    }
+
+    /// These words first, then those of `more` not among them.
+    pub fn then(&self, more: &Texts) -> Texts {
+        match (&self.0, &more.0) {
+            (Some(first), Some(more)) => Texts::new(Arc::new(Then(first.clone(), more.clone()))),
+            (Some(_), None) => self.clone(),
+            (None, _) => more.clone(),
+        }
+    }
+}
+
+impl PartialEq for Texts {
+    fn eq(&self, other: &Texts) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Texts {}
+
+impl fmt::Debug for Texts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Texts(index)"
+        } else {
+            "Texts(none)"
+        })
+    }
+}
+
+/// [`Texts::then`]: the words of one, then those of the other.
+struct Then(Arc<dyn TextWords>, Arc<dyn TextWords>);
+
+impl TextWords for Then {
+    fn text_words(&self, typed: &str, limit: usize) -> Vec<String> {
+        let mut words = self.0.text_words(typed, limit);
+        if words.len() < limit {
+            for w in self.1.text_words(typed, limit) {
+                if words.len() == limit {
+                    break;
+                }
+                if !words.contains(&w) {
+                    words.push(w);
+                }
+            }
+        }
+        words
+    }
 }
 
 /// What one item gives a [`Vocabulary`]: the values its filters match.
@@ -176,6 +257,16 @@ impl Vocabulary {
             owners: owners.ranked(),
             emojis: emojis.into_iter().map(|(_, _, e)| emoji_names::spelling(&e)).collect(),
             me: None,
+            texts: Texts::default(),
+        }
+    }
+
+    /// These values, `x:` offering the words of `words` (the index the
+    /// viewer's search reads).
+    pub fn with_texts(self, words: Arc<dyn TextWords>) -> Vocabulary {
+        Vocabulary {
+            texts: Texts::new(words),
+            ..self
         }
     }
 
@@ -206,6 +297,7 @@ impl Vocabulary {
             owners: join(&self.owners, &more.owners, same),
             emojis: join(&self.emojis, &more.emojis, emoji_names::toned_key),
             me: self.me.clone().or_else(|| more.me.clone()),
+            texts: self.texts.then(&more.texts),
         }
     }
 }
@@ -222,13 +314,15 @@ pub enum Field {
     Sort,
     /// `e:`: emojis, offered with their names.
     Emoji,
+    /// `x:` (`text:`): the words written on the items
+    /// ([`Vocabulary::texts`]), the value going out as typed.
+    Text,
 }
 
 impl Field {
     /// The field of a `key` as the query syntax spells it, its one-letter
-    /// form included (`v` is `vibe`); `None` for anything that is no key,
-    /// and for `text:` (`x:`), whose values are free words with nothing to
-    /// offer.
+    /// form included (`v` is `vibe`, `x` is `text`); `None` for anything
+    /// that is no key.
     pub fn of(key: &str) -> Option<Field> {
         Some(match Key::parse(key)? {
             Key::Vibe => Field::Vibe,
@@ -239,10 +333,20 @@ impl Field {
             Key::Is => Field::Is,
             Key::Sort => Field::Sort,
             Key::Emoji => Field::Emoji,
-            Key::Text => return None,
+            Key::Text => Field::Text,
         })
     }
 
+    /// The field of the `key:value` filter being typed at the end of
+    /// `query` ([`suggest`] offers its values), if any.
+    pub fn typed(query: &str) -> Option<Field> {
+        let token = query.rsplit(char::is_whitespace).next()?;
+        let (key, _) = token.strip_prefix('-').unwrap_or(token).split_once(':')?;
+        Field::of(key)
+    }
+
+    /// The values of the vocabulary's lists; none for `x:`, whose words
+    /// are looked up as typed ([`Vocabulary::texts`]).
     fn words(self, vocab: &Vocabulary) -> Vec<&str> {
         let fixed = |w: &[&'static str]| w.to_vec();
         match self {
@@ -254,6 +358,7 @@ impl Field {
             Field::Is => fixed(&IS_WORDS),
             Field::Sort => fixed(&SORT_WORDS),
             Field::Emoji => vocab.emojis.iter().map(String::as_str).collect(),
+            Field::Text => Vec::new(),
         }
     }
 }
@@ -266,8 +371,9 @@ pub struct Suggestions {
     /// The value typed so far.
     pub typed: String,
     /// Best first; the search uses the first unless `typed` is one of them
-    /// (for `e:`, the search uses what is typed: see [`Suggestions::chosen`]).
-    /// Taking one puts it in place of `typed`: for `e:`, an emoji.
+    /// (for `e:` and `x:`, the search uses what is typed: see
+    /// [`Suggestions::chosen`]). Taking one puts it in place of `typed`:
+    /// for `e:`, an emoji.
     pub words: Vec<String>,
     /// Parallel to `words`: the English short name of each emoji `e:`
     /// offers (`skull` for 💀); empty for the other fields, and for an
@@ -288,14 +394,23 @@ impl Suggestions {
     /// known value, else the best suggestion; none while nothing is typed
     /// (an empty filter is left out of the search). For `e:`, the search
     /// uses the value as typed: the emoji typed when it is offered, none
-    /// for a name (`e:sk`, which the search matches itself).
+    /// for a name (`e:sk`, which the search matches itself). For `x:` too:
+    /// the word typed when it is offered (written in any case, with any
+    /// apostrophe), else none (`x:lo` finds what starts with it).
     pub fn chosen(&self) -> Option<usize> {
         if self.typed.is_empty() {
             return None;
         }
-        if self.field() == Some(Field::Emoji) {
-            let typed = emoji_names::toned_key(&self.typed);
-            return self.words.iter().position(|w| emoji_names::toned_key(w) == typed);
+        match self.field() {
+            Some(Field::Emoji) => {
+                let typed = emoji_names::toned_key(&self.typed);
+                return self.words.iter().position(|w| emoji_names::toned_key(w) == typed);
+            }
+            Some(Field::Text) => {
+                let typed = text_word(&self.typed)?;
+                return self.words.iter().position(|w| *w == typed);
+            }
+            _ => {}
         }
         let typed = self.typed.to_lowercase();
         match self.words.iter().position(|w| *w == typed) {
@@ -308,6 +423,13 @@ impl Suggestions {
 /// The suggestions for the last token of `query` when it is a `key:value`
 /// filter of a [`Field`] being typed (no space after it yet).
 pub fn suggest(query: &str, vocab: &Vocabulary) -> Option<Suggestions> {
+    suggest_with(query, vocab, vocab.texts.get())
+}
+
+/// [`suggest`], `x:` offering the words of `texts` rather than of
+/// [`Vocabulary::texts`]: the server's, its index as the caller searches
+/// it (`stickpile_search::ViewedIndex`).
+pub fn suggest_with(query: &str, vocab: &Vocabulary, texts: Option<&dyn TextWords>) -> Option<Suggestions> {
     if query.ends_with(char::is_whitespace) || query.matches('"').count() % 2 == 1 {
         return None;
     }
@@ -321,21 +443,29 @@ pub fn suggest(query: &str, vocab: &Vocabulary) -> Option<Suggestions> {
     if typed.contains('"') {
         return None;
     }
-    let (words, labels) = if field == Field::Emoji {
-        let words = emojis(typed, vocab);
-        let labels = words
-            .iter()
-            .map(|e| emoji_names::short_name(e).unwrap_or_default().to_string())
-            .collect();
-        (words, labels)
-    } else {
-        let words: Vec<String> = ranked(typed, &field.words(vocab))
-            .into_iter()
-            .take(MAX_SUGGESTIONS)
-            .map(str::to_string)
-            .collect();
-        let labels = vec![String::new(); words.len()];
-        (words, labels)
+    let (words, labels) = match field {
+        Field::Emoji => {
+            let words = emojis(typed, vocab);
+            let labels = words
+                .iter()
+                .map(|e| emoji_names::short_name(e).unwrap_or_default().to_string())
+                .collect();
+            (words, labels)
+        }
+        Field::Text => {
+            let words = texts.map_or_else(Vec::new, |t| t.text_words(typed, MAX_SUGGESTIONS));
+            let labels = vec![String::new(); words.len()];
+            (words, labels)
+        }
+        _ => {
+            let words: Vec<String> = ranked(typed, &field.words(vocab))
+                .into_iter()
+                .take(MAX_SUGGESTIONS)
+                .map(str::to_string)
+                .collect();
+            let labels = vec![String::new(); words.len()];
+            (words, labels)
+        }
     };
     if words.is_empty() {
         return None;
@@ -398,10 +528,12 @@ fn emojis(typed: &str, vocab: &Vocabulary) -> Vec<String> {
 /// `query` with every filter value of a [`Field`] that is not a known value
 /// replaced by its best match, and empty filters of any key (`vibe:`,
 /// `e:`, `x:`: the parser would read an empty `text:` as the word "text")
-/// left out; also the replacements made, as (typed, used). An `e:` value
-/// is never replaced: the search matches an emoji name (`e:skull`) itself,
-/// typos included. The one-letter keys go out long (`v:sad` as
-/// `vibe:sad`), so a server from before them reads them too.
+/// left out; also the replacements made, as (typed, used). An `e:` or
+/// `x:` value is never replaced: the search matches an emoji name
+/// (`e:skull`) itself, typos included, and finds the words a `text:`
+/// value starts or is a typo of (`x:lo` is not narrowed to one word). The
+/// one-letter keys go out long (`v:sad` as `vibe:sad`), so a server from
+/// before them reads them too.
 pub fn resolve(query: &str, vocab: &Vocabulary) -> (String, Vec<(String, String)>) {
     let mut out = String::with_capacity(query.len());
     let mut fixes = Vec::new();
@@ -454,7 +586,7 @@ fn resolve_token<'a>(token: &'a str, vocab: &Vocabulary) -> Option<Resolved<'a>>
         return Some(Resolved::Drop);
     }
     let field = Field::of(key)?;
-    if field == Field::Emoji {
+    if matches!(field, Field::Emoji | Field::Text) {
         return None;
     }
     let words = field.words(vocab);
@@ -494,74 +626,24 @@ fn tokens(query: &str) -> Vec<(&str, bool)> {
     out
 }
 
-/// Typos forgiven in a value of `len` characters.
-fn typo_budget(len: usize) -> usize {
-    match len {
-        0..=2 => 0,
-        3..=5 => 1,
-        _ => 2,
-    }
-}
-
 /// `words` (in their order of use) that match `typed`, best first: those
 /// starting with it (the same word first), those containing it, then those
-/// a typo or two away, fewer typos first.
+/// a typo or two away, fewer typos first (`stickpile_search::offer_tier`,
+/// which ranks the words written on the items the same way).
 fn ranked<'a>(typed: &str, words: &[&'a str]) -> Vec<&'a str> {
     let typed: Vec<char> = typed.to_lowercase().chars().collect();
     if typed.is_empty() {
         return words.to_vec();
     }
-    let budget = typo_budget(typed.len());
     let mut scored: Vec<(usize, usize, &'a str)> = Vec::new();
     for (n, w) in words.iter().enumerate() {
         let chars: Vec<char> = w.chars().collect();
-        let tier = if chars == typed {
-            0
-        } else if chars.starts_with(&typed) {
-            1
-        } else if typed.len() >= 2 && chars.windows(typed.len()).any(|win| win == typed.as_slice()) {
-            2
-        } else {
-            // The typed text against the word's start of about its length,
-            // so a typo in a half-typed word counts as well.
-            let lo = typed.len().saturating_sub(budget).max(1);
-            let hi = (typed.len() + budget).min(chars.len());
-            match (lo..=hi).filter_map(|k| osa(&typed, &chars[..k], budget)).min() {
-                Some(d) => 3 + d,
-                None => continue,
-            }
-        };
-        scored.push((tier, n, w));
+        if let Some(tier) = offer_tier(&typed, &chars) {
+            scored.push((tier, n, w));
+        }
     }
     scored.sort_unstable();
     scored.into_iter().map(|(_, _, w)| w).collect()
-}
-
-/// Optimal string alignment distance (Damerau-Levenshtein with adjacent
-/// transpositions) when it is at most `max`.
-fn osa(a: &[char], b: &[char], max: usize) -> Option<usize> {
-    if a.len().abs_diff(b.len()) > max {
-        return None;
-    }
-    let w = b.len() + 1;
-    let mut d = vec![0usize; (a.len() + 1) * w];
-    for (j, v) in d.iter_mut().enumerate().take(w) {
-        *v = j;
-    }
-    for i in 1..=a.len() {
-        d[i * w] = i;
-        for j in 1..=b.len() {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            let mut v = (d[(i - 1) * w + j] + 1)
-                .min(d[i * w + j - 1] + 1)
-                .min(d[(i - 1) * w + j - 1] + cost);
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                v = v.min(d[(i - 2) * w + j - 2] + 1);
-            }
-            d[i * w + j] = v;
-        }
-    }
-    Some(d[a.len() * w + b.len()]).filter(|v| *v <= max)
 }
 
 #[cfg(test)]
@@ -578,6 +660,7 @@ mod tests {
             owners: ["alice", "bob"].map(String::from).to_vec(),
             emojis: ["😂", "🦨", "🐱", "💀", "❤️"].map(String::from).to_vec(),
             me: None,
+            texts: Texts::default(),
         }
     }
 
@@ -778,6 +861,7 @@ mod tests {
             owners: vec![],
             emojis: vec!["❤".into(), "🐶".into()],
             me: None,
+            texts: Texts::default(),
         };
         let all = Vocabulary {
             me: Some("alice".into()),
@@ -803,9 +887,9 @@ mod tests {
         assert!(suggest("e:sk ", &vocab()).is_none(), "the token is finished");
         assert!(suggest("\"vibe:sa", &vocab()).is_none(), "inside quotes");
         assert!(suggest("vibe:sa", &Vocabulary::default()).is_none(), "nothing known");
-        // The words in the picture are free text: nothing to offer or to correct.
-        assert_eq!(Field::of("text"), None);
-        assert_eq!(Field::of("X"), None);
+        // No index to read the words in the pictures from: nothing for x:.
+        assert_eq!(Field::of("text"), Some(Field::Text));
+        assert_eq!(Field::of("X"), Some(Field::Text));
         assert!(suggest("text:", &vocab()).is_none());
         assert!(suggest("cat x:sa", &vocab()).is_none());
         assert_eq!(
@@ -813,6 +897,117 @@ mod tests {
             "text:sad text:cat",
             "x: goes out long"
         );
+    }
+
+    /// Items with the words written on them, as a pack holds them.
+    fn texts() -> Vocabulary {
+        let item = |id: &str, text: &str| ItemSummary {
+            id: id.into(),
+            text: text.into(),
+            ..crate::model::tests::item(id)
+        };
+        let items = [
+            item("a", "LOL"),
+            item("b", "lol what"),
+            item("c", "what is love"),
+            item("d", "КОЛИВ ДОМА"),
+            item("e", "коли ти вдома"),
+            item("f", "П'ЯТНИЦЯ"),
+            item("g", "п’ятниця 2024"),
+            item("h", "hello"),
+        ];
+        vocab().with_texts(Arc::new(crate::within::Within::new(&items, None, None)))
+    }
+
+    #[test]
+    fn x_alone_offers_the_most_common_words() {
+        let s = suggest("cat x:", &texts()).unwrap();
+        assert_eq!((s.key.as_str(), s.typed.as_str(), s.start), ("x:", "", 6));
+        assert_eq!(s.field(), Some(Field::Text));
+        // In two items each, then in one, alphabetically; no numbers.
+        assert_eq!(
+            s.words[..6],
+            ["lol", "what", "пятниця", "hello", "is", "love"].map(String::from)
+        );
+        assert!(!s.words.contains(&"2024".to_string()));
+        assert!(s.labels.iter().all(String::is_empty) && s.labels.len() == s.words.len());
+        assert_eq!(s.chosen(), None, "nothing typed");
+        assert_eq!(suggest("text:", &texts()).unwrap().words, s.words);
+        assert_eq!(suggest("-x:", &texts()).unwrap().key, "-x:");
+    }
+
+    #[test]
+    fn x_offers_the_words_a_value_starts_has_inside_or_is_a_typo_of() {
+        let v = texts();
+        assert_eq!(words_in("x:l", &v), ["lol", "love"]);
+        assert_eq!(words_in("x:lo", &v), ["lol", "love", "hello"], "then inside");
+        assert_eq!(words_in("X:LO", &v), words_in("x:lo", &v));
+        assert_eq!(words_in("text:lo", &v), words_in("x:lo", &v));
+        assert_eq!(words_in("x:ко", &v), ["коли", "колив"]);
+        assert_eq!(words_in("x:оли", &v), ["коли", "колив"], "inside the words");
+        assert_eq!(words_in("x:lvoe", &v), ["love"], "a typo");
+        assert_eq!(words_in("x:п'ятн", &v), ["пятниця"], "as the index keeps it");
+        assert!(suggest("x:zzzz", &v).is_none());
+        assert!(suggest("x:a-b", &v).is_none(), "two words");
+        let s = suggest("cat -x:lo", &v).unwrap();
+        assert_eq!((s.key.as_str(), s.typed.as_str(), s.start), ("-x:", "lo", 7));
+    }
+
+    fn words_in(q: &str, v: &Vocabulary) -> Vec<String> {
+        suggest(q, v).map(|s| s.words).unwrap_or_default()
+    }
+
+    /// The search uses an `x:` value as typed: only a word typed whole is
+    /// chosen (a hint), and `resolve` leaves the value alone.
+    #[test]
+    fn an_x_value_goes_out_as_typed() {
+        let v = texts();
+        assert_eq!(suggest("x:lo", &v).unwrap().chosen(), None);
+        assert_eq!(suggest("x:lol", &v).unwrap().chosen(), Some(0));
+        assert_eq!(suggest("x:LOL", &v).unwrap().chosen(), Some(0));
+        assert_eq!(suggest("x:П’ЯТНИЦЯ", &v).unwrap().chosen(), Some(0));
+        assert_eq!(resolve("x:lo", &v), ("text:lo".to_string(), vec![]));
+        assert_eq!(resolve("cat x:lool -x:ко", &v).0, "cat text:lool -text:ко");
+        assert_eq!(resolve("x:\"no thou\"", &v).0, "text:\"no thou\"");
+        assert_eq!(resolve("cat x:", &v).0, "cat", "an empty x: is left out");
+    }
+
+    #[test]
+    fn choosing_a_text_word_puts_it_in_with_a_space() {
+        let q = "cat x:lo";
+        let s = suggest(q, &texts()).unwrap();
+        assert_eq!(format!("{}{} ", &q[..s.start], s.words[0]), "cat x:lol ");
+    }
+
+    #[test]
+    fn the_field_being_typed() {
+        assert_eq!(Field::typed("cat x:lo"), Some(Field::Text));
+        assert_eq!(Field::typed("-t:re"), Some(Field::Tag));
+        assert_eq!(Field::typed("e:"), Some(Field::Emoji));
+        assert_eq!(Field::typed("cat"), None);
+        assert_eq!(Field::typed("x:lo "), None);
+        assert_eq!(Field::typed("http://x"), None);
+    }
+
+    #[test]
+    fn texts_compare_by_the_index_they_read() {
+        let a = texts();
+        assert_eq!(a, a.clone());
+        assert_ne!(a, texts(), "another index");
+        assert_ne!(a, vocab());
+        assert_eq!(vocab(), vocab());
+        // A pack's words first, then the others.
+        let item = |id: &str, text: &str| ItemSummary {
+            id: id.into(),
+            text: text.into(),
+            ..crate::model::tests::item(id)
+        };
+        let pack =
+            Vocabulary::default().with_texts(Arc::new(crate::within::Within::new(&[item("p", "loud")], None, None)));
+        let both = pack.then(&a);
+        assert_eq!(words_in("x:lo", &both), ["loud", "lol", "love", "hello"]);
+        assert_eq!(format!("{:?}", both.texts), "Texts(index)");
+        assert_eq!(format!("{:?}", vocab().texts), "Texts(none)");
     }
 
     #[test]

@@ -22,6 +22,7 @@
 //! ([`Event::TextFocus`]) and moves the focus to match [`Model::mode`].
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use stickpile_api::profiles::{self, ItemShape};
 use stickpile_api::query::{Is, Query};
@@ -1182,10 +1183,11 @@ struct OpenPack {
     items: Listing<ItemSummary>,
     /// The search inside the pack (the text field).
     filter: String,
-    /// `items` indexed for `filter`.
-    within: Within,
+    /// `items` indexed for `filter`, and for the words `x:` offers.
+    within: Arc<Within>,
     /// What the field suggests: the values of the pack's items first,
-    /// then the others the viewer's items use.
+    /// then the others the viewer's items use; for `x:` the words of the
+    /// pack's texts first, then of the others.
     vocab: Vocabulary,
 }
 
@@ -1195,7 +1197,7 @@ impl OpenPack {
             set,
             items,
             filter: String::new(),
-            within: Within::default(),
+            within: Arc::default(),
             vocab: Vocabulary::default(),
         };
         open.index(vocab);
@@ -1204,13 +1206,15 @@ impl OpenPack {
 
     /// The items changed: index them again.
     fn index(&mut self, vocab: &Vocabulary) {
-        self.within = Within::new(&self.items.items, Some(self.set.visibility), None);
+        self.within = Arc::new(Within::new(&self.items.items, Some(self.set.visibility), None));
         self.suggest_from(vocab);
     }
 
     /// The items or the viewer's vocabulary changed.
     fn suggest_from(&mut self, vocab: &Vocabulary) {
-        self.vocab = Vocabulary::from_items(&self.items.items).then(vocab);
+        self.vocab = Vocabulary::from_items(&self.items.items)
+            .with_texts(self.within.clone())
+            .then(vocab);
     }
 
     /// The items the search inside the pack shows, with the fields their

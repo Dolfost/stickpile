@@ -178,6 +178,7 @@ pub(crate) mod tests {
                 owners: vec!["alice".into()],
                 emojis: vec!["😂".into(), "🐱".into(), "❤️".into(), "💀".into()],
                 me: None,
+                texts: Default::default(),
             },
         }
     }

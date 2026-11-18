@@ -101,6 +101,49 @@ fn emojis_are_offered_with_their_names_and_names_searched_as_typed() {
     assert_eq!(m.suggestions().unwrap().chosen, Some(0), "the emoji typed is chosen");
 }
 
+/// `x:` offers the words written on the items (here, a pack's worth read
+/// by `Within`, as the backends read their offline index); a click puts
+/// the word in with a space, the search goes out with the value as typed.
+#[test]
+fn text_words_are_offered_and_a_value_is_searched_as_typed() {
+    let texts = ["LOL", "lol what", "love", "коли", "КОЛИВ"];
+    let it: Vec<ItemSummary> = items(texts.len())
+        .into_iter()
+        .zip(texts)
+        .map(|(i, t)| ItemSummary { text: t.into(), ..i })
+        .collect();
+    let mut m = opened(cfg(), None);
+    m.handle(Event::VocabularyLoaded(
+        vocab().with_texts(Arc::new(Within::new(&it, None, None))),
+    ));
+    let cmds = m.handle(Event::QueryChanged("cat x:".into()));
+    let line = m.suggestions().unwrap();
+    assert_eq!((line.key.as_str(), line.chosen), ("x:", None));
+    assert_eq!(line.words[0], "lol", "the word in the most items first");
+    assert_eq!(line.labels, vec![String::new(); line.words.len()]);
+    assert_eq!(sent(&cmds).unwrap().0, "cat", "an empty filter is left out");
+
+    let cmds = m.handle(Event::QueryChanged("cat x:lo".into()));
+    let line = m.suggestions().unwrap();
+    assert_eq!(
+        (line.words.clone(), line.chosen),
+        (vec!["lol".into(), "love".into()], None)
+    );
+    assert_eq!(sent(&cmds).unwrap().0, "cat text:lo", "as typed, the key long");
+
+    let cmds = m.handle(Event::AcceptSuggestion(0));
+    assert_eq!(m.query(), "cat x:lol ", "a click puts the word in and a space");
+    assert_eq!(sent(&cmds).unwrap().0, "cat text:lol");
+
+    m.handle(Event::QueryChanged("x:ко".into()));
+    tab(&mut m, false);
+    assert_eq!(m.query(), "x:коли", "Tab puts the first word in");
+    assert_eq!(m.suggestions().unwrap().chosen, Some(0));
+    m.handle(Event::QueryChanged("x:lool".into()));
+    let cmds = m.handle(Event::QueryChanged("x:lolo".into()));
+    assert_eq!(sent(&cmds).unwrap().0, "text:lolo", "a typo goes out as typed");
+}
+
 #[test]
 fn tab_puts_the_values_in_one_after_another() {
     let mut m = search();

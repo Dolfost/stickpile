@@ -89,6 +89,7 @@ fn pack_with(cfg: ModelConfig, visibility: Visibility) -> Model {
         owners: vec!["me".into(), "bob".into()],
         emojis: vec![],
         me: Some("me".into()),
+        texts: Default::default(),
     }));
     m.handle(Event::PacksLoaded {
         generation,

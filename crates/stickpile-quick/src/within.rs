@@ -12,15 +12,18 @@
 //! - The pack's own name is no word to search for (every item has it):
 //!   only `set:` (its slug, name or id) looks at it.
 //! - A query of filters only keeps the list's order; `sort:` other than
-//!   relevance orders as the search does.
+//!   relevance orders as the search does. A `text:` value lists the best
+//!   matches of it first, as the search does
+//!   (`stickpile_search::Hit::text_tier`), each tier in the list's order.
 //! - `is:mine` compares the owner's username with the viewer's; `is:liked`
 //!   looks in the ids given; `is:public` at the pack's visibility.
+//! - `x:` offers the words written on these items ([`TextWords`]).
 
 use std::collections::{HashMap, HashSet};
 
 use stickpile_api::query::{Filter, Query, Sort};
 use stickpile_api::{ItemSummary, Visibility};
-use stickpile_search::{normalize, Doc, Index, SearchOptions, Viewer};
+use stickpile_search::{normalize, Doc, Index, SearchOptions, TextWords, Viewer};
 
 /// An item a search found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,26 +143,28 @@ impl Within {
 
         // Every item the filters let through, in the order `sort:` asks for.
         let words = std::mem::take(&mut q.text);
-        let passing: Vec<usize> = self
+        let passing: Vec<(u8, usize)> = self
             .index
             .search(&q, &viewer, &opts)
             .hits
             .iter()
-            .filter_map(|h| position(&h.item_id))
+            .filter_map(|h| Some((h.text_tier, position(&h.item_id)?)))
             .collect();
         if words.is_empty() {
-            let mut found: Vec<Found> = passing
+            let mut passing = passing;
+            if q.sort == Sort::Relevance {
+                // The list's order, after how well a `text:` value matched.
+                passing.sort_unstable();
+            }
+            return passing
                 .into_iter()
-                .map(|index| Found {
+                .map(|(_, index)| Found {
                     index,
                     matched: Vec::new(),
                 })
                 .collect();
-            if q.sort == Sort::Relevance {
-                found.sort_by_key(|f| f.index);
-            }
-            return found;
         }
+        let passing: Vec<usize> = passing.into_iter().map(|(_, index)| index).collect();
 
         q.text = words;
         let mut found: Vec<Found> = self
@@ -207,6 +212,17 @@ impl Within {
     fn contains_all(&self, i: usize, words: &[String]) -> bool {
         let texts = &self.texts[i];
         words.iter().all(|w| texts.iter().any(|t| t.contains(w.as_str())))
+    }
+}
+
+/// The words written on these items, all of which the viewer can search.
+impl TextWords for Within {
+    fn text_words(&self, typed: &str, limit: usize) -> Vec<String> {
+        let viewer = Viewer {
+            member_sets: self.set_ids.clone(),
+            ..Viewer::default()
+        };
+        self.index.text_words(typed, &viewer, limit)
     }
 }
 
@@ -358,6 +374,35 @@ mod tests {
             .search("c", None, &HashSet::new())
             .iter()
             .all(|f| f.matched.is_empty()));
+    }
+
+    /// `text:` inside a pack as in the search: the start of the last word,
+    /// typos, inside a word; the best matches first, each kind in pack
+    /// order; and the words `x:` offers.
+    #[test]
+    fn text_values_and_words_in_a_pack() {
+        let texts = ["bobcats", "cast", "caats", "catsup", "cats", "CATS!", "dogs"];
+        let items: Vec<ItemSummary> = texts
+            .iter()
+            .enumerate()
+            .map(|(n, t)| ItemSummary {
+                text: t.to_string(),
+                ..item(&n.to_string())
+            })
+            .collect();
+        let w = Within::new(&items, None, None);
+        let none = HashSet::new();
+        let find = |q: &str| ids(&items, &w.search(q, None, &none));
+        assert_eq!(
+            find("x:cats"),
+            ["4", "5", "3", "2", "1", "0"],
+            "exact, start, squashed, typo, inside"
+        );
+        assert_eq!(find("x:c"), ["1", "2", "3", "4", "5"], "starts: in pack order");
+        assert_eq!(find("-x:cat"), ["0", "1", "2", "6"], "the word and its start only");
+        assert_eq!(find("x:cats sort:copies")[..2], ["0", "1"], "sort: alone");
+        assert_eq!(w.text_words("ca", 12), ["cats", "caats", "cast", "catsup", "bobcats"]);
+        assert_eq!(w.text_words("", 3), ["cats", "bobcats", "caats"]);
     }
 
     #[test]
