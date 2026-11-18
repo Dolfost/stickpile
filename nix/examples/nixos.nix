@@ -54,6 +54,7 @@
       ai = {
         enabled = true;
         model_dir = "/var/lib/stickpile/models";
+        download_models = true;
         text_encoder = "multilingual";
         onnxruntime_library = "/run/current-system/sw/lib/libonnxruntime.so";
         threads = 2;

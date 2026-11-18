@@ -372,6 +372,17 @@ in
                 The flake's `models` package is such a directory.
               '';
             };
+            download_models = opt types.bool true ''
+              Download the model files this section needs (the CLIP image
+              tower, the text tower of `text_encoder`, the OCR models with
+              `ocr`) into `model_dir` at start, in the background, when they
+              are missing or do not match their pinned sha256 (from
+              huggingface.co and www.modelscope.cn; docs/ai.md). A `model_dir`
+              the service cannot write to, such as the flake's `models`
+              package, is left alone (one log line if a file is missing), so
+              `true` is harmless there. `false` on a host without network
+              access, or to keep model files of your own.
+            '';
             text_encoder =
               opt
                 (types.enum [

@@ -47,6 +47,9 @@ near_duplicate_distance = 8
 [ai]
 enabled = true
 model_dir = "/var/lib/stickpile/models"
+# Download the model files this section needs into model_dir at start when
+# they are missing (docs/ai.md); false on a host without network access.
+download_models = true
 text_encoder = "multilingual"
 threads = 2
 max_keywords = 5

@@ -226,6 +226,11 @@ pub struct AiConfig {
     pub enabled: bool,
     /// Directory with the ONNX models and tokenizers (layout: docs/ai.md).
     pub model_dir: PathBuf,
+    /// Download the model files this configuration needs into `model_dir`
+    /// at start, in the background, when they are missing or do not match
+    /// their pinned sha256 (docs/ai.md). A `model_dir` the server cannot
+    /// write to is left alone.
+    pub download_models: bool,
     pub text_encoder: TextEncoder,
     /// Path to libonnxruntime; default: `ORT_DYLIB_PATH` or the system library.
     pub onnxruntime_library: Option<PathBuf>,
@@ -247,6 +252,7 @@ impl Default for AiConfig {
         AiConfig {
             enabled: false,
             model_dir: PathBuf::from("/var/lib/stickpile/models"),
+            download_models: true,
             text_encoder: TextEncoder::Clip,
             onnxruntime_library: None,
             threads: 2,
