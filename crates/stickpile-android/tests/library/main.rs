@@ -7,6 +7,7 @@ mod files;
 mod offline;
 mod perf;
 mod reading;
+mod review_ts;
 mod sync;
 mod writing;
 
