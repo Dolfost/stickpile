@@ -41,6 +41,10 @@ pub struct Opts {
     /// Build the OCR backend as configured (`ai.enabled`, `ai.ocr`), like
     /// production, instead of `text_reader`.
     pub ocr_from_config: bool,
+    /// Where `ai_from_config` / `ocr_from_config` download missing model
+    /// files from. Default: nowhere (`ModelSources::none`), so no test
+    /// reaches the network.
+    pub models: Option<stickpile_server::models::ModelSources>,
 }
 
 pub struct TestUser {
@@ -129,9 +133,16 @@ impl TestServer {
             None if opts.ocr_from_config => TextReaderSource::FromConfig,
             None => TextReaderSource::Disabled,
         };
-        let state = stickpile_server::build_state(cfg.clone(), StartOptions { enricher, text_reader })
-            .await
-            .expect("start");
+        let state = stickpile_server::build_state(
+            cfg.clone(),
+            StartOptions {
+                enricher,
+                text_reader,
+                models: opts.models.unwrap_or_else(stickpile_server::models::ModelSources::none),
+            },
+        )
+        .await
+        .expect("start");
         let cancel = CancellationToken::new();
         tokio::spawn(stickpile_server::serve_tcp(state.clone(), tcp, cancel.clone()));
         let unix = stickpile_server::bind_unix(&socket, &cfg.trusted_proxy.socket_mode).expect("bind unix");

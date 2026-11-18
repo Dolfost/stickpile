@@ -67,6 +67,9 @@ mime_guess.workspace = true
 image.workspace = true
 tempfile.workspace = true
 tokio-util = { version = "0.7.20", features = ["io", "rt"] }
+# Downloading the AI model files at start (src/models.rs); the integration
+# crates already build it.
+reqwest.workspace = true
 form_urlencoded = "1.2.2"
 qrcode = { version = "0.14.1", default-features = false }
 http-body-util = "0.1.3"

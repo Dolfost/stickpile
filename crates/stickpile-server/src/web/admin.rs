@@ -125,11 +125,28 @@ pub async fn overview(State(state): State<AppState>, ctx: AdminCtx) -> AppResult
     let storage = svc::storage(&state).await?;
     let counts = ui::job_counts(&state).await?;
     let failures = ui::recent_failures(&state, 10).await?;
-    let ai = match state.ai_status() {
+    let status = state.ai_status();
+    let ai = match status {
         AiStatus::Off => t("off"),
         AiStatus::Loading => t("loading"),
         AiStatus::Ready => t("ready"),
         AiStatus::Failed => t("failed to load (see the server log)"),
+    };
+    // The model files come first (`ai.download_models`): CLIP waits for
+    // them, or only the OCR models are missing.
+    let ai = match state.model_download() {
+        Some((done, total)) => {
+            let line = tf(
+                "downloading the models ({done} of {total} MB)",
+                &[("done", &crate::models::mb(done)), ("total", &crate::models::mb(total))],
+            );
+            if status == AiStatus::Loading {
+                line
+            } else {
+                format!("{ai}; {line}")
+            }
+        }
+        None => ai.to_string(),
     };
     let pending: u64 = counts
         .iter()

@@ -150,8 +150,17 @@ pub async fn requeue_outdated_variants(pool: &sqlx::SqlitePool) -> crate::error:
 /// this reader read them before ([`read_words`]).
 pub async fn enrich(state: &AppState, job: &JobRow) -> JobResult {
     let media_id = media_id(job)?;
-    if state.ai_status() == crate::state::AiStatus::Loading {
+    // A download takes minutes, more than the retries wait: meanwhile do
+    // what is loaded. The server's rechecks fill in the rest once the
+    // models are ready (`app::finish_ai`, `app::publish_text_reader`).
+    let downloading = state.model_download().is_some();
+    if state.ai_status() == crate::state::AiStatus::Loading && !downloading {
         return Err(JobError::Retry("the AI model is still loading".into()));
+    }
+    if state.ai().is_none() && state.text_reader().is_none() && downloading {
+        return Ok(Some(
+            json!({"skipped": "the AI models are downloading; the server's recheck reads this picture once they are ready"}),
+        ));
     }
     if state.ai().is_none() && state.text_reader().is_none() {
         return Err(JobError::Fatal(

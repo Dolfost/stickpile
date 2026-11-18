@@ -28,7 +28,9 @@ impl Ai {
 }
 
 /// Lifecycle of the AI backend. Loading CLIP and embedding the vocabulary
-/// takes seconds, so it happens in the background after startup.
+/// takes seconds, so it happens in the background after startup; so does
+/// downloading its model files first, which stays `Loading` here
+/// ([`AppState::model_download`] tells the two apart).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AiStatus {
@@ -53,6 +55,8 @@ pub struct Inner {
     /// Set once the AI backend is ready (see [`AppState::ai`]).
     pub ai: OnceLock<Ai>,
     pub ai_status: AtomicU8,
+    /// The model files being downloaded at start (`ai.download_models`).
+    pub model_download: crate::models::Progress,
     /// Reads the words in pictures for the item text (OCR), once one is
     /// available (see [`AppState::text_reader`]).
     pub text_reader: OnceLock<Arc<dyn TextReader>>,
@@ -100,6 +104,11 @@ impl AppState {
     }
     pub fn set_ai_status(&self, s: AiStatus) {
         self.0.ai_status.store(s as u8, Ordering::Release);
+    }
+    /// `(done, total)` bytes while the server downloads model files at
+    /// start, before it loads them.
+    pub fn model_download(&self) -> Option<(u64, u64)> {
+        self.0.model_download.get()
     }
     /// Image embedding space in use, if AI is loaded.
     pub fn ai_model_id(&self) -> Option<&str> {

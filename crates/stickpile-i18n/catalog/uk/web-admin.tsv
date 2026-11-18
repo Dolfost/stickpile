@@ -18,6 +18,7 @@ off	вимкнено
 loading	завантажується
 ready	працює
 failed to load (see the server log)	не вдалося завантажити (див. журнал сервера)
+downloading the models ({done} of {total} MB)	завантаження моделей ({done} з {total} МБ)
 Media on disk	Медіа на диску
 Database	База даних
 Media files	Медіафайли

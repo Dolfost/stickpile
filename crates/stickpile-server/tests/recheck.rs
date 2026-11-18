@@ -142,9 +142,16 @@ fn fields(i: &Item) -> Fields {
 /// The same data opened again, as a restart does (the HTTP server keeps
 /// the first state; both share the database).
 async fn restart(srv: &TestServer, enricher: EnricherSource, text_reader: TextReaderSource) -> AppState {
-    stickpile_server::build_state(srv.state.config.clone(), StartOptions { enricher, text_reader })
-        .await
-        .unwrap()
+    stickpile_server::build_state(
+        srv.state.config.clone(),
+        StartOptions {
+            enricher,
+            text_reader,
+            models: stickpile_server::models::ModelSources::none(),
+        },
+    )
+    .await
+    .unwrap()
 }
 
 async fn viewer(state: &AppState, username: &str) -> stickpile_server::auth::CurrentUser {

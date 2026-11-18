@@ -16,8 +16,9 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 
-use crate::config::{read_secret, Config, TextEncoder};
+use crate::config::{read_secret, Config};
 use crate::error::AppResult;
+use crate::models::{self, ModelSource, ModelSources};
 use crate::security::{self, RateLimiters};
 use crate::state::{Ai, AiStatus, AppState, Inner, LruCache};
 use crate::{api, assets, auth, db, files, index, jobs, service, web};
@@ -51,6 +52,10 @@ pub enum TextReaderSource {
 pub struct StartOptions {
     pub enricher: EnricherSource,
     pub text_reader: TextReaderSource,
+    /// Where `FromConfig` backends download missing model files from
+    /// ([`models::ModelSources::default`]: the pinned hosts; tests serve
+    /// their own).
+    pub models: models::ModelSources,
 }
 
 /// Prepare everything except listeners and background tasks: data
@@ -110,6 +115,7 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
         index: RwLock::new(stickpile_search::Index::new()),
         ai: OnceLock::new(),
         ai_status: AtomicU8::new(AiStatus::Off as u8),
+        model_download: models::Progress::default(),
         text_reader: OnceLock::new(),
         vocab,
         jobs_notify: Notify::new(),
@@ -126,22 +132,33 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
     }
     let n = index::load_all(&state).await?;
     tracing::info!("search index loaded: {n} items");
+    // The backends that load from `ai.model_dir`, and the files they need
+    // (downloaded first when missing, `ai.download_models`).
+    let ai = &state.config.ai;
+    let clip_from_files = matches!(opts.enricher, EnricherSource::FromConfig) && ai.enabled;
+    let ocr_from_files = matches!(opts.text_reader, TextReaderSource::FromConfig) && ai.enabled && ai.ocr;
+    let plan = models::plan(ai, &opts.models, clip_from_files, ocr_from_files);
+    let mut ocr_fetch = Vec::new();
     let reader = match opts.text_reader {
         TextReaderSource::Disabled => None,
         _ if !state.config.ai.ocr => None,
         TextReaderSource::Provided(r) => Some(r),
         TextReaderSource::FromConfig if !state.config.ai.enabled => None,
-        TextReaderSource::FromConfig => text_reader_from_config(&state.config).await,
+        // A few MB: checked here, so that a reader whose files are in place
+        // is there before the first `Enrich` job, as without downloads.
+        TextReaderSource::FromConfig => {
+            if plan.blocked.is_none() {
+                ocr_fetch = models::stale(&state.config.ai.model_dir, &plan.ocr).await;
+            }
+            if ocr_fetch.is_empty() {
+                load_text_reader(&state.config, &opts.models).await
+            } else {
+                None
+            }
+        }
     };
     if let Some(r) = reader {
-        tracing::info!("OCR ready: model {}", r.model_id());
-        let _ = state.text_reader.set(r);
-        // Pictures this reader never read get their text in the background.
-        match service::recheck::start_system_text(&state).await {
-            Ok(Some(r)) => tracing::info!("started recheck {} of the text of {} pictures", r.id, r.total),
-            Ok(None) => {}
-            Err(e) => tracing::error!("starting the recheck of the text: {e}"),
-        }
+        publish_text_reader(&state, r).await;
     }
     match opts.enricher {
         EnricherSource::Disabled => {}
@@ -150,19 +167,97 @@ pub async fn build_state(config: Config, opts: StartOptions) -> anyhow::Result<A
             state.set_ai_status(AiStatus::Loading);
             finish_ai(&state, Ok(e)).await;
         }
-        EnricherSource::FromConfig if !state.config.ai.enabled => {}
-        // CLIP + vocabulary embedding take seconds: serve meanwhile
-        // (search reports `semantic: false` until ready).
-        EnricherSource::FromConfig => {
-            state.set_ai_status(AiStatus::Loading);
-            let st = state.clone();
-            tokio::spawn(async move {
-                let loaded = load_clip(&st.config).await;
-                finish_ai(&st, loaded).await;
-            });
-        }
+        // CLIP + vocabulary embedding take seconds, a download minutes:
+        // serve meanwhile (search reports `semantic: false` until ready).
+        EnricherSource::FromConfig if clip_from_files => state.set_ai_status(AiStatus::Loading),
+        EnricherSource::FromConfig => {}
+    }
+    if clip_from_files || !ocr_fetch.is_empty() {
+        let st = state.clone();
+        let sources = opts.models.clone();
+        tokio::spawn(async move { load_models(st, sources, plan, ocr_fetch, clip_from_files).await });
     }
     Ok(state)
+}
+
+/// The background part of loading from `ai.model_dir`: check the CLIP
+/// files (`clip`), download what is missing or wrong (the OCR files first:
+/// they are small), then load each backend once its files are in place.
+/// CLIP loads at once when its files are fine.
+async fn load_models(st: AppState, sources: ModelSources, plan: models::Plan, ocr_fetch: Vec<ModelSource>, clip: bool) {
+    let dir = st.config.ai.model_dir.clone();
+    let clip_fetch = if clip && plan.blocked.is_none() {
+        models::stale(&dir, &plan.clip).await
+    } else {
+        Vec::new()
+    };
+    if clip && clip_fetch.is_empty() {
+        let st = st.clone();
+        let stand_in = sources.enricher.clone();
+        tokio::spawn(async move {
+            let loaded = load_enricher(&st.config, stand_in).await;
+            finish_ai(&st, loaded).await;
+        });
+    }
+    let all: Vec<ModelSource> = ocr_fetch.iter().chain(&clip_fetch).cloned().collect();
+    if all.is_empty() {
+        return;
+    }
+    let mut downloads = match models::Downloader::start(&sources, &dir, &st.model_download, &all) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::error!("cannot download the model files: {e:#}");
+            None
+        }
+    };
+    if !ocr_fetch.is_empty() {
+        if let Some(d) = downloads.as_mut() {
+            d.fetch(&ocr_fetch).await;
+        }
+        // Logs why not when files are still missing.
+        if let Some(r) = load_text_reader(&st.config, &sources).await {
+            publish_text_reader(&st, r).await;
+        }
+    }
+    if let Some(d) = downloads.as_mut() {
+        d.fetch(&clip_fetch).await;
+    }
+    if let Some(d) = downloads {
+        d.finish();
+    }
+    if !clip_fetch.is_empty() {
+        let loaded = load_enricher(&st.config, sources.enricher.clone()).await;
+        finish_ai(&st, loaded).await;
+    }
+}
+
+/// Publish the OCR backend and start the server's recheck of the pictures
+/// this reader never read.
+async fn publish_text_reader(state: &AppState, r: Arc<dyn TextReader>) {
+    tracing::info!("OCR ready: model {}", r.model_id());
+    let _ = state.text_reader.set(r);
+    match service::recheck::start_system_text(state).await {
+        Ok(Some(r)) => tracing::info!("started recheck {} of the text of {} pictures", r.id, r.total),
+        Ok(None) => {}
+        Err(e) => tracing::error!("starting the recheck of the text: {e}"),
+    }
+}
+
+/// CLIP from `ai.model_dir`, or the tests' stand-in once the files are there.
+async fn load_enricher(config: &Config, stand_in: Option<Arc<dyn Enricher>>) -> anyhow::Result<Arc<dyn Enricher>> {
+    let kind = models::text_encoder_kind(config.ai.text_encoder);
+    match stand_in {
+        Some(e) if stickpile_ai::missing_model_files(&config.ai.model_dir, kind).is_empty() => Ok(e),
+        _ => load_clip(config).await,
+    }
+}
+
+/// [`text_reader_from_config`], or the tests' stand-in once the files are there.
+async fn load_text_reader(config: &Config, sources: &ModelSources) -> Option<Arc<dyn TextReader>> {
+    match &sources.text_reader {
+        Some(r) if stickpile_ai::missing_ocr_files(&config.ai.model_dir).is_empty() => Some(r.clone()),
+        _ => text_reader_from_config(config).await,
+    }
 }
 
 /// Embed the vocabulary, publish the AI backend, load stored embeddings
@@ -278,10 +373,7 @@ async fn probe_tool(bin: &Path) -> bool {
 async fn load_clip(config: &Config) -> anyhow::Result<Arc<dyn Enricher>> {
     let opts = stickpile_ai::ClipOptions {
         model_dir: config.ai.model_dir.clone(),
-        text_encoder: match config.ai.text_encoder {
-            TextEncoder::Clip => stickpile_ai::TextEncoderKind::Clip,
-            TextEncoder::Multilingual => stickpile_ai::TextEncoderKind::Multilingual,
-        },
+        text_encoder: models::text_encoder_kind(config.ai.text_encoder),
         onnxruntime_library: config.ai.onnxruntime_library.clone(),
         threads: config.ai.threads.max(1) as usize,
     };
@@ -291,7 +383,7 @@ async fn load_clip(config: &Config) -> anyhow::Result<Arc<dyn Enricher>> {
 
 #[cfg(not(feature = "clip"))]
 async fn load_clip(config: &Config) -> anyhow::Result<Arc<dyn Enricher>> {
-    let _ = (config, TextEncoder::Clip);
+    let _ = config;
     anyhow::bail!("this build has no CLIP support (feature `clip` disabled)")
 }
 
@@ -570,6 +662,7 @@ pub async fn spawn_for_tests(mut config: Config) -> anyhow::Result<TestServerHan
         StartOptions {
             enricher: EnricherSource::Disabled,
             text_reader: TextReaderSource::Disabled,
+            models: ModelSources::none(),
         },
     )
     .await?;

@@ -11,6 +11,8 @@
 //! * [`security`] — listeners, client IP, rate limits, headers, origin checks.
 //! * [`service`] — business logic shared by [`api`] (JSON) and [`web`] (HTML).
 //! * [`jobs`] — DB-backed job queue and handlers; [`index`] — search sync.
+//! * [`models`]: the AI model files the configuration needs, downloaded at
+//!   start.
 
 pub mod api;
 pub mod app;
@@ -26,6 +28,7 @@ pub mod i18n;
 pub mod ids;
 pub mod index;
 pub mod jobs;
+pub mod models;
 pub mod security;
 pub mod service;
 pub mod state;
