@@ -1,0 +1,1 @@
+Searching the words in pictures is easier: typing x: (or text:) now offers the words written on your stickers as you type, and the search matches a word from its first letters, forgives typos and finds words inside longer words, so x:l finds LOL.
