@@ -72,35 +72,13 @@ enum Command {
     },
 }
 
-/// Problems `check-config` reports without failing: things that only matter
-/// at runtime and may legitimately be provisioned later (model downloads,
-/// secrets mounted at start).
+/// Problems `check-config` and `serve` report without failing: things that
+/// only matter at runtime and may legitimately be provisioned later
+/// (secrets mounted at start). The model files are `check-config`'s own
+/// ([`stickpile_server::models::check_config_notes`]); at start the server
+/// says itself what it downloads or why not.
 fn config_warnings(cfg: &stickpile_server::Config) -> Vec<String> {
     let mut out = Vec::new();
-    if cfg.ai.enabled {
-        let kind = match cfg.ai.text_encoder {
-            stickpile_server::config::TextEncoder::Clip => stickpile_ai::TextEncoderKind::Clip,
-            stickpile_server::config::TextEncoder::Multilingual => stickpile_ai::TextEncoderKind::Multilingual,
-        };
-        let missing = stickpile_ai::missing_model_files(&cfg.ai.model_dir, kind);
-        if !missing.is_empty() {
-            let list: Vec<String> = missing.iter().map(|p| format!("  {}", p.display())).collect();
-            out.push(format!(
-                "ai.enabled = true but model files are missing (AI stays off until they exist; \
-                 see docs/ai.md, `scripts/fetch-models.sh`):\n{}",
-                list.join("\n")
-            ));
-        }
-        let missing = stickpile_ai::missing_ocr_files(&cfg.ai.model_dir);
-        if cfg.ai.ocr && !missing.is_empty() {
-            let list: Vec<String> = missing.iter().map(|p| format!("  {}", p.display())).collect();
-            out.push(format!(
-                "ai.ocr = true but the OCR model files are missing (the words in pictures are not read \
-                 until they exist; see docs/ai.md, `scripts/fetch-models.sh`):\n{}",
-                list.join("\n")
-            ));
-        }
-    }
     let unreadable = |what: &str, p: &std::path::Path| -> Option<String> {
         match stickpile_server::config::read_secret(p) {
             Ok(s) if !s.trim().is_empty() => None,
@@ -257,6 +235,9 @@ fn main() -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Serve) {
         Command::CheckConfig => {
             let cfg = stickpile_server::Config::load(&cli.config)?;
+            for n in stickpile_server::models::check_config_notes(&cfg.ai) {
+                eprintln!("{}: {}", if n.warning { "warning" } else { "note" }, n.text);
+            }
             for w in config_warnings(&cfg) {
                 eprintln!("warning: {w}");
             }

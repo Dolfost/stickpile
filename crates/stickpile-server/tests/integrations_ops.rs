@@ -108,7 +108,7 @@ async fn healthcheck_subcommand() {
 }
 
 #[tokio::test]
-async fn check_config_warns_about_missing_models_and_secrets() {
+async fn check_config_says_what_happens_to_missing_models() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("config.toml");
     let data = dir.path().join("data");
@@ -118,42 +118,102 @@ async fn check_config_warns_about_missing_models_and_secrets() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("configuration OK"));
     assert!(!String::from_utf8_lossy(&out.stderr).contains("warning"));
 
+    // The image tower is there (the right size; check-config does not hash).
     let models = dir.path().join("models");
     std::fs::create_dir_all(models.join("clip-vit-b32")).unwrap();
-    std::fs::write(models.join(stickpile_ai::layout::VISION), b"onnx").unwrap();
-    std::fs::write(
-        &cfg,
-        format!(
-            "[server]\ndata_dir = {:?}\n[ai]\nenabled = true\nmodel_dir = {:?}\n\
-             [telegram]\nenabled = true\nbot_token_file = {:?}\n",
-            data.display().to_string(),
-            models.display().to_string(),
-            dir.path().join("missing-token").display().to_string()
-        ),
-    )
-    .unwrap();
-    let out = bin(vec!["check-config".into()], Some(cfg)).await;
-    assert!(out.status.success(), "warnings do not fail the check");
-    let err = String::from_utf8_lossy(&out.stderr);
+    let vision = std::fs::File::create(models.join(stickpile_ai::layout::VISION)).unwrap();
+    vision.set_len(351_685_709).unwrap();
+    let write = |extra: &str, model_dir: &std::path::Path| {
+        std::fs::write(
+            &cfg,
+            format!(
+                "[server]\ndata_dir = {:?}\n[ai]\nenabled = true\nmodel_dir = {:?}\n{extra}\
+                 [telegram]\nenabled = true\nbot_token_file = {:?}\n",
+                data.display().to_string(),
+                model_dir.display().to_string(),
+                dir.path().join("missing-token").display().to_string()
+            ),
+        )
+        .unwrap();
+    };
+    let check = || async {
+        let out = bin(vec!["check-config".into()], Some(cfg.clone())).await;
+        assert!(out.status.success(), "notes and warnings do not fail the check");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+
+    // Downloads on (the default), the dir writable: one note with the size.
+    write("", &models);
+    let err = check().await;
     assert!(
-        err.contains("warning: ai.enabled = true but model files are missing"),
+        err.contains(&format!(
+            "note: ai.enabled = true and 4 model files are missing or the wrong size in {}: the server \
+             downloads 269.2 MB from huggingface.co and www.modelscope.cn in the background when it starts",
+            models.display()
+        )),
         "{err}"
     );
-    assert!(
-        err.contains(stickpile_ai::layout::CLIP_TEXT) && err.contains(stickpile_ai::layout::CLIP_TOKENIZER),
-        "{err}"
-    );
-    assert!(
-        err.contains("warning: ai.ocr = true but the OCR model files are missing")
-            && err.contains(stickpile_ai::layout::OCR_DET)
-            && err.contains(stickpile_ai::layout::OCR_REC),
-        "{err}"
-    );
+    for p in [
+        stickpile_ai::layout::CLIP_TEXT,
+        stickpile_ai::layout::CLIP_TOKENIZER,
+        stickpile_ai::layout::OCR_DET,
+        stickpile_ai::layout::OCR_REC,
+    ] {
+        assert!(err.contains(&format!("{} (", models.join(p).display())), "{p}: {err}");
+    }
     assert!(
         !err.contains(stickpile_ai::layout::VISION),
         "present files are not listed: {err}"
     );
+    assert!(!err.contains("warning: ai."), "{err}");
     assert!(err.contains("telegram.bot_token_file"), "{err}");
+
+    // A model dir that does not exist yet is created at start.
+    write("", &dir.path().join("new-models"));
+    let err = check().await;
+    assert!(
+        err.contains(&format!(
+            "note: ai.enabled = true and 5 model files are missing or the wrong size in {}, which does not \
+             exist yet: the server downloads 620.9 MB",
+            dir.path().join("new-models").display()
+        )),
+        "{err}"
+    );
+
+    // Downloads off: warnings, saying why.
+    write("download_models = false\n", &models);
+    let err = check().await;
+    assert!(
+        err.contains(
+            "warning: ai.enabled = true but model files are missing or the wrong size, and the server does not \
+             download them (ai.download_models = false): AI stays off until they exist"
+        ),
+        "{err}"
+    );
+    assert!(
+        err.contains(
+            "warning: ai.ocr = true but the OCR model files are missing or the wrong size, and the server does \
+             not download them (ai.download_models = false)"
+        ) && err.contains(stickpile_ai::layout::OCR_REC),
+        "{err}"
+    );
+    assert!(!err.contains("note:"), "{err}");
+
+    // A model dir the server cannot write to (unless the tests run as root).
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&models, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(models.join("probe"), b"x").is_err() {
+        write("", &models);
+        let err = check().await;
+        assert!(
+            err.contains(&format!(
+                "and the server does not download them ({} is not writable: ",
+                models.display()
+            )),
+            "{err}"
+        );
+    }
+    std::fs::set_permissions(&models, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 #[tokio::test]
