@@ -110,6 +110,7 @@ class LibraryTilesTest {
         assertEquals(listOf("vibe:", "tag:", "set:", "by:", "e:"), SearchTerms.examples("vibe: tag: set: by: e:"))
         assertEquals(listOf("cat \"big chungus\""), SearchTerms.examples("cat \"big chungus\""))
         assertEquals(listOf("tag:a tag:b"), SearchTerms.examples("tag:a tag:b"))
+        assertEquals(listOf("x:", "x:lo"), SearchTerms.examples("x:, x:lo"))
         assertEquals("vibe:", SearchTerms.typed("vibe:"))
         assertEquals("-tag:nsfw ", SearchTerms.typed("-tag:nsfw"))
     }

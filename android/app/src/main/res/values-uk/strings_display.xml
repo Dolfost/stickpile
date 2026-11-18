@@ -61,7 +61,7 @@
     <string name="display_syntax_tag">має цей тег</string>
     <string name="display_syntax_set">у цьому наборі (його slug або назва)</string>
     <string name="display_syntax_by">у наборі цього користувача</string>
-    <string name="display_syntax_text">має ці слова на картинці, одне за одним</string>
+    <string name="display_syntax_text">має ці слова на картинці, одне за одним; друкарські помилки й слова всередині довших теж підходять, а останнє може бути лише початком (x:l знаходить lol)</string>
     <string name="display_syntax_short">скорочено vibe: tag: set: by: text:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still (статичні), animated (анімовані), video (відео)</string>
     <string name="display_syntax_is">ваші, вподобані вами, публічні</string>
@@ -73,6 +73,7 @@
     <string name="display_syntax_offers">Підказки</string>
     <string name="display_syntax_offers_values">значення, які вже вживаються, з\'являються під полем, найчастіші першими; торкніться, щоб вставити</string>
     <string name="display_syntax_offers_emoji">емодзі з назвами: ваші, потім ті, що так звуться; торкніться, щоб вставити емодзі</string>
+    <string name="display_syntax_offers_text">слова на картинках, спершу ті, що є на найбільшій кількості стікерів; торкніться, щоб вставити</string>
     <string name="display_syntax_offers_words">слово пропонує теги, настрої й набори, що його містять</string>
     <string name="display_syntax_offers_typos">друкарська помилка чи недописане значення шукає найближче</string>
 </resources>

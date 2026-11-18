@@ -64,6 +64,7 @@ class PickerSearchTest {
         assertEquals("q>70 ", PickerSearch.exampleQuery("q>70, likes>=2, copies<5"))
         assertEquals("vibe:", PickerSearch.exampleQuery("vibe: tag: set: by: e:"))
         assertEquals("v:", PickerSearch.exampleQuery("v: t: s: b: x:"))
+        assertEquals("x:", PickerSearch.exampleQuery("x:, x:lo"))
         assertEquals("text:\"no thoughts\" ", PickerSearch.exampleQuery("text:\"no thoughts\""))
         assertEquals("cat \"big chungus\" ", PickerSearch.exampleQuery("cat \"big chungus\""))
         assertEquals("tag:a tag:b ", PickerSearch.exampleQuery("tag:a tag:b"))

@@ -21,6 +21,14 @@ class HintLabelTest {
         assertEquals(HintLabel("sarcastic", null), label("sarcastic"))
         assertEquals("an emoji without a name", HintLabel("🦨", null), label("🦨"))
         assertEquals(HintLabel("tag: (t:)", null), label("tag: (t:)", HintKind.KEY))
+        assertEquals(HintLabel("text: (x:)", null), label("text: (x:)", HintKind.KEY))
         assertEquals(HintLabel("tag:reaction", null), label("tag:reaction", HintKind.FILTER))
+    }
+
+    @Test
+    fun aWordOfTheTextsIsItsLabelAlone() {
+        // x: offers the words as the index keeps them: one word, no space.
+        assertEquals(HintLabel("lol", null), label("lol"))
+        assertEquals(HintLabel("пятниця", null), label("пятниця"))
     }
 }

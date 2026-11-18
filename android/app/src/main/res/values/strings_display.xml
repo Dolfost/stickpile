@@ -60,7 +60,7 @@
     <string name="display_syntax_tag">has this tag</string>
     <string name="display_syntax_set">in this pack (its slug or name)</string>
     <string name="display_syntax_by">in a pack of this user</string>
-    <string name="display_syntax_text">has these words in the picture, one after another</string>
+    <string name="display_syntax_text">has these words in the picture, one after another; typos and words inside longer words count, and the last may be just its start (x:l finds lol)</string>
     <string name="display_syntax_short">short for vibe: tag: set: by: text:</string>
     <string name="display_syntax_type">gif, png, webp, jpeg, mp4, webm, still, animated, video</string>
     <string name="display_syntax_is">yours, liked by you, public</string>
@@ -72,6 +72,7 @@
     <string name="display_syntax_offers">Suggestions</string>
     <string name="display_syntax_offers_values">the values in use are offered under the field, most used first; tap one to put it in</string>
     <string name="display_syntax_offers_emoji">emojis with their names: yours, then those named so; tap one to put the emoji in</string>
+    <string name="display_syntax_offers_text">the words in the pictures, those on the most stickers first; tap one to put it in</string>
     <string name="display_syntax_offers_words">a word offers the tags, vibes and packs that contain it</string>
     <string name="display_syntax_offers_typos">a typo or a half-typed value searches for the closest one</string>
 </resources>

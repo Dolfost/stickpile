@@ -40,6 +40,7 @@ object SyntaxHelp {
             listOf(
                 Line("vibe: tag: set: by: e:", R.string.display_syntax_offers_values),
                 Line("e:, e:sk", R.string.display_syntax_offers_emoji),
+                Line("x:, x:lo", R.string.display_syntax_offers_text),
                 Line("rea", R.string.display_syntax_offers_words),
                 Line("vibe:sarcstic", R.string.display_syntax_offers_typos),
             ),
