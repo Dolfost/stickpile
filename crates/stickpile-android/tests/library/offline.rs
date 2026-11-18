@@ -484,6 +484,12 @@ async fn a_kept_still_inserts_into_telegram_as_a_sticker_offline() {
     assert!(lib.offline_run().await.unwrap().complete);
     server.stop();
     let field = mimes(&["image/gif", "image/*", "image/jpg", "image/png", "image/webp"]);
+    // Marked available either way, so a tap with "Prefer stickers" on works too.
+    let id = vec![still.id.clone()];
+    let telegram = "org.telegram.messenger".to_string();
+    let plain = lib.available_offline(id.clone(), telegram.clone(), keyboard(&field), false);
+    let as_sticker = lib.available_offline(id, telegram, keyboard(&field), true);
+    assert_eq!((plain, as_sticker), (vec![true], vec![true]));
     let inserted = lib
         .prepare(still.id.clone(), "org.telegram.messenger".into(), field, true)
         .await

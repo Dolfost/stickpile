@@ -248,6 +248,68 @@ async fn prepare_picks_per_target_and_accepted_types() {
     );
 }
 
+/// The sticker flag, as the keyboard sends it from "Send as a sticker" and,
+/// with "Prefer stickers" on, from a tap: Telegram and its forks get the
+/// sticker WebP; every other app, and an unknown field, gets what it gets
+/// without the flag; an item without a sticker rendition goes into Telegram
+/// as without the flag.
+#[tokio::test]
+async fn the_sticker_flag_changes_only_what_telegram_and_its_forks_get() {
+    let (server, items) = seeded_server();
+    server
+        .state()
+        .add_variant(&items[0].id, Variant::TgSticker, "image/webp", webp_bytes(32, 32, 1));
+    let dir = tempfile::tempdir().unwrap();
+    let lib = signed_in(&server, dir.path());
+    // Telegram's message field (docs/android-input.md).
+    let field = mimes(&["image/gif", "image/*", "image/jpg", "image/png", "image/webp"]);
+    let prepare =
+        |id: &str, package: &str, sticker: bool| lib.prepare(id.into(), package.into(), field.clone(), sticker);
+
+    for package in [
+        "org.telegram.messenger",
+        "org.telegram.messenger.web",
+        "org.thunderdog.challegram",
+        "tw.nekomimi.nekogram",
+        "com.radolyn.ayugram",
+    ] {
+        let s = prepare(&items[0].id, package, true).await.unwrap();
+        assert_eq!(
+            (s.variant.as_str(), s.mime_type.as_str(), s.sticker, s.target),
+            ("tg_sticker", "image/webp", true, Target::Telegram),
+            "{package}"
+        );
+        let plain = prepare(&items[0].id, package, false).await.unwrap();
+        assert_eq!(
+            (plain.variant.as_str(), plain.sticker),
+            ("original", false),
+            "{package}"
+        );
+    }
+
+    for package in [
+        "com.whatsapp",
+        "com.discord",
+        "org.thoughtcrime.securesms",
+        "com.google.android.apps.messaging",
+        "",
+    ] {
+        for item in &items[..3] {
+            let plain = prepare(&item.id, package, false).await.map_err(|e| e.kind());
+            let flagged = prepare(&item.id, package, true).await.map_err(|e| e.kind());
+            assert_eq!(flagged, plain, "{package} {}", item.name);
+        }
+    }
+
+    // No sticker rendition: the GIF and the WebP still go in as usual.
+    for item in &items[1..3] {
+        let plain = prepare(&item.id, "org.telegram.messenger", false).await.unwrap();
+        let flagged = prepare(&item.id, "org.telegram.messenger", true).await.unwrap();
+        assert_eq!(flagged, plain, "{}", item.name);
+        assert!(!flagged.sticker);
+    }
+}
+
 #[tokio::test]
 async fn prepare_works_offline_once_cached() {
     let (mut server, items) = seeded_server();
