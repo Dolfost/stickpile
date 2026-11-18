@@ -160,6 +160,6 @@ async fn review_ts_android_hints_agree_with_the_server_offers() {
         .unwrap();
     }
     println!("{table}");
-    std::fs::write("/data/stickpile/.claude/scratch/review-ts/android_table.md", &table).ok();
+    println!("{table}");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }

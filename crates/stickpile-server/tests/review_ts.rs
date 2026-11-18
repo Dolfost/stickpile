@@ -449,7 +449,7 @@ async fn review_query_table() {
         .unwrap();
     }
     println!("{table}");
-    std::fs::write("/data/stickpile/.claude/scratch/review-ts/query_table.md", &table).ok();
+    println!("{table}");
     println!("{}", problems.join("\n"));
 }
 
@@ -530,7 +530,7 @@ async fn review_offers_table() {
         .unwrap();
     }
     println!("{table}");
-    std::fs::write("/data/stickpile/.claude/scratch/review-ts/offers_table.md", &table).ok();
+    println!("{table}");
     println!("{}", problems.join("\n"));
 }
 
@@ -642,7 +642,7 @@ async fn review_leaks_after_changes() {
         }
     }
     println!("sync after the changes: {report:?}\n{table}");
-    std::fs::write("/data/stickpile/.claude/scratch/review-ts/leaks_table.md", &table).ok();
+    println!("{table}");
     assert!(leaks.is_empty(), "{}", leaks.join("\n"));
 }
 
