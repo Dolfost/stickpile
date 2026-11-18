@@ -32,7 +32,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension};
 use stickpile_api::profiles::{choose_variant, ItemShape};
 use stickpile_api::{ItemSummary, SearchHit, TargetApp, UsageEvent, User, Visibility};
-use stickpile_search::{Doc, Index, Query, SearchOptions, Viewer};
+use stickpile_search::{Doc, Index, Query, SearchOptions, TextWords, Viewer};
 
 use crate::client::ApiClient;
 use crate::offline::{OfflineFailure, OfflineUsage, Scope};
@@ -1571,15 +1571,21 @@ impl OfflineIndex {
         self.items.values()
     }
 
+    /// Who searches the cache: the account it holds (every cached item is
+    /// one the account can search, see [`doc_for`]).
+    fn viewer(&self) -> Viewer {
+        Viewer {
+            user_id: self.me.clone().unwrap_or_default(),
+            liked: HashSet::new(),
+            member_sets: HashSet::new(),
+        }
+    }
+
     /// Search with the server's query syntax (no image-content matching; the
     /// liked set is unknown offline, so `is:liked` matches nothing).
     pub fn search(&self, query: &str, target: Option<TargetApp>, limit: usize) -> Vec<SearchHit> {
         let q = Query::parse(query);
-        let viewer = Viewer {
-            user_id: self.me.clone().unwrap_or_default(),
-            liked: HashSet::new(),
-            member_sets: HashSet::new(),
-        };
+        let viewer = self.viewer();
         let opts = SearchOptions {
             limit,
             offset: 0,
@@ -1600,6 +1606,14 @@ impl OfflineIndex {
                 })
             })
             .collect()
+    }
+}
+
+/// The words written on the cached items, for the suggestion line's `x:`
+/// ([`Index::text_words`]): read from this index on each call.
+impl TextWords for OfflineIndex {
+    fn text_words(&self, typed: &str, limit: usize) -> Vec<String> {
+        self.index.text_words(typed, &self.viewer(), limit)
     }
 }
 
