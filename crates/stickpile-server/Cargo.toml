@@ -78,3 +78,5 @@ tempfile.workspace = true
 # tests/review_search.rs: the clients' offline cache and index, synced
 # from the test server.
 stickpile-core.workspace = true
+# The library the suggest endpoint is timed on (`service::search::perf`).
+stickpile-search = { workspace = true, features = ["synthetic"] }

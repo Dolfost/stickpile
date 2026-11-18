@@ -8,6 +8,11 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+[features]
+# The library the speed measurements of the crates that use this one
+# search (`stickpile_search::synthetic`).
+synthetic = []
+
 [dependencies]
 stickpile-api.workspace = true
 unicode-normalization.workspace = true

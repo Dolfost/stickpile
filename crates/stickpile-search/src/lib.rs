@@ -27,6 +27,9 @@ mod rank;
 #[cfg(test)]
 mod review_tests;
 mod store;
+#[cfg(any(test, feature = "synthetic"))]
+#[doc(hidden)]
+pub mod synthetic;
 #[cfg(test)]
 mod tests;
 mod text;

@@ -1634,4 +1634,81 @@ mod tests {
         let shown = format!("{creds:?}");
         assert!(!shown.contains("hunter2") && !shown.contains("123456"), "{shown}");
     }
+
+    /// The popup's suggestion line per keystroke on 50,000 cached items
+    /// (rule 8 of the text-search round), the vocabulary loaded as the
+    /// backend loads it (`CoreBackend::vocabulary`): the query changes
+    /// (its search command resolved) and the line is drawn.
+    /// `cargo test -p stickpile-desktop --release --lib -- --ignored --nocapture perf_popup`
+    #[test]
+    #[ignore]
+    fn perf_popup_suggestions() {
+        use std::time::Instant;
+        use stickpile_quick::{Event, Model, ModelConfig, OpenInfo};
+        use stickpile_search::synthetic;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = config_for(&dead_url(), dir.path());
+        let items: Vec<ItemSummary> = synthetic::library(50_000, 42).iter().map(synthetic::summary).collect();
+        {
+            let cache = stickpile_core::cache::Cache::open(&cfg.cache_path(), cfg.cache_max_mb).unwrap();
+            cache.bind_server(&cfg.server_url).unwrap();
+            cache
+                .set_me(&User {
+                    id: "user0".into(),
+                    username: "User0".into(),
+                    display_name: "User0".into(),
+                    role: stickpile_api::Role::User,
+                    totp_enabled: false,
+                    tailscale_login: None,
+                    created_at: 0,
+                    telegram_user_id: None,
+                    theme: Default::default(),
+                    language: None,
+                })
+                .unwrap();
+            cache.upsert_items(&items).unwrap();
+        }
+        let rt = rt();
+        let b = backend(&rt, cfg);
+        let start = Instant::now();
+        let vocab = rt.block_on(b.clone().vocabulary());
+        println!("vocabulary, cache index built: {:.2?}", start.elapsed());
+        let start = Instant::now();
+        let vocab2 = rt.block_on(b.clone().vocabulary());
+        println!("vocabulary again (once per cache change): {:.2?}", start.elapsed());
+        assert_eq!(vocab.tags, vocab2.tags);
+        let mut m = Model::new(ModelConfig::default());
+        m.handle(Event::Open(OpenInfo::default()));
+        m.handle(Event::VocabularyLoaded(vocab));
+        for typed in [
+            "vibe:",
+            "vibe:sa",
+            "t:",
+            "t:ko",
+            "e:",
+            "e:sk",
+            "x:",
+            "x:l",
+            "x:lo",
+            "x:lol",
+            "x:lool",
+            "x:ко",
+            "x:оли",
+            "x:п'ят",
+        ] {
+            let runs = 20;
+            let other = format!("a {typed}");
+            let start = Instant::now();
+            let mut line = None;
+            for i in 0..runs {
+                let q = if i % 2 == 0 { typed } else { other.as_str() };
+                m.handle(Event::QueryChanged(q.into()));
+                line = m.suggestions();
+            }
+            let per = start.elapsed() / runs;
+            let words = line.map(|l| l.words.join(" ")).unwrap_or_else(|| "none".into());
+            println!("  {typed:<10} {per:>10.2?}  {words}");
+        }
+    }
 }

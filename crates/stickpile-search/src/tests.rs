@@ -1656,3 +1656,64 @@ fn perf_synthetic_library() {
         }
     }
 }
+
+/// `text:` against a plain word of the same length (docs/search.md,
+/// "Limits and performance"): 50,000 docs with the words in their
+/// pictures ([`crate::synthetic`]), searched by `user0`, mean of 20 runs.
+/// `cargo test -p stickpile-search --release -- --ignored --nocapture perf_text`
+#[test]
+#[ignore]
+fn perf_text_search() {
+    let docs = crate::synthetic::library(50_000, 42);
+    let start = Instant::now();
+    let mut ix = Index::new();
+    for d in docs {
+        ix.upsert(d);
+    }
+    println!(
+        "n=50000: indexed in {:.2?}, vocab {}",
+        start.elapsed(),
+        ix.store.vocab_len()
+    );
+    let v = viewer("user0");
+    let time = |q: &str| {
+        let query = Query::parse(q);
+        let runs = 20;
+        let mut total = ix.search(&query, &v, &SearchOptions::default()).total;
+        let start = Instant::now();
+        for _ in 0..runs {
+            total = ix.search(&query, &v, &SearchOptions::default()).total;
+        }
+        (start.elapsed() / runs, total)
+    };
+    println!(
+        "  {:<16} {:>10} {:>7}   {:<18} {:>10} {:>7} {:>6}",
+        "plain", "", "hits", "text:", "", "hits", "ratio"
+    );
+    for (plain, text) in [
+        ("l", "x:l"),
+        ("lo", "x:lo"),
+        ("lol", "x:lol"),
+        ("lool", "x:lool"),
+        ("thou", "x:thou"),
+        ("thoughts", "x:thoughts"),
+        ("thoguhts", "x:thoguhts"),
+        ("ко", "x:ко"),
+        ("коли", "x:коли"),
+        ("оли", "x:оли"),
+        ("п'ятн", "x:п'ятн"),
+        ("п'ятниця", "x:п'ятниця"),
+        ("\"no thou\"", "x:\"no thou\""),
+        ("\"i love\"", "x:\"i love\""),
+        ("-lo", "-x:lo"),
+        ("-lool", "-x:lool"),
+        ("cat lo", "cat x:lo"),
+    ] {
+        let (tp, np) = time(plain);
+        let (tt, nt) = time(text);
+        println!(
+            "  {plain:<16} {tp:>10.2?} {np:>7}   {text:<18} {tt:>10.2?} {nt:>7} {:>6.2}",
+            tt.as_secs_f64() / tp.as_secs_f64()
+        );
+    }
+}

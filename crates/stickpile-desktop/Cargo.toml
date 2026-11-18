@@ -51,3 +51,5 @@ tempfile = { workspace = true, optional = true }
 tempfile.workspace = true
 # In-process mock server for display-free tests of the core adapter.
 stickpile-core = { workspace = true, features = ["mock"] }
+# The library the suggestion line is timed on (`backend::tests`).
+stickpile-search = { workspace = true, features = ["synthetic"] }

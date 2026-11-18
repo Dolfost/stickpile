@@ -48,6 +48,8 @@ libc = "0.2"
 
 [dev-dependencies]
 stickpile-core = { workspace = true, features = ["mock"] }
+# The library the hints are timed on (tests/library/perf.rs).
+stickpile-search = { workspace = true, features = ["synthetic"] }
 tempfile.workspace = true
 image.workspace = true
 # src/hints/review_tests.rs reads the search review's fixture.

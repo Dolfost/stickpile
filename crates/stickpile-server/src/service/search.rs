@@ -222,3 +222,72 @@ pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> App
         labels: s.labels,
     }))
 }
+
+#[cfg(test)]
+mod perf {
+    use std::collections::HashSet;
+    use std::time::Instant;
+
+    use stickpile_quick::suggest::{self, ItemValues, Suggestions, Vocabulary};
+    use stickpile_search::Index;
+
+    use crate::authz;
+
+    /// What `suggest` does per request once the member sets are read.
+    fn per_request(index: &Index, me: &str, member_sets: &HashSet<String>, typed: &str) -> Option<Suggestions> {
+        let vocab = Vocabulary::from_values(
+            index
+                .docs()
+                .filter(|d| authz::searchable(me, &d.owner_id, d.visibility, member_sets.contains(&d.set_id)))
+                .map(|d| ItemValues {
+                    vibe: d.vibe.as_deref(),
+                    tags: &d.tags,
+                    set_slug: &d.set_slug,
+                    set_name: &d.set_name,
+                    owner_username: &d.owner_username,
+                    emojis: &d.emojis,
+                    mine: d.owner_id == me,
+                }),
+        );
+        suggest::suggest(typed, &vocab)
+    }
+
+    /// The suggest endpoint per request on 50,000 items (rule 8 of the
+    /// text-search round): `user0` sees about 18,000 of them.
+    /// `cargo test -p stickpile-server --release --lib -- --ignored --nocapture perf_suggest`
+    #[test]
+    #[ignore]
+    fn perf_suggest() {
+        let mut index = Index::new();
+        for d in stickpile_search::synthetic::library(50_000, 42) {
+            index.upsert(d);
+        }
+        let member_sets = HashSet::new();
+        for typed in [
+            "vibe:",
+            "vibe:sa",
+            "t:",
+            "t:ko",
+            "e:",
+            "e:sk",
+            "x:",
+            "x:l",
+            "x:lo",
+            "x:lol",
+            "x:lool",
+            "x:ко",
+            "x:оли",
+            "x:п'ят",
+        ] {
+            let runs = 20;
+            let mut found = per_request(&index, "user0", &member_sets, typed);
+            let start = Instant::now();
+            for _ in 0..runs {
+                found = per_request(&index, "user0", &member_sets, typed);
+            }
+            let per = start.elapsed() / runs;
+            let words = found.map(|s| s.words.join(" ")).unwrap_or_else(|| "none".into());
+            println!("  {typed:<10} {per:>10.2?}  {words}");
+        }
+    }
+}
