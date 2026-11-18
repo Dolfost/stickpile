@@ -126,6 +126,11 @@ fn x_forgives_typos_and_finds_words_inside_words() {
         strs(&["joined", "koly"]),
         "the word, then a typo away"
     );
+    // A letter OCR read as its look-alike (a Latin o in a Cyrillic word,
+    // й for ї) is a typo from 4 letters.
+    let misread = index([doc("latin_o", "кoтик"), doc("short_i", "їжак")]);
+    assert_eq!(found(&misread, "x:котик"), strs(&["latin_o"]));
+    assert_eq!(found(&misread, "x:йжак"), strs(&["short_i"]));
     assert!(found(&ix, "x:ол").is_empty(), "inside a word from 3 letters");
     assert!(found(&ix, "x:hlo").is_empty(), "no typo below 4 letters");
     assert!(found(&ix, "x:zzzz").is_empty());
