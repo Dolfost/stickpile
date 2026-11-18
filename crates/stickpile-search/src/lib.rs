@@ -91,6 +91,16 @@ pub struct Viewer {
     pub member_sets: HashSet<String>,
 }
 
+impl Viewer {
+    /// Whether this viewer can search `doc`: their own, in a set they
+    /// contribute to, or public (docs/search.md, "Visibility").
+    pub fn can_search(&self, doc: &Doc) -> bool {
+        doc.visibility == Visibility::Public
+            || (!self.user_id.is_empty() && doc.owner_id == self.user_id)
+            || self.member_sets.contains(&doc.set_id)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
     /// Page size; 0 means [`DEFAULT_LIMIT`]. Not capped here (the server caps it).

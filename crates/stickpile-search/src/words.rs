@@ -8,7 +8,6 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Bound;
 
-use crate::rank::visible;
 use crate::store::{Store, TokenEntry, TEXT};
 use crate::text::{osa_start_within, osa_start_within_in, tokenize};
 use crate::Viewer;
@@ -111,7 +110,7 @@ impl Seen<'_> {
     fn visible(&mut self, doc: u32) -> bool {
         let m = &mut self.memo[doc as usize];
         if *m == 0 {
-            *m = if visible(self.viewer, &self.store.slot(doc).doc) {
+            *m = if self.viewer.can_search(&self.store.slot(doc).doc) {
                 1
             } else {
                 2

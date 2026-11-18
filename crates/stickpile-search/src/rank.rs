@@ -258,14 +258,6 @@ impl TextFilter {
     }
 }
 
-/// Whether `viewer` can search `doc`: their own, in a set they contribute
-/// to, or public (docs/search.md, "Visibility").
-pub(crate) fn visible(viewer: &Viewer, doc: &Doc) -> bool {
-    doc.visibility == Visibility::Public
-        || (!viewer.user_id.is_empty() && doc.owner_id == viewer.user_id)
-        || viewer.member_sets.contains(&doc.set_id)
-}
-
 impl<'a> Filters<'a> {
     fn new(store: &Store, q: &'a Query, viewer: &'a Viewer) -> Filters<'a> {
         let norm = |s: &String| normalize(s.trim());
@@ -295,7 +287,7 @@ impl<'a> Filters<'a> {
     fn pass(&self, idx: u32, s: &Slot) -> bool {
         let d = &s.doc;
         let q = self.q;
-        visible(self.viewer, d)
+        self.viewer.can_search(d)
             && self.texts.accepts(idx)
             && q.quality_ok(d.quality)
             && q.likes_ok(d.likes)
