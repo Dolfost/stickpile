@@ -431,14 +431,19 @@ dump is `stickpile-server backup`.
 stickpile search cat
 stickpile search 'e:😂 set:cats vibe:tired q>70 type:gif -tag:nsfw' --target telegram -n 10
 stickpile search e:skull                     # stickers with a skull emoji (💀, ☠️, ...)
+stickpile search x:lo                        # "LOL", "love", ... written in the picture
 stickpile --json search naahh
 ```
 
 The query uses the search syntax from the plan: bare words, `"phrases"`,
 `e:` (an emoji, `e:😂`, or its English name, `e:skull`, typos forgiven:
 any emoji whose name or keyword starts so), `set:`, `vibe:`, `tag:`, `type:`, `by:`, `is:mine|liked|public`,
+`text:` or `x:` (the words in the picture, one after another; typos and
+words inside longer words count, and the last may be just its start:
+`x:l` finds "lol"; [search.md](search.md#matching)),
 `q>70`, `likes>=2`, `copies>5`, `sort:recent|likes|copies|quality`, and `-` to
-negate. Words starting with a single dash after `search`/`copy` are query
+negate. A server up to 0.8.1 takes `text:` words whole, so `x:lo` sent to
+it finds the word "lo" alone. Words starting with a single dash after `search`/`copy` are query
 negations, not options (`-tag:nsfw`, `-naahh`). `-t`, `-n` and `-v` keep their
 meaning, and anything after `--` is query. With `--target`, items that cannot
 be sent to that app are marked `(!)` with the reason.

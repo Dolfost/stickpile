@@ -325,7 +325,9 @@ pub enum SetsCmd {
 #[derive(Args, Debug)]
 pub struct SearchArgs {
     /// Query words and filters (`e:😂 set:cats vibe:tired q>70 type:gif -tag:nsfw`);
-    /// `e:` takes an emoji or its English name (`e:skull`, typos forgiven)
+    /// `e:` takes an emoji or its English name (`e:skull`, typos forgiven);
+    /// `text:` (`x:`) the words in the picture, typos and words inside longer
+    /// words counting, the last also by its start (`x:l` finds "lol")
     #[arg(required = true, num_args = 1..)]
     pub query: Vec<String>,
     /// Mark results that cannot be sent to this app
