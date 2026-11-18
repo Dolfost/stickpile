@@ -18,21 +18,21 @@ use crate::Doc;
 pub struct Rng(pub u64);
 
 impl Rng {
-    pub fn next(&mut self) -> u64 {
+    pub fn step(&mut self) -> u64 {
         self.0 ^= self.0 >> 12;
         self.0 ^= self.0 << 25;
         self.0 ^= self.0 >> 27;
         self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
     }
     pub fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
+        (self.step() % n as u64) as usize
     }
     pub fn pick<'a, T>(&mut self, v: &'a [T]) -> &'a T {
         &v[self.below(v.len())]
     }
     /// In 0..1.
     pub fn unit(&mut self) -> f64 {
-        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+        (self.step() >> 11) as f64 / (1u64 << 53) as f64
     }
     pub fn chance(&mut self, p: f64) -> bool {
         self.unit() < p
@@ -467,7 +467,8 @@ pub fn caption(rng: &mut Rng) -> String {
         text.push_str(w);
     }
     if rng.chance(0.15) {
-        text.push_str(*rng.pick(&["!", "?", "...", "!!!", " 😂", "."]));
+        const ENDS: [&str; 6] = ["!", "?", "...", "!!!", " 😂", "."];
+        text.push_str(rng.pick::<&str>(&ENDS));
     }
     if rng.chance(0.5) {
         text = text.to_uppercase();
