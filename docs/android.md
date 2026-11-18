@@ -173,10 +173,18 @@ Using it:
 - Tap a sticker: it is inserted and your keyboard comes back. If the field
   does not take pictures, the chat app's share screen opens with the file;
   failing that, it is copied to the clipboard (the keyboard says which).
+  With "Prefer stickers (Telegram)" on, a tap in Telegram or one of its
+  forks inserts what Send as a sticker does: a still's 512 px sticker
+  WebP, which Telegram sends as a sticker (seen by the owner on a phone,
+  2026-11-18), and an animation's or video's WebM video sticker. A
+  sticker without a sticker version, or a field that does not take it,
+  gets the usual file, as with Send as a sticker; other apps get the
+  usual file either way.
 - Long press: the sticker's details (pack, numbers, vibe, emojis and tags,
   a tap on one searches for it; the words in the picture, line breaks
-  kept; why it is kept offline) with Send, Send as a sticker (Telegram),
-  Like or Unlike, Keep offline or Don't keep offline, and Share. The tiles
+  kept; why it is kept offline) with Send (what a tap sends), the other
+  way (Send as a sticker, or Send as a picture with "Prefer stickers"
+  on), Like or Unlike, Keep offline or Don't keep offline, and Share. The tiles
   carry the offline marks of the app ([Keeping stickers
   offline](#keeping-stickers-offline)); the keyboard has no offline
   settings of its own.
@@ -184,9 +192,11 @@ Using it:
 
 Its settings (in the app's settings): the keyboard height (the sticker
 grid at 60% to 160% of its usual height, never more than half the
-screen; it applies the next time the keyboard opens), search what is
-typed, delete what was typed when a result from it is inserted, and stay
-open after inserting.
+screen; it applies the next time the keyboard opens), prefer stickers
+(Telegram; off by default, as the desktop's `prefer_stickers`: a tap
+sends the sticker version, a long press still offers the picture), search
+what is typed, delete what was typed when a result from it is inserted,
+and stay open after inserting.
 
 ### Other keyboards
 
@@ -250,7 +260,9 @@ design; everything below is the app's side of it).
   instead of naming a network error. The keyboard marks what a pick would
   insert into the field (or share), as a plain pick or with "Send as a
   sticker" (a video whose only small enough file is its Telegram video
-  sticker is not dimmed), and starts no download of its own for the
+  sticker is not dimmed), whichever of the two a tap makes; with "Prefer
+  stickers" on that is what a tap inserts, since the sticker choice falls
+  back to the usual files. It starts no download of its own for the
   marks.
 - **Clearing.** "Clear" under "Saved pictures" deletes the other saved
   files and says how many kept files stay; "Remove kept files" (asked
@@ -832,7 +844,14 @@ Two functions in `stickpile-core`, with unit tests:
   the best rendition whose MIME type the field accepts, honouring
   wildcards (`image/*`), or none. The preference order per target is a
   table (data, not code), provisional until the by-hand results in
-  `docs/android-input.md` fill it in.
+  `docs/android-input.md` fill it in; one is in: a still sent with the
+  sticker flag goes into Telegram as its 512 px sticker WebP, and
+  Telegram sends that as a sticker (the owner, on a phone, 2026-11-18).
+  The flag (`sticker`) comes from Send as a sticker in the details, and
+  from a tap with "Prefer stickers" on (`ime.SendChoice`). With it, only
+  an app that has stickers (Telegram and its forks) gets the sticker
+  rendition first, and every other rendition stays after it in the usual
+  order; for any other app the flag changes nothing.
 
 The input method then tries, in order: `commitContent` with the prepared
 file's provider URI; else an `ACTION_SEND` intent to the editor's package;
@@ -856,8 +875,11 @@ is one process; these pieces are shared by its parts:
   through the provider, each tied to its signing certificates, and the
   pending (refused) ones. It reads the package manager: call it off the
   main thread.
-- `ime.ImeSettings`: the picker keyboard's switches (search the draft,
-  delete the draft, stay open) and its height (`ime.PickerHeight`).
+- `ime.ImeSettings`: the picker keyboard's switches (prefer stickers,
+  search the draft, delete the draft, stay open) and its height
+  (`ime.PickerHeight`), in the preferences `ime_settings`, which the
+  keyboard reads in the same process when it needs them (prefer stickers
+  on each tap and long press, the height when it opens).
 - `motion.Motions`: the moving renditions for the grids and details of
   the app and the keyboard (the bridge's `motion`, after a short wait so
   that a fling downloads nothing, at most three downloads at once), and
