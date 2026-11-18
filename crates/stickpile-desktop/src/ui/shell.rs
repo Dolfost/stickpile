@@ -196,8 +196,10 @@ struct Widgets {
     /// The selection's stats, above the footer row.
     details: gtk::Label,
     /// The values offered for the filter being typed, under the header;
-    /// it clips what does not fit instead of widening the window.
+    /// it clips what does not fit instead of widening the window, and
+    /// scrolls to keep the chosen value in view.
     suggest: gtk::ScrolledWindow,
+    suggest_view: gtk::Viewport,
     suggest_box: gtk::Box,
     /// The question over the popup (`Model::confirm`).
     confirm: ConfirmCard,
@@ -1190,6 +1192,7 @@ impl Shell {
         key.add_css_class("caption");
         key.add_css_class("stickpile-suggest-key");
         row.append(&key);
+        let mut chosen = None;
         for (i, word) in line.words.iter().enumerate() {
             let b = gtk::Button::builder()
                 .can_focus(false)
@@ -1214,10 +1217,11 @@ impl Shell {
             }
             b.add_css_class("flat");
             b.add_css_class("caption");
+            row.append(&b);
             if line.chosen == Some(i) {
                 b.add_css_class("stickpile-chosen");
+                chosen = Some(b);
             }
-            row.append(&b);
         }
         let hint = gtk::Label::new(Some(t("Tab")));
         hint.add_css_class("dim-label");
@@ -1225,6 +1229,41 @@ impl Shell {
         hint.set_margin_start(4);
         hint.set_tooltip_text(Some(t("Tab / Shift+Tab: put in the next / previous value")));
         row.append(&hint);
+        // A long line (the words written on the items, `x:un`) runs past
+        // the right edge, and Tab may choose a value there: once the line
+        // is laid out, scroll the chosen value into view. A line without
+        // one starts at its beginning.
+        let Some(adj) = self.w.suggest_view.hadjustment() else {
+            return;
+        };
+        let Some(chosen) = chosen else {
+            adj.set_value(0.0);
+            return;
+        };
+        // The first value with the key before it, the last with the hint.
+        let first = line.chosen == Some(0);
+        let last = line.chosen == Some(line.words.len() - 1);
+        let line_box = row.clone();
+        row.add_tick_callback(move |_, _| {
+            if chosen.parent().as_ref() != Some(line_box.upcast_ref()) {
+                // Drawn again since: that line scrolls itself.
+                return glib::ControlFlow::Break;
+            }
+            // Not laid out yet: the next frame.
+            if chosen.width() == 0 {
+                return glib::ControlFlow::Continue;
+            }
+            if let Some(b) = chosen.compute_bounds(&line_box) {
+                let start = if first { 0.0 } else { f64::from(b.x()) };
+                let end = if last {
+                    adj.upper()
+                } else {
+                    f64::from(b.x() + b.width())
+                };
+                adj.clamp_page(start, end);
+            }
+            glib::ControlFlow::Break
+        });
     }
 
     fn open_uri(&self, uri: &str) {
@@ -2424,11 +2463,12 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
     header.append(&count);
     let suggest_box = gtk::Box::builder().spacing(4).build();
     suggest_box.add_css_class("stickpile-suggest");
+    let suggest_view = gtk::Viewport::builder().child(&suggest_box).build();
     let suggest = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::External)
         .vscrollbar_policy(gtk::PolicyType::Never)
         .propagate_natural_height(true)
-        .child(&suggest_box)
+        .child(&suggest_view)
         .visible(false)
         .build();
     let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -2578,6 +2618,7 @@ fn build_widgets(app: &adw::Application, cfg: &ClientConfig, me: &MePage, settin
         status,
         details,
         suggest,
+        suggest_view,
         suggest_box,
         confirm,
         menu_anchor,
