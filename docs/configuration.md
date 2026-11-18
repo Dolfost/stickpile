@@ -20,7 +20,7 @@ Use systemd credentials, agenix/sops-nix or podman secrets to provide them.
 | Command | Does |
 |---|---|
 | `stickpile-server [serve]` | Run the server until SIGINT/SIGTERM (graceful shutdown). |
-| `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: missing CLIP model files when `ai.enabled`, an unreadable or empty Telegram token or git token file, a Discord token file that does not read as a token, a Signal credentials file that does not read as credentials (or none: import only), a missing `git.ssh_key_file`. Warnings name the files, never their content. |
+| `stickpile-server check-config` | Parse and validate the file, then exit. Invalid configuration fails. Problems that only matter at runtime are printed as `warning:` lines on stderr without failing: model files that are missing or the wrong size when `ai.enabled` and the server does not download them (with the reason), an unreadable or empty Telegram token or git token file, a Discord token file that does not read as a token, a Signal credentials file that does not read as credentials (or none: import only), a missing `git.ssh_key_file`. Warnings name the files, never their content. Model files the server will download at start are a `note:` line with their total size ([ai.md](ai.md#fetching)). |
 | `stickpile-server create-user <username> [--admin] [--password-file F] [--tailscale-login L]` | Create a user directly in the database (at least one of `--password-file` / `--tailscale-login`). |
 | `stickpile-server reset-password <username> --password-file F [--revoke-tokens] [--reset-totp]` | Set a new password for a user who forgot theirs; signs them out of every web session (see [deployment](deployment.md#forgotten-passwords)). |
 | `stickpile-server backup <dir>` | Full backup: every set as a set directory plus a database snapshot; safe while the server runs. See [backup.md](backup.md). |
@@ -93,9 +93,10 @@ See [media.md](media.md) and [quality.md](quality.md).
 
 ## `[ai]`
 
-See [ai.md](ai.md). The model loads in the background after startup: the
-server serves requests meanwhile and search reports `semantic: false` until it
-is ready. If loading fails, the error is logged and the server runs without
+See [ai.md](ai.md). The model loads in the background after startup, after
+downloading its files when they are missing (`download_models`): the server
+serves requests meanwhile and search reports `semantic: false` until it is
+ready. If loading fails, the error is logged and the server runs without
 AI. When the model becomes ready, media without an embedding from it are queued
 for enrichment.
 
@@ -103,13 +104,14 @@ for enrichment.
 |---|---|---|---|
 | `enabled` | bool | `false` | Load the CLIP model. |
 | `model_dir` | path | `"/var/lib/stickpile/models"` | ONNX models and tokenizers (layout in [ai.md](ai.md)). |
+| `download_models` | bool | `true` | Download the model files this section needs (the CLIP image tower, the text tower of `text_encoder`, the OCR models with `ocr`) into `model_dir` at start, in the background, when they are missing or do not match their pinned sha256, from huggingface.co and www.modelscope.cn ([ai.md](ai.md#fetching)). Nothing is downloaded when `model_dir` is not writable (one log line when files are missing). `false` on a host without network access, or to keep model files of your own. |
 | `text_encoder` | `"clip"` / `"multilingual"` | `"clip"` | English CLIP text tower, or the multilingual encoder aligned to the same image space. Switching needs no image re-embedding. |
 | `onnxruntime_library` | path | unset | `libonnxruntime.so`; default `ORT_DYLIB_PATH` or the system library. |
 | `threads` | integer | `2` | Inference threads. |
 | `vocabulary_file` | path | unset | TOML replacing (parts of) the built-in zero-shot vocabulary. Also used for vibe-synonym query expansion, even without a model. Startup fails if it is invalid. |
 | `max_keywords` | integer | `5` | AI keywords suggested per item. |
 | `max_emojis` | integer | `3` | AI emojis suggested per item. |
-| `ocr` | bool | `true` | Read the words written in pictures (OCR) into the item text, with `enabled`, using the OCR models in `model_dir/ocr/` ([ai.md](ai.md#the-reader)). Without them the server logs that once at startup and goes on. |
+| `ocr` | bool | `true` | Read the words written in pictures (OCR) into the item text, with `enabled`, using the OCR models in `model_dir/ocr/` ([ai.md](ai.md#the-reader)), downloaded first when missing (`download_models`). Without them the server logs that once at startup and goes on. |
 
 ## `[telegram]`
 

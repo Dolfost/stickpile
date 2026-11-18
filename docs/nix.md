@@ -223,6 +223,13 @@ services.stickpile.settings.ai = {
 ```
 
 These are store paths, so they are read-only, shared, and garbage-collected
-together with the system generation. The container and non-Nix installs use
-`stickpile-server fetch-models` or `scripts/fetch-models.sh` instead (see
-docs/ai.md).
+together with the system generation. The server never writes there:
+`settings.ai.download_models` (default `true`, as in the server) only
+downloads into a `model_dir` it can write to, so with a store path it does
+nothing (one log line if a file were missing). Without these packages, the
+default `model_dir = "/var/lib/stickpile/models"` lies in the service's
+`StateDirectory=` (with the default `data_dir`), and the server downloads
+the files its configuration needs there on its first start, as the
+container does ([ai.md](ai.md#fetching)). `download_models = false` keeps a
+host without network access from trying. `scripts/fetch-models.sh` still
+fills any directory by hand.

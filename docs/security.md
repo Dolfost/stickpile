@@ -199,11 +199,11 @@ All rules live in `authz.rs` and implement the visibility table of
   contours and 300 boxes per frame are processed. All of this is pure
   Rust; the two ONNX models run in the same ONNX Runtime as CLIP.
 - It runs in-process on the blocking pool, without network access. The
-  model files are fetched ahead of time with pinned sha256 hashes
-  (`scripts/fetch-models.sh`, `nix/models.nix`); the server never
-  downloads anything. Missing or broken models turn OCR off with a log
-  line; they never stop the server. There is no timeout (as for CLIP),
-  because the work is bounded as above.
+  model files have pinned sha256 hashes; the server downloads missing ones
+  at start ([AI model downloads](#ai-model-downloads)), or they are fetched
+  ahead of time (`scripts/fetch-models.sh`, `nix/models.nix`). Missing or
+  broken models turn OCR off with a log line; they never stop the server.
+  There is no timeout (as for CLIP), because the work is bounded as above.
 - The output is untrusted text: it is cleaned like any text a user types
   (control characters removed, at most 2000 characters), stored as data,
   escaped by maud in the web UI like every other field, and written to
@@ -347,10 +347,35 @@ How they are removed:
   cannot be deleted stays registered and is tried again.
 - Deleting the cache directory removes everything; the clients rebuild it.
 
+### AI model downloads
+
+With `ai.enabled` and `ai.download_models = true` (the default), the server
+makes outbound HTTPS requests at start, but only when model files its
+configuration needs are missing or wrong in `ai.model_dir`
+([ai.md](ai.md#fetching)):
+
+- Only to the URLs pinned in `stickpile_ai::MODEL_FILES`: huggingface.co
+  (CLIP, the multilingual model) and www.modelscope.cn (OCR), with the
+  redirects they answer with (their file CDNs). The certificates are
+  checked against the web PKI roots built into the binary (rustls,
+  webpki-roots). The requests carry no data of the server or its users,
+  only the `stickpile/<version>` user agent.
+- Each file is checked against its pinned size and sha256 before it is
+  renamed into place; a file that does not match is deleted, logged with
+  its URL, and never loaded. A response of another size fails as soon as
+  that shows (its length header, or a byte past the pinned size). So a
+  compromised host or CDN can withhold the models, but not change them.
+- Files already in place with the right sha256 are never fetched again. A
+  `model_dir` the server cannot write to (such as a Nix store path) is left
+  alone.
+- `ai.download_models = false` turns it off: no request is made, and the
+  files come from `scripts/fetch-models.sh` or `nix/models.nix`.
+
 ### No telemetry
 
-The server makes no outbound connections of its own. The only outbound traffic
-is what a user configures: git remotes and the Telegram Bot API
+The server makes no outbound connections of its own beyond the model
+downloads above, and only those for missing files. The rest of the outbound
+traffic is what a user configures: git remotes and the Telegram Bot API
 (integrations). AI runs in-process.
 
 ## Tailscale trust model

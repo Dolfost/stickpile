@@ -394,9 +394,14 @@ linux/arm64.
   everything else at server defaults); mount your own over it.
 - Volume `/var/lib/stickpile`, `TMPDIR` inside it, `HOME` set to it.
 - Runs as `65532:65532`. A read-only root filesystem works.
-- AI models are not in the image. Put them in `$STICKPILE_DIR/models` (see
-  docs/ai.md for `stickpile-server fetch-models` and the layout) and set
-  `ai.enabled = true`.
+- AI models are not in the image. With `ai.enabled = true` the server
+  downloads the files its configuration needs into the volume
+  (`/var/lib/stickpile/models`, that is `$STICKPILE_DIR/models`) on its first
+  start, in the background, and checks their sha256: about 621 MB with
+  `text_encoder = "clip"`, 503 MB with `"multilingual"`, OCR included
+  ([ai.md](ai.md#fetching)). Later starts find them in place. Without
+  network access, set `ai.download_models = false` and put them there
+  yourself with `scripts/fetch-models.sh` (layout in docs/ai.md).
 
 ## Release binaries
 

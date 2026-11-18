@@ -43,8 +43,10 @@ tailscale_admins = ["you@github"]
 workers = 2
 
 [ai]
-# CLIP enrichment needs the models under $STICKPILE_DIR/models
-# (docs/deployment.md, "AI models"). onnxruntime is in the image.
+# CLIP enrichment needs the models under $STICKPILE_DIR/models: with
+# enabled = true the server downloads them there on its first start (about
+# 503 MB for "multilingual", OCR included; docs/ai.md, "Fetching").
+# download_models = false without network access. onnxruntime is in the image.
 enabled = false
 model_dir = "/var/lib/stickpile/models"
 text_encoder = "multilingual"

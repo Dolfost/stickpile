@@ -28,7 +28,7 @@ AutoUpdate=registry
 # 	stickpile.db      SQLite database (users, sets, items, stats)
 # 	media/            content-addressed originals and variants
 # 	gitpacks/         clones of git-bound sets
-# 	models/           CLIP models, if ai.enabled (docs/deployment.md)
+# 	models/           AI models, downloaded at start if ai.enabled (docs/ai.md)
 # 	tmp/              upload staging (TMPDIR), same filesystem as media/
 # 	tailscale.sock    trusted listener for `tailscale serve`, created at start
 # 	config.toml       server configuration, mounted read-only below

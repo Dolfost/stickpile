@@ -200,6 +200,56 @@ Correctness checks:
 
 ## Fetching
 
+The server downloads the files itself. With `ai.enabled` and
+`ai.download_models = true` (the default), it checks at start the files its
+configuration needs: the image tower, the text tower of `text_encoder`, and
+the OCR files when `ai.ocr` is on; nothing else. A file that is missing, of
+another size or of another sha256 is downloaded from its pinned URL in
+`stickpile_ai::MODEL_FILES` (huggingface.co for CLIP and the multilingual
+model, www.modelscope.cn for OCR). This happens in the background: the
+server answers requests meanwhile, AI is "loading" (search reports
+`semantic: false`), and the admin page says "downloading the models (x of y
+MB)". The OCR files come first (12.9 MB), and OCR loads as soon as they are
+in place; CLIP loads once its files are. From then on it is an ordinary
+start: the server's own rechecks fill in the embeddings and the text of
+pictures uploaded meanwhile ([Recheck](#recheck)). An `Enrich` job that
+runs during the download does what is loaded and leaves the rest to those
+rechecks.
+
+- Each file streams into `<file>.part` next to its place, its size and
+  sha256 are checked on the way, and it is renamed into place only when
+  both match. A mismatch deletes the part file and logs an error naming the
+  file and the URL; an unverified file is never installed. A part file left
+  by a crash does not count as the model and is overwritten.
+- Each file is tried 4 times, 10, 20 and 40 s apart, then the server gives
+  up until its next start (logged). There is no resume: an attempt starts
+  over. A connection silent for 60 s fails the attempt.
+- Servers sharing a model dir take turns: the one downloading a file holds a
+  lock on its part file, and the other waits, then keeps the file it finds
+  in place.
+- At every start the server reads each needed file once to compare its
+  sha256: the OCR files before it listens, the CLIP files in the
+  background before CLIP loads (608 MB in about 0.4 s on the machine this
+  was measured on, with the files in the page cache).
+- The log says what happens: `downloading 5 model files, 620.9 MB, to
+  /var/lib/stickpile/models`, progress at most every 5 s, a line per file
+  and the result.
+
+Nothing is downloaded with `ai.download_models = false` (a host without
+network access) or when the server cannot write to `model_dir` (such as a
+Nix store path, below). Then the server logs one line when files are
+missing and goes on as before: AI or OCR stays off until the files are
+there. `stickpile-server check-config` lists the missing files and says
+whether the server will download them (and how much) or why not. It compares
+sizes only; the server also compares sha256.
+
+A file in place that does not match its pinned sha256 is replaced, with a
+log line. Files of your own at these paths, such as the fp16 CLIP exports
+mentioned above, therefore need `download_models = false`.
+
+The script and Nix still work, to fetch ahead of time or for hosts that
+should not fetch at run time.
+
 Script (curl plus sha256 verification; keeps files that are already
 correct). Every set includes the OCR files:
 
@@ -222,12 +272,15 @@ in {
 }
 ```
 
-A downloader inside the server can use `stickpile_ai::MODEL_FILES` (path,
-URL, sha256, size) and `TextEncoderKind::model_files()`.
+In the code: `stickpile_ai::MODEL_FILES` (path, URL, sha256, size) is the
+table, `TextEncoderKind::required_files()` and `stickpile_ai::OCR_FILES`
+pick the rows of a configuration, and `stickpile_server::models` downloads
+them (`plan`, `stale`, `Downloader`) and writes what `check-config` says
+about them (`check_config_notes`).
 `stickpile_ai::missing_model_files(dir, encoder)` lists what is absent, for
-`check-config` and startup errors; `stickpile_ai::missing_ocr_files(dir)`
-does the same for the OCR files (`stickpile_ai::OCR_FILES`), which are
-optional: without them the server reads no text and says so once.
+startup errors; `stickpile_ai::missing_ocr_files(dir)` does the same for
+the OCR files, which are optional: without them the server reads no text
+and says so once.
 
 ### Runtime dependency: ONNX Runtime
 
@@ -254,6 +307,7 @@ fixed. ORT telemetry is disabled.
 [ai]
 enabled = true
 model_dir = "/var/lib/stickpile/models"   # layout above
+download_models = true                    # fetch missing files at start (Fetching above)
 text_encoder = "clip"                     # or "multilingual"
 # onnxruntime_library = "/nix/store/…-onnxruntime-1.24.4/lib/libonnxruntime.so"
 threads = 2                               # intra-op threads per inference; 0 = one per core
@@ -473,14 +527,17 @@ frame grab as the representative frame).
 [the reader](#the-reader) when `ai.enabled`; `false` reads nothing. At
 startup `app::text_reader_from_config` loads it from `<model_dir>/ocr/`
 with `threads` (it takes well under a second, so startup waits for it and
-the first `Enrich` job already has it). It loads the ONNX Runtime first,
-with `onnxruntime_library`, because CLIP loads later, in the background.
-Without the files the server logs once ("ai.ocr is on, but the OCR models
-are missing (...): the words in pictures are not read") and goes on;
-`check-config` warns about them. A failed load is logged the same way and
-never stops the server; a build without the cargo feature `ocr` logs that.
-Tests give a reader through `StartOptions::text_reader`
-(`TextReaderSource::Provided`), which still obeys `ai.ocr`.
+the first `Enrich` job already has it). When the server downloads its
+files first ([Fetching](#fetching)), it loads once they are in place, and
+the server's recheck of the text reads the pictures uploaded meanwhile. It
+loads the ONNX Runtime first, with `onnxruntime_library`, because CLIP loads
+later, in the background. Without the files (and no download) the server
+logs once ("ai.ocr is on, but the OCR models are missing (...): the words
+in pictures are not read") and goes on; `check-config` warns about them. A
+failed load is logged the same way and never stops the server; a build
+without the cargo feature `ocr` logs that. Tests give a reader through
+`StartOptions::text_reader` (`TextReaderSource::Provided`), which still
+obeys `ai.ocr`.
 
 No timeout around a read, as for CLIP: a timeout around `spawn_blocking`
 would stop the waiting, not the work, and the work per frame is bounded
@@ -591,6 +648,18 @@ upgrade, the server moves such keys into the item text at startup
   write path, user, set and server scope, the queue order (an upload's
   jobs before the remaining recheck jobs), the audit and rate limit, and
   the server's own rechecks after a model change and for a new reader.
+- `tests/models.rs` (server) covers [the download at start](#fetching)
+  against a local host serving fake model files under a test table
+  (`StartOptions::models`; the test harness's default table is empty, so no
+  test reaches the network). `MockEnricher` and `MockTextReader` stand in
+  for CLIP and OCR once the files are in place. It checks: missing files
+  downloaded, verified and loaded, with the admin page's progress line and
+  the rechecks afterwards; a wrong sha256 rejected and nothing installed;
+  `download_models = false` and a read-only model dir fetching nothing;
+  only the files of the configuration fetched (English or multilingual, OCR
+  on or off); verified files kept, files of another size or sha256
+  replaced, a crash's part file not counted; two servers sharing a model
+  dir. `tests/integrations_ops.rs` checks what `check-config` says.
 - `STICKPILE_TEST_MODEL_DIR=$PWD/models cargo test -p stickpile-ai --release`
   adds the real-model tests (`tests/real_model.rs`):
   - red square vs "a red square" / "a blue square", also in Ukrainian;
