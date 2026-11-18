@@ -987,7 +987,11 @@ fn text_filter_wants_consecutive_words() {
     );
     // Only the text: the name "no thoughts" is not enough, nor a prefix.
     assert!(!sorted_ids(&ix, "text:\"no thoughts\"", &alice()).contains(&"named".to_string()));
-    assert!(sorted_ids(&ix, "text:thought", &alice()).is_empty(), "whole words");
+    assert_eq!(
+        sorted_ids(&ix, "text:thought", &alice()),
+        strs(&["apart", "between", "phrase"]),
+        "the start of a word (being typed)"
+    );
     assert!(sorted_ids(&ix, "text:nowhere", &alice()).is_empty(), "unknown word");
     assert!(sorted_ids(&ix, "text:!!!", &alice()).is_empty(), "no word at all");
     // With soft terms the filter cuts, the words rank.
@@ -1466,6 +1470,9 @@ fn incremental_index_equals_fresh_rebuild() {
         "text:cat",
         "x:\"big chungus\" -text:dog",
         "sleepy -x:cat",
+        "x:c",
+        "x:chugnus",
+        "x:\"big ch\" -x:sl",
     ];
     for q in queries {
         for v in [alice(), viewer("bob")] {
@@ -1715,5 +1722,26 @@ fn perf_text_search() {
             "  {plain:<16} {tp:>10.2?} {np:>7}   {text:<18} {tt:>10.2?} {nt:>7} {:>6.2}",
             tt.as_secs_f64() / tp.as_secs_f64()
         );
+    }
+    // The words offered for `x:` (`Index::text_words`), as `user0` and as
+    // someone who can search every doc (a client's cache of them all).
+    let everyone = Viewer {
+        user_id: "user0".into(),
+        member_sets: (0..300).map(|s| format!("set{s}")).collect(),
+        ..Viewer::default()
+    };
+    for (who, v) in [("user0", &v), ("all docs", &everyone)] {
+        println!("  text_words as {who}:");
+        for typed in [
+            "", "l", "lo", "lol", "lool", "thoguhts", "ко", "коли", "оли", "п'ят", "zzzz",
+        ] {
+            let runs = 20;
+            let mut words = ix.text_words(typed, v, 12);
+            let start = Instant::now();
+            for _ in 0..runs {
+                words = ix.text_words(typed, v, 12);
+            }
+            println!("    {typed:<10} {:>10.2?}  {}", start.elapsed() / runs, words.join(" "));
+        }
     }
 }

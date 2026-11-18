@@ -64,6 +64,50 @@ impl Kind {
     fn is_fuzzy(self) -> bool {
         matches!(self, Kind::Squash | Kind::Fuzzy)
     }
+    /// Where a `text:` match ranks, best first ([`crate::Hit::text_tier`]):
+    /// the word, a word it starts (being typed), squashed, a typo, inside
+    /// a word.
+    pub(crate) fn tier(self) -> u8 {
+        match self {
+            Kind::Exact => 0,
+            Kind::Prefix => 1,
+            Kind::Squash => 2,
+            Kind::Fuzzy => 3,
+            Kind::Substring => 4,
+        }
+    }
+}
+
+/// The match kinds [`Store::candidates`] looks for.
+#[derive(Debug, Clone, Copy)]
+struct Rule {
+    /// Prefixes from this many characters; `None`: no prefixes.
+    prefix_from: Option<usize>,
+    /// Squashed, typo and substring matches too.
+    fuzzy: bool,
+    /// Per token, keep the kind of the best [`Kind::tier`] rather than of
+    /// the best [`Kind::quality`].
+    tiered: bool,
+}
+
+/// A plain word: prefixes from 2 characters, every kind, the best quality.
+const WORD: Rule = Rule {
+    prefix_from: Some(2),
+    fuzzy: true,
+    tiered: false,
+};
+
+impl Rule {
+    /// A word of a `text:` value: a prefix from the first letter for the
+    /// last word only (the one being typed); for `-text:` the word or a
+    /// prefix only, so a typo never hides more than was meant.
+    fn text(last: bool, negated: bool) -> Rule {
+        Rule {
+            prefix_from: last.then_some(1),
+            fuzzy: !negated,
+            tiered: true,
+        }
+    }
 }
 
 struct QTok {
@@ -120,6 +164,8 @@ struct Row {
     idx: u32,
     score: f32,
     labels: u16,
+    /// [`crate::Hit::text_tier`].
+    tier: u8,
 }
 
 /// One `e:` value.
@@ -161,9 +207,7 @@ struct Filters<'a> {
     vibes: Filter<String>,
     tags: Filter<String>,
     owners: Filter<String>,
-    /// `text:` values as token-id runs; `None`: a value no doc can contain
-    /// (a word missing from the vocabulary, or no word at all).
-    texts: Filter<Option<Vec<u32>>>,
+    texts: TextFilter,
     /// Token-id sequences that must not occur in any own text field.
     exclude: Vec<Vec<u32>>,
 }
@@ -173,6 +217,53 @@ fn map_filter<T, U>(f: &Filter<T>, g: impl Fn(&T) -> U) -> Filter<U> {
         any: f.any.iter().map(&g).collect(),
         none: f.none.iter().map(&g).collect(),
     }
+}
+
+/// The `text:` values, matched in the index before the docs are looked
+/// at (docs/search.md, "The item text").
+struct TextFilter {
+    /// The docs with one of the `text:` values, each with the best
+    /// [`Kind::tier`] it matched; `None` without such values.
+    any: Option<IntMap<u32, u8>>,
+    /// The docs with one of the `-text:` values, the words themselves or
+    /// a prefix of the last.
+    none: IntMap<u32, ()>,
+}
+
+impl TextFilter {
+    fn new(store: &Store, f: &Filter<String>) -> TextFilter {
+        let any = (!f.any.is_empty()).then(|| {
+            let mut docs: IntMap<u32, u8> = IntMap::default();
+            for v in &f.any {
+                for (doc, tier) in store.text_matches(v, false) {
+                    docs.entry(doc).and_modify(|t| *t = (*t).min(tier)).or_insert(tier);
+                }
+            }
+            docs
+        });
+        let mut none: IntMap<u32, ()> = IntMap::default();
+        for v in &f.none {
+            none.extend(store.text_matches(v, true).into_keys().map(|d| (d, ())));
+        }
+        TextFilter { any, none }
+    }
+
+    fn accepts(&self, idx: u32) -> bool {
+        self.any.as_ref().is_none_or(|docs| docs.contains_key(&idx)) && !self.none.contains_key(&idx)
+    }
+
+    /// [`crate::Hit::text_tier`] of a doc that passed.
+    fn tier(&self, idx: u32) -> u8 {
+        self.any.as_ref().and_then(|docs| docs.get(&idx)).copied().unwrap_or(0)
+    }
+}
+
+/// Whether `viewer` can search `doc`: their own, in a set they contribute
+/// to, or public (docs/search.md, "Visibility").
+pub(crate) fn visible(viewer: &Viewer, doc: &Doc) -> bool {
+    doc.visibility == Visibility::Public
+        || (!viewer.user_id.is_empty() && doc.owner_id == viewer.user_id)
+        || viewer.member_sets.contains(&doc.set_id)
 }
 
 impl<'a> Filters<'a> {
@@ -195,21 +286,17 @@ impl<'a> Filters<'a> {
             vibes: map_filter(&q.vibes, norm),
             tags: map_filter(&q.tags, norm),
             owners: map_filter(&q.owners, |s| s.trim().to_lowercase()),
-            texts: map_filter(&q.texts, run),
+            texts: TextFilter::new(store, &q.texts),
             exclude,
         }
     }
 
-    fn visible(&self, doc: &Doc) -> bool {
-        doc.visibility == Visibility::Public
-            || (!self.viewer.user_id.is_empty() && doc.owner_id == self.viewer.user_id)
-            || self.viewer.member_sets.contains(&doc.set_id)
-    }
-
-    fn pass(&self, s: &Slot) -> bool {
+    /// Whether the doc in slot `idx` passes.
+    fn pass(&self, idx: u32, s: &Slot) -> bool {
         let d = &s.doc;
         let q = self.q;
-        self.visible(d)
+        visible(self.viewer, d)
+            && self.texts.accepts(idx)
             && q.quality_ok(d.quality)
             && q.likes_ok(d.likes)
             && q.copies_ok(d.copies)
@@ -226,9 +313,6 @@ impl<'a> Filters<'a> {
             && self.vibes.accepts(|v| s.vibe.as_deref() == Some(v.as_str()))
             && self.tags.accepts(|v| s.tags.contains(v))
             && self.owners.accepts(|v| s.owner == *v)
-            && self
-                .texts
-                .accepts(|v| v.as_deref().is_some_and(|seq| contains_run(&s.fields[TEXT], seq)))
             && !self.excluded(s)
     }
 
@@ -278,12 +362,17 @@ impl Store {
         tf * (K1 + 1.0) / (tf + K1 * (1.0 - b + b * len as f32 / avg.max(1e-3)))
     }
 
-    /// Vocabulary tokens matching one query token, with the best match kind.
-    fn candidates(&self, q: &QTok) -> IntMap<u32, Kind> {
+    /// Vocabulary tokens matching one query token by the kinds of `rule`,
+    /// each with its best kind.
+    fn candidates(&self, q: &QTok, rule: Rule) -> IntMap<u32, Kind> {
         let mut best: IntMap<u32, Kind> = IntMap::default();
+        let better = |new: Kind, old: Kind| match rule.tiered {
+            true => new.tier() < old.tier(),
+            false => new.quality() > old.quality(),
+        };
         let mut put = |id: u32, k: Kind| {
             best.entry(id)
-                .and_modify(|e| *e = if k.quality() > e.quality() { k } else { *e })
+                .and_modify(|e| *e = if better(k, *e) { k } else { *e })
                 .or_insert(k);
         };
         if let Some(&id) = self.vocab.get(&q.text) {
@@ -293,13 +382,16 @@ impl Store {
             return best;
         }
         let n = q.chars.len();
-        if n >= 2 {
+        if rule.prefix_from.is_some_and(|from| n >= from) {
             let range = self
                 .vocab
                 .range::<str, _>((Bound::Excluded(q.text.as_str()), Bound::Unbounded));
             for (_, &id) in range.take_while(|(k, _)| k.starts_with(&q.text)) {
                 put(id, Kind::Prefix);
             }
+        }
+        if !rule.fuzzy {
+            return best;
         }
         if let Some(ids) = self.squashed.get(&squash_key(&q.text)) {
             for &id in ids {
@@ -357,10 +449,70 @@ impl Store {
         best
     }
 
+    /// The docs whose text has the `text:` value `value`, each with the
+    /// [`Kind::tier`] it matched: each word by its kinds ([`Rule::text`]),
+    /// several words one after another in the text, a phrase as well as
+    /// its weakest word, in its best place. `negated`: for `-text:`.
+    fn text_matches(&self, value: &str, negated: bool) -> IntMap<u32, u8> {
+        let mut out: IntMap<u32, u8> = IntMap::default();
+        let toks = prepare(value);
+        let n = toks.len();
+        let cands: Vec<IntMap<u32, Kind>> = toks
+            .iter()
+            .enumerate()
+            .map(|(i, t)| self.candidates(t, Rule::text(i + 1 == n, negated)))
+            .collect();
+        if n == 0 || cands.iter().any(IntMap::is_empty) {
+            return out;
+        }
+        let in_text = |c: &IntMap<u32, Kind>| -> Vec<(u32, u8)> {
+            c.iter()
+                .flat_map(|(id, k)| {
+                    self.tokens[*id as usize]
+                        .postings
+                        .iter()
+                        .filter(|p| p.field as usize == TEXT)
+                        .map(|p| (p.doc, k.tier()))
+                })
+                .collect()
+        };
+        if n == 1 {
+            for (doc, tier) in in_text(&cands[0]) {
+                out.entry(doc).and_modify(|t| *t = (*t).min(tier)).or_insert(tier);
+            }
+            return out;
+        }
+        // A phrase: the texts with its rarest word, read word by word.
+        let postings_of = |c: &IntMap<u32, Kind>| {
+            c.keys()
+                .map(|id| self.tokens[*id as usize].postings.len())
+                .sum::<usize>()
+        };
+        let pivot = (0..n).min_by_key(|&i| postings_of(&cands[i])).unwrap_or(0);
+        let mut docs: Vec<u32> = in_text(&cands[pivot]).into_iter().map(|(d, _)| d).collect();
+        docs.sort_unstable();
+        docs.dedup();
+        for doc in docs {
+            let best = self.slot(doc).fields[TEXT]
+                .iter()
+                .flat_map(|v| v.windows(n))
+                .filter_map(|w| {
+                    w.iter()
+                        .zip(&cands)
+                        .try_fold(0u8, |worst, (id, c)| c.get(id).map(|k| worst.max(k.tier())))
+                })
+                .min();
+            if let Some(tier) = best {
+                out.insert(doc, tier);
+            }
+        }
+        out
+    }
+
     fn term_hits(&self, term: &Term) -> IntMap<u32, TermHit> {
         let mut hits: IntMap<u32, TermHit> = IntMap::default();
         if let [tok] = term.toks.as_slice() {
-            for (id, kind) in self.candidates(tok) {
+            for (id, kind) in self.candidates(tok, WORD) {
                 let e = &self.tokens[id as usize];
                 let (q, idf) = (kind.quality(), self.idf(e.df));
                 for p in &e.postings {
@@ -372,7 +524,7 @@ impl Store {
             return hits;
         }
         // Phrase: consecutive tokens inside one field value.
-        let cands: Vec<IntMap<u32, Kind>> = term.toks.iter().map(|t| self.candidates(t)).collect();
+        let cands: Vec<IntMap<u32, Kind>> = term.toks.iter().map(|t| self.candidates(t, WORD)).collect();
         if cands.iter().any(IntMap::is_empty) {
             return hits;
         }
@@ -499,7 +651,7 @@ impl Store {
         };
         let mut lexical: Vec<(u32, f32)> = acc
             .iter()
-            .filter(|(d, _)| filters.pass(self.slot(**d)))
+            .filter(|(d, _)| filters.pass(**d, self.slot(**d)))
             .map(|(d, a)| {
                 // Coordination: reward docs that match more of the user's terms;
                 // expansion-only matches count as half a term.
@@ -520,7 +672,7 @@ impl Store {
                     let Some(e) = slot.doc.embedding.as_deref() else {
                         continue;
                     };
-                    if e.len() != qv.len() || !filters.pass(slot) {
+                    if e.len() != qv.len() || !filters.pass(idx as u32, slot) {
                         continue;
                     }
                     let c = dot(&qv, e);
@@ -535,21 +687,19 @@ impl Store {
         // Reciprocal-rank fusion.
         let mut fused: IntMap<u32, Row> = IntMap::default();
         let rrf = |rank: usize| 1.0 / (RRF_K + rank as f32 + 1.0);
+        let row = |idx: u32| Row {
+            idx,
+            score: 0.0,
+            labels: 0,
+            tier: filters.texts.tier(idx),
+        };
         for (rank, (idx, _)) in lexical.iter().enumerate() {
-            let r = fused.entry(*idx).or_insert(Row {
-                idx: *idx,
-                score: 0.0,
-                labels: 0,
-            });
+            let r = fused.entry(*idx).or_insert_with(|| row(*idx));
             r.score += rrf(rank);
             r.labels |= acc[idx].labels;
         }
         for (rank, (idx, _)) in vector.iter().enumerate() {
-            let r = fused.entry(*idx).or_insert(Row {
-                idx: *idx,
-                score: 0.0,
-                labels: 0,
-            });
+            let r = fused.entry(*idx).or_insert_with(|| row(*idx));
             r.score += rrf(rank);
             r.labels |= IMAGE;
         }
@@ -557,20 +707,28 @@ impl Store {
         self.page(rows, query.sort, false, opts.offset, limit)
     }
 
-    /// Filter-only query: every visible doc passing the filters.
+    /// Filter-only query: every visible doc passing the filters; with a
+    /// `text:` value, of the docs it matched.
     fn browse(&self, filters: &Filters, sort: Sort, offset: usize, limit: usize) -> Outcome {
-        let rows: Vec<Row> = self
-            .slots
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| {
-                s.as_ref().filter(|s| filters.pass(s)).map(|_| Row {
-                    idx: i as u32,
-                    score: 0.0,
-                    labels: 0,
-                })
-            })
-            .collect();
+        let row = |idx: u32| Row {
+            idx,
+            score: 0.0,
+            labels: 0,
+            tier: filters.texts.tier(idx),
+        };
+        let rows: Vec<Row> = match &filters.texts.any {
+            Some(docs) => docs
+                .keys()
+                .filter(|i| filters.pass(**i, self.slot(**i)))
+                .map(|i| row(*i))
+                .collect(),
+            None => self
+                .slots
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| s.as_ref().filter(|s| filters.pass(i as u32, s)).map(|_| row(i as u32)))
+                .collect(),
+        };
         self.page(rows, sort, true, offset, limit)
     }
 
@@ -579,8 +737,13 @@ impl Store {
             let (da, db) = (&self.slot(a.idx).doc, &self.slot(b.idx).doc);
             let by_score = || b.score.total_cmp(&a.score);
             let primary = match sort {
-                Sort::Relevance if browse => db.copies.cmp(&da.copies).then_with(|| db.likes.cmp(&da.likes)),
-                Sort::Relevance => by_score(),
+                // How well a `text:` value matched, then as without one.
+                Sort::Relevance if browse => a
+                    .tier
+                    .cmp(&b.tier)
+                    .then_with(|| db.copies.cmp(&da.copies))
+                    .then_with(|| db.likes.cmp(&da.likes)),
+                Sort::Relevance => a.tier.cmp(&b.tier).then_with(by_score),
                 Sort::Recent => db.updated_at.cmp(&da.updated_at).then_with(by_score),
                 Sort::Likes => db.likes.cmp(&da.likes).then_with(by_score),
                 Sort::Copies => db.copies.cmp(&da.copies).then_with(by_score),
@@ -612,6 +775,7 @@ impl Store {
                     .filter(|(i, _)| r.labels & (1 << i) != 0)
                     .map(|(_, l)| *l)
                     .collect(),
+                text_tier: r.tier,
             })
             .collect();
         Outcome { hits, total }

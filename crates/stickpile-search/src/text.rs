@@ -226,19 +226,49 @@ pub(crate) fn osa_within(a: &[char], b: &[char], max: usize) -> Option<usize> {
     if a.len().abs_diff(b.len()) > max {
         return None;
     }
+    osa_start_within(a, b, b.len(), max)
+}
+
+/// The smallest optimal string alignment distance between `a` and a start
+/// of `b` at least `from` characters long (`b[..k]`, `from <= k <=
+/// b.len()`), if it is `<= max`.
+pub(crate) fn osa_start_within(a: &[char], b: &[char], from: usize, max: usize) -> Option<usize> {
     const STACK: usize = 48;
     let m = b.len();
+    if from > m {
+        return None;
+    }
     if m < STACK {
         let mut rows = [[0usize; STACK]; 3];
-        osa_rows(a, b, max, &mut rows)
+        osa_rows(a, b, from, max, &mut rows)
     } else {
         let mut rows = [vec![0usize; m + 1], vec![0usize; m + 1], vec![0usize; m + 1]];
-        osa_rows(a, b, max, &mut rows)
+        osa_rows(a, b, from, max, &mut rows)
     }
 }
 
-/// Three DP rows (two back, one back, current), each at least `b.len() + 1` long.
-fn osa_rows<R: AsMut<[usize]>>(a: &[char], b: &[char], max: usize, rows: &mut [R; 3]) -> Option<usize> {
+/// [`osa_start_within`] in `rows`, grown as needed: for many words in a row.
+pub(crate) fn osa_start_within_in(
+    a: &[char],
+    b: &[char],
+    from: usize,
+    max: usize,
+    rows: &mut [Vec<usize>; 3],
+) -> Option<usize> {
+    let m = b.len();
+    if from > m {
+        return None;
+    }
+    for r in rows.iter_mut().filter(|r| r.len() <= m) {
+        r.resize(m + 1, 0);
+    }
+    osa_rows(a, b, from, max, rows)
+}
+
+/// Three DP rows (two back, one back, current), each at least `b.len() + 1`
+/// long. The last row holds the distances between `a` and every start of
+/// `b`; the smallest from `from` characters on counts.
+fn osa_rows<R: AsMut<[usize]>>(a: &[char], b: &[char], from: usize, max: usize, rows: &mut [R; 3]) -> Option<usize> {
     let m = b.len();
     let [r0, r1, r2] = rows;
     let (mut prev2, mut prev, mut cur) = (r0.as_mut(), r1.as_mut(), r2.as_mut());
@@ -262,7 +292,7 @@ fn osa_rows<R: AsMut<[usize]>>(a: &[char], b: &[char], max: usize, rows: &mut [R
         }
         (prev2, prev, cur) = (prev, cur, prev2);
     }
-    Some(prev[m]).filter(|d| *d <= max)
+    prev[from..=m].iter().copied().min().filter(|d| *d <= max)
 }
 
 /// Dot product with independent accumulators so it vectorises.

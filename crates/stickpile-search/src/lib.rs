@@ -9,7 +9,11 @@
 //!    unlisted sets are never searchable by non-owners) cut the candidate
 //!    set. An `e:` value is an emoji or a name ([`emoji_names::by_name`]:
 //!    `e:skull` is 💀 or ☠️, ...). A `text:` value's words must appear in
-//!    the item's text, consecutive, after normalisation.
+//!    the item's text, consecutive, each matched as plain words are (a
+//!    typo, squashed, inside a word) and the last also by its start (it is
+//!    being typed: `x:l` finds "lol"); `-text:` takes the words or the
+//!    start of the last only. A query with a `text:` value lists the best
+//!    matches of it first ([`Hit::text_tier`]).
 //! 2. Lexical score: per-field weighted BM25-style scoring over name,
 //!    keywords, emojis (plus a small built-in emoji vocabulary, 😂 -> laugh),
 //!    vibe, tags, set name and the text (the words in the picture, weighted
@@ -21,6 +25,10 @@
 //!    and each item's image embedding.
 //! 4. Reciprocal-rank fusion of the two rankings (k = 60); ties broken by
 //!    copies, then recency. `sort:` other than relevance overrides the order.
+//!
+//! The words written on the items are offered while a `text:` value is
+//! typed ([`Index::text_words`], [`TextWords`]): those of the items the
+//! viewer can search, most common first.
 
 pub mod emoji_names;
 mod rank;
@@ -33,6 +41,9 @@ pub mod synthetic;
 #[cfg(test)]
 mod tests;
 mod text;
+#[cfg(test)]
+mod text_tests;
+mod words;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -40,6 +51,7 @@ use std::sync::Arc;
 pub use rank::DEFAULT_LIMIT;
 pub use stickpile_api::query::{Query, Sort};
 use stickpile_api::{MediaFormat, MediaKind, Visibility};
+pub use words::{offer_tier, text_word, typo_budget};
 
 /// Everything search needs to know about one item.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +111,11 @@ pub struct Hit {
     /// `name`, `keyword`, `emoji`, `vibe`, `tag`, `set`, `fuzzy`, `expansion`,
     /// `image`, `text`.
     pub matched: Vec<&'static str>,
+    /// How well the item's text matched the query's `text:` values, the
+    /// first sort key of the relevance order: 0 the words themselves, 1 the
+    /// start of the last one, 2 squashed, 3 a typo, 4 inside a word; 0
+    /// without a `text:` value.
+    pub text_tier: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -151,6 +168,44 @@ impl Index {
     }
     pub fn search(&self, query: &Query, viewer: &Viewer, opts: &SearchOptions) -> Outcome {
         self.store.search(query, viewer, opts)
+    }
+
+    /// The words written on the items `viewer` can search (their `text`)
+    /// to offer while the `text:` value `typed` is typed, best first, at
+    /// most `limit`: the word itself and those starting with it, those with
+    /// it inside, those a typo or two away ([`offer_tier`]), each group the
+    /// words in the most items first (a word counts once per item), then
+    /// alphabetically. Nothing typed: the words in the most items. Words
+    /// of one letter and numbers are not offered, nor anything for a value
+    /// of several words or none ([`text_word`]). The words are as the
+    /// index keeps them: lower case, without accents and apostrophes
+    /// (`пятниця`), which find what they were written as.
+    pub fn text_words(&self, typed: &str, viewer: &Viewer, limit: usize) -> Vec<String> {
+        self.store.text_words(typed, viewer, limit)
+    }
+}
+
+/// Where the words written on the items come from for a suggestion line
+/// (`x:`): an index as one viewer searches it ([`ViewedIndex`]), a
+/// client's offline index, the items of an opened pack. Each call reads
+/// the index ([`Index::text_words`]).
+pub trait TextWords: Send + Sync {
+    /// The words to offer for the `text:` value `typed`, best first, at
+    /// most `limit` ([`Index::text_words`]).
+    fn text_words(&self, typed: &str, limit: usize) -> Vec<String>;
+}
+
+/// An index as one viewer searches it: the words of the items the viewer
+/// can search.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewedIndex<'a> {
+    pub index: &'a Index,
+    pub viewer: &'a Viewer,
+}
+
+impl TextWords for ViewedIndex<'_> {
+    fn text_words(&self, typed: &str, limit: usize) -> Vec<String> {
+        self.index.text_words(typed, self.viewer, limit)
     }
 }
 
