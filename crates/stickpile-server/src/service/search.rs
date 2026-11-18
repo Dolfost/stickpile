@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use stickpile_api::query::{Is, Query};
 use stickpile_api::{SearchHit, SearchResults, SearchSuggestions, TargetApp};
-use stickpile_quick::suggest::{self, ItemValues, Vocabulary};
-use stickpile_search::{SearchOptions, Viewer};
+use stickpile_quick::suggest::{self, Field, ItemValues, Suggestions, Vocabulary};
+use stickpile_search::{Index, SearchOptions, ViewedIndex, Viewer};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -180,37 +180,24 @@ pub async fn search(state: &AppState, viewer: &CurrentUser, params: SearchParams
 /// ([`stickpile_quick::suggest::suggest`]), from the items the viewer can
 /// search: the ones the popups have in their cache. The emojis are those
 /// of the viewer's own items, as the popups count them
-/// ([`Vocabulary::for_viewer`]).
+/// ([`Vocabulary::for_viewer`]); `x:` offers the words written on the
+/// items, read from the index ([`stickpile_search::Index::text_words`]).
 pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> AppResult<Option<SearchSuggestions>> {
     // No filter being typed: nothing to look up.
-    let token = typed.rsplit(char::is_whitespace).next().unwrap_or_default();
-    if !token.contains(':') {
+    if Field::typed(typed).is_none() {
         return Ok(None);
     }
     let member_sets = authz::member_set_ids(&state.db, viewer.id()).await?;
     let st = state.clone();
-    let me = viewer.id().to_string();
+    let viewer = Viewer {
+        user_id: viewer.id().to_string(),
+        liked: HashSet::new(),
+        member_sets,
+    };
     let typed = typed.to_string();
     let found = tokio::task::spawn_blocking(move || {
-        let vocab = {
-            let index = st.index.read().unwrap_or_else(|e| e.into_inner());
-            Vocabulary::from_values(
-                index
-                    .docs()
-                    .filter(|d| authz::searchable(&me, &d.owner_id, d.visibility, member_sets.contains(&d.set_id)))
-                    .map(|d| ItemValues {
-                        vibe: d.vibe.as_deref(),
-                        tags: &d.tags,
-                        set_slug: &d.set_slug,
-                        set_name: &d.set_name,
-                        owner_username: &d.owner_username,
-                        emojis: &d.emojis,
-                        // `e:` alone offers the emojis of the caller's own items.
-                        mine: d.owner_id == me,
-                    }),
-            )
-        };
-        suggest::suggest(&typed, &vocab)
+        let index = st.index.read().unwrap_or_else(|e| e.into_inner());
+        suggest_in(&index, &viewer, &typed)
     })
     .await?;
     Ok(found.map(|s| SearchSuggestions {
@@ -223,37 +210,40 @@ pub async fn suggest(state: &AppState, viewer: &CurrentUser, typed: &str) -> App
     }))
 }
 
+/// What [`suggest`] offers for `typed` from `index` to `viewer`. Only the
+/// values of the field being typed are counted, from the items the viewer
+/// can search; the words for `x:` are looked up in the index.
+pub fn suggest_in(index: &Index, viewer: &Viewer, typed: &str) -> Option<Suggestions> {
+    let field = Field::typed(typed)?;
+    let counted = |f: Field| field == f;
+    let vocab = match field {
+        Field::Type | Field::Is | Field::Sort | Field::Text => Vocabulary::default(),
+        _ => Vocabulary::from_values(index.docs().filter(|d| viewer.can_search(d)).map(|d| ItemValues {
+            vibe: d.vibe.as_deref().filter(|_| counted(Field::Vibe)),
+            tags: if counted(Field::Tag) { &d.tags } else { &[] },
+            set_slug: if counted(Field::Set) { &d.set_slug } else { "" },
+            set_name: if counted(Field::Set) { &d.set_name } else { "" },
+            owner_username: if counted(Field::Owner) { &d.owner_username } else { "" },
+            emojis: if counted(Field::Emoji) { &d.emojis } else { &[] },
+            // `e:` alone offers the emojis of the caller's own items.
+            mine: d.owner_id == viewer.user_id,
+        })),
+    };
+    suggest::suggest_with(typed, &vocab, Some(&ViewedIndex { index, viewer }))
+}
+
 #[cfg(test)]
 mod perf {
     use std::collections::HashSet;
     use std::time::Instant;
 
-    use stickpile_quick::suggest::{self, ItemValues, Suggestions, Vocabulary};
-    use stickpile_search::Index;
+    use stickpile_search::{Index, Viewer};
 
-    use crate::authz;
-
-    /// What `suggest` does per request once the member sets are read.
-    fn per_request(index: &Index, me: &str, member_sets: &HashSet<String>, typed: &str) -> Option<Suggestions> {
-        let vocab = Vocabulary::from_values(
-            index
-                .docs()
-                .filter(|d| authz::searchable(me, &d.owner_id, d.visibility, member_sets.contains(&d.set_id)))
-                .map(|d| ItemValues {
-                    vibe: d.vibe.as_deref(),
-                    tags: &d.tags,
-                    set_slug: &d.set_slug,
-                    set_name: &d.set_name,
-                    owner_username: &d.owner_username,
-                    emojis: &d.emojis,
-                    mine: d.owner_id == me,
-                }),
-        );
-        suggest::suggest(typed, &vocab)
-    }
+    use super::suggest_in;
 
     /// The suggest endpoint per request on 50,000 items (rule 8 of the
-    /// text-search round): `user0` sees about 18,000 of them.
+    /// text-search round), once the member sets are read: `user0` sees
+    /// about 18,000 of them.
     /// `cargo test -p stickpile-server --release --lib -- --ignored --nocapture perf_suggest`
     #[test]
     #[ignore]
@@ -262,7 +252,11 @@ mod perf {
         for d in stickpile_search::synthetic::library(50_000, 42) {
             index.upsert(d);
         }
-        let member_sets = HashSet::new();
+        let viewer = Viewer {
+            user_id: "user0".into(),
+            liked: HashSet::new(),
+            member_sets: HashSet::new(),
+        };
         for typed in [
             "vibe:",
             "vibe:sa",
@@ -278,12 +272,14 @@ mod perf {
             "x:ко",
             "x:оли",
             "x:п'ят",
+            "x:thoguhts",
+            "x:zzzz",
         ] {
             let runs = 20;
-            let mut found = per_request(&index, "user0", &member_sets, typed);
+            let mut found = suggest_in(&index, &viewer, typed);
             let start = Instant::now();
             for _ in 0..runs {
-                found = per_request(&index, "user0", &member_sets, typed);
+                found = suggest_in(&index, &viewer, typed);
             }
             let per = start.elapsed() / runs;
             let words = found.map(|s| s.words.join(" ")).unwrap_or_else(|| "none".into());

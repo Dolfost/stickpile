@@ -33,9 +33,10 @@
     {"label": "moai", "set": "mine", "meta": {"name": "stone face", "emojis": ["🗿"], "vibe": "sarcastic"}},
     {"label": "long_text", "set": "mine", "meta": {"name": "wall", "text": "this is a very long caption about many things\nand somewhere deep in the middle of it there are\nsome thoughts about cats dogs frogs and ducks\nthat go on and on for a while longer still"}},
     {"label": "emoji_text", "set": "mine", "meta": {"name": "caption", "text": "😂😂 lol"}},
+    {"label": "joined", "set": "mine", "meta": {"name": "ocr joined", "text": "КОЛИВ ДОМА"}},
     {"label": "pub_skull", "set": "apub", "meta": {"name": "public skull", "emojis": ["💀"], "tags": ["reaction"], "text": "NO\nTHOUGHTS"}},
     {"label": "gif", "set": "bobs", "gif": true, "meta": {"name": "dancing", "emojis": ["💀", "😂"], "vibe": "tired", "tags": ["nsfw"], "text": "when the code works"}},
     {"label": "duck", "set": "bobs", "meta": {"name": "duck", "emojis": ["🦆"], "vibe": "happy", "text": "quack кря"}},
-    {"label": "secret", "set": "secret", "meta": {"name": "secret thoughts", "emojis": ["💀", "🦄"], "vibe": "hush", "tags": ["hidden"], "text": "no thoughts"}}
+    {"label": "secret", "set": "secret", "meta": {"name": "secret thoughts", "emojis": ["💀", "🦄"], "vibe": "hush", "tags": ["hidden"], "text": "no thoughts zyzzyva"}}
   ]
 }

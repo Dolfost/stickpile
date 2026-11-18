@@ -525,6 +525,96 @@ async fn search_suggest_offers_the_values_of_searchable_items() {
     srv.anon_get(&suggest_url("e:", None)).await.expect(401);
 }
 
+/// `x:` offers the words written on the items the caller can search, the
+/// words in the most of them first; never a word that only someone else's
+/// private sticker has (rule 6 of the text-search round).
+#[tokio::test]
+async fn search_suggest_offers_the_words_of_searchable_texts() {
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let bob = srv.user("bob").await;
+    let mine = srv.create_set(&alice, "mine", Visibility::Private).await;
+    srv.upload(
+        &alice,
+        &mine.id,
+        vec![("a.png", png(1)), ("b.png", png(2))],
+        Some(json!([{"text": "LOL what"}, {"text": "lol п'ятниця"}])),
+    )
+    .await
+    .expect(200);
+    let public = srv.create_set(&bob, "bobs", Visibility::Public).await;
+    srv.upload(
+        &bob,
+        &public.id,
+        vec![("c.png", png(3))],
+        Some(json!([{"text": "love zebra"}])),
+    )
+    .await
+    .expect(200);
+    let hidden = srv.create_set(&bob, "secret", Visibility::Private).await;
+    srv.upload(
+        &bob,
+        &hidden.id,
+        vec![("d.png", png(4))],
+        Some(json!([{"text": "zyzzyva lol lol"}])),
+    )
+    .await
+    .expect(200);
+
+    let s = suggest(&srv, &alice, "cat x:").await.unwrap();
+    assert_eq!(
+        (s.key.as_str(), s.typed.as_str(), s.start, s.chosen),
+        ("x:", "", 6, None)
+    );
+    assert_eq!(
+        s.words,
+        ["lol", "love", "what", "zebra", "пятниця"],
+        "lol in two items, bob's private one not counted"
+    );
+    assert_eq!(s.labels, vec![String::new(); s.words.len()]);
+    let s = suggest(&srv, &alice, "x:l").await.unwrap();
+    assert_eq!(
+        (s.words.as_slice(), s.chosen),
+        (["lol", "love"].map(String::from).as_slice(), None)
+    );
+    assert_eq!(
+        suggest(&srv, &alice, "x:LOL").await.unwrap().chosen,
+        Some(0),
+        "typed whole"
+    );
+    let s = suggest(&srv, &alice, "-text:п’ят").await.unwrap();
+    assert_eq!(
+        (s.key.as_str(), s.words.as_slice()),
+        ("-text:", ["пятниця".to_string()].as_slice())
+    );
+    assert_eq!(
+        suggest(&srv, &alice, "x:zyz").await,
+        None,
+        "only in bob's private sticker"
+    );
+    assert_eq!(suggest(&srv, &alice, "x:zyzzyva ").await, None);
+    assert_eq!(
+        suggest(&srv, &bob, "x:zy").await.unwrap().words,
+        ["zyzzyva"],
+        "bob's own"
+    );
+
+    // A client of 0.8.1 reads the answer: the same fields, nothing new.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct SearchSuggestions081 {
+        key: String,
+        typed: String,
+        start: u64,
+        words: Vec<String>,
+        labels: Vec<String>,
+        chosen: Option<u32>,
+    }
+    let old: Option<SearchSuggestions081> = srv.get(&alice, &suggest_url("x:l", None)).await.expect(200).json();
+    assert_eq!(old.unwrap().words, ["lol", "love"]);
+}
+
 #[tokio::test]
 async fn sync_pagination() {
     let srv = TestServer::start().await;

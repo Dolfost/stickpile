@@ -7,14 +7,16 @@
 //! /api/v1/search/suggest`); the offline side is the clients' own path: a
 //! `stickpile_core` cache synced from the server with `cache::sync`, its
 //! `OfflineIndex`, and the vocabulary the desktop backend builds from it
-//! (`Vocabulary::for_viewer(index.items(), me)`, `me` the cache's
-//! account). The popup's suggestion line is the model's
+//! (`Vocabulary::for_viewer(index.items(), me).with_texts(index)`, `me`
+//! the cache's account). The popup's suggestion line is the model's
 //! (`Model::suggestions`). Tables go to stdout (run with `--nocapture`).
+//! The text-search round added fuzzy `text:` and the words `x:` offers.
 
 mod common;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
+use std::sync::Arc;
 use std::time::Duration;
 
 use common::{gif_anim, png, read, TestServer, TestUser};
@@ -58,7 +60,7 @@ struct World {
     labels: HashMap<String, String>,
     /// Labels alice can search (all but bob's private set), in upload order.
     visible: Vec<String>,
-    offline: OfflineIndex,
+    offline: Arc<OfflineIndex>,
     /// As the desktop backend builds it from the offline index.
     vocab: Vocabulary,
     _cache_dir: tempfile::TempDir,
@@ -114,11 +116,12 @@ async fn world() -> World {
     cache.bind_server(&srv.base).unwrap();
     cache.set_me(&me).unwrap();
     cache::sync(&cache, &client, 500).await.unwrap();
-    let offline = cache.offline_index().unwrap();
+    let offline = Arc::new(cache.offline_index().unwrap());
     assert_eq!(offline.len(), visible.len(), "the cache holds what alice can search");
-    // As the desktop backend builds it: `e:` offers the viewer's emojis.
+    // As the desktop backend builds it: `e:` offers the viewer's emojis,
+    // `x:` the words of the texts read from the offline index.
     let me = cache.me().unwrap().map(|u| u.username);
-    let vocab = Vocabulary::for_viewer(offline.items(), me.as_deref());
+    let vocab = Vocabulary::for_viewer(offline.items(), me.as_deref()).with_texts(offline.clone());
     World {
         srv,
         alice,
@@ -240,7 +243,40 @@ fn queries() -> Vec<(String, Option<BTreeSet<String>>)> {
             Some(vec!["text_thoughts", "reversed", "long_text", "pub_skull"]),
         ),
         ("TEXT:thoughts", None),
-        ("text:thought", Some(vec![])),
+        (
+            "text:thought",
+            Some(vec!["text_thoughts", "reversed", "long_text", "pub_skull"]),
+        ),
+        // fuzzy text: (the text-search round)
+        ("x:l", Some(vec!["emoji_text", "long_text"])),
+        ("x:lo", Some(vec!["emoji_text", "long_text"])),
+        ("x:lool", Some(vec!["emoji_text"])),
+        (
+            "x:thou",
+            Some(vec!["text_thoughts", "reversed", "long_text", "pub_skull"]),
+        ),
+        (
+            "x:thoguhts",
+            Some(vec!["text_thoughts", "reversed", "long_text", "pub_skull"]),
+        ),
+        ("x:\"no thou\"", Some(vec!["text_thoughts", "pub_skull"])),
+        ("x:\"n thoughts\"", Some(vec![])),
+        ("x:\"when the c\"", Some(vec!["gif"])),
+        ("x:\"the code w\"", Some(vec!["gif"])),
+        ("x:коли", Some(vec!["joined"])),
+        ("x:оли", Some(vec!["joined"])),
+        ("x:КО", Some(vec!["joined"])),
+        ("x:п'ятн", Some(vec!["apos_ascii", "apos_2019", "apos_02bc"])),
+        ("x:п`ятн", Some(vec!["apos_ascii", "apos_2019", "apos_02bc"])),
+        ("x:пʼят", Some(vec!["apos_ascii", "apos_2019", "apos_02bc"])),
+        ("x:zyz", Some(vec![])),
+        ("-x:lo", None),
+        ("-x:lool", None),
+        ("-x:\"no thou\"", None),
+        ("x:th -x:thoughts", Some(vec!["gif"])),
+        ("sort:recent x:thou", None),
+        // `head` also reaches 💀's vocabulary word "dead" (a typo).
+        ("head x:thou", Some(vec!["text_thoughts", "pub_skull"])),
         ("text:\"no thoughts\"", Some(vec!["text_thoughts", "pub_skull"])),
         ("x:\"no thoughts\"", Some(vec!["text_thoughts", "pub_skull"])),
         ("text:\"thoughts head\"", Some(vec!["text_thoughts"])),
@@ -306,8 +342,10 @@ fn queries() -> Vec<(String, Option<BTreeSet<String>>)> {
         .into_iter()
         .map(|(q, want)| (q.to_string(), want.map(|w| labels(&w))))
         .collect();
-    out.push((long_value, Some(BTreeSet::new())));
-    out.push((too_long, Some(BTreeSet::new())));
+    // Squashed, `aaa...a` is the word "a" (in `long_text`), as for a plain
+    // word; the server answers 400 for the second (over 1000 bytes).
+    out.push((long_value, Some(labels(&["long_text"]))));
+    out.push((too_long, Some(labels(&["long_text"]))));
     out
 }
 
@@ -471,6 +509,20 @@ async fn every_surface_offers_the_same_values() {
         "x:",
         "text:",
         "x:кі",
+        "x:l",
+        "x:lo",
+        "x:lol",
+        "x:LOL",
+        "x:lool",
+        "x:th",
+        "-x:thou",
+        "x:thoguhts",
+        "x:ко",
+        "x:оли",
+        "x:п'ят",
+        "x:п’ятниця",
+        "x:zy",
+        "x:a-b",
         "set:\"my",
         "e:sk ",
     ];
@@ -549,6 +601,46 @@ async fn every_surface_offers_the_same_values() {
         "{own:?}"
     );
     assert_eq!(server_suggest(&w, "e:duck").await.unwrap().words[0], "🦆");
+    // `x:` offers the words of the texts alice can search, bob's public
+    // ones included (`кря`), never `zyzzyva` (only in bob's private one).
+    let words = server_suggest(&w, "x:").await.unwrap().words;
+    assert_eq!(words[0], "thoughts", "{words:?}");
+    assert!(server_suggest(&w, "x:кр")
+        .await
+        .unwrap()
+        .words
+        .contains(&"кря".to_string()));
+    assert_eq!(server_suggest(&w, "x:zy").await, None);
+    assert!(suggest::suggest("x:zy", &w.vocab).is_none());
+}
+
+/// Taking an `x:` offer puts the word in (`x:<word> `); the query then
+/// finds the same items on the server, offline and inside a pack.
+#[tokio::test]
+async fn a_chosen_text_offer_finds_its_items() {
+    let w = world().await;
+    let mut problems = Vec::new();
+    for typed in ["x:", "x:l", "x:th", "x:ко", "x:п'ят", "cat -x:lo"] {
+        let Some(s) = server_suggest(&w, typed).await else {
+            problems.push(format!("{typed:?}: no offers"));
+            continue;
+        };
+        for word in &s.words {
+            let q = format!("{}{word} ", &typed[..s.start as usize]);
+            // `resolve` leaves an x: value as typed (the key long).
+            let sent = suggest::resolve(&q, &w.vocab).0;
+            assert!(sent.ends_with(&format!("text:{word}")), "{sent}");
+            let (srv, _) = server(&w, &sent).await.unwrap();
+            let off = offline(&w, &sent);
+            if set(&srv) != set(&off) {
+                problems.push(format!("{sent:?}: server {srv:?} offline {off:?}"));
+            }
+            if !typed.contains('-') && srv.is_empty() {
+                problems.push(format!("{sent:?}: an offered word finds nothing"));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 /// Taking an `e:` offer puts the emoji in (`e:<glyph>`); the query then
@@ -640,6 +732,13 @@ async fn the_search_inside_a_pack_agrees_with_the_server() {
         "thoughts",
         "кіт",
         "is:mine e:skull",
+        "x:l",
+        "x:thoguhts",
+        "x:\"no thou\"",
+        "x:оли",
+        "x:п`ятн",
+        "-x:lo",
+        "-x:lool",
     ] {
         let (srv, _) = server(&w, &format!("{q} set:mine")).await.unwrap();
         let inside: Vec<String> = within
