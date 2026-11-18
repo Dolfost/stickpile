@@ -520,6 +520,33 @@ fn preference_table_covers_every_combination_once() {
     assert_eq!(PREFERENCES.len(), TargetApp::ALL.len() * 3 * 2);
 }
 
+/// The sticker flag is also what a tap in the Android keyboard sends with
+/// "Prefer stickers" on, as "Send as a sticker" in the details always did.
+/// For an app without stickers the flag changes nothing; for one with
+/// stickers it only puts the sticker renditions first, the others in the
+/// usual order after them, so whatever goes in without the flag can still
+/// go in with it (the keyboard's offline marks count on that).
+#[test]
+fn the_sticker_flag_only_puts_the_sticker_renditions_first() {
+    for target in TargetApp::ALL {
+        for kind in [MediaKind::Still, MediaKind::Animation, MediaKind::Video] {
+            let usual = preference_order(target, kind, false);
+            let flagged = preference_order(target, kind, true);
+            if profile(target).sticker.is_none() {
+                assert_eq!(flagged, usual, "{target:?} {kind:?}");
+                continue;
+            }
+            let stickers = flagged.iter().take_while(|v| is_sticker_rendition(**v)).count();
+            assert!(stickers > 0, "{target:?} {kind:?}");
+            let others = |order: &[Variant]| -> Vec<Variant> {
+                order.iter().copied().filter(|v| !is_sticker_rendition(*v)).collect()
+            };
+            assert_eq!(others(&flagged[stickers..]), others(usual), "{target:?} {kind:?}");
+            assert!(usual.iter().all(|v| flagged.contains(v)), "{target:?} {kind:?}");
+        }
+    }
+}
+
 // -- property: the result is always something the field listed ------------------------------------
 
 /// Independent of `field_accepts`: lower-case everything, drop parameters.

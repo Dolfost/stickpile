@@ -93,10 +93,12 @@ pub fn target_for_package(package: &str) -> TargetApp {
 /// Variants the item does not have, or whose MIME type the field does not
 /// accept, are skipped. `Thumb` is never inserted.
 ///
-/// PROVISIONAL (UNVERIFIED on Android): nothing here was observed on a
-/// phone. How each app treats a committed WebP, GIF, MP4 or WebM is to be
-/// tried by hand and recorded in docs/android-input.md; the results replace
-/// these rows. The orders come from the desktop's choice
+/// PROVISIONAL (mostly UNVERIFIED on Android): one result was observed on
+/// a phone (by the owner, 2026-11-18): a still with the sticker flag goes
+/// into Telegram's field as its 512 px sticker WebP, and Telegram sends
+/// that as a sticker. How each app treats a committed WebP, GIF, MP4 or
+/// WebM is to be tried by hand and recorded in docs/android-input.md; the
+/// results replace these rows. The orders come from the desktop's choice
 /// (`stickpile_api::profiles`, its `candidates` and each app's profile),
 /// the desktop's fallback (`stickpile_core::session::pick_variant`) and
 /// docs/clipboard.md (Telegram Desktop observed on Wayland, Discord expected
