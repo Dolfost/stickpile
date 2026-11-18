@@ -27,7 +27,7 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | `tag:reaction`, `t:reaction` | Exact tag, case-insensitive. |
 | `type:gif` | `still`/`image`, `animated`/`animation`, `video`, or a format: `png jpeg jpg webp gif mp4 webm`. |
 | `by:alice`, `b:alice`, `user:alice` | Owner username, case-insensitive. |
-| `text:"no thoughts"`, `x:thoughts` | The item text (the words written in the picture) has these words, one after another, after normalisation: whole words (`text:thought` does not find `thoughts`), no typos. Only the text: a name with the words does not count. |
+| `text:"no thoughts"`, `x:thoughts` | The item text (the words written in the picture) has these words, one after another, after normalisation. Each word matches as a plain word does (a typo, squashed, inside a word from 3 letters), and the last also by its start, from the first letter: `x:l` finds "lol", `x:"no thou"` finds "NO THOUGHTS" ([the item text](#matching)). Only the text: a name with the words does not count. |
 | `is:mine`, `is:liked`, `is:public` | Own items, items you liked, items in public sets. |
 | `q>70`, `likes>=2`, `copies<5` | Comparisons with `> >= < <= =`. Several are ANDed: `q>=50 q<90`. Items without a quality score never pass a `q` filter. |
 | `sort:relevance` (default), `sort:recent`/`new`, `sort:likes`, `sort:copies`/`used`/`popular`, `sort:quality` | Result order. |
@@ -49,12 +49,19 @@ Rules:
   after its colon yet, of any key (`vibe:`, `e:`, `x:`, `text:`), so
   `cat x:` goes out as `cat` while the value is typed.
 - `text:` values are kept lowercased in `Query.texts`; the search
-  tokenizes them like the indexed text and wants the run of tokens in the
-  item's text. A value whose words no item has finds nothing, and so does
-  a value without a word (`text:!!!`). Nothing is offered while a `text:`
-  value is typed (`stickpile_quick::suggest::Field::of` gives `None`): the
-  words are free. A server from before the text field (0.7.0) reads
-  `text:hi` as the plain words `text:hi`.
+  tokenizes them like the indexed text and wants their words one after
+  another in the item's text, each matched as described under
+  [Matching](#matching) ("The item text"). A value without a word
+  (`text:!!!`) finds nothing. `-text:` leaves out the items with the words
+  themselves or the start of the last one, never a typo or a word inside
+  another, so it hides no more than was typed. While a `text:` value is
+  typed the words written on the items are offered
+  ([Suggestions](#suggestions)); the value goes out as typed (`resolve`
+  leaves it alone: `x:lo` is not narrowed to one word). A server from
+  before the text field (0.7.0) reads `text:hi` as the plain words
+  `text:hi`; a server up to 0.8.1 takes whole words only, so a half-typed
+  `x:lo` sent to it finds the word "lo" alone, and it offers no words for
+  `x:`.
 - An `e:` value made of letters (with `_` or `-` between words) is an
   emoji name, anything else an emoji. `Query.emojis` keeps the values as
   typed (the normalised query writes `e:skull`); `stickpile-search` turns a
@@ -86,6 +93,8 @@ Rules:
   written in several ways is offered once, in one spelling
   (`emoji_names::spelling`): the table's fully qualified glyph (`☠️` for
   `☠` and `☠️`, `❤️` for `❤`) with the item's skin tone (`👍🏽`).
+- Typing `x:` or `text:` (`-x:` too) offers the words written on the
+  items the viewer can search ([Suggestions](#suggestions)).
 - Unknown `key:value` tokens are plain text, and so is a key with
   nothing after its colon: the parser reads a bare `x:` as the word `x`.
 
@@ -99,6 +108,12 @@ Examples:
 | `кіт -tag:nsfw` | Ukrainian `Кіт` in any field, without the `nsfw` tag. |
 | `thoughts` | Also items with "no thoughts" written in the picture, below those with it in their name or keywords. |
 | `text:"no thoughts"` | Items whose picture says "no thoughts" (or "NO THOUGHTS", across a line break too), not "thoughts? no". |
+| `x:"no thou"` | The same while the last word is typed: "NO THOUGHTS", "no thou shalt". |
+| `x:l`, `x:lo` | Items with a word starting with `l` (`lo`) written on them: "LOL", "love", "Literally". The ones with the word itself first. |
+| `x:lool`, `x:thoguhts` | "lol" (squashed), "thoughts" (two letters swapped). |
+| `x:оли` | "КОЛИВ" (OCR joined "КОЛИ В"): the word is inside, from 3 letters. |
+| `x:п'ятн` | "п'ятниця" written with any apostrophe (`'`, `’`, `ʼ`, a backtick), typed with any. |
+| `-x:lo` | Items without a word starting with `lo` in their text; `-x:lool` leaves out "lool" and the words it starts, not "lol". |
 | `x:кіт -tag:nsfw` | Items with `Кіт` written on them, without the `nsfw` tag. |
 | `cafe` | Also `Café`, and the other way round. |
 | `😂` | Items with 😂 in their emojis (ranked first) or in their text. |
@@ -179,7 +194,32 @@ position.
 **The item text** (`Doc::text`, the words written in the picture, read by
 OCR or typed; see [ai.md](ai.md#ocr-and-the-text-field)) is indexed as one
 value, so a phrase may run over a line break. Plain words and phrases
-match it like any field; `text:` matches it alone, exact tokens in a row.
+match it like any field. `text:` matches it alone, its words one after
+another, each by the kinds above (the same candidates, `Store::candidates`,
+restricted to the text), with two differences:
+
+- The last word also matches by its start from the first letter, not
+  from 2 (`x:l` finds "lol"): it is the word being typed. A word before
+  it does not match by its start (`x:"n thoughts"` finds nothing), but a
+  typo, squashed or inside a word still count (`x:"no thougths head"`).
+- `-text:` leaves out the words themselves and the start of the last
+  word only, never a typo, squashed or inside a word.
+
+The words of a value are matched in the index before the items are looked
+at (the postings of the text field), so `text:` alone does not read every
+item. A query with a `text:` value lists the items by how well the value
+matched (`Hit::text_tier`, best first): the words themselves, the start
+of the last, squashed, a typo, inside a word; then as without it (see
+[Fusion and order](#fusion-and-order)). Several values (`x:lo x:ha`, an
+OR): the best of an item's. A phrase counts as its weakest word, in its
+best place in the text. `sort:` decides alone. A filter adds no label to
+`Hit::matched`: the label stays `text`, for plain words that matched the
+text.
+
+OCR quirks the matching meets: words OCR joined (`КОЛИВ` for "КОЛИ В")
+are found by a part from 3 letters (`x:оли`, `x:коли`); one letter read as
+a look-alike (a Latin `o` in a Cyrillic word, `й` for `ї`) is a typo from
+4 letters.
 
 ### Emoji names
 
@@ -318,6 +358,11 @@ it to about 0.2–0.25 for ViT-B/32, in line with
   visible document that passes the filters. They are ordered by copies,
   likes, then `updated_at` (all descending), with score 0. Expansions and
   the embedding are ignored.
+- **`text:`** A query with a `text:` value lists first the items it
+  matched best (`Hit::text_tier`: the words, the start of the last,
+  squashed, a typo, inside a word; see [the item text](#matching)), each
+  group in the order above (by score, or for filters only by copies and
+  likes).
 - **`sort:`** `recent`, `likes`, `copies` and `quality` override the order
   for any query but never add results. Ties fall back to the fused score,
   then the tie-breaks above. Items without a quality score sort last.
@@ -330,6 +375,49 @@ it to about 0.2–0.25 for ViT-B/32, in line with
 (the best match for some user term was fuzzy or squashed); `expansion`;
 `image`; `text` (a user term matched the item text; last, so the order of
 the older labels stays).
+
+## Suggestions
+
+While a `key:value` filter is typed, the suggestion line under the search
+field offers its values (`stickpile_quick::suggest`; the vibes, tags,
+packs, owners, emojis and fixed words are described under
+[Query syntax](#query-syntax)). For `x:` and `text:` (`-x:` too) it offers
+the words written on the items, the text that OCR read or a person typed:
+
+- The words of the items the viewer can search (own items, the sets the
+  viewer contributes to, public sets; `Viewer::can_search`). A word that
+  only someone else's private item has is never offered, by the server or
+  by a client: the server counts the caller's items only, a client's
+  cache holds no others.
+- Each word counts once per item ("lol lol lol" is one), and the words in
+  the most items come first. `x:` alone offers those.
+- A value typed offers, in this order, the word itself and the words it
+  starts (`x:l`: "lol", "love"), the words it is inside (from 2 letters:
+  `x:оли`: "колив"), the words whose start is a typo or two away (one
+  from 3 letters, two from 6: `x:lvoe`: "love"); each group the words in
+  the most items first, then alphabetically. This is the order the line
+  gives tags and vibes (`stickpile_search::offer_tier`).
+- Words of one letter and numbers alone are not offered, nor anything
+  for a value of several words (`x:a-b`).
+- The words are as the index keeps them: lower case, without accents and
+  apostrophes (`x:п'ят` offers `пятниця`), which find what they were
+  written as.
+- Taking one puts the word and a space in place of the value (`x:lol `),
+  as for tags. The search takes a `text:` value as typed (the matching
+  forgives a half-typed or misspelled word): `resolve` leaves it alone,
+  and `chosen` marks only the word typed whole (`x:LOL` marks "lol"),
+  a hint.
+
+The words are read from the search index, not copied: `Index::text_words`
+reads the postings of the text field and the ordered vocabulary on each
+call, through the `stickpile_search::TextWords` trait. The server answers
+`GET /api/v1/search/suggest` from its index for the caller
+(`ViewedIndex`); the desktop popup, the Mac driver and the Android bridge
+read their offline index (`OfflineIndex` is a `TextWords`, handed to the
+suggestion line as `Vocabulary::texts`), and an opened pack its own items
+(`Within`) before the others. A server up to 0.8.1 offers nothing for
+`x:`; the popups and the Android app offer the words of their cache with
+any server.
 
 ## Keeping the index current
 
@@ -411,9 +499,12 @@ their own and searches it with the whole syntax:
   emoji or a tag (`c`, `at` while `cat` is typed); those come after the
   ranked ones, in pack order.
 - Filters alone keep the pack's order; `sort:` other than relevance sorts
-  as above.
+  as above. A `text:` value lists the items it matched best first, each
+  group in pack order.
 - No embeddings and no expansions: image similarity and vibe synonyms
   are left out, as offline.
+- `x:` offers the words written on the pack's items first, then those of
+  the other cached items ([Suggestions](#suggestions)).
 
 ## Limits and performance
 
@@ -461,44 +552,54 @@ The vector side is a linear scan over the visible, filtered documents. It is
 the most expensive part, and fine at this scale. If libraries grow well past
 100k items, an ANN index would replace the scan behind the same API.
 
-## Draft: fuzzy `text:` and text word suggestions
+### The item text and its words
 
-Design note for the text-search round (branch `text-search`); the sections
-above are rewritten from it when the work lands, and this section then goes.
+`perf_text_search` (`... --nocapture perf_text`) times `text:` against a
+plain word of the same length on 50,000 docs with words in their pictures
+(`stickpile_search::synthetic`: English and Ukrainian captions, the common
+words far more often, three apostrophe forms, uppercase, words OCR joined
+or misread, numbers; 33k distinct tokens in all fields), searched by a
+user who sees 18k of them; mean of 20 runs, same machine:
 
-**Matching `text:` (`x:`).** Each word of a `text:` value matches a word of
-the item's text (`TEXT` field) through the same candidate tiers plain words
-use (`Store::candidates`), restricted to `TEXT`: exact; prefix from the
-first letter (`x:l` finds "lol"); squashed (`x:naah` finds "naahh");
-typos by optimal string alignment, 1 edit from 4 letters and 2 from 7, none
-when the word has a digit (`x:lool` finds "lol"); substring from 3 letters
-(`x:oli` finds "КОЛИВ", a word OCR joined). A quoted value of several words
-matches consecutive words of one text, each word by its tiers, and only the
-last word may be a prefix (`x:"no thou"` finds "NO THOUGHTS"; `x:"fix the b"`
-finds "FIX THE BUG"). `-text:` excludes items with an exact or prefix match
-only, never a typo or substring. Results of a query with a `text:` filter
-are ordered by the best tier the filter matched (exact, prefix, squashed,
-typo, substring), then as today, unless `sort:` is given; the match label
-stays `text`. One implementation in `stickpile-search`: the server, the
-offline index of the clients and the in-pack search (`stickpile_quick::within`)
-answer the same.
+| query | plain word | `text:` |
+|---|---|---|
+| `l` | 0.0004 ms (the word `l` only: a plain word's start counts from 2 letters) | 0.56 ms (1,934 hits) |
+| `lo` | 2.9 ms | 0.27 ms |
+| `lol` | 1.1 ms | 0.17 ms |
+| `lool` (squashed) | 0.70 ms | 0.18 ms |
+| `thoguhts` (a typo) | 0.10 ms | 0.08 ms |
+| `коли` | 0.41 ms | 0.29 ms |
+| `оли` (inside a word) | 0.40 ms | 0.27 ms |
+| `"no thou"` | 0.08 ms | 0.06 ms |
+| `-lo` | 1.8 ms | 1.8 ms |
+| `cat lo` | 3.1 ms | 0.54 ms (`cat x:lo`) |
 
-**Suggesting text words.** `Field::Text` (`x:`, `text:`, `-x:`) offers the
-words of the `TEXT` field of the items the viewer can search (own items,
-member sets, public sets: never a word only in someone else's private
-sticker), each counted once per item, most common first among the words the
-typed value reaches by `ranked`'s order (prefix, substring, typo); words
-shorter than 2 letters and pure numbers are not offered; `x:` alone offers
-the most common words. The words are read from the search index (the
-`TEXT` postings and the ordered vocabulary) through one public API in
-`stickpile-search` that the server, the desktop popup, the Mac driver and
-Android share; `Vocabulary` does not copy the texts. Choosing an offer
-inserts the word and a space, as for tags. `resolve` leaves `text:` values
-as typed (the matching forgives them; `x:lo` is not narrowed to one word).
-A client sending a half-typed `x:` value to a 0.8.1 server gets that
-server's exact-word answer.
+A `text:` value is matched in the postings of the text first, so a query
+of `text:` alone reads only the items it matched.
 
-**Speed (rule 8).** On 50,000 items with realistic texts, release build:
-each suggest call (server endpoint, desktop popup, Android bridge) under
-10 ms, and `text:` filtering no slower than twice a plain-word search of
-the same length.
+The words offered for `x:` (`Index::text_words`), per call: nothing typed
+2 ms for the 18k items of one user (3 to 4 ms when all 50k are visible); a
+start 0.01 to 0.4 ms (`x:l` is the slowest: every word starting with `l`
+is counted); a value that starts too few words (`x:lool`, `x:оли`,
+`x:thoguhts`) also reads the whole vocabulary for the words it is inside
+or a typo of, 1.5 to 2.7 ms. Through each surface (the server's
+`suggest_in` per request, `perf_suggest`; the popup per keystroke, its
+query changed and its line drawn, from a cache of all 50k items,
+`perf_popup_suggestions` in stickpile-desktop; the Android bridge's
+`hints()`, `perf_hints` in stickpile-android's library tests):
+
+| typed | server (one user, 18k of 50k) | desktop popup (50k cached) | Android `hints()` (50k cached) |
+|---|---|---|---|
+| `x:` | 2.1 ms | 1.2 ms | 1.1 ms |
+| `x:l` | 0.23 ms | 0.15 ms | 0.17 ms |
+| `x:lo` | 0.10 ms | 0.07 ms | 0.08 ms |
+| `x:lool` | 1.9 ms | 2.1 ms | 1.9 ms |
+| `x:оли` | 1.7 ms | 2.0 ms | 1.6 ms |
+| `x:п'ят` | 0.01 ms | 0.01 ms | 0.01 ms |
+| `vibe:` | 3.0 ms | under 0.01 ms | under 0.01 ms |
+| `t:ko` | 7.2 ms | 4.1 ms | 2.0 ms |
+
+The server counts the values of the field typed only, per request (the
+whole vocabulary of 50k items took it 8 to 10 ms); the clients count
+theirs once per change of their cache (25 ms for 50k items) and read the
+words of the texts from their index as they are typed.
