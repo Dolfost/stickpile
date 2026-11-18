@@ -578,7 +578,10 @@ A `text:` value is matched in the postings of the text first, so a query
 of `text:` alone reads only the items it matched.
 
 The words offered for `x:` (`Index::text_words`), per call: nothing typed
-2 ms for the 18k items of one user (3 to 4 ms when all 50k are visible); a
+2 ms for the 18k items of one user (3 to 4 ms when all 50k are visible;
+about 8 ms in the worst case, a viewer who can search only a few of the
+50k items, because the scan stops early only once enough words are found
+and so reads the whole vocabulary); a
 start 0.01 to 0.4 ms (`x:l` is the slowest: every word starting with `l`
 is counted); a value that starts too few words (`x:lool`, `x:оли`,
 `x:thoguhts`) also reads the whole vocabulary for the words it is inside

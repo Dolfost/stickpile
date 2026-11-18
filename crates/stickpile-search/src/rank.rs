@@ -374,7 +374,8 @@ impl Store {
             return best;
         }
         let n = q.chars.len();
-        if rule.prefix_from.is_some_and(|from| n >= from) {
+        let prefix = rule.prefix_from.is_some_and(|from| n >= from);
+        if prefix {
             let range = self
                 .vocab
                 .range::<str, _>((Bound::Excluded(q.text.as_str()), Bound::Unbounded));
@@ -434,7 +435,15 @@ impl Store {
             if max_edits > 0 && all as i64 >= need && osa_within(&q.chars, &e.chars, max_edits).is_some() {
                 put(id, Kind::Fuzzy);
             }
-            if substring && interior > 0 && inner == interior && e.text.contains(&q.text) {
+            // Inside the word: where no prefix counts (a word before the
+            // last of a `text:` phrase), the start of a word is no match
+            // either, or `x:"thou head"` would find "thoughts head".
+            if substring
+                && interior > 0
+                && inner == interior
+                && e.text.contains(&q.text)
+                && (prefix || !e.text.starts_with(&q.text))
+            {
                 put(id, Kind::Substring);
             }
         }
