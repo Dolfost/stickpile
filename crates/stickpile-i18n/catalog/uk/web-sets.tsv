@@ -181,6 +181,7 @@ Finds	Знаходить
 Repeating a filter means OR ({example}); different filters must all match.	Кілька однакових фільтрів поєднуються через АБО ({example}); різні фільтри мають виконуватися всі.
 Example:	Приклад:
 While a filter is typed, the values in use are offered under the search field, most used first; {emoji} offers emojis with their names ({example}), and taking one puts the emoji in.	Поки ви вводите фільтр, значення, що вже використовуються, з'являються під полем пошуку, найуживаніші першими; {emoji} пропонує емодзі з назвами ({example}), а вибране вставляє емодзі.
+{text} offers the words written in the pictures, those on the most items first ({example}).	{text} пропонує слова, написані на картинках, спершу ті, що є на найбільшій кількості стікерів ({example}).
 Why this matched	Чому це знайдено
 More results	Більше результатів
 Semantic search is on: results also match image content and related words.	Семантичний пошук увімкнено: результати враховують також вміст зображень і споріднені слова.

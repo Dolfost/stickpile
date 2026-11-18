@@ -52,7 +52,7 @@ pub fn cheat_sheet() -> Markup {
         ("tag:reaction  -tag:nsfw", t("has / has not this tag")),
         (
             "text:\"no thoughts\"",
-            t("has these words in the picture, one after another"),
+            t("has these words in the picture, one after another; typos and words inside longer words count, and the last may be just its start (x:l finds lol)"),
         ),
         (
             "type:gif",
@@ -89,6 +89,11 @@ pub fn cheat_sheet() -> Markup {
                 (rich(
                     t("While a filter is typed, the values in use are offered under the search field, most used first; {emoji} offers emojis with their names ({example}), and taking one puts the emoji in."),
                     &[("emoji", html! { code { "e:" } }), ("example", html! { code { "e:sk" } ": 💀 skull" })],
+                ))
+                " "
+                (rich(
+                    t("{text} offers the words written in the pictures, those on the most items first ({example})."),
+                    &[("text", html! { code { "x:" } }), ("example", html! { code { "x:l" } ": lol, love" })],
                 ))
             }
         }

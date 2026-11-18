@@ -5,19 +5,24 @@
 // field and the one in the top bar) offer, while a `key:value` filter is
 // typed, the values the desktop popups offer under their search field:
 // the vibes, tags, sets and owners of the items you can search (most used
-// first), the words of type:, is: and sort:, and for e: emojis with their
+// first), the words of type:, is: and sort:, for e: emojis with their
 // names (e: alone: the emojis of your own items, not of others' public
 // ones; e:sk: the emojis named so, those your items use first, then
-// others from the table).
+// others from the table), and for x: and text: the words written in the
+// pictures of the items you can search (x: alone: those on the most
+// items; x:lo: the words starting so, then those it is inside, then those
+// a typo away), as the index keeps them (lower case, without accents and
+// apostrophes).
 // The matching is the server's (GET /api/v1/search/suggest, the popups'
-// Rust code), never done here.
+// Rust code), never done here: any `key:` token is sent as typed.
 //
 // The field is a combobox and the list under it its listbox (the focus
 // stays in the field; the markup and look are the emoji suggestions' of
 // emoji.js). Up and Down move the highlight, which starts on the value a
-// half-typed filter stands for; Tab, or Enter on a highlighted value, puts
-// it in place of what is typed (an emoji in place of its name) and a
-// space; a click too. Enter without a highlight searches as before.
+// half-typed filter stands for (the server's `chosen`: for x: only a word
+// typed whole, as the search takes x:lo as typed); Tab, or Enter on a
+// highlighted value, puts it in place of what is typed (an emoji in
+// place of its name) and a space; a click too. Enter without a highlight searches as before.
 // Escape, a space, moving away or leaving the field close the list.
 // Without JavaScript the fields work as plain search fields.
 (function () {
