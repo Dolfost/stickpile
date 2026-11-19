@@ -26,10 +26,21 @@ Layout: `crates/stickpile-android` (the Rust library, behind UniFFI),
 It needs Android 8.0 (API 26) or later and a stickpile server
 ([deployment.md](deployment.md)); there is no public server.
 
-- **From a release:** each GitHub release has
-  `stickpile-vX.Y.Z-android-unsigned.apk`. Android installs only signed
-  APKs: sign it first ([Release signing](#release-signing)) or build it
-  ([Build from source](#build-from-source)).
+- **From a release:** from 0.8.5 on, each GitHub release has
+  `stickpile-vX.Y.Z-android.apk`, signed with the release key (certificate
+  SHA-256 in [Release signing](#release-signing)); open it on the phone
+  and allow the app you opened it from to install apps. Releases up to
+  0.8.4 have only `stickpile-vX.Y.Z-android-unsigned.apk`, which Android
+  does not install: sign it first or build the app
+  ([Build from source](#build-from-source)). Android updates the app only
+  from an APK signed with the same key, so an app installed from another
+  build (a test build, or a later F-Droid one) has to be uninstalled
+  first; that signs the phone out.
+- **Samsung phones:** Auto Blocker (on out of the box on newer Galaxy
+  phones) blocks every APK from outside the app stores, even with "Install
+  unknown apps" allowed ("Unknown app blocked"). Turn it off in Settings,
+  Security and privacy, Auto Blocker, install, and turn it on again if you
+  like; the installed app keeps working.
 - **F-Droid:** planned, not submitted yet ([F-Droid](#f-droid)).
 
 The app keeps its files in its private storage, outside backups and device
@@ -352,20 +363,39 @@ downloads cannot run, so the shell points Gradle at the SDK's own through
 
 ## Release signing
 
-The release workflow builds the APK unsigned: no signing key is in the
-repository or in CI. To install it, the owner signs it with their own key
-(`apksigner` and `zipalign` are in the SDK's build tools, e.g.
-`$ANDROID_HOME/build-tools/36.0.0/`):
+Release APKs (from 0.8.5) are signed with the owner's release key, an
+RSA 4096 key in a PKCS12 file, alias `stickpile`, valid until 2056. Its
+certificate's SHA-256 is
+
+```
+ab7200c912206a158239eb8463d37329785aa838c67f98343b5a44201034e120
+```
+
+(`apksigner verify --print-certs stickpile-vX.Y.Z-android.apk` prints it
+as "Signer #1 certificate SHA-256 digest"). The key is not in the
+repository. The release workflow gets it from two repository secrets,
+`ANDROID_KEYSTORE_BASE64` (the PKCS12 file, base64) and
+`ANDROID_KEYSTORE_PASSWORD`, and Gradle signs the APK with it
+(`android/app/build.gradle.kts`: the environment variables
+`STICKPILE_KEYSTORE`, `STICKPILE_KEYSTORE_PASSWORD`, optionally
+`STICKPILE_KEY_ALIAS` and `STICKPILE_KEY_PASSWORD`). The workflow fails
+when the signed APK carries another certificate than `ANDROID_CERT_SHA256`
+or its native libraries are not 16 KB aligned. Without the secrets (a
+fork, or before they were set) the APK is published unsigned as
+`stickpile-vX.Y.Z-android-unsigned.apk`; to install that one, sign it
+with your own key (`apksigner` and `zipalign` are in the SDK's build
+tools, e.g. `$ANDROID_HOME/build-tools/36.0.0/`):
 
 ```sh
-zipalign -c -v 4 stickpile-vX.Y.Z-android-unsigned.apk      # aligned already?
-apksigner sign --ks stickpile-release.jks --out stickpile-vX.Y.Z-android.apk \
+zipalign -c -P 16 -v 4 stickpile-vX.Y.Z-android-unsigned.apk   # aligned already?
+apksigner sign --ks my-key.p12 --out stickpile-vX.Y.Z-android.apk \
     stickpile-vX.Y.Z-android-unsigned.apk
 apksigner verify --print-certs stickpile-vX.Y.Z-android.apk
 ```
 
 Every update must be signed with the same key, or Android refuses to
-install it over the old one. An APK from F-Droid is signed with F-Droid's
+install it over the old one; losing the release key means the app can
+never be updated in place again, so the owner keeps a backup of it. An APK from F-Droid is signed with F-Droid's
 key unless the build is reproducible (below), so the two cannot update
 each other.
 

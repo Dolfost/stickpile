@@ -419,7 +419,9 @@ file:
   by cargo. Install `ffmpeg` and `onnxruntime` from Homebrew to get the same
   features.
 - **Windows**: the `stickpile` CLI, best effort.
-- **Android**: `stickpile-vX.Y.Z-android-unsigned.apk`, one APK for
-  arm64-v8a, armeabi-v7a and x86_64, unsigned (best effort; sign it before
-  installing, see [android.md](android.md#release-signing)). F-Droid is
+- **Android**: `stickpile-vX.Y.Z-android.apk`, one APK for arm64-v8a,
+  armeabi-v7a and x86_64, signed with the release key (from 0.8.5; best
+  effort). Without the signing secrets the workflow publishes
+  `stickpile-vX.Y.Z-android-unsigned.apk` instead, which has to be signed
+  before installing ([android.md](android.md#release-signing)). F-Droid is
   planned.
