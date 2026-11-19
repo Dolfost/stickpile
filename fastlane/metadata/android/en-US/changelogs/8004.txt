@@ -1,0 +1,1 @@
+Telegram stickers with one tap: turn on Settings > Sticker keyboard > Prefer stickers (Telegram), and a tap in the keyboard sends the sticker version in Telegram instead of the picture. A long press still offers the picture.
