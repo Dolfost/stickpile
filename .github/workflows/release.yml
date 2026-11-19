@@ -207,13 +207,17 @@ jobs:
           path: dist/*
 
   android:
-    name: android (APK, unsigned)
+    name: android (APK)
     # Best effort until the app has been run on devices.
     continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       NDK_VERSION: 28.2.13676358
+      # apksigner and zipalign for the checks below: the build tools the
+      # build uses (nix/android-shell.nix), not whichever is newest on the
+      # runner. zipalign -P needs 35 or later.
+      BUILD_TOOLS_VERSION: 36.0.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -226,7 +230,7 @@ jobs:
       # android/app/build.gradle.kts) and builds Rust with cargo-ndk.
       - name: NDK, JDK 21 and cargo-ndk
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_HOME_21_X64" >>"$GITHUB_ENV"
           cargo install cargo-ndk --version 4.1.2 --locked
@@ -257,13 +261,19 @@ jobs:
           mkdir -p dist
           out=android/app/build/outputs/apk/release
           if [ -f "$out/app-release.apk" ]; then
-            bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -1)
-            cert=$("$bt/apksigner" verify --print-certs "$out/app-release.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+            # What apksigner says goes into the error (an annotation, which
+            # anyone can read): the certificate is public, the key is not in it.
+            said=$("$bt/apksigner" verify --print-certs "$out/app-release.apk" 2>&1) || true
+            cert=$(printf '%s\n' "$said" | grep -m1 -oiE 'certificate SHA-256 digest: [0-9a-f]{64}' | awk '{print tolower($NF)}') || true
             if [ "$cert" != "$ANDROID_CERT_SHA256" ]; then
-              echo "::error::The APK is signed with certificate $cert, not the release key's $ANDROID_CERT_SHA256"
+              echo "::error::The APK is signed with certificate '$cert', not the release key's $ANDROID_CERT_SHA256. apksigner ($bt) said:%0A$(printf '%s\n' "$said" | head -n 12 | awk 'BEGIN {ORS="%0A"} {print}')"
               exit 1
             fi
-            "$bt/zipalign" -c -P 16 4 "$out/app-release.apk"
+            if ! aligned=$("$bt/zipalign" -c -P 16 4 "$out/app-release.apk" 2>&1); then
+              echo "::error::The APK's native libraries are not 16 KB aligned:%0A$(printf '%s\n' "$aligned" | grep -v '(OK' | head -n 12 | awk 'BEGIN {ORS="%0A"} {print}')"
+              exit 1
+            fi
             cp "$out/app-release.apk" "dist/stickpile-${TAG}-android.apk"
           else
             cp "$out/app-release-unsigned.apk" "dist/stickpile-${TAG}-android-unsigned.apk"
