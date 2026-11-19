@@ -36,13 +36,39 @@ android {
         }
     }
 
+    // Release signing only when a keystore is named in the environment
+    // (the release workflow sets it from its secrets; docs/android.md,
+    // "Release signing"): STICKPILE_KEYSTORE (a PKCS12 file),
+    // STICKPILE_KEYSTORE_PASSWORD, and optionally STICKPILE_KEY_ALIAS
+    // (default stickpile) and STICKPILE_KEY_PASSWORD (default the store's).
+    // Without it the release APK is unsigned (app-release-unsigned.apk),
+    // as F-Droid builds it.
+    val releaseKeystore = providers.environmentVariable("STICKPILE_KEYSTORE").orNull?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                val storePass = providers.environmentVariable("STICKPILE_KEYSTORE_PASSWORD").orNull?.trim()
+                    ?: throw GradleException("STICKPILE_KEYSTORE is set but STICKPILE_KEYSTORE_PASSWORD is not")
+                storeFile = file(releaseKeystore)
+                storeType = "pkcs12"
+                storePassword = storePass
+                keyAlias = providers.environmentVariable("STICKPILE_KEY_ALIAS").orNull?.trim() ?: "stickpile"
+                keyPassword = providers.environmentVariable("STICKPILE_KEY_PASSWORD").orNull?.trim() ?: storePass
+                // minSdk 26 verifies v2 and newer; no v1 (JAR) signature.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             // No R8: JNA and the UniFFI bindings look classes and methods
             // up by name at run time, so shrinking them needs keep rules,
-            // and there are none. No signing config either: the release
-            // APK is unsigned, and whoever publishes it signs it.
+            // and there are none.
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

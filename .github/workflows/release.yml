@@ -5,9 +5,11 @@
 #   macos      CLI + server for arm64 and x86_64, built by cargo, and the
 #              Stickpile app (crates/stickpile-mac, ad-hoc signed)
 #   windows    CLI, built by cargo (best effort)
-#   android    the Android app as an unsigned release APK, built by Gradle
-#              and cargo-ndk (best effort; sign it before installing, see
-#              docs/android.md, "Release signing")
+#   android    the Android app as a release APK, built by Gradle and
+#              cargo-ndk (best effort), signed with the release key from the
+#              secrets ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD
+#              and checked against ANDROID_CERT_SHA256; without the secrets
+#              it is published unsigned (docs/android.md, "Release signing")
 #   container  ghcr.io/dolfost/stickpile:<version> and :latest, multi-arch,
 #              built by Nix and pushed with skopeo
 #   release    GitHub release with every artifact and SHA256SUMS
@@ -39,6 +41,10 @@ permissions:
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
   IMAGE: ghcr.io/dolfost/stickpile
+  # SHA-256 of the Android release key's certificate (docs/android.md,
+  # "Release signing"). A signed APK with any other certificate fails the
+  # android job.
+  ANDROID_CERT_SHA256: ab7200c912206a158239eb8463d37329785aa838c67f98343b5a44201034e120
 
 jobs:
   linux:
@@ -224,13 +230,44 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_HOME_21_X64" >>"$GITHUB_ENV"
           cargo install cargo-ndk --version 4.1.2 --locked
+      # The release key, when both secrets are set: Gradle signs the APK with
+      # it (android/app/build.gradle.kts). Without them the APK stays
+      # unsigned and is published as such.
+      - name: Release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::warning::No Android release key (secrets ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD): the APK is published unsigned"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          echo "STICKPILE_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
       - name: Build
         working-directory: android
+        env:
+          STICKPILE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
+      # A signed APK must carry the pinned certificate and keep its native
+      # libraries 16 KB aligned (Android 15+ devices with 16 KB pages).
       - name: Package
         run: |
+          rm -f "$RUNNER_TEMP/release.p12"
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/stickpile-${TAG}-android-unsigned.apk"
+          out=android/app/build/outputs/apk/release
+          if [ -f "$out/app-release.apk" ]; then
+            bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -1)
+            cert=$("$bt/apksigner" verify --print-certs "$out/app-release.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            if [ "$cert" != "$ANDROID_CERT_SHA256" ]; then
+              echo "::error::The APK is signed with certificate $cert, not the release key's $ANDROID_CERT_SHA256"
+              exit 1
+            fi
+            "$bt/zipalign" -c -P 16 4 "$out/app-release.apk"
+            cp "$out/app-release.apk" "dist/stickpile-${TAG}-android.apk"
+          else
+            cp "$out/app-release-unsigned.apk" "dist/stickpile-${TAG}-android-unsigned.apk"
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: android
@@ -321,6 +358,11 @@ jobs:
           NixOS module \`nixosModules.default\`, home-manager module \`homeManagerModules.default\`
           (docs/deployment.md, docs/nix.md). The flake input \`github:Dolfost/stickpile/stable\` follows releases.
           EOF
+          if ls dist/*-android.apk >/dev/null 2>&1; then
+            # shellcheck disable=SC2016 # the backticks are Markdown
+            printf '\nAndroid: `stickpile-%s-android.apk`, signed with the release key (certificate SHA-256 `%s`). Android updates the app only from an APK signed with the same key (docs/android.md).\n' \
+              "$TAG" "$ANDROID_CERT_SHA256" >> notes.md
+          fi
           gh release create "$TAG" dist/* \
             --repo "${{ github.repository }}" \
             --title "stickpile $TAG" \
