@@ -1,0 +1,1 @@
+The first signed APK on GitHub: it installs as it is (0.8.5 was published without one). If you installed the app from an earlier APK, uninstall it first: this one is signed with a different key. You sign in again; your stickers stay on the server.

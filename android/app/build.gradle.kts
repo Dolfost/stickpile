@@ -28,8 +28,8 @@ android {
         // versionName is the workspace version; versionCode is
         // major * 1000000 + minor * 1000 + patch. checkStickpileVersion
         // fails the build when either disagrees with Cargo.toml.
-        versionCode = 8005
-        versionName = "0.8.5"
+        versionCode = 8006
+        versionName = "0.8.6"
         // One universal APK with these ABIs only (JNA ships more).
         ndk {
             abiFilters += rustAbis
