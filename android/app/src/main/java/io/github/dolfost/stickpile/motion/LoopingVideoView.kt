@@ -4,6 +4,9 @@ import android.content.Context
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Surface
@@ -21,6 +24,11 @@ import java.io.FileInputStream
  *
  * Main thread only. [play] the file (null: none); a file that will not
  * play is reported to [listener] once and not tried again.
+ *
+ * The players are made, started and released on a thread of their own
+ * ([Player]): each of those is a call to the media server, and a grid
+ * that scrolls starts and stops several at once, which on the main thread
+ * held up its frames.
  */
 class LoopingVideoView @JvmOverloads constructor(
     context: Context,
@@ -38,8 +46,7 @@ class LoopingVideoView @JvmOverloads constructor(
     var listener: Listener? = null
 
     private var path: String? = null
-    private var player: MediaPlayer? = null
-    private var surface: Surface? = null
+    private var player: Player? = null
     private var videoWidth = 0
     private var videoHeight = 0
 
@@ -73,39 +80,7 @@ class LoopingVideoView @JvmOverloads constructor(
         if (!slots.take(this)) return
         val file = path ?: return
         val texture = surfaceTexture ?: return
-        val s = Surface(texture)
-        val mp = MediaPlayer()
-        surface = s
-        player = mp
-        try {
-            FileInputStream(file).use { mp.setDataSource(it.fd) }
-            mp.setSurface(s)
-            mp.isLooping = true
-            mp.setVolume(0f, 0f)
-            mp.setOnPreparedListener { if (player === it) it.start() }
-            mp.setOnVideoSizeChangedListener { p, w, h ->
-                if (player === p) {
-                    videoWidth = w
-                    videoHeight = h
-                    fit()
-                }
-            }
-            mp.setOnInfoListener { p, what, _ ->
-                if (player === p && what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
-                    alpha = 1f
-                    listener?.started()
-                }
-                false
-            }
-            mp.setOnErrorListener { p, what, extra ->
-                if (player === p) fail("error $what/$extra")
-                true
-            }
-            mp.prepareAsync()
-        } catch (e: Exception) {
-            // IOException, IllegalStateException, SecurityException: a file that does not play.
-            fail(e.javaClass.simpleName)
-        }
+        player = Player(this, file, texture)
     }
 
     private fun fail(why: String) {
@@ -116,11 +91,9 @@ class LoopingVideoView @JvmOverloads constructor(
     }
 
     private fun stopPlaying() {
-        val mp = player
+        val p = player
         player = null
-        mp?.release()
-        surface?.release()
-        surface = null
+        p?.release()
         alpha = 0f
         slots.give(this)?.start()
     }
@@ -153,12 +126,92 @@ class LoopingVideoView @JvmOverloads constructor(
         fit()
     }
 
+    /**
+     * [texture] is released on the player thread (false: not by the view),
+     * after the players that drew into it: that thread runs in order.
+     */
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
         stopPlaying()
-        return true
+        worker.post { texture.release() }
+        return false
     }
 
     override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+
+    /**
+     * One [MediaPlayer] for [file] into [texture], living on the player
+     * thread: it is made there, and its callbacks come there and go on to
+     * the main thread, where they count only while [view] still plays it.
+     */
+    private class Player(private val view: LoopingVideoView, file: String, texture: SurfaceTexture) {
+        // Only on the player thread.
+        private var mp: MediaPlayer? = null
+        private var surface: Surface? = null
+
+        @Volatile
+        private var released = false
+
+        init {
+            worker.post { open(file, texture) }
+        }
+
+        /** Stop and release; nothing more reaches the view. */
+        fun release() {
+            released = true
+            worker.post {
+                mp?.release()
+                mp = null
+                surface?.release()
+                surface = null
+            }
+        }
+
+        private fun open(file: String, texture: SurfaceTexture) {
+            if (released) return
+            val player = MediaPlayer()
+            mp = player
+            try {
+                val s = Surface(texture)
+                surface = s
+                FileInputStream(file).use { player.setDataSource(it.fd) }
+                player.setSurface(s)
+                player.isLooping = true
+                player.setVolume(0f, 0f)
+                player.setOnPreparedListener { if (!released) it.start() }
+                player.setOnVideoSizeChangedListener { _, w, h ->
+                    onView {
+                        videoWidth = w
+                        videoHeight = h
+                        fit()
+                    }
+                }
+                player.setOnInfoListener { _, what, _ ->
+                    if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                        onView {
+                            alpha = 1f
+                            listener?.started()
+                        }
+                    }
+                    false
+                }
+                player.setOnErrorListener { _, what, extra ->
+                    onView { fail("error $what/$extra") }
+                    true
+                }
+                player.prepareAsync()
+            } catch (e: Exception) {
+                // IOException, IllegalStateException, SecurityException: a file that does not play.
+                val why = e.javaClass.simpleName
+                onView { fail(why) }
+            }
+        }
+
+        /** Runs [block] on the main thread while [view] still plays this player. */
+        private fun onView(block: LoopingVideoView.() -> Unit) {
+            if (released) return
+            main.post { if (!released && view.player === this) view.block() }
+        }
+    }
 
     companion object {
         private const val TAG = "stickpile.motion"
@@ -167,5 +220,12 @@ class LoopingVideoView @JvmOverloads constructor(
         const val MAX_PLAYING = 6
 
         private val slots = Slots<LoopingVideoView>(MAX_PLAYING)
+
+        private val main = Handler(Looper.getMainLooper())
+
+        /** The players' thread: made, started and released there, in order. */
+        private val worker: Handler by lazy {
+            Handler(HandlerThread("stickpile-video").apply { start() }.looper)
+        }
     }
 }

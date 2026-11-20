@@ -916,8 +916,10 @@ is one process; these pieces are shared by its parts:
   the decoded animated pictures (`ImageDecoder`, API 28 and later).
   `motion.LoopingVideoView` plays a video in a `TextureView` with a
   muted, looping `MediaPlayer`, only while on screen and at most six at
-  once in the process (`motion.Slots`); `motion.MotionPolicy` says when
-  an item plays (`display.Autoplay`).
+  once in the process (`motion.Slots`); the players are made, started and
+  released on a thread of their own (`stickpile-video`), never on the
+  main thread, which a scrolling grid would hold up. `motion.MotionPolicy`
+  says when an item plays (`display.Autoplay`).
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server
