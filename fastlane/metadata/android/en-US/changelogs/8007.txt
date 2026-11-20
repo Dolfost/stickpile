@@ -1,0 +1,1 @@
+Smoother scrolling and a quicker keyboard: videos start and stop in the background instead of holding up the screen, the keyboard shows its thumbnails at once when you open it again, and the app lets go of the pictures it keeps in memory when the phone runs short of it.
