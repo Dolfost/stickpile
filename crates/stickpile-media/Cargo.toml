@@ -15,7 +15,7 @@ gif.workspace = true
 webp.workspace = true
 # libwebp's animation encoder, fed one frame at a time (WhatsApp stickers);
 # the same library the `webp` crate builds.
-libwebp-sys = "0.9"
+libwebp-sys = "0.14"
 sha2.workspace = true
 hex.workspace = true
 serde.workspace = true
@@ -28,6 +28,6 @@ tracing.workspace = true
 png = "0.18"
 # NeuQuant palettes for APNG and GIF stickers (Discord, Signal); the version
 # the gif and image crates already pull in.
-color_quant = "1.1"
+color_quant = "2.0"
 
 [dev-dependencies]
