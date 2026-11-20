@@ -916,8 +916,18 @@ is one process; these pieces are shared by its parts:
   the decoded animated pictures (`ImageDecoder`, API 28 and later).
   `motion.LoopingVideoView` plays a video in a `TextureView` with a
   muted, looping `MediaPlayer`, only while on screen and at most six at
-  once in the process (`motion.Slots`); `motion.MotionPolicy` says when
-  an item plays (`display.Autoplay`).
+  once in the process (`motion.Slots`); the players are made, started and
+  released on a thread of their own (`stickpile-video`), never on the
+  main thread, which a scrolling grid would hold up. `motion.MotionPolicy`
+  says when an item plays (`display.Autoplay`).
+- The decoded pictures in memory: the app's thumbnails
+  (`ui.library.Thumbnails`), the keyboard's (`ime.ThumbnailLoader`, one
+  cache for the process, so that the keyboard the system makes again each
+  time it is chosen shows them at once) and the moving pictures
+  (`motion.Motions`). All three are cleared with the cache and on another
+  account, and trimmed when the system is short of memory
+  (`StickpileApp.onTrimMemory`, `MemoryTrim`): all of them once nothing
+  of the process is on screen.
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server

@@ -78,6 +78,11 @@ object Thumbnails {
         memory.evictAll()
     }
 
+    /** Keep [share] of the decoded thumbnails, the least used go ([io.github.dolfost.stickpile.MemoryTrim]). */
+    fun trim(share: Float) {
+        memory.trimToSize((memory.maxSize() * share).toInt())
+    }
+
     private fun decode(path: String, resources: Resources): Drawable? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             ImageDecoder.decodeDrawable(ImageDecoder.createSource(File(path))) { decoder, _, _ ->
