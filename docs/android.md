@@ -925,7 +925,9 @@ is one process; these pieces are shared by its parts:
   cache for the process, so that the keyboard the system makes again each
   time it is chosen shows them at once) and the moving pictures
   (`motion.Motions`). All three are cleared with the cache and on another
-  account.
+  account, and trimmed when the system is short of memory
+  (`StickpileApp.onTrimMemory`, `MemoryTrim`): all of them once nothing
+  of the process is on screen.
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server

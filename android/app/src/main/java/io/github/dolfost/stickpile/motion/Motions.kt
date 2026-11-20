@@ -102,6 +102,11 @@ object Motions {
         failed.clear()
     }
 
+    /** Keep [share] of the decoded pictures, the least used go ([io.github.dolfost.stickpile.MemoryTrim]). */
+    fun trim(share: Float) {
+        pictures.trimToSize((pictures.maxSize() * share).toInt())
+    }
+
     @Volatile
     private var meteredAt = 0L
 

@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.os.SystemClock
 import io.github.dolfost.stickpile.display.DisplaySettings
+import io.github.dolfost.stickpile.ime.ThumbnailLoader
+import io.github.dolfost.stickpile.motion.Motions
 import io.github.dolfost.stickpile.offline.OfflineJobs
 import io.github.dolfost.stickpile.offline.OfflineScheduler
 import io.github.dolfost.stickpile.offline.OfflineSettings
@@ -11,6 +13,7 @@ import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.sync.CacheChanges
+import io.github.dolfost.stickpile.ui.library.Thumbnails
 import java.io.File
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -77,6 +80,20 @@ class StickpileApp : Application() {
             Log.e(TAG, "background work failed: ${e.javaClass.simpleName}")
         },
     )
+
+    /**
+     * The system is short of memory: the decoded pictures go, all of them
+     * once nothing of the process is on screen ([MemoryTrim]).
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val keep = MemoryTrim.keep(level)
+        if (keep < 1f) {
+            Thumbnails.trim(keep)
+            ThumbnailLoader.trim(keep)
+            Motions.trim(keep)
+        }
+    }
 
     /** What the grids show (safe mode, the tiles' information), shared by the app and the keyboard. */
     val display: DisplaySettings by lazy { DisplaySettings(this) }
