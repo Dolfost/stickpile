@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.dolfost.stickpile.R
 import io.github.dolfost.stickpile.StickpileApp
+import io.github.dolfost.stickpile.ime.ThumbnailLoader
 import io.github.dolfost.stickpile.motion.Motions
 import io.github.dolfost.stickpile.provider.PreparedFiles
 import io.github.dolfost.stickpile.rust.StickpileLibrary
@@ -114,6 +115,7 @@ private fun SettingsContent(
             background = app.scope,
             onCacheCleared = {
                 Thumbnails.clear()
+                ThumbnailLoader.clear()
                 Motions.clear()
                 // The files the tokens pointed to are gone.
                 PreparedFiles.revokeAll()
@@ -124,6 +126,7 @@ private fun SettingsContent(
                 // The library removed what the account kept.
                 app.offlineJobs.cancel()
                 Thumbnails.clear()
+                ThumbnailLoader.clear()
                 Motions.clear()
                 PreparedFiles.revokeAll()
                 AccountChanges.changed()

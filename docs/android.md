@@ -920,6 +920,12 @@ is one process; these pieces are shared by its parts:
   released on a thread of their own (`stickpile-video`), never on the
   main thread, which a scrolling grid would hold up. `motion.MotionPolicy`
   says when an item plays (`display.Autoplay`).
+- The decoded pictures in memory: the app's thumbnails
+  (`ui.library.Thumbnails`), the keyboard's (`ime.ThumbnailLoader`, one
+  cache for the process, so that the keyboard the system makes again each
+  time it is chosen shows them at once) and the moving pictures
+  (`motion.Motions`). All three are cleared with the cache and on another
+  account.
 - `sync.SyncScheduler`: `ensureScheduled(context)` at app start and after a
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server

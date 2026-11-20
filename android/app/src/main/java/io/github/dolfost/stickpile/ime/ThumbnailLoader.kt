@@ -25,7 +25,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * Thumbnails for the grid: the library's cached file (downloaded when
- * missing), decoded off the main thread, kept in memory in an [LruCache].
+ * missing), decoded off the main thread, kept in memory in an [LruCache]
+ * of the whole process ([shared]): the system makes the keyboard again
+ * each time it is chosen, and its pictures are there at once then.
  * On API 28 and later [ImageDecoder] decodes them, so an animated WebP
  * moves; below, [BitmapFactory] gives its first frame.
  *
@@ -43,10 +45,6 @@ internal class ThumbnailLoader(
 ) {
     private val maxPx = DecodeSize.thumbnailPx(cellPx)
 
-    private val cache = object : LruCache<String, Drawable>(cacheBytes()) {
-        override fun sizeOf(key: String, value: Drawable): Int = bytesOf(value)
-    }
-
     /** Shows [itemId]'s thumbnail in [image]; the job to cancel when the view is reused, if any. */
     fun bind(itemId: String, image: ImageView): Job? = bind(itemId, image) { library.thumbnail(itemId) }
 
@@ -57,7 +55,9 @@ internal class ThumbnailLoader(
     /** Shows the picture in the file [file] gives (null: none) in [image], cached under [key]. */
     private fun bind(key: String, image: ImageView, file: suspend () -> String?): Job? {
         image.tag = key
-        cache.get(key)?.let {
+        // Decoded at most maxPx: another cell size decodes again.
+        val cacheKey = "$key@$maxPx"
+        shared.get(cacheKey)?.let {
             show(image, it)
             return null
         }
@@ -70,7 +70,7 @@ internal class ThumbnailLoader(
                 null
             } ?: return@launch
             val drawable = decode(path) ?: return@launch
-            cache.put(key, drawable)
+            shared.put(cacheKey, drawable)
             if (image.tag == key) show(image, drawable)
         }
     }
@@ -80,10 +80,6 @@ internal class ThumbnailLoader(
         (image.drawable as? Animatable)?.stop()
         image.tag = null
         image.setImageDrawable(null)
-    }
-
-    fun clear() {
-        cache.evictAll()
     }
 
     /**
@@ -127,16 +123,30 @@ internal class ThumbnailLoader(
         return if (w == bitmap.width && h == bitmap.height) bitmap else bitmap.scale(w, h)
     }
 
-    private companion object {
-        const val TAG = "stickpile.ime"
+    companion object {
+        private const val TAG = "stickpile.ime"
+
+        private val shared = object : LruCache<String, Drawable>(cacheBytes()) {
+            override fun sizeOf(key: String, value: Drawable): Int = bytesOf(value)
+        }
+
+        /** Forget every decoded thumbnail (the cache was cleared, or another account). */
+        fun clear() {
+            shared.evictAll()
+        }
+
+        /** Keep [share] of the decoded thumbnails, the least used go ([io.github.dolfost.stickpile.MemoryTrim]). */
+        fun trim(share: Float) {
+            shared.trimToSize((shared.maxSize() * share).toInt())
+        }
 
         /** Before a pack's id, the key of its cover (item ids never start so). */
-        const val COVER_KEY = "pack:"
+        private const val COVER_KEY = "pack:"
 
         /** An eighth of what the process may use, at most 32 MiB. */
-        fun cacheBytes(): Int = minOf(Runtime.getRuntime().maxMemory() / 8, 32L * 1024 * 1024).toInt()
+        private fun cacheBytes(): Int = minOf(Runtime.getRuntime().maxMemory() / 8, 32L * 1024 * 1024).toInt()
 
-        fun bytesOf(drawable: Drawable): Int = when (drawable) {
+        private fun bytesOf(drawable: Drawable): Int = when (drawable) {
             is BitmapDrawable -> drawable.bitmap?.allocationByteCount ?: 1
             // An animation keeps about a frame or two decoded.
             else -> maxOf(drawable.intrinsicWidth, 1) * maxOf(drawable.intrinsicHeight, 1) * 4 * 2

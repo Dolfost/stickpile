@@ -315,7 +315,6 @@ internal class PickerView(
         job.cancel()
         keys.stopRepeat()
         status.removeCallbacks(hideStatus)
-        thumbnails.clear()
     }
 
     /** An insert is running: show it, and take no other pick. */
