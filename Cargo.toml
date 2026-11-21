@@ -126,6 +126,15 @@ strip = true
 [profile.release.package.stickpile-android]
 strip = false
 
+# Debug builds keep line tables only (file and line in backtraces and
+# panics), not full debug info: every integration test is a binary of its
+# own with all its dependencies linked in, each 200-500 MB with full debug
+# info, and cargo keeps the old ones beside the new (target/debug passed
+# 300 GB in a week of releases). A debugger shows no local variables then;
+# CARGO_PROFILE_DEV_DEBUG=true brings full debug info back for a session.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 2
 
