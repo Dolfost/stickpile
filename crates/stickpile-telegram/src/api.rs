@@ -490,6 +490,12 @@ impl BotApi {
         )
         .await
     }
+
+    /// Delete pack `name` with all its stickers (`deleteStickerSet`, Bot API
+    /// 6.6). A bot may delete only a pack it created.
+    pub async fn delete_sticker_set(&self, name: &str) -> Result<(), TelegramError> {
+        self.call_true("deleteStickerSet", &[("name", json!(name))], &[]).await
+    }
 }
 
 /// Reads a response body, failing as soon as it exceeds `cap` bytes.

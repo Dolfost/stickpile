@@ -627,6 +627,75 @@ async fn identical_content_is_exported_once() {
 }
 
 #[tokio::test]
+async fn delete_sticker_set_only_sets_of_this_bot() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let items = vec![item("a", "A", StickerFormat::Static, &["😼"], &[])];
+    export_pack(&client, OWNER, PACK, "Cats", &items, &PackState::default(), None)
+        .await
+        .unwrap();
+    state.lock().unwrap().seed_pack(
+        "dogs_by_other_bot",
+        "Dogs",
+        OWNER,
+        vec![("static", b"dog".to_vec(), "🐶")],
+    );
+
+    // Another bot's pack stays, answered like a missing pack.
+    let err = client.delete_sticker_set("dogs_by_other_bot").await.unwrap_err();
+    assert!(err.is_missing_sticker_set(), "{err}");
+    assert!(state.lock().unwrap().packs.contains_key("dogs_by_other_bot"));
+
+    // This bot's pack goes, stickers and all.
+    client.delete_sticker_set(PACK).await.unwrap();
+    assert!(!state.lock().unwrap().packs.contains_key(PACK));
+    let err = client.get_sticker_set(PACK).await.unwrap_err();
+    assert!(err.is_missing_sticker_set(), "{err}");
+
+    // A pack that is gone already.
+    let err = client.delete_sticker_set(PACK).await.unwrap_err();
+    assert!(err.is_missing_sticker_set(), "{err}");
+    assert_eq!(state.lock().unwrap().count("deleteStickerSet"), 3);
+}
+
+#[tokio::test]
+async fn the_mock_enforces_names_titles_and_sizes() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let one = vec![stickpile_telegram::InputSticker {
+        bytes: b"x".to_vec(),
+        filename: "sticker.webp".into(),
+        format: StickerFormat::Static,
+        emoji_list: vec!["😼".into()],
+        keywords: vec![],
+    }];
+    let long = format!("{}_by_{BOT}", "a".repeat(64 - BOT.len() - 4 + 1));
+    assert_eq!(long.len(), 65);
+    for name in [
+        "1cats_by_stickpile_test_bot",
+        "ca__ts_by_stickpile_test_bot",
+        "ca-ts_by_stickpile_test_bot",
+        "_by_stickpile_test_bot",
+        long.as_str(),
+    ] {
+        let err = client.create_new_sticker_set(OWNER, name, "T", &one).await.unwrap_err();
+        assert!(matches!(err, TelegramError::Api { code: 400, .. }), "{name}: {err}");
+    }
+    let title = "т".repeat(65);
+    let err = client
+        .create_new_sticker_set(OWNER, PACK, &title, &one)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, TelegramError::Api { code: 400, .. }), "{err}");
+    client
+        .create_new_sticker_set(OWNER, PACK, &"т".repeat(64), &one)
+        .await
+        .unwrap();
+    assert!(client.set_sticker_set_title(PACK, "").await.is_err());
+    assert!(state.lock().unwrap().packs.len() == 1);
+}
+
+#[tokio::test]
 async fn export_to_a_pack_of_another_bot_fails_cleanly() {
     let (base, _state) = start().await;
     let items = vec![item("a", "A", StickerFormat::Static, &["😼"], &[])];

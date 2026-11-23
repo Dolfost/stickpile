@@ -5,8 +5,12 @@
 //! multipart requests with `attach://` parts, `file_unique_id` derived from
 //! the file content (so identical uploads are deduplicated within a set),
 //! new stickers appended at the end, and file downloads under
-//! `/file/bot<token>/<file_path>`. It additionally refuses to delete the
-//! last sticker of a pack, to catch exports that empty a pack mid-way.
+//! `/file/bot<token>/<file_path>`. It enforces Telegram's pack name and
+//! title rules, 1 to 50 stickers in `createNewStickerSet` and 120 per pack,
+//! and lets a bot delete only the packs it created (`deleteStickerSet`). It
+//! additionally refuses to delete the last sticker of a pack, to catch
+//! exports that empty a pack mid-way, and can fail calls on purpose
+//! (`MockState::fail_after`) to test exports that stop half-way.
 
 #![allow(dead_code)]
 
@@ -55,6 +59,12 @@ pub struct MockState {
     pub retry_after: u64,
     /// Answer every file download with 404.
     pub fail_downloads: bool,
+    /// method -> how many more calls of it succeed; every later call fails
+    /// with a 500 until the entry is removed.
+    pub fail_after: HashMap<String, u32>,
+    /// Injected failures take effect first: the call changes the packs and
+    /// only its answer is lost, as when a connection drops.
+    pub fail_after_applying: bool,
     next: u64,
 }
 
@@ -128,6 +138,18 @@ impl MockState {
 
     pub fn pack(&self, name: &str) -> &MockPack {
         &self.packs[name]
+    }
+
+    /// Is this call of `method` to fail on purpose? Counts the call.
+    fn injected_failure(&mut self, method: &str) -> bool {
+        match self.fail_after.get_mut(method) {
+            Some(0) => true,
+            Some(n) => {
+                *n -= 1;
+                false
+            }
+            None => false,
+        }
     }
 
     fn find(&self, file_id: &str) -> MockResult<(String, usize)> {
@@ -210,8 +232,11 @@ impl MockState {
                 let user = int(p, "user_id")?;
                 let name = text(p, "name")?;
                 let title = text(p, "title")?;
-                if !name.to_ascii_lowercase().ends_with(&format!("_by_{BOT}")) {
+                if !valid_name(&name) {
                     return bad("invalid sticker set name is specified");
+                }
+                if !valid_title(&title) {
+                    return bad("invalid sticker set title is specified");
                 }
                 if self.packs.contains_key(&name) {
                     return bad("sticker set name is already occupied");
@@ -319,10 +344,24 @@ impl MockState {
             "setStickerSetTitle" => {
                 let name = text(p, "name")?;
                 let title = text(p, "title")?;
+                if !valid_title(&title) {
+                    return bad("invalid sticker set title is specified");
+                }
                 let Some(pack) = self.packs.get_mut(&name) else {
                     return bad("STICKERSET_INVALID");
                 };
                 pack.title = title;
+                Ok(json!(true))
+            }
+            "deleteStickerSet" => {
+                // A bot can delete only the packs it created, whose names
+                // end in its own suffix. Any other name is answered like a
+                // missing pack.
+                let name = text(p, "name")?;
+                let ours = name.to_ascii_lowercase().ends_with(&format!("_by_{BOT}"));
+                if !ours || self.packs.remove(&name).is_none() {
+                    return bad("STICKERSET_INVALID");
+                }
                 Ok(json!(true))
             }
             _ => Err((404, "Not Found: method not found".to_string())),
@@ -401,6 +440,24 @@ fn valid_thumbnail(bytes: &[u8]) -> bool {
     let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
     let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
     (w, h) == (100, 100)
+}
+
+/// Telegram's rule for the name of a pack a bot creates: 1-64 characters of
+/// `A-Z a-z 0-9 _`, starting with a letter, no `__`, ending in
+/// `_by_<bot username>` (case-insensitive).
+fn valid_name(name: &str) -> bool {
+    let suffix = format!("_by_{BOT}");
+    name.len() <= 64
+        && name.len() > suffix.len()
+        && name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !name.contains("__")
+        && name.to_ascii_lowercase().ends_with(&suffix)
+}
+
+/// A pack title: 1-64 characters.
+fn valid_title(title: &str) -> bool {
+    (1..=64).contains(&title.chars().count())
 }
 
 /// Telegram refuses words as sticker emoji (STICKER_EMOJI_INVALID).
@@ -495,6 +552,12 @@ async fn handle(State(state): State<Shared>, req: Request) -> Response {
             )
                 .into_response();
         }
+    }
+    if st.injected_failure(&method) {
+        if st.fail_after_applying {
+            let _ = st.dispatch(&method, &params, &files);
+        }
+        return error(500, "Internal Server Error: injected failure");
     }
     match st.dispatch(&method, &params, &files) {
         Ok(v) => ok(v),
