@@ -160,6 +160,21 @@ whole. Variation selectors (U+FE0F) are dropped, so `❤️` equals `❤`.
   ``п`ятниця`` are all the word `пятниця`, in the items and in queries.
 - Each emoji is a token of its own. ZWJ sequences and flags stay whole, and
   skin tones are dropped (`👍🏽` → `👍`).
+- **Punctuation (design, being built).** A run of punctuation and symbols
+  in the item text and the name (`...`, `?`, `!?`, `???`, `*`, `#`, `%`)
+  becomes a token of its own (`word: false`, like an emoji), NFKC
+  normalised (full-width `？` is `?`) and with `…` written as `...`. A
+  punctuation value matches a token that contains it: `x:?` finds `?`,
+  `??`, `?!` and the `?` of "what?"; `x:...` finds `...`, `....` and `…`,
+  not `..`. No prefix, typo or substring tier applies to it, and these
+  tokens do not count in the field lengths of the ranking, so plain-word
+  ranking does not change. A plain query of punctuation only (`?`, `...`)
+  searches like `x:?`, `x:...` instead of nothing; in a mixed one
+  (`what?`) the words stay fuzzy and the punctuation is a soft extra term.
+  `x:"what?"` is the word followed by a token containing `?`. `-x:?`
+  excludes. `?` and `*` are not wildcards. The `x:` word offers leave
+  punctuation out. A server older than this answers such queries with
+  nothing; the index is rebuilt in memory at start, so no migration.
 
 **Per-token match kinds.** Each query word is looked up in the vocabulary of
 indexed tokens. Emoji tokens only match exactly.

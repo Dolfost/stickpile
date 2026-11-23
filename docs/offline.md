@@ -379,3 +379,41 @@ The plan for the shells, as in the brief, section 4.9:
   plain pick or for "Send as a sticker"), no settings of its own, no
   downloads beyond what a pick needs.
 - **home-manager module**: the `[offline]` options, mirrored (done).
+
+## Reachability and results without waiting (design, being built)
+
+A search never waits for a server that does not answer. In
+`stickpile-core`, built once and used by the GTK popup, the macOS app,
+the Android app and the keyboard (the CLI and the web UI keep their
+behaviour):
+
+- **Reachability for every client.** The fail-fast reachability of
+  `ApiClient::with_fail_fast` is used by every client that shows
+  results, and it publishes its state as a watch value: `Unknown`,
+  `Reachable`, `Unreachable { since }`. While the server is believed
+  unreachable a background task probes `GET /healthz` every 15 s for 5
+  minutes, then every 60 s, whether or not anything reads; it starts on
+  any offline failure and stops when the server answers. A shell can ask
+  for a probe at once: when the popup or the app opens, and on Android
+  when a network appears (`ConnectivityManager`; no new permission).
+- **Two-step search.** With the state `Unreachable`, a search answers
+  from the offline index at once, marked offline. With `Reachable` or
+  `Unknown` it asks the server; if the server has not answered after
+  300 ms, the offline results are handed over first and the server's
+  follow in the same generation when they come. A failure then marks the
+  state `Unreachable` and the offline results stay. One core API yields
+  the offline answer and then, maybe, the server's; the popup model and
+  the Android bridge consume it.
+- **Short connect timeout.** Searches and other interactive reads connect
+  within 2 s, so a peer that is gone is recognised quickly; `timeout_secs`
+  still bounds the rest, and uploads, imports and file downloads keep
+  their timeouts.
+- **Back online.** When the watch value turns `Reachable`, the shells run
+  the current search again online, start a sync and drop the offline
+  notice.
+- **Results do not jump.** The server's results replace the offline ones
+  in place: the selected sticker stays selected (by id) when it is still
+  in them, a copy or insert in progress is not dropped, and the grid is
+  not reordered under a pointer or a finger pressing a tile. The server
+  stays authoritative: its results include semantic and image matches
+  and items the cache does not hold.
