@@ -1798,3 +1798,140 @@ async fn web_export_page_lists_parts() {
     assert!(html.contains("Опубліковано як 2 набори."), "{html}");
     assert!(html.contains("Перепакувати частини"));
 }
+
+// ---------------------------------------------------------------------------
+// Review of the parts round: findings
+// ---------------------------------------------------------------------------
+
+/// Packs on the mock that are no part of any set (`telegram_parts`).
+async fn unbound_packs(tg: &Tg) -> Vec<String> {
+    let bound: BTreeSet<String> = sqlx::query_scalar::<_, String>("SELECT lower(pack_name) FROM telegram_parts")
+        .fetch_all(&tg.srv.state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    packs(tg)
+        .into_keys()
+        .filter(|n| !bound.contains(&n.to_ascii_lowercase()))
+        .collect()
+}
+
+/// Stickers that are in more than one pack.
+fn doubled(tg: &Tg) -> Vec<String> {
+    let mut seen = BTreeMap::<String, usize>::new();
+    for f in packs(tg).into_values().flatten() {
+        *seen.entry(f).or_default() += 1;
+    }
+    seen.into_iter().filter(|(_, n)| *n > 1).map(|(f, _)| f).collect()
+}
+
+/// Finding: an export under a new name that fails before it changes
+/// anything on Telegram still drops the set's parts (rows, mappings) and its
+/// `telegram_pack`. Going back to the name the set is still published under
+/// on Telegram is then "a new name" again: it starts from nothing, moves the
+/// stickers of part 2 into part 1 without a repack, and leaves part 2 on
+/// Telegram, bound to nothing, with copies of stickers that are now in
+/// part 1 (rules 5 and 6).
+#[tokio::test]
+async fn review_failed_rename_loses_the_parts() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    // 20 stickers of part 1 go: 100 and 5, nothing moves.
+    delete_items(srv, &alice, &ids[..20]).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let before = packs(&tg);
+    assert_eq!((before[&p1].len(), before[&p2].len()), (100, 5));
+    let placed = item_packs(srv, &set.id).await;
+
+    // A rename whose first call on Telegram keeps failing (an outage, or a
+    // name Telegram refuses): the job fails, Telegram is unchanged.
+    tg.mock
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("createNewStickerSet".into(), 0);
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "dogs"})).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    tg.mock.lock().unwrap().fail_after.clear();
+    assert_eq!(packs(&tg), before, "nothing on Telegram changed");
+    let link_after_failure = detail(srv, &alice, &set.id).await.set.telegram_pack;
+    let rows_after_failure = part_rows(srv, &set.id).await;
+
+    // The owner goes back to the name the set is published under.
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "cats"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let after = item_packs(srv, &set.id).await;
+    let moved: Vec<&String> = after
+        .iter()
+        .filter(|(item, pack)| placed.get(*item) != Some(*pack))
+        .map(|(item, _)| item)
+        .collect();
+    let unbound = unbound_packs(&tg).await;
+    let twice = doubled(&tg);
+    assert!(
+        link_after_failure.as_deref() == Some(p1.as_str()) && moved.is_empty() && unbound.is_empty() && twice.is_empty(),
+        "after the failed rename: telegram_pack {link_after_failure:?}, parts {rows_after_failure:?}; after going \
+         back to \"cats\": {} published stickers moved without a repack, packs bound to no set {unbound:?}, {} \
+         stickers in two packs",
+        moved.len(),
+        twice.len()
+    );
+}
+
+/// Finding: publishing another of the user's sets under a set's name moves
+/// every part at the start of the export; when that export fails before it
+/// changes anything on Telegram, the first set has lost its packs (its
+/// `telegram_pack` is gone at once) and its mappings. Its next export takes
+/// the packs back without a mapping: every sticker is uploaded again and
+/// the stickers of part 2 move into part 1 without a repack (rule 5), part 2
+/// is deleted.
+#[tokio::test]
+async fn review_failed_takeover_loses_the_first_sets_parts() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, cats, ids) = big_set(&tg, "alice", "cats", 125).await;
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    assert_eq!(export(srv, &alice, &cats.id, json!({})).await.status, JobStatus::Done);
+    delete_items(srv, &alice, &ids[..20]).await;
+    assert_eq!(export(srv, &alice, &cats.id, json!({})).await.status, JobStatus::Done);
+    let before = packs(&tg);
+    assert_eq!((before[&p1].len(), before[&p2].len()), (100, 5));
+    let placed = item_packs(srv, &cats.id).await;
+
+    // Alice's other set takes the name over; its first write on Telegram
+    // keeps failing.
+    let dogs = srv.create_set(&alice, "dogs", Visibility::Private).await;
+    add_items(srv, &alice, &dogs.id, 7000, 3).await;
+    tg.mock
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("deleteStickerFromSet".into(), 0);
+    let j = export(srv, &alice, &dogs.id, json!({"pack_name": "cats"})).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    tg.mock.lock().unwrap().fail_after.clear();
+    assert_eq!(packs(&tg), before, "nothing on Telegram changed");
+    let link_after_failure = detail(srv, &alice, &cats.id).await.set.telegram_pack;
+
+    // cats is exported again, as it was published before.
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &cats.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let uploads = uploads_since(&tg, calls)
+        .into_iter()
+        .filter(|c| c == "addStickerToSet" || c == "replaceStickerInSet" || c == "createNewStickerSet")
+        .count();
+    let after = item_packs(srv, &cats.id).await;
+    let moved = after.iter().filter(|(item, pack)| placed.get(*item) != Some(*pack)).count();
+    assert!(
+        link_after_failure.as_deref() == Some(p1.as_str()) && moved == 0 && uploads == 0,
+        "after dogs' failed takeover: cats' telegram_pack {link_after_failure:?}; cats' next export: {moved} \
+         published stickers moved to another pack without a repack, {uploads} stickers uploaded again, packs now \
+         {:?}",
+        packs(&tg).iter().map(|(n, s)| (n.clone(), s.len())).collect::<Vec<_>>()
+    );
+}
