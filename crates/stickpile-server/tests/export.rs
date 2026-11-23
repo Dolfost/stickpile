@@ -816,7 +816,7 @@ async fn publish_to_telegram_discord_and_signal_at_once() {
     }
     assert!(html.contains(&format!("value=\"{}\"", mock_discord::GUILD)), "{html}");
     assert!(html.contains("<option value=\"emojis\" selected>"), "{html}");
-    assert!(html.contains("every publish uploads a new pack with a new link"));
+    assert!(html.contains("every publish uploads new packs with new links"));
     assert!(html.contains("3 emoji: 3 added, 0 removed, 0 left out"), "{html}");
     assert!(html.contains("3 stickers in a new pack, 0 left out"), "{html}");
     assert!(html.contains("Cat Lounge"));
