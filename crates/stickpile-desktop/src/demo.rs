@@ -37,7 +37,7 @@ pub const DEMO_VIBES: [&str; 8] = [
     "party",
 ];
 
-use crate::backend::{AuthKind, Backend, BoxFut, Credentials, LoginError, Profile};
+use crate::backend::{AuthKind, Backend, BoxFut, Credentials, LoginError, Profile, Searched};
 use crate::offers;
 
 struct DemoItem {
@@ -552,12 +552,12 @@ impl Backend for DemoBackend {
         false
     }
 
-    fn search(self: Arc<Self>, query: String, _target: TargetApp, limit: usize) -> BoxFut<Result<Results, String>> {
+    fn search(self: Arc<Self>, query: String, _target: TargetApp, limit: usize) -> BoxFut<Result<Searched, String>> {
         Box::pin(async move {
-            Ok(Results {
+            Ok(Searched::now(Results {
                 hits: self.search_now(&query, limit),
                 offline: false,
-            })
+            }))
         })
     }
 
@@ -808,6 +808,8 @@ mod tests {
         rt.block_on(async {
             assert!(!b.login_required());
             let r = b.clone().search("cat".into(), TargetApp::Generic, 5).await.unwrap();
+            assert!(r.then.is_none());
+            let r = r.first;
             assert_eq!(r.hits.len(), 1);
             let item = r.hits[0].item.clone();
             assert!(b

@@ -7,7 +7,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use stickpile_api::{ItemSummary, Role, SetSummary, TargetApp, TokenRequest, User, UserStats, Variant};
@@ -16,15 +16,65 @@ use stickpile_core::offline::{
     OfflineControl, OfflineOptions, OfflineOutcome, OfflineState, OfflineStatus, OfflineUsage, RunEnd,
 };
 use stickpile_core::session::{self, Listing};
-use stickpile_core::{CoreError, PreparedCopy, Session};
+use stickpile_core::{CoreError, PreparedCopy, Reach, SearchOutcome, Session};
 use stickpile_i18n::global::{t, tf};
-use stickpile_quick::model::{target_name, Results};
+use stickpile_quick::model::{target_name, Event, Results};
 use stickpile_quick::offline::{Estimate, KeepScope, KeptFor, Skips};
 use stickpile_quick::suggest::Vocabulary;
+use tokio::sync::watch;
 
 use crate::offline::{estimate_from_core, reason_from_core, scope_from_core, scope_to_core, skips_from_core};
 
 pub type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+
+/// What [`Backend::search`] answers: the results to show now, and maybe
+/// the server's to come (`Session::search_steps`, docs/offline.md).
+pub struct Searched {
+    /// The server's results when it answered within the delay
+    /// (`stickpile_core::session::OFFLINE_AFTER`), else the offline
+    /// index's (`offline`); [`stickpile_quick::Event::Results`].
+    pub first: Results,
+    /// When `first` came from the offline index because the server had
+    /// not answered yet: its answer, for
+    /// [`stickpile_quick::Event::ServerResults`] of the same generation.
+    /// `Ok(Some)` replaces `first`; `Ok(None)`: it gave none, and `first`
+    /// stands. Dropping it does not cancel the request.
+    pub then: Option<BoxFut<Result<Option<Results>, String>>>,
+}
+
+impl Searched {
+    /// Results with nothing to come after them.
+    pub fn now(first: Results) -> Searched {
+        Searched { first, then: None }
+    }
+}
+
+impl std::fmt::Debug for Searched {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Searched")
+            .field("first", &self.first)
+            .field("then", &self.then.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
+/// The model's event for what the client knows of the server
+/// ([`Backend::reach`]); `None` for [`Reach::Unknown`], which tells nothing
+/// new (a check is waiting, or an outage was forgotten).
+pub fn reach_event(reach: Reach) -> Option<Event> {
+    match reach {
+        Reach::Reachable => Some(Event::Reachable(true)),
+        Reach::Unreachable { .. } => Some(Event::Reachable(false)),
+        Reach::Unknown => None,
+    }
+}
+
+fn results(o: SearchOutcome) -> Results {
+    Results {
+        hits: o.hits,
+        offline: o.offline,
+    }
+}
 
 /// A password login.
 #[derive(Clone, PartialEq, Eq)]
@@ -161,7 +211,11 @@ pub trait Backend: Send + Sync + 'static {
     /// it (no token and no tailnet identity, or a revoked token). Having no
     /// token is not enough: tailnet users work without one.
     fn login_required(&self) -> bool;
-    fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Results, String>>;
+    /// Never waits for a server that does not answer: the offline index's
+    /// results first when the server is believed unreachable (at once) or
+    /// has not answered within the delay, and then the server's
+    /// ([`Searched::then`]).
+    fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Searched, String>>;
     fn recent(self: Arc<Self>, limit: usize) -> BoxFut<Vec<ItemSummary>>;
     fn thumbnail(self: Arc<Self>, item: ItemSummary) -> BoxFut<Result<PathBuf, String>>;
     fn prepare_copy(
@@ -204,13 +258,17 @@ pub trait Backend: Send + Sync + 'static {
     /// words written on them, read from the cache's index as they are typed.
     fn vocabulary(self: Arc<Self>) -> BoxFut<Vocabulary>;
 
-    // -- keeping offline (docs/offline.md); the demo has none ------------------------
+    // -- reachability and keeping offline (docs/offline.md); the demo has none ----------
 
-    /// Whether the server answered the last request that tried it; `None`
-    /// before one did.
-    fn reachable(&self) -> Option<bool> {
+    /// What the client knows of the server, as it changes
+    /// (`Session::reach`): the shells follow it and tell the model
+    /// ([`reach_event`]). `None` without a server.
+    fn reach(&self) -> Option<watch::Receiver<Reach>> {
         None
     }
+    /// Check the server now, in the background (`Session::check_server`):
+    /// when the popup opens. Callable from the UI thread.
+    fn check_server(&self) {}
     /// What the user keeps on this device.
     fn offline_keeps(self: Arc<Self>) -> BoxFut<Result<Vec<KeepScope>, String>> {
         no_offline()
@@ -267,11 +325,6 @@ pub trait Backend: Send + Sync + 'static {
 fn no_offline<T: Send + 'static>() -> BoxFut<Result<T, String>> {
     Box::pin(async { Err(t("Keeping offline needs a server (not in demo mode)").to_string()) })
 }
-
-/// [`Backend::reachable`], kept in an atomic.
-const REACH_UNKNOWN: u8 = 0;
-const REACH_YES: u8 = 1;
-const REACH_NO: u8 = 2;
 
 /// The item's page in the web UI of the server at `server_url`.
 pub fn item_page_url(server_url: &str, item_id: &str) -> Option<String> {
@@ -368,12 +421,13 @@ pub fn client_name() -> String {
     format!("desktop/{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// The real backend.
+/// The real backend. Its session fails fast (`Session::with_fail_fast`):
+/// what it knows of the server is the core's [`Reach`] ([`Backend::reach`]),
+/// the one record of it, which every request and the background checks
+/// keep.
 pub struct CoreBackend {
     session: Session,
     login_required: AtomicBool,
-    /// [`Backend::reachable`]: `REACH_*`.
-    reach: AtomicU8,
 }
 
 impl CoreBackend {
@@ -381,9 +435,8 @@ impl CoreBackend {
     /// shell re-opens the session to pick up a token from `stickpile login`).
     pub fn new(session: Session, login_required: bool) -> CoreBackend {
         CoreBackend {
-            session: session.with_client_name(client_name()),
+            session: session.with_client_name(client_name()).with_fail_fast(),
             login_required: AtomicBool::new(login_required),
-            reach: AtomicU8::new(REACH_UNKNOWN),
         }
     }
 
@@ -391,15 +444,9 @@ impl CoreBackend {
         self.session.is_logged_in()
     }
 
-    fn reached(&self, yes: bool) {
-        self.reach
-            .store(if yes { REACH_YES } else { REACH_NO }, Ordering::Relaxed);
-    }
-
-    /// Track authorisation and reachability from a result: a rejection
-    /// sets the login flag, an answer from the server (`reached_server`)
-    /// clears it, and an unreachable server is noted. Errors become
-    /// user-facing text, `offline` for an unreachable server.
+    /// Track authorisation from a result: a rejection sets the login flag,
+    /// an answer from the server (`reached_server`) clears it. Errors
+    /// become user-facing text, `offline` for an unreachable server.
     fn track<T>(
         &self,
         r: Result<T, CoreError>,
@@ -410,18 +457,12 @@ impl CoreBackend {
             Ok(v) => {
                 if reached_server(&v) {
                     self.login_required.store(false, Ordering::Relaxed);
-                    self.reached(true);
                 }
                 Ok(v)
             }
             Err(e) => {
                 if e.is_unauthorized() {
                     self.login_required.store(true, Ordering::Relaxed);
-                }
-                if e.is_offline() {
-                    self.reached(false);
-                } else if e.status().is_some() {
-                    self.reached(true);
                 }
                 Err(describe_with(&e, offline))
             }
@@ -430,9 +471,6 @@ impl CoreBackend {
 
     /// [`CoreBackend::track`] for a list that may come from the offline cache.
     fn listing<T>(&self, r: Result<Listing<T>, CoreError>, offline: &str) -> Result<Vec<T>, String> {
-        if r.as_ref().is_ok_and(|l| l.offline) {
-            self.reached(false);
-        }
         self.track(r, |l| !l.offline, offline).map(|l| l.items)
     }
 
@@ -454,16 +492,21 @@ impl Backend for CoreBackend {
         self.login_required.load(Ordering::Relaxed)
     }
 
-    fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Results, String>> {
+    fn search(self: Arc<Self>, query: String, target: TargetApp, limit: usize) -> BoxFut<Result<Searched, String>> {
         Box::pin(async move {
-            let r = self.session.search(&query, Some(target), limit).await;
-            if r.as_ref().is_ok_and(|o| o.offline) {
-                self.reached(false);
-            }
-            let out = self.track(r, |o| !o.offline, ITEM_NOT_CACHED())?;
-            Ok(Results {
-                hits: out.hits,
-                offline: out.offline,
+            let r = self.session.search_steps(&query, Some(target), limit).await;
+            let steps = self.track(r, |s| !s.first.offline, ITEM_NOT_CACHED())?;
+            let then = steps.then.map(|step| {
+                let this = self.clone();
+                Box::pin(async move {
+                    let r = step.wait().await;
+                    this.track(r, Option::is_some, ITEM_NOT_CACHED())
+                        .map(|o| o.map(results))
+                }) as BoxFut<_>
+            });
+            Ok(Searched {
+                first: results(steps.first),
+                then,
             })
         })
     }
@@ -521,17 +564,12 @@ impl Backend for CoreBackend {
             {
                 // Kept already: `K` would release it, so say what is missing.
                 if self.session.offline_reasons(&item).is_ok_and(|r| !r.is_empty()) {
-                    self.reached(false);
                     return Err(kept_not_here(name, *variant, target, sticker));
                 }
             }
-            // The core copies another kept file only when the server did not
-            // answer, so the tiles dim as after a failed copy.
-            if r.as_ref()
-                .is_ok_and(|p| p.warning.as_deref() == Some(stickpile_core::session::COPIED_ANOTHER_FILE))
-            {
-                self.reached(false);
-            }
+            // A file not on the device, or another kept one copied, means
+            // the server did not answer: the core's reachability says so
+            // already, and the tiles dim when the shell tells the model.
             self.track(r, |_| false, ITEM_NOT_CACHED())
         })
     }
@@ -715,12 +753,12 @@ impl Backend for CoreBackend {
         })
     }
 
-    fn reachable(&self) -> Option<bool> {
-        match self.reach.load(Ordering::Relaxed) {
-            REACH_YES => Some(true),
-            REACH_NO => Some(false),
-            _ => None,
-        }
+    fn reach(&self) -> Option<watch::Receiver<Reach>> {
+        Some(self.session.reach())
+    }
+
+    fn check_server(&self) {
+        self.session.check_server();
     }
 
     fn offline_keeps(self: Arc<Self>) -> BoxFut<Result<Vec<KeepScope>, String>> {
@@ -761,10 +799,8 @@ impl Backend for CoreBackend {
     fn offline_run(self: Arc<Self>, control: OfflineControl) -> BoxFut<Result<OfflineOutcome, String>> {
         Box::pin(async move {
             let out = self.session.offline_run(&control).await.map_err(|e| describe(&e))?;
-            match out.end {
-                RunEnd::WaitingForNetwork => self.reached(false),
-                RunEnd::Unauthorized => self.login_required.store(true, Ordering::Relaxed),
-                _ => {}
+            if out.end == RunEnd::Unauthorized {
+                self.login_required.store(true, Ordering::Relaxed);
             }
             Ok(out)
         })
@@ -849,6 +885,15 @@ mod tests {
         Arc::new(CoreBackend::new(rt.block_on(Session::open(cfg)).unwrap(), false))
     }
 
+    /// What the backend knows of the server: `None` before anything answered.
+    fn reachable(b: &CoreBackend) -> Option<bool> {
+        match *b.reach().unwrap().borrow() {
+            Reach::Reachable => Some(true),
+            Reach::Unreachable { .. } => Some(false),
+            Reach::Unknown => None,
+        }
+    }
+
     #[test]
     fn error_texts() {
         assert_eq!(
@@ -901,6 +946,8 @@ mod tests {
             assert_eq!(b.clone().vocabulary().await.sets, ["cats"]);
             assert!(!b.clone().sync().await.unwrap(), "nothing new on the server");
             let r = b.clone().search("cat".into(), TargetApp::Discord, 10).await.unwrap();
+            assert!(r.then.is_none(), "the server answered at once");
+            let r = r.first;
             assert!(!r.offline);
             let ids: Vec<_> = r.hits.iter().map(|h| h.item.id.as_str()).collect();
             assert!(
@@ -965,7 +1012,8 @@ mod tests {
         let r = rt
             .block_on(b.clone().search("cat".into(), TargetApp::Generic, 5))
             .unwrap();
-        assert!(r.offline);
+        assert!(r.then.is_none(), "refused: nothing to wait for");
+        assert!(r.first.offline);
         assert!(b.login_required(), "an offline answer says nothing about credentials");
         assert!(rt.block_on(b.clone().sync()).is_err());
     }
@@ -1245,11 +1293,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rt = rt();
         let b = alice(&rt, &server, dir.path());
-        assert_eq!(b.reachable(), None);
+        assert_eq!(reachable(&b), None);
         let cats = KeepScope::Set(cat.set_id.clone());
         rt.block_on(async {
             b.clone().sync().await.unwrap();
-            assert_eq!(b.reachable(), Some(true));
+            assert_eq!(reachable(&b), Some(true));
             assert!(b.clone().offline_keeps().await.unwrap().is_empty());
             let e = b.clone().offline_estimate(cats.clone()).await.unwrap();
             assert_eq!(e.items, 3);
@@ -1288,7 +1336,7 @@ mod tests {
                 err,
                 "good dog is not on this device and the server is unreachable; keep it offline (K) to copy it without the server"
             );
-            assert_eq!(b.reachable(), Some(false));
+            assert_eq!(reachable(&b), Some(false));
             let out = b.clone().offline_run(OfflineControl::new()).await.unwrap();
             assert_eq!(out.end, RunEnd::WaitingForNetwork);
 
@@ -1443,7 +1491,7 @@ mod tests {
                     );
                 }
             }
-            assert_eq!(b.reachable(), Some(false));
+            assert_eq!(reachable(&b), Some(false));
             let err = b
                 .clone()
                 .prepare_copy(gif.clone(), TargetApp::Generic, false)
@@ -1470,7 +1518,7 @@ mod tests {
         std::fs::write(dir.path().join("a.png"), encoded(8, 8, ImageFormat::Png)).unwrap();
         let demo = Arc::new(crate::demo::DemoBackend::scan(dir.path(), &ClientConfig::default()).unwrap());
         let rt = rt();
-        assert_eq!(demo.reachable(), None);
+        assert!(demo.reach().is_none(), "no server");
         let err = rt.block_on(demo.offline_keeps()).unwrap_err();
         assert!(err.contains("demo"), "{err}");
     }
@@ -1618,7 +1666,12 @@ mod tests {
             }
             assert!(server.state().tokens[0].info.name.starts_with("stickpile-desktop@"));
             // The same backend uses the new token right away.
-            let r = b.clone().search("cat".into(), TargetApp::Generic, 5).await.unwrap();
+            let r = b
+                .clone()
+                .search("cat".into(), TargetApp::Generic, 5)
+                .await
+                .unwrap()
+                .first;
             assert_eq!(r.hits.len(), 3);
             assert_eq!(b.session.cache().me().unwrap().unwrap().username, "alice");
         });
@@ -1679,6 +1732,190 @@ mod tests {
         };
         let shown = format!("{creds:?}");
         assert!(!shown.contains("hunter2") && !shown.contains("123456"), "{shown}");
+    }
+
+    // -- results without waiting (docs/offline.md) ------------------------------------
+
+    fn ms(n: u64) -> std::time::Duration {
+        std::time::Duration::from_millis(n)
+    }
+
+    /// A server that accepts connections and never answers (a tailnet peer
+    /// that is gone): the kernel accepts into the backlog.
+    fn hung_server() -> (std::net::TcpListener, String) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        (listener, url)
+    }
+
+    /// A backend on `url` with alice's cats of [`world`] in its cache (no
+    /// request made).
+    fn cached(
+        rt: &tokio::runtime::Runtime,
+        url: &str,
+        dir: &std::path::Path,
+        items: &[ItemSummary],
+    ) -> Arc<CoreBackend> {
+        let b = backend(rt, config_for(url, dir));
+        b.session.cache().upsert_items(&items[..3]).unwrap();
+        b
+    }
+
+    /// The next value of the backend's reachability (within 5 s).
+    fn next_reach(rt: &tokio::runtime::Runtime, rx: &mut watch::Receiver<Reach>) -> Reach {
+        rt.block_on(async { tokio::time::timeout(ms(5000), rx.changed()).await })
+            .expect("a change within 5 s")
+            .unwrap();
+        *rx.borrow_and_update()
+    }
+
+    /// The popup's search with a server that accepts and never answers:
+    /// the offline results after the delay (`OFFLINE_AFTER`), not after
+    /// `timeout_secs`; the server's answer (none) after the timeout; then
+    /// it is believed away and the next search answers at once.
+    #[test]
+    fn popup_search_with_hung_server_answers_offline_within_delay() {
+        use stickpile_core::session::OFFLINE_AFTER;
+        let (_world, items) = world();
+        let (_hung, url) = hung_server();
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = cached(&rt, &url, dir.path(), &items);
+        rt.block_on(async {
+            let start = std::time::Instant::now();
+            let s = b.clone().search("cat".into(), TargetApp::Generic, 10).await.unwrap();
+            let first_at = start.elapsed();
+            assert!(s.first.offline);
+            assert_eq!(s.first.hits.len(), 3);
+            assert!(
+                first_at >= OFFLINE_AFTER && first_at < OFFLINE_AFTER + ms(250),
+                "{first_at:?}"
+            );
+            let then = s.then.expect("the server was asked");
+            assert_eq!(then.await, Ok(None), "it never answered: the offline results stand");
+            assert!(start.elapsed() >= ms(2000), "after timeout_secs: {:?}", start.elapsed());
+            assert_eq!(reachable(&b), Some(false));
+
+            let start = std::time::Instant::now();
+            let s = b.clone().search("cat".into(), TargetApp::Generic, 10).await.unwrap();
+            assert!(s.first.offline && s.then.is_none());
+            assert!(start.elapsed() < ms(50), "{:?}", start.elapsed());
+        });
+    }
+
+    /// With the server believed unreachable (here a refused port), every
+    /// search answers from the offline index at once, without a request
+    /// and with nothing to wait for (rule 8: results within the debounce
+    /// plus 50 ms).
+    #[test]
+    fn popup_search_when_unreachable_is_immediate() {
+        let (_world, items) = world();
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = cached(&rt, &dead_url(), dir.path(), &items);
+        rt.block_on(async {
+            let s = b.clone().search("cat".into(), TargetApp::Generic, 10).await.unwrap();
+            assert!(s.first.offline && s.then.is_none(), "refused: offline at once");
+            assert_eq!(reachable(&b), Some(false));
+            for query in ["cat", "grumpy", "dance", "cat"] {
+                let start = std::time::Instant::now();
+                let s = b.clone().search(query.into(), TargetApp::Generic, 10).await.unwrap();
+                let took = start.elapsed();
+                assert!(s.first.offline && s.then.is_none(), "{query}");
+                assert!(!s.first.hits.is_empty(), "{query}");
+                assert!(took < ms(50), "{query}: {took:?}");
+            }
+        });
+    }
+
+    /// The shell's path for reachability: the backend's watch value, made
+    /// into the model's event ([`reach_event`]). The server gone dims what
+    /// is not on the device; back (found by a check), it runs the search
+    /// shown again in place and starts a sync.
+    #[test]
+    fn reach_event_reaches_the_model() {
+        use stickpile_quick::{Command, Model, ModelConfig, OpenInfo};
+        let (mut server, _items) = world();
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        let mut rx = b.reach().unwrap();
+        assert_eq!(reach_event(*rx.borrow_and_update()), None, "nothing known yet");
+        rt.block_on(b.clone().sync()).unwrap();
+        assert_eq!(reach_event(*rx.borrow_and_update()), Some(Event::Reachable(true)));
+
+        let mut m = Model::new(ModelConfig::default());
+        m.handle(Event::Open(OpenInfo::default()));
+        m.handle(Event::Reachable(true));
+        let search = |m: &mut Model, cmds: Vec<Command>| {
+            let Some(Command::Search {
+                query,
+                target,
+                limit,
+                generation,
+                ..
+            }) = cmds.into_iter().find(|c| matches!(c, Command::Search { .. }))
+            else {
+                panic!("no search");
+            };
+            let s = rt.block_on(b.clone().search(query, target, limit)).unwrap();
+            assert!(s.then.is_none(), "refused or answered at once");
+            m.handle(Event::Results {
+                generation,
+                outcome: Ok(s.first),
+            })
+        };
+
+        server.kill();
+        let cmds = m.handle(Event::QueryChanged("cat".into()));
+        search(&mut m, cmds);
+        assert!(m.is_offline());
+        let gone = reach_event(next_reach(&rt, &mut rx)).expect("unreachable");
+        assert_eq!(gone, Event::Reachable(false));
+        m.handle(gone);
+        assert!(!m.reachable());
+
+        // Back: the check the popup makes when it opens finds it (from
+        // the UI thread, outside the runtime).
+        server.restart();
+        b.check_server();
+        let back = reach_event(next_reach(&rt, &mut rx)).expect("reachable");
+        assert_eq!(back, Event::Reachable(true));
+        let cmds = m.handle(back);
+        assert!(cmds.contains(&Command::Sync));
+        search(&mut m, cmds);
+        assert!(!m.is_offline(), "the server's results, in place");
+        assert_eq!(m.entries().len(), 3);
+        assert_eq!(m.footer().status, "");
+    }
+
+    /// Opening the popup checks the server in the background
+    /// ([`Backend::check_server`], from the UI thread): a fresh backend
+    /// knows nothing until then.
+    #[test]
+    fn check_on_open() {
+        let (server, items) = world();
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let b = alice(&rt, &server, dir.path());
+        assert_eq!(reachable(&b), None);
+        let mut rx = b.reach().unwrap();
+        b.check_server();
+        assert_eq!(next_reach(&rt, &mut rx), Reach::Reachable);
+        assert_eq!(server.state().requests, ["GET /healthz"], "nothing else asked");
+
+        let dir = tempfile::tempdir().unwrap();
+        let gone = cached(&rt, &dead_url(), dir.path(), &items);
+        let mut rx = gone.reach().unwrap();
+        gone.check_server();
+        assert!(next_reach(&rt, &mut rx).is_unreachable());
+        // The first search after it does not try the server.
+        let start = std::time::Instant::now();
+        let s = rt
+            .block_on(gone.clone().search("cat".into(), TargetApp::Generic, 10))
+            .unwrap();
+        assert!(s.first.offline && s.then.is_none());
+        assert!(start.elapsed() < ms(50), "{:?}", start.elapsed());
     }
 
     /// The popup's suggestion line per keystroke on 50,000 cached items

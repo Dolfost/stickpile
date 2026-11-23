@@ -586,7 +586,8 @@ fn unreachable_dims_what_is_not_on_the_device_whatever_zo_says() {
     m.handle(Event::Reachable(true));
     assert_eq!(marks(&m), [OfflineMark::None; 3]);
 
-    // Results from the cache mean the server did not answer.
+    // Results from the cache alone do not say the server is away: a slow
+    // one sends them first and its own after. The shell says it is.
     m.handle(Event::QueryChanged("dog".into()));
     let generation = m.generation();
     let cmds = m.handle(Event::Results {
@@ -596,6 +597,9 @@ fn unreachable_dims_what_is_not_on_the_device_whatever_zo_says() {
             offline: true,
         }),
     });
+    assert!(m.reachable());
+    assert!(check_of(&cmds).is_none(), "marks off, the server answering");
+    let cmds = m.handle(Event::Reachable(false));
     assert!(!m.reachable());
     let (check, ..) = check_of(&cmds).expect("asked");
     m.handle(Event::OfflineChecked {

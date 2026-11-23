@@ -71,6 +71,11 @@ impl KeepState {
             names: Vec::new(),
         }
     }
+
+    /// The menu of a cell is open.
+    pub(super) fn menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
 }
 
 /// User input that closes the menu of a cell (choosing an entry reads it first).
@@ -515,21 +520,20 @@ impl Model {
 
     // -- marks -----------------------------------------------------------------------------
 
+    /// The server is believed unreachable, or answers again
+    /// ([`Event::Reachable`]): the marks, and after an outage what the
+    /// server is back for ([`Model::server_back`]).
     fn set_reachable(&mut self, reachable: bool) -> Vec<Command> {
         if self.keep.reachable == reachable {
             return Vec::new();
         }
         self.keep.reachable = reachable;
         self.mark_offline();
-        self.check_offline().into_iter().collect()
-    }
-
-    /// Search results say whether the server answered; `true` when that
-    /// is news.
-    pub(super) fn results_reached(&mut self, offline: bool) -> bool {
-        let changed = self.keep.reachable == offline;
-        self.keep.reachable = !offline;
-        changed
+        let mut cmds: Vec<Command> = self.check_offline().into_iter().collect();
+        if reachable {
+            cmds.extend(self.server_back());
+        }
+        cmds
     }
 
     /// Ask whose files are on the device, for the shown items, when the

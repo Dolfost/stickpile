@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use stickpile_api::{ItemSummary, SetSummary, TargetApp};
 use stickpile_core::settings as config_file;
-use stickpile_core::{ClientConfig, PreparedCopy, Session};
+use stickpile_core::{ClientConfig, PreparedCopy, Reach, Session};
 use stickpile_desktop::backend::{self, Backend, BoxFut, CoreBackend, Credentials, LoginError, Profile};
 use stickpile_desktop::demo::DemoBackend;
 use stickpile_desktop::offline::{remove_numbers, Downloads, Panel, PanelView};
@@ -90,8 +90,10 @@ struct State {
     /// Keeping offline: the downloader's runs and the Settings block.
     downloads: Downloads,
     panel: Panel,
-    /// The reachability last told to the model.
-    reach_told: Option<bool>,
+    /// Which session's reachability is followed ([`Driver::watch_reach`]):
+    /// counts the sessions opened, with the task that follows the current
+    /// one (stopped when another opens).
+    reach_watch: (u64, Option<tokio::task::AbortHandle>),
 }
 
 pub struct Driver {
@@ -197,7 +199,7 @@ impl Driver {
             opened_over: None,
             downloads: Downloads::default(),
             panel: Panel::default(),
-            reach_told: None,
+            reach_watch: (0, None),
             cfg,
         };
         Arc::new_cyclic(|weak| Driver {
@@ -279,26 +281,86 @@ impl Driver {
     /// (Re)open the core session. `login_required`: what the old session
     /// learned about the login (same server and token file).
     fn open_session(&self, login_required: bool) {
-        let cfg = self.lock().cfg.clone();
+        let cfg = {
+            let mut s = self.lock();
+            // The old session's reachability is no longer followed.
+            s.reach_watch.0 += 1;
+            if let Some(old) = s.reach_watch.1.take() {
+                old.abort();
+            }
+            s.cfg.clone()
+        };
         let task = self.rt.spawn(Session::open(cfg));
         // Opening only loads the token and the cache; never let it freeze the UI.
         let outcome = self
             .rt
             .block_on(async { tokio::time::timeout(SESSION_OPEN_TIMEOUT, task).await });
-        let mut s = self.lock();
-        match outcome {
-            Ok(Ok(Ok(session))) => {
-                let carried = login_required && !session.is_logged_in();
-                s.backend = Some(Arc::new(CoreBackend::new(session, carried)));
-                s.backend_error = None;
+        let opened = {
+            let mut s = self.lock();
+            match outcome {
+                Ok(Ok(Ok(session))) => {
+                    let carried = login_required && !session.is_logged_in();
+                    s.backend = Some(Arc::new(CoreBackend::new(session, carried)));
+                    s.backend_error = None;
+                }
+                Ok(Ok(Err(e))) => s.backend_error = Some(backend::describe(&e)),
+                Ok(Err(e)) => s.backend_error = Some(tf("stickpile-core failed: {error}", &[("error", &e)])),
+                Err(_) => s.backend_error = Some(t("opening the local cache timed out").into()),
             }
-            Ok(Ok(Err(e))) => s.backend_error = Some(backend::describe(&e)),
-            Ok(Err(e)) => s.backend_error = Some(tf("stickpile-core failed: {error}", &[("error", &e)])),
-            Err(_) => s.backend_error = Some(t("opening the local cache timed out").into()),
+            if let Some(e) = &s.backend_error {
+                tracing::warn!("opening the session: {e}");
+            }
+            s.backend_error.is_none()
+        };
+        if opened {
+            self.watch_reach();
         }
-        if let Some(e) = &s.backend_error {
-            tracing::warn!("opening the session: {e}");
+    }
+
+    /// Follow what the session knows of the server (the core's `Reach`)
+    /// and tell the model as it changes ([`backend::reach_event`]): a task
+    /// on the runtime hands each value to the main thread ([`PopupUi::post`]).
+    fn watch_reach(&self) {
+        let Some(mut rx) = self.backend().and_then(|b| b.reach()) else {
+            return;
+        };
+        let watch = self.lock().reach_watch.0;
+        let weak = self.weak.clone();
+        let ui = self.ui.clone();
+        let task = self.rt.spawn(async move {
+            loop {
+                let reach = *rx.borrow_and_update();
+                let weak = weak.clone();
+                ui.post(MainTask::new(move || {
+                    if let Some(d) = weak.upgrade() {
+                        d.reach_changed(watch, reach);
+                    }
+                }));
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.lock().reach_watch.1 = Some(task.abort_handle());
+    }
+
+    fn reach_changed(&self, watch: u64, reach: Reach) {
+        let Some(event) = backend::reach_event(reach) else {
+            return;
+        };
+        {
+            let mut s = self.lock();
+            if s.reach_watch.0 != watch {
+                return;
+            }
+            tracing::debug!("server: {reach:?}");
+            if event == Event::Reachable(true) && !s.model.reachable() {
+                // Back after an outage: what failed to load meanwhile loads again.
+                s.thumbs.retain(|_, t| *t != Thumb::Failed);
+                s.covers.retain(|_, t| *t != Thumb::Failed);
+            }
         }
+        self.dispatch(event);
     }
 
     /// Run a backend request and hand its outcome to the model; every
@@ -315,7 +377,6 @@ impl Driver {
         self.spawn(request(b), move |d, out| {
             let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             d.dispatch(event(outcome));
-            d.tell_reachable();
         });
     }
 
@@ -679,6 +740,7 @@ impl Driver {
                     }
                 });
             }
+            Command::Sync => self.sync_now(),
             Command::SaveHistory(history) => {
                 let path = self.lock().history_path.clone();
                 self.rt.spawn_blocking(move || {
@@ -820,7 +882,6 @@ impl Driver {
                 again
             };
             d.dispatch(Event::OfflineFiles);
-            d.tell_reachable();
             d.refresh_usage();
             if again {
                 d.start_run();
@@ -864,17 +925,6 @@ impl Driver {
             self.dispatch(Event::OfflineFiles);
         } else {
             self.render();
-        }
-    }
-
-    /// Tell the model whether the server answers, when that changed.
-    fn tell_reachable(&self) {
-        let Some(r) = self.backend().and_then(|b| b.reachable()) else {
-            return;
-        };
-        let changed = self.lock().reach_told.replace(r) != Some(r);
-        if changed {
-            self.dispatch(Event::Reachable(r));
         }
     }
 
@@ -977,6 +1027,11 @@ impl Driver {
             let required = self.login_required();
             self.open_session(required);
             self.render();
+        }
+        // Whether the server answers is checked now, in the background:
+        // searches do not wait for it (docs/offline.md).
+        if let Some(b) = self.backend() {
+            b.check_server();
         }
         {
             // Failed thumbnails and covers get another chance on every open.
@@ -1295,7 +1350,6 @@ impl Driver {
             // What was kept and downloaded belonged to the old account.
             s.downloads.forget();
             s.panel = Panel::default();
-            s.reach_told = None;
         }
         self.dispatch(Event::Reload);
         self.maybe_sync();
@@ -1441,11 +1495,30 @@ impl Driver {
         self.lock().search = Some(handle);
     }
 
+    /// The search in two steps (docs/offline.md): what to show now, then
+    /// maybe the server's results, both for `generation` (the model drops
+    /// them once another search started).
     fn run_search(&self, query: String, target: TargetApp, limit: usize, generation: u64) {
-        self.answer(
-            move |b| b.search(query, target, limit),
-            move |outcome| Event::Results { generation, outcome },
-        );
+        let Some(b) = self.backend() else {
+            self.dispatch(Event::Results {
+                generation,
+                outcome: Err(t("not connected").into()),
+            });
+            return;
+        };
+        self.spawn(b.search(query, target, limit), move |d, out| {
+            let (outcome, then) = match out {
+                Some(Ok(s)) => (Ok(s.first), s.then),
+                Some(Err(e)) => (Err(e), None),
+                None => (Err(t("internal error (see log)").into()), None),
+            };
+            d.dispatch(Event::Results { generation, outcome });
+            let Some(then) = then else { return };
+            d.spawn(then, move |d, out| {
+                let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
+                d.dispatch(Event::ServerResults { generation, outcome });
+            });
+        });
     }
 
     // -- thumbnails and covers -------------------------------------------------------------------
@@ -1532,10 +1605,7 @@ impl Driver {
                     d.paste_after_pick();
                     d.record(item, prepared);
                 }
-                Err(error) => {
-                    d.dispatch(Event::CopyFailed { item_id: id, error });
-                    d.tell_reachable();
-                }
+                Err(error) => d.dispatch(Event::CopyFailed { item_id: id, error }),
             }
         });
     }
@@ -1586,13 +1656,26 @@ impl Driver {
 
     // -- sync ------------------------------------------------------------------------------------------------
 
+    /// A sync when the schedule says one is due (`SyncPolicy`).
     fn maybe_sync(&self) {
-        let now = Instant::now();
-        if !self.lock().sync.due(now) {
-            return;
+        let due = self.lock().sync.due(Instant::now());
+        if due {
+            self.start_sync();
         }
+    }
+
+    /// The server is back ([`Command::Sync`]): a sync now, unless one is
+    /// running; the schedule goes on from it.
+    fn sync_now(&self) {
+        let running = self.lock().sync.is_running();
+        if !running {
+            self.start_sync();
+        }
+    }
+
+    fn start_sync(&self) {
         let Some(b) = self.backend() else { return };
-        self.lock().sync.started(now);
+        self.lock().sync.started(Instant::now());
         self.spawn(b.sync(), |d, out| {
             let ok = matches!(out, Some(Ok(_)));
             if let Some(Err(e)) = &out {
@@ -1602,7 +1685,6 @@ impl Driver {
             if matches!(out, Some(Ok(true))) {
                 d.dispatch(Event::LibraryChanged);
             }
-            d.tell_reachable();
             // After each successful sync: what is kept and missing.
             if ok {
                 d.refresh_keeps();

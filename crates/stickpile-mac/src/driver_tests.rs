@@ -113,6 +113,27 @@ impl Harness {
         Harness::start(serial, dir, &format!("server_url = {:?}\n", server.url), None)
     }
 
+    /// [`Harness::against`] with the library in the cache already (synced
+    /// before the start), so the offline index can answer.
+    fn against_synced(server: &MockServer) -> Harness {
+        let serial = serial();
+        let dir = tempfile::tempdir().unwrap();
+        let token = server.state().issue_token("alice", "mac test");
+        stickpile_core::token::write_token(&dir.path().join("token"), &token).unwrap();
+        let cfg = stickpile_core::ClientConfig {
+            server_url: server.url.clone(),
+            token_file: Some(dir.path().join("token")),
+            cache_dir: Some(dir.path().join("cache")),
+            ..stickpile_core::ClientConfig::default()
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let session = stickpile_core::Session::open(cfg).await.unwrap();
+            assert!(session.sync().await.unwrap());
+        });
+        Harness::start(serial, dir, &format!("server_url = {:?}\n", server.url), None)
+    }
+
     /// The driver on a config in `dir` that starts with `head`, for the
     /// demo files in `media` or else the configured server.
     fn start(
@@ -162,6 +183,20 @@ impl Harness {
         while !done(&self.ui.seen.lock().unwrap()) {
             let left = deadline.saturating_duration_since(Instant::now());
             assert!(!left.is_zero(), "timed out waiting for {what}");
+            if let Ok(task) = self.tasks.recv_timeout(left.min(Duration::from_millis(50))) {
+                task.run();
+            }
+        }
+    }
+
+    /// Run posted tasks for `time`.
+    fn pump_for(&self, time: Duration) {
+        let deadline = Instant::now() + time;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
             if let Ok(task) = self.tasks.recv_timeout(left.min(Duration::from_millis(50))) {
                 task.run();
             }
@@ -830,4 +865,72 @@ fn unreachable_dims_what_is_not_here_and_explains_it() {
             .unwrap();
     h.driver.activate(kept_at as u32);
     h.pump_until("the kept cat copied", |s| s.clipboard.len() == copies + 1);
+}
+
+// -- results without waiting (docs/offline.md) ------------------------------------------
+
+const NOTICE: &str = "Offline: showing saved stickers";
+
+fn notice_with(s: &Seen, n: usize) -> bool {
+    s.entries.len() == n && s.renders.last().is_some_and(|v| v.footer.status == NOTICE)
+}
+
+/// A slow server: the offline index's results first with the notice (not
+/// "Searching..." until the server answers), then the server's in their
+/// place, the selected sticker still selected.
+#[test]
+fn offline_results_first_then_the_servers_in_place() {
+    let server = kennel();
+    let h = Harness::against_synced(&server);
+    server.state().search_delay = Some(Duration::from_millis(1500));
+    h.driver.toggle(None, false);
+    let start = Instant::now();
+    h.driver.query_changed("cat".into());
+    h.pump_until("the offline results", |s| notice_with(s, 2));
+    let first_at = start.elapsed();
+    assert!(first_at < Duration::from_millis(1000), "{first_at:?}");
+    assert_eq!(h.last().footer.level, Level::Warning);
+    assert!(h.key(124, "\u{f703}"));
+    assert_eq!(h.last().selected, Some(1));
+    let chosen = h.ui.seen.lock().unwrap().entries[1].id.clone();
+
+    h.pump_until("the server's results", |s| {
+        s.renders.last().is_some_and(|v| v.footer.status.is_empty())
+    });
+    assert!(start.elapsed() >= Duration::from_millis(1500));
+    let selected = h.last().selected.expect("selected") as usize;
+    assert_eq!(
+        h.ui.seen.lock().unwrap().entries[selected].id,
+        chosen,
+        "the selected sticker stays selected"
+    );
+}
+
+/// Opening the popup checks the server. With it gone a search shows the
+/// offline results and the notice at once; once the check of the next
+/// opening finds it back, a sync starts at once (the schedule would wait).
+#[test]
+fn opening_checks_the_server_and_its_return_starts_a_sync() {
+    let mut server = kennel();
+    let h = Harness::against_synced(&server);
+    h.driver.toggle(None, false);
+    h.pump_until("the check on opening", |_| {
+        server.state().requests.iter().any(|r| r == "GET /healthz")
+    });
+
+    server.kill();
+    let start = Instant::now();
+    h.driver.query_changed("cat".into());
+    h.pump_until("the offline results", |s| notice_with(s, 2));
+    assert!(start.elapsed() < Duration::from_millis(1000), "{:?}", start.elapsed());
+    h.pump_for(Duration::from_millis(300));
+
+    server.restart();
+    server.state().requests.clear();
+    h.driver.toggle(None, true);
+    h.driver.toggle(None, false);
+    h.pump_until("a sync once the server is back", |_| {
+        let st = server.state();
+        st.requests.iter().any(|r| r == "GET /healthz") && st.requests.iter().any(|r| r == "GET /api/v1/me")
+    });
 }

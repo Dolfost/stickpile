@@ -22,7 +22,7 @@ use gtk::{gdk, gio, glib};
 use stickpile_api::{ItemSummary, SetSummary, TargetApp};
 use stickpile_core::config::Theme;
 use stickpile_core::settings as config_file;
-use stickpile_core::{ClientConfig, PreparedCopy, Session};
+use stickpile_core::{ClientConfig, PreparedCopy, Reach, Session};
 use stickpile_i18n::global::{t, tf};
 use stickpile_i18n::Lang;
 use stickpile_quick::focus::FocusEnv;
@@ -32,7 +32,7 @@ use stickpile_quick::model::{
 use stickpile_quick::offline::{Confirm, KeepScope, Menu};
 use stickpile_quick::{Mode, Tab, View};
 
-use crate::backend::{Backend, BoxFut, CoreBackend, LoginError};
+use crate::backend::{self, Backend, BoxFut, CoreBackend, LoginError};
 use crate::demo::DemoBackend;
 use crate::keys::{self, KeyPress, Mods};
 use crate::offline::{remove_numbers, Downloads, Panel, PanelView};
@@ -323,8 +323,9 @@ pub struct Shell {
     downloads: RefCell<Downloads>,
     panel: RefCell<Panel>,
     panel_shown: RefCell<Option<PanelView>>,
-    /// The reachability last told to the model.
-    reach_told: Cell<Option<bool>>,
+    /// Which session's reachability is followed ([`Shell::watch_reach`]):
+    /// counts the sessions opened, so the watch of an old one ends.
+    reach_watch: Cell<u64>,
     /// The menu of a tile on screen, and its popover.
     menu: RefCell<Option<(Menu, gtk::Popover)>>,
     /// Where the last right click was: the cell and the point in it.
@@ -425,7 +426,7 @@ impl Shell {
             downloads: RefCell::new(Downloads::default()),
             panel: RefCell::new(Panel::default()),
             panel_shown: RefCell::new(None),
-            reach_told: Cell::new(None),
+            reach_watch: Cell::new(0),
             menu: RefCell::new(None),
             menu_at: RefCell::new(None),
             confirm_shown: RefCell::new(None),
@@ -493,7 +494,9 @@ impl Shell {
     /// (Re)open the core session. Runs inside the runtime so a panic in the
     /// core cannot take the resident process down. `login_required`: what
     /// the old session learned about the login (same server and token file).
-    fn open_session(&self, login_required: bool) {
+    fn open_session(self: &Rc<Self>, login_required: bool) {
+        // The old session's reachability is no longer followed.
+        self.reach_watch.set(self.reach_watch.get() + 1);
         let cfg = self.cfg.borrow().clone();
         let rt = runtime();
         let task = rt.spawn(Session::open(cfg));
@@ -504,11 +507,56 @@ impl Shell {
                 let carried = login_required && !session.is_logged_in();
                 *self.backend.borrow_mut() = Some(Arc::new(CoreBackend::new(session, carried)));
                 *self.backend_error.borrow_mut() = None;
+                self.watch_reach();
             }
             Ok(Ok(Err(e))) => self.session_failed(crate::backend::describe(&e)),
             Ok(Err(e)) => self.session_failed(tf("stickpile-core failed: {error}", &[("error", &e)])),
             Err(_) => self.session_failed(t("opening the local cache timed out").into()),
         }
+    }
+
+    /// Follow what the session knows of the server (the core's `Reach`)
+    /// and tell the model as it changes ([`backend::reach_event`]), from
+    /// the session's runtime to the main loop, the way the downloader's
+    /// status comes ([`Shell::watch_offline`]). Ends when another session
+    /// is opened or the shell is gone.
+    fn watch_reach(self: &Rc<Self>) {
+        let watch = self.reach_watch.get();
+        let Some(mut rx) = self.backend().and_then(|b| b.reach()) else {
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            loop {
+                let reach = *rx.borrow_and_update();
+                let Some(this) = weak.upgrade() else { break };
+                if this.reach_watch.get() != watch {
+                    break;
+                }
+                // Not inside a dispatch: the main loop runs it next.
+                glib::idle_add_local_once(move || {
+                    if this.reach_watch.get() == watch {
+                        this.reach_changed(reach);
+                    }
+                });
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    fn reach_changed(self: &Rc<Self>, reach: Reach) {
+        let Some(event) = backend::reach_event(reach) else {
+            return;
+        };
+        tracing::debug!("server: {reach:?}");
+        if event == Event::Reachable(true) && !self.model.borrow().reachable() {
+            // Back after an outage: what failed to load meanwhile loads again.
+            self.thumbs.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
+            self.covers.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
+        }
+        self.dispatch(event);
     }
 
     fn session_failed(&self, error: String) {
@@ -758,6 +806,7 @@ impl Shell {
                     });
                 }
             }
+            Command::Sync => self.sync_now(),
             Command::SaveHistory(history) => {
                 let path = self.history_path.clone();
                 runtime().spawn_blocking(move || {
@@ -904,7 +953,6 @@ impl Shell {
                 }
             }
             this.dispatch(Event::OfflineFiles);
-            this.tell_reachable();
             this.refresh_usage();
             if again {
                 this.start_run();
@@ -937,16 +985,6 @@ impl Shell {
                 glib::timeout_future(Duration::from_millis(400)).await;
             }
         });
-    }
-
-    /// Tell the model whether the server answers, when that changed.
-    fn tell_reachable(self: &Rc<Self>) {
-        let Some(r) = self.backend().and_then(|b| b.reachable()) else {
-            return;
-        };
-        if self.reach_told.replace(Some(r)) != Some(r) {
-            self.dispatch(Event::Reachable(r));
-        }
     }
 
     /// What the Settings block says: the usage, and between runs what the
@@ -1156,7 +1194,6 @@ impl Shell {
         self.spawn(request(b), move |this, out| {
             let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
             this.dispatch(event(outcome));
-            this.tell_reachable();
         });
     }
 
@@ -1502,6 +1539,11 @@ impl Shell {
         if !self.demo_mode && self.config_error.is_none() && (self.backend().is_none() || self.login_required()) {
             self.open_session(self.login_required());
         }
+        // Whether the server answers is checked now, in the background:
+        // searches do not wait for it (docs/offline.md).
+        if let Some(b) = self.backend() {
+            b.check_server();
+        }
         self.update_page();
         // Failed thumbnails and covers get another chance on every open.
         self.thumbs.borrow_mut().retain(|_, t| !matches!(t, Thumb::Failed));
@@ -1565,7 +1607,6 @@ impl Shell {
         // What was kept and downloaded belonged to the old account.
         self.downloads.borrow_mut().forget();
         *self.panel.borrow_mut() = Panel::default();
-        self.reach_told.set(None);
         self.dispatch(Event::Reload);
         *self.sync.borrow_mut() = sync::SyncPolicy::default();
         self.maybe_sync();
@@ -1707,11 +1748,49 @@ impl Shell {
         *self.search_timer.borrow_mut() = Some(id);
     }
 
+    /// The search in two steps (docs/offline.md): what to show now, then
+    /// maybe the server's results, both for `generation` (the model drops
+    /// them once another search started).
     fn run_search(self: &Rc<Self>, query: String, target: TargetApp, limit: usize, generation: u64) {
-        self.answer(
-            move |b| b.search(query, target, limit),
-            move |outcome| Event::Results { generation, outcome },
-        );
+        let Some(b) = self.backend() else {
+            self.dispatch(Event::Results {
+                generation,
+                outcome: Err(t("not connected").into()),
+            });
+            return;
+        };
+        let start = Instant::now();
+        self.spawn(b.search(query, target, limit), move |this, out| {
+            let (outcome, then) = match out {
+                Some(Ok(s)) => (Ok(s.first), s.then),
+                Some(Err(e)) => (Err(e), None),
+                None => (Err(t("internal error (see log)").into()), None),
+            };
+            if let Ok(r) = &outcome {
+                tracing::debug!(
+                    "search {generation}: {} results after {:.1?} (offline: {}; the server's to come: {})",
+                    r.hits.len(),
+                    start.elapsed(),
+                    r.offline,
+                    then.is_some()
+                );
+            }
+            this.dispatch(Event::Results { generation, outcome });
+            let Some(then) = then else { return };
+            this.spawn(then, move |this, out| {
+                let outcome = out.unwrap_or_else(|| Err(t("internal error (see log)").into()));
+                tracing::debug!(
+                    "search {generation}: the server's answer after {:.1?}: {}",
+                    start.elapsed(),
+                    match &outcome {
+                        Ok(Some(r)) => format!("{} results", r.hits.len()),
+                        Ok(None) => "none".into(),
+                        Err(e) => e.clone(),
+                    }
+                );
+                this.dispatch(Event::ServerResults { generation, outcome });
+            });
+        });
     }
 
     // -- thumbnails and covers -------------------------------------------------------------------
@@ -1837,10 +1916,7 @@ impl Shell {
                     this.paste_after_pick();
                     this.record(item, prepared);
                 }
-                Err(error) => {
-                    this.dispatch(Event::CopyFailed { item_id: id, error });
-                    this.tell_reachable();
-                }
+                Err(error) => this.dispatch(Event::CopyFailed { item_id: id, error }),
             }
         });
     }
@@ -1958,13 +2034,24 @@ impl Shell {
 
     // -- sync ------------------------------------------------------------------------------------------------
 
+    /// A sync when the schedule says one is due (`SyncPolicy`).
     fn maybe_sync(self: &Rc<Self>) {
-        let now = Instant::now();
-        if !self.sync.borrow().due(now) {
-            return;
+        if self.sync.borrow().due(Instant::now()) {
+            self.start_sync();
         }
+    }
+
+    /// The server is back ([`Command::Sync`]): a sync now, unless one is
+    /// running; the schedule goes on from it.
+    fn sync_now(self: &Rc<Self>) {
+        if !self.sync.borrow().is_running() {
+            self.start_sync();
+        }
+    }
+
+    fn start_sync(self: &Rc<Self>) {
         let Some(b) = self.backend() else { return };
-        self.sync.borrow_mut().started(now);
+        self.sync.borrow_mut().started(Instant::now());
         self.spawn(b.sync(), |this, out| {
             let ok = matches!(out, Some(Ok(_)));
             if let Some(Err(e)) = &out {
@@ -1975,7 +2062,6 @@ impl Shell {
                 this.dispatch(Event::LibraryChanged);
             }
             this.update_page();
-            this.tell_reachable();
             // After each successful sync: what is kept and missing.
             if ok {
                 this.refresh_keeps();

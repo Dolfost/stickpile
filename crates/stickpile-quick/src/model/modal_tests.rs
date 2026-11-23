@@ -620,6 +620,10 @@ fn search_results_wait_for_the_search_tab() {
     let g = m.generation();
     m.handle(Event::ShowTab(Tab::Recent));
     assert_ne!(m.status(), &Status::Searching, "Recent has nothing to search");
+    // Only what Recent shows is looked at: whose files are here, now that
+    // the server does not answer.
+    let cmds = m.handle(Event::Reachable(false));
+    assert!(matches!(&cmds[..], [Command::CheckOffline { items, .. }] if items.len() == 2));
     let cmds = m.handle(Event::Results {
         generation: g,
         outcome: Ok(Results {
@@ -627,9 +631,7 @@ fn search_results_wait_for_the_search_tab() {
             offline: true,
         }),
     });
-    // Only what Recent shows is looked at: whose files are here, now that
-    // the server did not answer.
-    assert!(matches!(&cmds[..], [Command::CheckOffline { items, .. }] if items.len() == 2));
+    assert!(cmds.is_empty(), "not shown on Recent");
     assert_eq!(ids(&m), ["0", "1"]);
     assert!(!m.is_offline(), "offline is about search results");
     let cmds = m.handle(Event::ShowTab(Tab::Search));

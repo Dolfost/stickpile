@@ -8,8 +8,9 @@
 //! network, so every behaviour is unit-tested below.
 //!
 //! Async results are tagged: every [`Command::Search`] carries a generation
-//! number and [`Event::Results`] for any other generation are dropped, so a
-//! slow answer to an old query can never overwrite a newer one. The list
+//! number and [`Event::Results`] (and [`Event::ServerResults`], the server's
+//! answer after the offline index's) for any other generation are dropped,
+//! so a slow answer to an old query can never overwrite a newer one. The list
 //! loads (most used, favorites, packs, a pack's items) are tagged the same
 //! way. Debouncing is the shell's job; the command carries a `debounce_ms`
 //! hint (0 when the user did not type, e.g. after switching the target app).
@@ -303,10 +304,30 @@ pub enum Event {
     /// its items (the whole search syntax, see [`crate::within`]). Ignored
     /// on the other tabs.
     QueryChanged(String),
+    /// The results of [`Command::Search`] to show now: the server's, or
+    /// the offline index's (`offline`) when the server did not answer
+    /// within the delay (`Session::search_steps`) or is believed away.
     Results {
         generation: u64,
         outcome: Result<Results, String>,
     },
+    /// The server's answer to a search whose offline results came first
+    /// ([`Event::Results`] of the same generation). `Ok(Some)`: they
+    /// replace the shown ones in place: the selected sticker stays
+    /// selected, and while a pointer presses a tile or a menu of a tile is
+    /// open they wait ([`Event::Pressing`]). `Ok(None)`: the server gave
+    /// none, the offline results and their notice stand. `Err`: why it gave
+    /// none (the offline results stand).
+    ServerResults {
+        generation: u64,
+        outcome: Result<Option<Results>, String>,
+    },
+    /// A pointer button went down on the grid (`true`) or was let go
+    /// (`false`). While it is down, results that replace the shown ones in
+    /// place wait, so the grid does not change under the press (the tile
+    /// it activates is the one it pressed). The shell reports the release
+    /// after the click it makes is handled.
+    Pressing(bool),
     /// Most recently used items, newest first (answer to [`Command::LoadRecent`]).
     RecentLoaded(Vec<ItemSummary>),
     /// Answer to [`Command::LoadMostUsed`].
@@ -436,7 +457,11 @@ pub enum Event {
     /// Files arrived on the device (the downloader went on): the marks of
     /// the shown tiles are looked at again.
     OfflineFiles,
-    /// Whether the server answers, as the last request to it found.
+    /// What the client knows of the server changed (`Session::reach`;
+    /// `Unknown` is not told): `false` while it is believed unreachable
+    /// (the tiles whose file is not here are dimmed). `true` after `false`
+    /// is the server back: results the offline index answered are searched
+    /// again and replaced in place, and a sync starts ([`Command::Sync`]).
     Reachable(bool),
     /// Keep or stop keeping, from outside the grid (the Settings page's
     /// "Keep everything" switch): a pack or the library is kept only after
@@ -545,6 +570,11 @@ pub enum Command {
     /// owners of the cached items); answer with [`Event::VocabularyLoaded`].
     /// Sent on every opening and after [`Event::LibraryChanged`].
     LoadVocabulary,
+    /// The server answers again after it did not ([`Event::Reachable`]):
+    /// sync now, unless a sync is running, rather than when the schedule
+    /// would (`SyncPolicy`): the library may have changed meanwhile, and
+    /// the copies made offline and the downloader wait for it.
+    Sync,
     /// Safe mode was switched: save it as `ui.safe_mode`.
     SaveSafeMode {
         on: bool,
@@ -635,6 +665,8 @@ pub enum Status {
     NoRecent,
     /// The Recent tab with nothing used yet.
     NothingUsed,
+    /// The results shown came from the offline index (the notice in the
+    /// footer, until the server's replace them).
     Offline,
     NothingSelected,
     Copying {
@@ -747,7 +779,7 @@ impl Status {
             ),
             Status::NoRecent => t("Nothing used yet — type to search").into(),
             Status::NothingUsed => t("Nothing used yet").into(),
-            Status::Offline => t("Offline — showing cached results").into(),
+            Status::Offline => t("Offline: showing saved stickers").into(),
             Status::NothingSelected => t("Nothing selected").into(),
             Status::Copying { name } => tf("Preparing {name}…", &[("name", name)]),
             Status::Copied {
@@ -1246,6 +1278,11 @@ enum Sel {
     Refresh,
     /// Coming back to a view: this entry, else the first.
     Id(Option<String>),
+    /// Results replacing the shown ones in place (the server's after the
+    /// offline index's): the selected item where it is now, whether or not
+    /// the user moved the selection; when it is gone, as [`Sel::Refresh`]
+    /// (the same place if the user moved the selection, else the first).
+    Swap,
 }
 
 #[derive(Debug, Clone)]
@@ -1270,6 +1307,15 @@ pub struct Model {
     showing: Showing,
     /// A search is in flight.
     searching: bool,
+    /// The generation of a search that runs the shown query again (the
+    /// server back, a sync): its results replace the shown ones in place,
+    /// and nobody is told "Searching" meanwhile.
+    in_place: Option<u64>,
+    /// A pointer is pressing the grid ([`Event::Pressing`]).
+    pressing: bool,
+    /// Results to put in place once the press ends or the menu of a tile
+    /// closes, with their generation.
+    held: Option<(u64, Results)>,
     most_used: Listing<ItemSummary>,
     favorites: Listing<ItemSummary>,
     packs: Packs,
@@ -1373,6 +1419,9 @@ impl Model {
             results_target: cfg.default_target,
             showing: Showing::Recent,
             searching: false,
+            in_place: None,
+            pressing: false,
+            held: None,
             most_used: Listing::default(),
             favorites: Listing::default(),
             packs: Packs::default(),
@@ -1637,6 +1686,16 @@ impl Model {
     // -- events ----------------------------------------------------------------
 
     pub fn handle(&mut self, event: Event) -> Vec<Command> {
+        let mut cmds = self.handle_event(event);
+        // Results held for a press or the menu of a tile go in once
+        // neither holds them any more.
+        if self.held.is_some() && !self.holds_results() {
+            cmds.extend(self.release_held());
+        }
+        cmds
+    }
+
+    fn handle_event(&mut self, event: Event) -> Vec<Command> {
         if cancels_pending(&event) {
             self.pending.clear();
         }
@@ -1676,10 +1735,17 @@ impl Model {
             }
             Event::Hidden => {
                 self.visible = false;
+                // A release the window no longer gets.
+                self.pressing = false;
                 Vec::new()
             }
             Event::QueryChanged(q) => self.query_changed(q),
             Event::Results { generation, outcome } => self.results(generation, outcome),
+            Event::ServerResults { generation, outcome } => self.server_results(generation, outcome),
+            Event::Pressing(down) => {
+                self.pressing = down;
+                Vec::new()
+            }
             Event::RecentLoaded(items) => self.recent_loaded(items),
             Event::MostUsedLoaded { generation, outcome } => {
                 let fresh = self.most_used.accept(generation, outcome);
@@ -1814,10 +1880,7 @@ impl Model {
                 // A sync may have removed files of the shown items.
                 cmds.extend(self.check_offline());
                 // Results the cache answered may be others now; the server's stay.
-                if self.visible && self.offline && !self.query.trim().is_empty() && self.completion.is_none() {
-                    self.generation += 1;
-                    cmds.push(self.search_command(0));
-                }
+                cmds.extend(self.search_offline_again());
                 cmds
             }
             Event::ToggleFavorite => self.toggle_favorite(),
@@ -1850,6 +1913,9 @@ impl Model {
         self.results.clear();
         self.offline = false;
         self.searching = false;
+        self.in_place = None;
+        self.pressing = false;
+        self.held = None;
         self.showing = Showing::Recent;
         self.copying = None;
         self.status = Status::Idle;
@@ -1891,6 +1957,7 @@ impl Model {
 
     fn hide(&mut self) -> Vec<Command> {
         self.visible = false;
+        self.pressing = false;
         self.pending.clear();
         vec![Command::Hide]
     }
@@ -1991,6 +2058,8 @@ impl Model {
         self.results.clear();
         self.offline = false;
         self.searching = false;
+        self.in_place = None;
+        self.held = None;
         self.showing = Showing::Recent;
         // Answers to searches for the old account are dropped.
         self.generation += 1;
@@ -2310,9 +2379,51 @@ impl Model {
 
     fn search_command(&mut self, debounce_ms: u64) -> Command {
         self.searching = true;
+        self.in_place = None;
         if self.copying.is_none() && self.tab == Tab::Search {
             self.status = Status::Searching;
         }
+        self.search_request(debounce_ms)
+    }
+
+    /// Results the offline index answered are searched again, after a
+    /// sync changed the cache: see [`Model::search_again`].
+    fn search_offline_again(&mut self) -> Option<Command> {
+        let wanted = self.visible && self.offline && !self.query.trim().is_empty() && self.completion.is_none();
+        wanted.then(|| self.search_again())
+    }
+
+    /// The server is back ([`Event::Reachable`]): what the offline index
+    /// answered, or a search still waiting for its answer (sent while the
+    /// server was believed away), is searched again: see
+    /// [`Model::search_again`]. A sync starts too.
+    pub(super) fn server_back(&mut self) -> Vec<Command> {
+        let mut cmds = vec![Command::Sync];
+        let wanted = self.visible
+            && (self.offline || self.searching)
+            && !self.query.trim().is_empty()
+            && self.completion.is_none();
+        if wanted {
+            cmds.push(self.search_again());
+        }
+        cmds
+    }
+
+    /// Search the current query again at once. Results on screen stay
+    /// there without "Searching", and the new ones replace them in place
+    /// ([`Sel::Swap`]); a search still waiting for its answer goes out
+    /// again as it was.
+    fn search_again(&mut self) -> Command {
+        self.generation += 1;
+        if self.searching || self.showing != Showing::Results {
+            return self.search_command(0);
+        }
+        self.in_place = Some(self.generation);
+        self.search_request(0)
+    }
+
+    /// The search for the current query.
+    fn search_request(&self, debounce_ms: u64) -> Command {
         // Half-typed or misspelled filter values go out as the value they
         // most likely mean (see `suggest::resolve`).
         let mut query = resolve(self.query.trim(), &self.vocab).0;
@@ -2332,11 +2443,20 @@ impl Model {
         }
     }
 
+    /// Whether the server answers comes from the shell
+    /// ([`Event::Reachable`]), not from the results: offline results may
+    /// come first from a server that is there but slow.
     fn results(&mut self, generation: u64, outcome: Result<Results, String>) -> Vec<Command> {
         if generation != self.generation || self.query.trim().is_empty() {
             return Vec::new();
         }
         self.searching = false;
+        if self.in_place.take() == Some(generation) {
+            return match outcome {
+                Ok(r) => self.replace_in_place(r),
+                Err(e) => self.search_failed(&e),
+            };
+        }
         let shown = self.tab == Tab::Search;
         match outcome {
             Ok(mut r) => {
@@ -2345,12 +2465,7 @@ impl Model {
                 self.results = r.hits;
                 self.results_target = self.target;
                 self.showing = Showing::Results;
-                let reach_changed = self.results_reached(r.offline);
                 if !shown {
-                    if reach_changed {
-                        self.mark_offline();
-                        return self.check_offline().into_iter().collect();
-                    }
                     return Vec::new();
                 }
                 self.rebuild(Sel::First);
@@ -2359,12 +2474,78 @@ impl Model {
                 }
                 self.thumbnails()
             }
-            Err(e) => {
-                if self.copying.is_none() && shown {
-                    self.status = Status::Error(tf("Search failed: {error}", &[("error", &t_dyn(&e))]));
-                }
-                Vec::new()
+            Err(e) => self.search_failed(&e),
+        }
+    }
+
+    fn search_failed(&mut self, error: &str) -> Vec<Command> {
+        if self.copying.is_none() && self.tab == Tab::Search {
+            self.status = Status::Error(tf("Search failed: {error}", &[("error", &t_dyn(error))]));
+        }
+        Vec::new()
+    }
+
+    /// The second step of a search ([`Event::ServerResults`]).
+    fn server_results(&mut self, generation: u64, outcome: Result<Option<Results>, String>) -> Vec<Command> {
+        if generation != self.generation || self.query.trim().is_empty() || self.showing != Showing::Results {
+            return Vec::new();
+        }
+        match outcome {
+            Ok(Some(r)) => self.replace_in_place(r),
+            // The offline results and their notice stand.
+            Ok(None) => Vec::new(),
+            Err(e) => self.search_failed(&e),
+        }
+    }
+
+    /// Results of the current generation that replace the shown ones
+    /// without a jump: the selected sticker stays selected ([`Sel::Swap`]),
+    /// a copy in progress goes on (it has its item), and while a pointer
+    /// presses the grid or the menu of a tile is open they wait
+    /// ([`Model::holds_results`]). A status that tells what the user did
+    /// stays; one that describes the shown list (the offline notice) is
+    /// made again.
+    fn replace_in_place(&mut self, mut r: Results) -> Vec<Command> {
+        r.hits.truncate(self.cfg.max_results);
+        let shown = self.tab == Tab::Search;
+        if shown && self.holds_results() {
+            self.held = Some((self.generation, r));
+            return Vec::new();
+        }
+        self.held = None;
+        self.offline = r.offline;
+        self.results = r.hits;
+        self.results_target = self.target;
+        self.showing = Showing::Results;
+        if !shown {
+            return Vec::new();
+        }
+        self.rebuild(Sel::Swap);
+        if self.copying.is_none() && self.status.describes_view() {
+            self.status = self.search_status();
+        }
+        self.thumbnails()
+    }
+
+    /// Something on the grid must not change under the user: a pointer
+    /// presses it, or the menu of a tile is open (its entries act on that
+    /// tile).
+    fn holds_results(&self) -> bool {
+        self.pressing || self.keep.menu_open()
+    }
+
+    /// Put in the results a press or a menu held, if they still answer
+    /// the current search.
+    fn release_held(&mut self) -> Vec<Command> {
+        match self.held.take() {
+            Some((generation, r))
+                if generation == self.generation
+                    && !self.query.trim().is_empty()
+                    && self.showing == Showing::Results =>
+            {
+                self.replace_in_place(r)
             }
+            _ => Vec::new(),
         }
     }
 
@@ -2645,6 +2826,11 @@ impl Model {
             Sel::Keep => keep(self),
             Sel::Refresh if self.touched => keep(self),
             Sel::Refresh => 0,
+            Sel::Swap => match prev_id.as_deref().and_then(|id| self.position(id)) {
+                Some(i) => i,
+                None if self.touched => keep(self),
+                None => 0,
+            },
             Sel::Id(id) => {
                 let found = id.as_deref().and_then(|id| self.position(id));
                 self.touched = found.is_some();
@@ -3424,7 +3610,7 @@ pub(crate) mod tests {
         let f = m.footer();
         assert!(f.offline);
         assert_eq!(f.level, Level::Warning);
-        assert_eq!(f.status, "Offline — showing cached results");
+        assert_eq!(f.status, "Offline: showing saved stickers");
         m.handle(Event::QueryChanged(String::new()));
         assert!(!m.is_offline(), "recent list is not an offline result");
     }
@@ -4137,6 +4323,8 @@ mod pack_search_tests;
 mod review_tests;
 #[cfg(test)]
 mod safe_tests;
+#[cfg(test)]
+mod steps_tests;
 #[cfg(test)]
 mod suggest_tests;
 #[cfg(test)]
