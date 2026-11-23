@@ -11,7 +11,9 @@ import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.OfflineScope
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.Prepared
+import io.github.dolfost.stickpile.rust.SearchAnswer
 import io.github.dolfost.stickpile.rust.SearchHint
+import io.github.dolfost.stickpile.rust.ServerReach
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.rust.targetForPackage
 import kotlinx.coroutines.Dispatchers
@@ -47,12 +49,26 @@ internal class ImeLibrary(private val app: StickpileApp) {
     /**
      * Search ranked for the editor's app (the bridge maps its package to a
      * [io.github.dolfost.stickpile.rust.Target]; a native call too, so off
-     * the main thread with the rest).
+     * the main thread with the rest), without waiting for a server that
+     * does not answer: the offline cache's results first when it is away
+     * or slow, and the server's to wait for ([SearchAnswer.pending]).
      */
-    suspend fun search(query: String): ItemList {
+    suspend fun search(query: String): SearchAnswer {
         val editor = editorPackage
-        return call { it.search(query, targetForPackage(editor), LIMIT) }
+        return call { it.searchSteps(query, targetForPackage(editor), LIMIT) }
     }
+
+    /** What the library knows of the server now. */
+    suspend fun serverReach(): ServerReach = call { it.serverReach() }
+
+    /** What the library knows of the server once it differs from [seen] (a long poll). */
+    suspend fun serverReachChange(seen: ServerReach): ServerReach = call { it.serverReachChange(seen) }
+
+    /** Check the server now, in the background: the keyboard opened. */
+    suspend fun checkServer() = call { it.checkServer() }
+
+    /** The server answers again after it was away: the app's sync for that (one at a time). */
+    fun syncBackOnline() = app.syncBackOnline()
 
     suspend fun packs(): PackList = call { it.packs() }
 

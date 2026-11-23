@@ -3,6 +3,7 @@ package io.github.dolfost.stickpile.ime
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
+import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -36,12 +37,15 @@ import io.github.dolfost.stickpile.rust.Item
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.Pack
+import io.github.dolfost.stickpile.sync.ServerWatch
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -63,6 +67,12 @@ import kotlinx.coroutines.launch
  * changed the cache asks for the offers again ([ImeLibrary.cacheChanges]).
  * Safe mode (shared with the app through [DisplaySettings]) leaves nsfw
  * out of the search and of every list.
+ *
+ * The search never waits for a server that does not answer (docs/offline.md,
+ * "Reachability and results without waiting"): the offline cache's results
+ * show first, with the offline note, and the server's replace them in
+ * place when they come, once no finger is on the grid. While shown, the
+ * picker follows what the library knows of the server ([followServer]).
  *
  * Runs on the main thread; it loads through [ImeLibrary] in coroutines of
  * its own scope (a child of the service's), cancelled by [stop] and
@@ -103,6 +113,13 @@ internal class PickerView(
 
         data class Failed(val kind: LibraryErrorKind) : Shown
     }
+
+    /**
+     * What a load shows first, and for a search answered from the offline
+     * cache first, the server's results to replace it with ([then]: null
+     * when it could not be reached or failed).
+     */
+    private class Steps(val first: Shown, val then: (suspend () -> Shown?)? = null)
 
     private val job = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + job)
@@ -197,6 +214,13 @@ internal class PickerView(
     private var searchJob: Job? = null
     private var hintsJob: Job? = null
     private var likesJob: Job? = null
+    private var watchJob: Job? = null
+
+    /** A finger is on the grid: a list replaced in place waits until it lifts. */
+    private val pressed = MutableStateFlow(false)
+
+    /** The status line shows the offline note: a list from the server takes it away. */
+    private var offlineNoted = false
     private var loading = false
     private var reloading = false
     private var busy = false
@@ -240,6 +264,7 @@ internal class PickerView(
         grid.layoutManager = gridLayout
         grid.adapter = itemsAdapter
         grid.addOnItemTouchListener(emptyTapHidesKeys())
+        grid.addOnItemTouchListener(pressWatch())
         look.display = display
         look.likedOf = ::likedOf
         motions.autoplay = display.autoplay
@@ -271,7 +296,10 @@ internal class PickerView(
             heightPercent = height
             applyColumns()
         }
-        if (InputRestart.keepsView(started, restarting, query, draftQuery)) return
+        if (InputRestart.keepsView(started, restarting, query, draftQuery)) {
+            followServer()
+            return
+        }
         started = true
         draftQuery = query
         likes.clear()
@@ -285,6 +313,7 @@ internal class PickerView(
         requestHints()
         val first = PickerSearch.tabs(this.query).first()
         show(first)
+        followServer()
     }
 
     /** Once [read] is over, what is shown loads again with the hearts it learnt (not the list of sets). */
@@ -297,13 +326,39 @@ internal class PickerView(
         }
     }
 
+    /**
+     * While the picker is shown: the server is checked now (the keyboard
+     * opened), and what the library knows of it is followed
+     * ([ServerWatch]): back after it was away, what is shown loads again in
+     * place (the offline note goes when the server answers) and the app
+     * syncs. The value is read before the check goes out, so what the check
+     * finds is seen.
+     */
+    private fun followServer() {
+        watchJob?.cancel()
+        watchJob = scope.launch {
+            try {
+                val now = library.serverReach()
+                launch { library.checkServer() }
+                ServerWatch.follow(now, library::serverReachChange, stale = { listOffline }) {
+                    if (started) reload(top = false)
+                    library.syncBackOnline()
+                }
+            } catch (e: LibraryException) {
+                Log.i(TAG, "not following the server: ${e.kind}")
+            }
+        }
+    }
+
     /** The picker was hidden: stop loading. */
     fun stop() {
         started = false
+        pressed.value = false
         loadJob?.cancel()
         searchJob?.cancel()
         hintsJob?.cancel()
         likesJob?.cancel()
+        watchJob?.cancel()
         keys.stopRepeat()
         loading = false
         reloading = false
@@ -327,6 +382,7 @@ internal class PickerView(
 
     private fun showStatus(text: CharSequence) {
         status.text = text
+        offlineNoted = false
         status.visibility = View.VISIBLE
         status.removeCallbacks(hideStatus)
         status.postDelayed(hideStatus, STATUS_MILLIS)
@@ -476,6 +532,21 @@ internal class PickerView(
         }
     }
 
+    /**
+     * Whether a finger is on the grid: down on a tile or between them,
+     * while it scrolls, until it lifts or the gesture is cancelled. The
+     * listeners see every event of a gesture while none of them takes it.
+     */
+    private fun pressWatch(): RecyclerView.OnItemTouchListener = object : RecyclerView.SimpleOnItemTouchListener() {
+        override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> pressed.value = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pressed.value = false
+            }
+            return false
+        }
+    }
+
     // -- tabs and loading ------------------------------------------------------------
 
     /** Shows [t] and loads it. */
@@ -518,7 +589,7 @@ internal class PickerView(
             PickerTab.RESULTS -> {
                 val q = query.trim()
                 if (q.isEmpty()) return
-                load(keep || resultsFor != null, top) { search(q) }
+                loadSteps(keep || resultsFor != null, top) { search(q) }
             }
             PickerTab.RECENT -> load(keep, top) {
                 val recent = library.recent()
@@ -575,9 +646,14 @@ internal class PickerView(
     }
 
     /** The search, with safe mode's filter in safe mode. */
-    private suspend fun search(q: String): Shown {
-        val list = library.search(SafeMode.query(q, display.safeMode))
-        return items(list.items, list.offline, context.getString(R.string.ime_empty_results, q), resultsFor = q)
+    private suspend fun search(q: String): Steps {
+        val answer = library.search(SafeMode.query(q, display.safeMode))
+        val empty = context.getString(R.string.ime_empty_results, q)
+        val first = items(answer.list.items, answer.list.offline, empty, resultsFor = q)
+        val pending = answer.pending ?: return Steps(first)
+        return Steps(first) {
+            pending.use { it.serverResults() }?.let { list -> items(list.items, list.offline, empty, resultsFor = q) }
+        }
     }
 
     /** What safe mode shows of [list]. */
@@ -586,7 +662,18 @@ internal class PickerView(
         return Shown.Items(shown.items, offline, empty, shown.hidden, resultsFor)
     }
 
-    private fun load(keep: Boolean, top: Boolean, block: suspend () -> Shown) {
+    private fun load(keep: Boolean, top: Boolean, block: suspend () -> Shown) = loadSteps(keep, top) { Steps(block()) }
+
+    /**
+     * Loads what [block] answers. [keep]: what is shown stays until the
+     * answer comes, which then replaces it in place; [top]: the answer is
+     * shown from its start. When the first answer came from the offline
+     * cache and the server's is to come ([Steps.then]), it replaces the
+     * first in place; none, and the first stays. A list replaced in place
+     * waits while a finger is on the grid. A newer load or [stop] drops
+     * both.
+     */
+    private fun loadSteps(keep: Boolean, top: Boolean, block: suspend () -> Steps) {
         loadJob?.cancel()
         if (keep) {
             reloading = true
@@ -594,6 +681,7 @@ internal class PickerView(
             loading = true
             messageBox.visibility = View.GONE
             items = emptyList()
+            listOffline = false
             resultsFor = null
             updateFilters()
             itemsAdapter.submitList(emptyList())
@@ -601,29 +689,55 @@ internal class PickerView(
         }
         updateProgress()
         loadJob = scope.launch {
-            val shown = try {
+            val steps = try {
                 block()
             } catch (e: LibraryException) {
-                Shown.Failed(e.kind)
+                Steps(Shown.Failed(e.kind))
             }
             loading = false
             reloading = false
             updateProgress()
-            display(shown, top)
+            if (keep) untilReleased()
+            display(steps.first, top, inPlace = keep)
+            val then = steps.then ?: return@launch
+            val server = try {
+                then()
+            } catch (e: LibraryException) {
+                // The offline results stand, unless the account is gone.
+                if (ImeTexts.isSignedOut(e.kind)) display(Shown.Failed(e.kind))
+                null
+            } ?: return@launch
+            untilReleased()
+            display(server, top = false, inPlace = true)
         }
     }
 
-    private fun display(shown: Shown, top: Boolean = false) {
+    /** Until no finger is on the grid ([pressWatch]). */
+    private suspend fun untilReleased() {
+        pressed.first { !it }
+    }
+
+    /**
+     * Shows [shown]. [inPlace]: it replaces the list shown (a reload, the
+     * server's results after the offline ones): the emoji filter chosen
+     * stays while the new list has it. Either way a grid at its top stays
+     * at the top; scrolled down, the sticker first in view stays where it
+     * is while it is still listed (the grid follows the items' ids).
+     */
+    private fun display(shown: Shown, top: Boolean = false, inPlace: Boolean = false) {
         when (shown) {
             is Shown.Items -> {
                 // Other stickers: no marks until the library said which work offline.
                 if (shown.items.map { it.id } != items.map { it.id }) look.marks = OfflineMarks()
+                val filter = if (inPlace) chipRows.checkedFilter else null
+                val atTop = !grid.canScrollVertically(-1)
                 items = shown.items
                 listOffline = shown.offline
                 resultsFor = shown.resultsFor
                 use(gridLayout, itemsAdapter)
-                updateFilters()
-                itemsAdapter.submitList(items) { if (top) grid.scrollToPosition(0) }
+                val kept = updateFilters(keep = filter)
+                val list = if (kept != null) EmojiFilters.narrow(items, kept) { it.emojis } else items
+                itemsAdapter.submitList(list) { if (top || atTop) grid.scrollToPosition(0) }
                 loadMarks(shown.offline)
                 when {
                     items.isNotEmpty() -> messageBox.visibility = View.GONE
@@ -634,6 +748,7 @@ internal class PickerView(
             }
             is Shown.Packs -> {
                 items = emptyList()
+                listOffline = shown.offline
                 resultsFor = null
                 updateFilters()
                 use(listLayout, packsAdapter)
@@ -647,6 +762,7 @@ internal class PickerView(
             }
             is Shown.Failed -> {
                 items = emptyList()
+                listOffline = false
                 resultsFor = null
                 safeNote = null
                 updateFilters()
@@ -657,7 +773,11 @@ internal class PickerView(
         }
     }
 
-    /** The status line after a list: safe mode just changed, how many it hid, offline. */
+    /**
+     * The status line after a list: safe mode just changed, how many it
+     * hid, offline. A list from the server takes away the offline note
+     * still shown for the one it replaced.
+     */
     private fun notes(offline: Boolean, hidden: Int) {
         val lines = listOfNotNull(
             safeNote?.let(context::getString),
@@ -665,7 +785,13 @@ internal class PickerView(
             context.getString(R.string.ime_offline).takeIf { offline },
         )
         safeNote = null
-        if (lines.isNotEmpty()) showStatus(lines.joinToString("\n"))
+        if (lines.isNotEmpty()) {
+            showStatus(lines.joinToString("\n"))
+            offlineNoted = offline
+        } else if (offlineNoted) {
+            status.removeCallbacks(hideStatus)
+            hideStatus.run()
+        }
     }
 
     private fun hiddenText(hidden: Int): String =
@@ -678,10 +804,11 @@ internal class PickerView(
         }
     }
 
-    /** The emoji filters of the items shown; none selected. */
-    private fun updateFilters() {
-        chipRows.showFilters(items.map { it.emojis })
-    }
+    /**
+     * The emoji filters of the items shown; none selected, or [keep] while
+     * the items have it. Returns the one selected.
+     */
+    private fun updateFilters(keep: String? = null): String? = chipRows.showFilters(items.map { it.emojis }, keep)
 
     private fun showMessage(text: String, openApp: Boolean = false) {
         message.text = text
@@ -862,6 +989,7 @@ internal class PickerView(
         (context.resources.displayMetrics.widthPixels - 2 * gridPaddingPx) / Columns.MIN
 
     private companion object {
+        const val TAG = "stickpile.ime"
         const val STATUS_MILLIS = 5_000L
 
         /** Rows of the grid while the keys show (at 100%). */

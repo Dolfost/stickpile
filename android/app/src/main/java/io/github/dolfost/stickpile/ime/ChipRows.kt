@@ -33,11 +33,18 @@ internal class ChipRows(
     private val filters: ChipGroup = root.findViewById(R.id.ime_filters)
     private var offering = false
 
+    /** The filters are being set by code: the listener does not narrow the grid. */
+    private var quiet = false
+
     init {
         filters.setOnCheckedStateChangeListener { group, checked ->
-            onFilter(checked.firstOrNull()?.let { group.findViewById<Chip>(it)?.tag as? String })
+            if (!quiet) onFilter(checked.firstOrNull()?.let { group.findViewById<Chip>(it)?.tag as? String })
         }
     }
+
+    /** The emoji filter selected now; null: none. */
+    val checkedFilter: String?
+        get() = filters.findViewById<Chip>(filters.checkedChipId)?.tag as? String
 
     /** The offers show ([on]), or the filters; going to the offers clears the filter. */
     fun offer(on: Boolean) {
@@ -59,18 +66,34 @@ internal class ChipRows(
         update()
     }
 
-    /** The filters for the items with these emoji lists; none selected. */
-    fun showFilters(emojiLists: List<List<String>>) {
-        filters.clearCheck()
-        filters.removeAllViews()
-        for (emoji in EmojiFilters.top(emojiLists)) {
-            val chip = inflater.inflate(R.layout.ime_filter_chip, filters, false) as Chip
-            chip.id = View.generateViewId()
-            chip.text = emoji
-            chip.tag = emoji
-            filters.addView(chip)
+    /**
+     * The filters for the items with these emoji lists; none selected, or
+     * [keep] when it is still one of them (a list replaced in place keeps
+     * what was chosen). Returns the filter selected; the caller narrows the
+     * grid with it (the listener is not called).
+     */
+    fun showFilters(emojiLists: List<List<String>>, keep: String? = null): String? {
+        quiet = true
+        try {
+            filters.clearCheck()
+            filters.removeAllViews()
+            var kept: String? = null
+            for (emoji in EmojiFilters.top(emojiLists)) {
+                val chip = inflater.inflate(R.layout.ime_filter_chip, filters, false) as Chip
+                chip.id = View.generateViewId()
+                chip.text = emoji
+                chip.tag = emoji
+                filters.addView(chip)
+                if (emoji == keep && !offering) {
+                    filters.check(chip.id)
+                    kept = emoji
+                }
+            }
+            update()
+            return kept
+        } finally {
+            quiet = false
         }
-        update()
     }
 
     /** An offer's text: an emoji of `e:` with its name after it, smaller and dimmer. */
