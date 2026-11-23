@@ -18,8 +18,8 @@ pub mod sync;
 
 pub use api::{BotApi, BotUser, InputSticker, Sticker, StickerFormat, StickerSet, TelegramError, TgFile};
 pub use parts::{
-    export_parts, part_pack_name, part_title, plan_parts, PartReport, PartStates, PartUpdate, PartsError, PartsExport,
-    PartsFailure, PartsPlan, PartsReport, PartsTotals, PlannedPart,
+    export_parts, part_pack_name, part_title, plan_parts, plan_parts_skipping, PartReport, PartStates, PartUpdate,
+    PartsError, PartsExport, PartsFailure, PartsPlan, PartsReport, PartsTotals, PlannedPart,
 };
 pub use sync::{
     complete_pack_name, default_pack_name, export_pack, export_pack_resumable, import_pack, is_emoji, valid_pack_name,

@@ -7,7 +7,7 @@
 //! plan part by part with the single-pack export, then deletes the parts
 //! left empty. [`part_pack_name`] and [`part_title`] name the parts.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::future::Future;
 
 use serde::Serialize;
@@ -88,6 +88,24 @@ pub fn plan_parts(
     capacity: usize,
     repack: bool,
 ) -> Result<PartsPlan, TelegramError> {
+    plan_parts_skipping(items, previous, &BTreeSet::new(), capacity, repack)
+}
+
+/// [`plan_parts`] that never gives a new part one of the numbers in
+/// `retired`, nor uses one in a repack: the numbers of parts whose packs were
+/// deleted, as Telegram does not say whether a deleted pack's name can be
+/// created again. A number in `previous` is a part that exists and is
+/// planned as such, retired or not.
+pub fn plan_parts_skipping(
+    items: &[ExportItem],
+    previous: &PartStates,
+    retired: &BTreeSet<u32>,
+    capacity: usize,
+    repack: bool,
+) -> Result<PartsPlan, TelegramError> {
+    // The numbers a part may have, in order: existing parts and numbers
+    // never retired.
+    let usable = |n: &u32| previous.contains_key(n) || !retired.contains(n);
     if capacity == 0 {
         return Err(invalid("a part must hold at least one sticker"));
     }
@@ -138,8 +156,12 @@ pub fn plan_parts(
     let mut parts: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     let mut moved = 0;
     if repack {
+        let mut numbers = (1..=u32::MAX).filter(usable);
+        let mut number = 0;
         for (n, &i) in exported.iter().enumerate() {
-            let number = u32::try_from(n / capacity + 1).map_err(|_| invalid("too many parts"))?;
+            if n % capacity == 0 {
+                number = numbers.next().ok_or_else(|| invalid("too many parts"))?;
+            }
             if published
                 .get(items[i].key.as_str())
                 .is_some_and(|(was, _)| *was != number)
@@ -165,7 +187,7 @@ pub fn plan_parts(
         let mut candidates = previous
             .keys()
             .copied()
-            .chain((1..=u32::MAX).filter(|n| !previous.contains_key(n)));
+            .chain((1..=u32::MAX).filter(|n| !previous.contains_key(n) && usable(n)));
         let mut current = candidates.next().ok_or_else(|| invalid("too many parts"))?;
         for i in new {
             while parts.get(&current).map_or(0, Vec::len) >= capacity {
@@ -851,6 +873,36 @@ mod tests {
             layout(&plan, &its),
             [(1, took.clone()), (2, cat(&[&b[1..], &a[119..]]))]
         );
+    }
+
+    #[test]
+    fn plan_skips_retired_numbers() {
+        let (a, b) = (named("a", 0..120), named("b", 0..120));
+        // Part 1 was emptied and deleted; part 2 is full.
+        let previous = PartStates::from([(2, state(&b))]);
+        let retired = BTreeSet::from([1, 3]);
+        let its = items(&cat(&[&one("new"), &b]));
+        let plan = plan_parts_skipping(&its, &previous, &retired, CAP, false).unwrap();
+        assert_eq!(layout(&plan, &its), [(2, b.clone()), (4, one("new"))]);
+        assert!(plan.delete.is_empty());
+        // Without retired numbers the new sticker would start part 1 again.
+        let plain = plan_parts(&its, &previous, CAP, false).unwrap();
+        assert_eq!(layout(&plain, &its), [(1, one("new")), (2, b.clone())]);
+
+        // A repack uses the usable numbers in order: 2, 4, 5.
+        let its = items(&cat(&[&a, &b, &one("x")]));
+        let plan = plan_parts_skipping(&its, &previous, &retired, CAP, true).unwrap();
+        assert_eq!(sizes(&plan), [(2, 120), (4, 120), (5, 1)]);
+        assert_eq!(plan.moved, 120, "all of part 2 moves to part 4");
+
+        // An existing part keeps its number, retired or not.
+        let previous = PartStates::from([(1, state(&a))]);
+        let its = items(&cat(&[&a, &one("y")]));
+        let plan = plan_parts_skipping(&its, &previous, &BTreeSet::from([1, 2]), CAP, false).unwrap();
+        assert_eq!(layout(&plan, &its), [(1, a.clone()), (3, one("y"))]);
+        let plan = plan_parts_skipping(&its, &previous, &BTreeSet::from([1]), CAP, true).unwrap();
+        assert_eq!(sizes(&plan), [(1, 120), (2, 1)]);
+        assert_eq!(plan.moved, 0);
     }
 
     #[test]
