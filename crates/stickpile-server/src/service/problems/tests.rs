@@ -241,10 +241,9 @@ fn telegram_blockers_of_a_published_set() {
     f.telegram_pack = Some("big_by_bot".into());
     f.telegram_mapping = Some(Default::default());
     let ps = run(&f, &ENV);
-    let too_many = of_kind(&ps, ProblemKind::TelegramTooMany);
-    assert_eq!(too_many.len(), 1);
-    assert_eq!(too_many[0].severity, ProblemSeverity::Error);
-    assert!(too_many[0].message.contains("122 stickers"), "{}", too_many[0].message);
+    // More stickers than one pack holds is no problem: the set is published
+    // as several packs.
+    assert!(ps.iter().all(|p| p.severity != ProblemSeverity::Error), "{ps:?}");
     let skipped = of_kind(&ps, ProblemKind::TelegramUnsupported);
     assert_eq!(skipped[0].items.len(), 1);
     assert!(skipped[0].items[0]
@@ -261,8 +260,6 @@ fn telegram_blockers_of_a_published_set() {
         "{}",
         outdated[0].message
     );
-    // Errors first.
-    assert_eq!(ps[0].kind, ProblemKind::TelegramTooMany);
     // Animations without ffmpeg cannot become stickers at all.
     let no_ffmpeg = Env {
         telegram: true,

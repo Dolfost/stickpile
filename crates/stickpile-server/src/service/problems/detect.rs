@@ -17,7 +17,7 @@ use stickpile_api::{
 };
 use stickpile_media::hash::hamming;
 use stickpile_media::signature::Signature;
-use stickpile_telegram::{PackMapping, DEFAULT_EMOJI, MAX_PACK_STICKERS};
+use stickpile_telegram::{PackMapping, DEFAULT_EMOJI};
 
 use crate::i18n::{t, tf, tp};
 use crate::ids::sha256_hex;
@@ -648,25 +648,6 @@ pub fn detect(f: &SetFacts, cands: &[Candidate], sigs: &HashMap<String, Arc<Sign
             .iter()
             .filter_map(|it| telegram_skip_reason(it, env).map(|r| (it.id.as_str(), r)))
             .collect();
-        let exportable = items.len() - skipped.len();
-        if exportable > MAX_PACK_STICKERS {
-            b.push(
-                ProblemKind::TelegramTooMany,
-                ProblemSeverity::Error,
-                tpf(
-                    exportable,
-                    "The set has {n} sticker; a Telegram pack holds at most {max}, so publishing fails. Move some \
-                     items to another set.",
-                    "The set has {n} stickers; a Telegram pack holds at most {max}, so publishing fails. Move some \
-                     items to another set.",
-                    &[("max", &MAX_PACK_STICKERS)],
-                ),
-                Vec::new(),
-                Some(ProblemAction::SplitSet),
-                None,
-                &exportable.to_string(),
-            );
-        }
         b.per_item(
             ProblemKind::TelegramUnsupported,
             ProblemSeverity::Warning,

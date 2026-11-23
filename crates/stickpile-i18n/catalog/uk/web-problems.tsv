@@ -11,7 +11,6 @@ Very small pictures	Дуже малі зображення
 AI suggestions to review	Пропозиції ШІ на перевірку
 Emoji entries that are not emoji	Записи емодзі, що не є емодзі
 No emoji	Без емодзі
-Too many stickers for Telegram	Забагато стікерів для Telegram
 Cannot become Telegram stickers	Не можуть стати стікерами Telegram
 Cut short on Telegram	Обрізані в Telegram
 Telegram pack out of date	Набір у Telegram застарів
@@ -86,7 +85,6 @@ Telegram scales stickers up to 512 px.	Telegram збільшує стікери 
 {n} item has no emoji; on Telegram they get {emoji}, which makes them hard to find.|{n} items have no emoji; on Telegram they get {emoji}, which makes them hard to find.	{n} стікер не має емодзі; у Telegram він отримає {emoji}, тож його буде важко знайти.|{n} стікери не мають емодзі; у Telegram вони отримають {emoji}, тож їх буде важко знайти.|{n} стікерів не мають емодзі; у Telegram вони отримають {emoji}, тож їх буде важко знайти.
 {n} item has AI suggestions nobody confirmed yet.|{n} items have AI suggestions nobody confirmed yet.	{n} стікер має пропозиції ШІ, які ще ніхто не підтвердив.|{n} стікери мають пропозиції ШІ, які ще ніхто не підтвердив.|{n} стікерів мають пропозиції ШІ, які ще ніхто не підтвердив.
 The last publish to Telegram failed: {error}	Остання публікація в Telegram не вдалася: {error}
-The set has {n} sticker; a Telegram pack holds at most {max}, so publishing fails. Move some items to another set.|The set has {n} stickers; a Telegram pack holds at most {max}, so publishing fails. Move some items to another set.	У наборі {n} стікер; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.|У наборі {n} стікери; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.|У наборі {n} стікерів; набір у Telegram вміщує щонайбільше {max}, тож публікація не вдасться. Перенесіть частину стікерів в інший набір.
 {n} item cannot become Telegram stickers and is left out when the set is published.|{n} items cannot become Telegram stickers and are left out when the set is published.	{n} стікер не може стати стікером Telegram, тож під час публікації набору його буде пропущено.|{n} стікери не можуть стати стікерами Telegram, тож під час публікації набору їх буде пропущено.|{n} стікерів не можуть стати стікерами Telegram, тож під час публікації набору їх буде пропущено.
 {n} animation or video is longer than {max}: Telegram gets only the first {max}.|{n} animations or videos are longer than {max}: Telegram gets only the first {max}.	{n} анімація або відео триває довше за {max}: Telegram отримає лише перші {max}.|{n} анімації або відео тривають довше за {max}: Telegram отримає лише перші {max}.|{n} анімацій або відео тривають довше за {max}: Telegram отримає лише перші {max}.
 {n} item not on Telegram yet|{n} items not on Telegram yet	{n} стікер ще не в Telegram|{n} стікери ще не в Telegram|{n} стікерів ще не в Telegram

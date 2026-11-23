@@ -106,7 +106,6 @@ pub fn kind_label(k: ProblemKind) -> &'static str {
         ProblemKind::AiUnreviewed => t("AI suggestions to review"),
         ProblemKind::NotEmoji => t("Emoji entries that are not emoji"),
         ProblemKind::NoEmoji => t("No emoji"),
-        ProblemKind::TelegramTooMany => t("Too many stickers for Telegram"),
         ProblemKind::TelegramUnsupported => t("Cannot become Telegram stickers"),
         ProblemKind::TelegramTrimmed => t("Cut short on Telegram"),
         ProblemKind::TelegramOutdated => t("Telegram pack out of date"),

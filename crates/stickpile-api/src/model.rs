@@ -1913,8 +1913,6 @@ pub enum ProblemKind {
     GitFailed,
     /// The last publish to Telegram failed.
     TelegramFailed,
-    /// More stickers than a Telegram pack holds.
-    TelegramTooMany,
     /// Items the Telegram export skips (cannot become a sticker).
     TelegramUnsupported,
     /// The set changed after its last publish to Telegram.
@@ -1938,14 +1936,13 @@ pub enum ProblemKind {
 }
 
 impl ProblemKind {
-    pub const ALL: [ProblemKind; 17] = [
+    pub const ALL: [ProblemKind; 16] = [
         ProblemKind::ExactDuplicate,
         ProblemKind::NearDuplicate,
         ProblemKind::MissingFiles,
         ProblemKind::ProcessingFailed,
         ProblemKind::GitFailed,
         ProblemKind::TelegramFailed,
-        ProblemKind::TelegramTooMany,
         ProblemKind::TelegramUnsupported,
         ProblemKind::TelegramOutdated,
         ProblemKind::NoEmoji,
@@ -1969,7 +1966,6 @@ impl ProblemKind {
             ProblemKind::AiUnreviewed => "ai_unreviewed",
             ProblemKind::NotEmoji => "not_emoji",
             ProblemKind::NoEmoji => "no_emoji",
-            ProblemKind::TelegramTooMany => "telegram_too_many",
             ProblemKind::TelegramUnsupported => "telegram_unsupported",
             ProblemKind::TelegramTrimmed => "telegram_trimmed",
             ProblemKind::TelegramOutdated => "telegram_outdated",
