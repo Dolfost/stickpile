@@ -211,6 +211,49 @@ pub struct ItemList {
     pub offline: bool,
 }
 
+/// What `StickpileLibrary.search_steps` answers: the results to show now,
+/// and the server's to come when these are the offline cache's because the
+/// server had not answered yet (docs/offline.md, "Results without
+/// waiting").
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchAnswer {
+    /// The results to show now: the server's if it answered in time, else
+    /// the offline cache's (`offline = true`).
+    pub list: ItemList,
+    /// The server's answer to wait for, which replaces `list`; `None` when
+    /// nothing is to come (the server answered, or it is believed
+    /// unreachable and was not asked).
+    pub pending: Option<std::sync::Arc<crate::reach::PendingSearch>>,
+}
+
+/// What the library knows of the server (`stickpile_core::Reach`): a
+/// request or a background check found it there or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ServerReach {
+    /// Nothing asked yet, or an outage forgotten because the user asked
+    /// for something (a sync, a share): the next request tries the server.
+    Unknown,
+    /// The server answered the last request or check.
+    Reachable,
+    /// A request found no server and nothing answered since: reads answer
+    /// from the offline cache at once, and the server is checked in the
+    /// background.
+    Unreachable {
+        /// When the outage was noticed (its first failure).
+        since: std::time::SystemTime,
+    },
+}
+
+impl From<stickpile_core::Reach> for ServerReach {
+    fn from(r: stickpile_core::Reach) -> Self {
+        match r {
+            stickpile_core::Reach::Unknown => ServerReach::Unknown,
+            stickpile_core::Reach::Reachable => ServerReach::Reachable,
+            stickpile_core::Reach::Unreachable { since } => ServerReach::Unreachable { since },
+        }
+    }
+}
+
 /// A pack (a set of items, as the server calls it).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Pack {

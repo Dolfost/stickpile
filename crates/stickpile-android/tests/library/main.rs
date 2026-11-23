@@ -6,6 +6,7 @@ mod account;
 mod files;
 mod offline;
 mod perf;
+mod reach;
 mod reading;
 mod review_ts;
 mod sync;

@@ -20,8 +20,9 @@ use std::path::PathBuf;
 use uniffi_meta::{EnumShape, Metadata, Type};
 
 /// The contract, rendered as [`render`] does. Types: `String`, `Boolean`,
-/// `u16`, `u32`, `u64`, `i64`, `List<T>`, `T?`, and the records and enums
-/// by name.
+/// `u16`, `u32`, `u64`, `i64`, `Timestamp` (a `SystemTime`, Kotlin's
+/// `java.time.Instant`), `List<T>`, `T?`, and the objects, records and
+/// enums by name.
 const CONTRACT: &[&str] = &[
     "fn target_for_package(package: String) -> Target",
     "fn version() -> String",
@@ -80,6 +81,13 @@ const CONTRACT: &[&str] = &[
     "fn StickpileLibrary.available_offline(item_ids: List<String>, editor_package: String, \
      accepted_mime_types: List<String>, sticker: Boolean) -> List<Boolean>",
     "fn StickpileLibrary.server_unreachable() -> Boolean",
+    // results without waiting, reachability
+    "async fn StickpileLibrary.search_steps(query: String, target: Target, limit: u32) -> SearchAnswer throws LibraryError",
+    "fn StickpileLibrary.server_reach() -> ServerReach",
+    "async fn StickpileLibrary.server_reach_change(seen: ServerReach) -> ServerReach throws LibraryError",
+    "fn StickpileLibrary.check_server()",
+    "object PendingSearch",
+    "async fn PendingSearch.server_results() -> ItemList? throws LibraryError",
     "async fn StickpileLibrary.offline_run() -> OfflineOutcome throws LibraryError",
     "fn StickpileLibrary.offline_status() -> OfflineStatus",
     "async fn StickpileLibrary.offline_status_change(seen: OfflineStatus?) -> OfflineStatus throws LibraryError",
@@ -94,6 +102,7 @@ const CONTRACT: &[&str] = &[
      format: MediaFormat, width: u32, height: u32, quality: u32?, likes: u64, copies: u64, nsfw: Boolean, \
      liked: Boolean, text: String }",
     "record ItemList { items: List<Item>, offline: Boolean }",
+    "record SearchAnswer { list: ItemList, pending: PendingSearch? }",
     "record Pack { id: String, slug: String, name: String, owner: String, item_count: u32, mine: Boolean }",
     "record PackList { packs: List<Pack>, offline: Boolean }",
     "record Suggestions { key: String, words: List<String>, chosen: u32?, labels: List<String> }",
@@ -138,6 +147,7 @@ const CONTRACT: &[&str] = &[
     "enum OfflinePart { Thumbnails, Kept { scope: OfflineScope }, Used, Liked, OwnPacks }",
     "enum OfflineState { Idle, Downloading, Paused, WaitingForNetwork, LimitReached, DiskFull }",
     "enum OfflineEnd { Complete, Cancelled, WaitingForNetwork, LimitReached, DiskFull, Unauthorized }",
+    "enum ServerReach { Unknown, Reachable, Unreachable { since: Timestamp } }",
     // the error
     "error LibraryError { NotSignedIn { detail: String }, Unauthorized { detail: String }, \
      Unreachable { detail: String }, NotFound { detail: String }, RateLimited { detail: String }, \
@@ -202,6 +212,7 @@ fn ty(t: &Type) -> String {
         Type::Float32 => "f32".into(),
         Type::Float64 => "f64".into(),
         Type::Boolean => "Boolean".into(),
+        Type::Timestamp => "Timestamp".into(),
         Type::String => "String".into(),
         Type::Object { name, .. }
         | Type::Record { name, .. }

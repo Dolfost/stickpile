@@ -52,10 +52,12 @@ mod hints;
 mod library;
 mod motion;
 mod offline;
+mod reach;
 pub mod types;
 
 pub use error::{LibraryError, LibraryErrorKind};
 pub use library::StickpileLibrary;
+pub use reach::PendingSearch;
 pub use types::*;
 
 /// The chat app behind an Android package name (the focused field's

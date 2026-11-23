@@ -74,6 +74,11 @@ const METHODS: &[&str] = &[
     "fun `removeKeptFiles`(): CacheCleared",
     "fun `availableOffline`(`itemIds`: List<kotlin.String>, `editorPackage`: kotlin.String, `acceptedMimeTypes`: List<kotlin.String>, `sticker`: kotlin.Boolean): List<kotlin.Boolean>",
     "fun `serverUnreachable`(): kotlin.Boolean",
+    // results without waiting, reachability
+    "suspend fun `searchSteps`(`query`: kotlin.String, `target`: Target, `limit`: kotlin.UInt): SearchAnswer",
+    "fun `serverReach`(): ServerReach",
+    "suspend fun `serverReachChange`(`seen`: ServerReach): ServerReach",
+    "fun `checkServer`()",
     "suspend fun `offlineRun`(): OfflineOutcome",
     "fun `offlineStatus`(): OfflineStatus",
     "suspend fun `offlineStatusChange`(`seen`: OfflineStatus?): OfflineStatus",
@@ -97,6 +102,8 @@ const NOT_THROWING: &[&str] = &[
     "setOfflineOptions",
     "availableOffline",
     "serverUnreachable",
+    "serverReach",
+    "checkServer",
     "offlineStatus",
     "pauseOffline",
     "resumeOffline",
@@ -148,6 +155,7 @@ const RECORDS: &[(&str, &[&str])] = &[
         ],
     ),
     ("ItemList", &["items: List<Item>", "offline: kotlin.Boolean"]),
+    ("SearchAnswer", &["list: ItemList", "pending: PendingSearch?"]),
     (
         "SearchHint",
         &[
@@ -361,6 +369,14 @@ const SEALED: &[(&str, &[&str])] = &[
             "object OwnPacks : OfflinePart()",
         ],
     ),
+    (
+        "ServerReach",
+        &[
+            "object Unknown : ServerReach()",
+            "object Reachable : ServerReach()",
+            "data class Unreachable(val `since`: java.time.Instant) : ServerReach()",
+        ],
+    ),
 ];
 
 const ENUMS: &[(&str, &[&str])] = &[
@@ -524,6 +540,8 @@ fn the_kotlin_bindings_carry_the_contract() {
     let exported = RECORDS.iter().chain(ENUMS).chain(SEALED).map(|(name, _)| *name).chain([
         "StickpileLibrary",
         "StickpileLibraryInterface",
+        "PendingSearch",
+        "PendingSearchInterface",
         "LibraryException",
     ]);
     for name in exported {
@@ -571,6 +589,27 @@ fn the_kotlin_bindings_carry_the_contract() {
         }
         assert_eq!(throws, !NOT_THROWING.contains(&name), "{name}: throws");
     }
+
+    // The server's answer to a search (`SearchAnswer.pending`): one method,
+    // which throws; a class a test can subclass (`NoHandle`).
+    let pending = kt
+        .split("public interface PendingSearchInterface {")
+        .nth(1)
+        .and_then(|s| s.split("companion object").next())
+        .expect("PendingSearchInterface");
+    let declared: Vec<&str> = pending
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("fun ") || l.starts_with("suspend fun "))
+        .collect();
+    assert_eq!(declared, ["suspend fun `serverResults`(): ItemList?"]);
+    assert!(squashed.contains(&squash(
+        "@Throws(LibraryException::class) @Suppress(\"ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE\") override suspend fun `serverResults`()"
+    )));
+    assert!(squashed.contains(&squash(
+        "open class PendingSearch: Disposable, AutoCloseable, PendingSearchInterface {"
+    )));
+    assert!(squashed.contains(&squash("constructor(noHandle: NoHandle)")));
 
     // The primary constructor (not async: UniFFI cannot make it so for Kotlin).
     assert!(squashed.contains(&squash(

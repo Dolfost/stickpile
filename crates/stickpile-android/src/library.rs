@@ -55,7 +55,7 @@ const FAVORITES_SAVED: usize = 200;
 pub struct StickpileLibrary {
     /// `Some` until the library is dropped.
     runtime: Option<tokio::runtime::Runtime>,
-    handle: tokio::runtime::Handle,
+    pub(crate) handle: tokio::runtime::Handle,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -130,6 +130,10 @@ pub(crate) struct Inner {
     pub(crate) offline_one: tokio::sync::Mutex<()>,
     /// A run goes on (`OfflineStatus.running`).
     pub(crate) offline_running: watch::Sender<bool>,
+    /// Moves on when the session is replaced (another server), so that a
+    /// wait on the server's reachability follows the new session
+    /// (`server_reach_change`).
+    pub(crate) sessions: watch::Sender<u64>,
 }
 
 /// Counts the account and server changes (logins, logouts, another
@@ -242,7 +246,7 @@ fn same_server(current: &str, url: &str) -> bool {
 
 /// Aborts a task when the caller stops waiting for it (the Kotlin coroutine
 /// was cancelled). Aborting a finished task does nothing.
-struct AbortOnDrop(tokio::task::AbortHandle);
+pub(crate) struct AbortOnDrop(pub(crate) tokio::task::AbortHandle);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -257,7 +261,7 @@ impl Inner {
 
     /// The session, with the generation to give [`Inner::if_current`] for
     /// what is read from it.
-    fn current(&self) -> (u64, Arc<Session>) {
+    pub(crate) fn current(&self) -> (u64, Arc<Session>) {
         // The count first: a change replaces the session before it ends, so
         // the session is never older than the count.
         let generation = lock(&self.generation).count;
@@ -300,6 +304,7 @@ impl Inner {
         lock(&self.packs_seen).clear();
         *lock(&self.vocabulary) = None;
         *self.session.write().unwrap_or_else(|e| e.into_inner()) = session;
+        self.sessions.send_modify(|n| *n += 1);
     }
 
     /// Sign out of `old`'s server before going to another one, so that its
@@ -409,7 +414,7 @@ impl Inner {
         });
     }
 
-    fn list(&self, generation: u64, session: &Session, items: Vec<ItemSummary>, offline: bool) -> ItemList {
+    pub(crate) fn list(&self, generation: u64, session: &Session, items: Vec<ItemSummary>, offline: bool) -> ItemList {
         self.remember(generation, &items);
         ItemList {
             items: self.items(session, &items),
@@ -485,6 +490,22 @@ impl Inner {
         };
         *slot = Some((generation, vocabulary.clone()));
         vocabulary
+    }
+
+    /// `query` as a search sends it: a `key:value` filter whose value is
+    /// half typed or misspelled resolved to its best suggestion, a
+    /// one-letter key written long (`StickpileLibrary::search`).
+    pub(crate) async fn search_query(
+        self: &Arc<Self>,
+        session: &Arc<Session>,
+        query: String,
+    ) -> Result<String, LibraryError> {
+        if !query.contains(':') {
+            return Ok(query.trim().to_string());
+        }
+        let (inner, session) = (self.clone(), session.clone());
+        let vocabulary = tokio::task::spawn_blocking(move || inner.vocabulary(&session)).await?;
+        Ok(suggest::resolve(query.trim(), &vocabulary.vocab).0)
     }
 
     /// `items`, the pack `pack_id`'s, that `query` finds
@@ -727,6 +748,7 @@ impl StickpileLibrary {
             offline_options: Mutex::new(None),
             offline_one: tokio::sync::Mutex::new(()),
             offline_running: watch::channel(false).0,
+            sessions: watch::channel(0).0,
         };
         tracing::info!(
             "stickpile {} (Android library), server {}",
@@ -941,17 +963,13 @@ impl StickpileLibrary {
     /// misspelled searches for its best suggestion (`suggestions`), and a
     /// one-letter key (`v:`) goes to the server written long (`vibe:`).
     /// When the server is unreachable the offline cache answers
-    /// (`offline = true`, names and keywords only).
+    /// (`offline = true`, names and keywords only). Waits for the server as
+    /// long as the request takes (the provider's one answer); the app and
+    /// the keyboard use `search_steps`, which does not.
     pub async fn search(&self, query: String, target: Target, limit: u32) -> Result<ItemList, LibraryError> {
         self.read(move |inner| async move {
             let (generation, session) = inner.current();
-            let query = if query.contains(':') {
-                let (inner2, session2) = (inner.clone(), session.clone());
-                let vocabulary = tokio::task::spawn_blocking(move || inner2.vocabulary(&session2)).await?;
-                suggest::resolve(query.trim(), &vocabulary.vocab).0
-            } else {
-                query.trim().to_string()
-            };
+            let query = inner.search_query(&session, query).await?;
             let out = session.search(&query, Some(target.into()), limit as usize).await?;
             let items = out.hits.into_iter().map(|h| h.item).collect();
             Ok(inner.list(generation, &session, items, out.offline))

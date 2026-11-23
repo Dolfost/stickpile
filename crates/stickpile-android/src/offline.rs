@@ -172,9 +172,10 @@ impl StickpileLibrary {
             .collect()
     }
 
-    /// A request found the server unreachable lately, and the lists answer
-    /// from the offline cache (for five minutes, or until the server
-    /// answers again). No network.
+    /// The server is believed unreachable (`server_reach` is `Unreachable`):
+    /// a request found it away and nothing answered since, so the lists
+    /// answer from the offline cache at once until a background check or a
+    /// request finds it again. No network.
     pub fn server_unreachable(&self) -> bool {
         self.inner.session().client().believed_unreachable()
     }
