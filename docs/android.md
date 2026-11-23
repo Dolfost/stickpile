@@ -951,8 +951,10 @@ Behaviour the signatures do not show:
   asked, and its results come if they are there within 300 ms; if not,
   the offline cache's come first (`list.offline = true`) with
   `pending`, whose `server_results` waits for the server's: they replace
-  the offline ones, or null when it failed (the offline ones stand, the
-  server is then believed unreachable), or it throws what the server
+  the offline ones, or null when it could not be reached (no connection,
+  a timeout, a proxy's 502 to 504 without an API error: the server is
+  then believed unreachable) or failed with a 5xx of its own (an answer:
+  it is not), and the offline ones stand, or it throws what the server
   answered instead (`Unauthorized`). Cancelling the wait (the coroutine)
   leaves the request running, so that its outcome still tells whether the
   server is there. The app and the keyboard search with it, in the
