@@ -300,7 +300,10 @@ previous export:
 2. A published sticker stays in the part it was first published to, the
    part whose mapping has its item. Moving an item in the set across a part
    boundary does not move its sticker to another pack, and an item whose
-   media changed is replaced within its part.
+   media changed is replaced within its part. An item whose media is
+   published for another item (the duplicate that was exported is
+   removed, and this one is left) goes to the part with that media while
+   it has room, so the sticker stays in its pack.
 3. New stickers fill the first part with room, in set order: the existing
    parts by number, then new parts, numbered from the lowest unused number.
    A part emptied in the same export takes new stickers first.
@@ -313,7 +316,8 @@ part.
 
 **Repack**, only on request, assigns every item again in set order: part 1
 gets the first 120, part 2 the next 120, and so on. The plan counts the
-published stickers that change part (`moved`), the number to show in a
+published stickers that change part (`moved`, by the item's part, else
+the part with its media), the number to show in a
 confirmation before the repack runs, and deletes the parts no longer
 needed.
 
