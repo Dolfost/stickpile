@@ -478,6 +478,8 @@ final class FakePopup: PopupControl {
         render()
     }
 
+    func pressing(down: Bool, holdMs: UInt32) {}
+
     func activate(index: UInt32) {
         guard state.view == .items, Int(index) < entries.count else { return }
         let path = files[Int(index) % files.count]

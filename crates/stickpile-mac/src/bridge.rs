@@ -797,6 +797,14 @@ impl Popup {
         self.driver.activate(index);
     }
 
+    /// The mouse button went down on a grid cell (`down`), or up. While it
+    /// is down, and for `hold_ms` after it went up (the double-click
+    /// interval, `NSEvent.doubleClickInterval`), results that replace the
+    /// shown ones wait, so the cells do not change under a click.
+    pub fn pressing(&self, down: bool, hold_ms: u32) {
+        self.driver.pressing(down, hold_ms);
+    }
+
     /// A click on the tab bar.
     pub fn show_tab(&self, tab: TabId) {
         self.driver.show_tab(tab);

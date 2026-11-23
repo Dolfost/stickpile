@@ -906,6 +906,29 @@ fn offline_results_first_then_the_servers_in_place() {
     );
 }
 
+/// A press on a tile holds the server's results until the button is up,
+/// and for the double-click interval after it (the second click of a
+/// double click lands on the sticker the first one selected).
+#[test]
+fn a_press_holds_the_servers_results() {
+    let server = kennel();
+    let h = Harness::against_synced(&server);
+    server.state().search_delay = Some(Duration::from_millis(600));
+    h.driver.toggle(None, false);
+    h.driver.query_changed("cat".into());
+    h.pump_until("the offline results", |s| notice_with(s, 2));
+    h.driver.pressing(true, 300);
+    // The server answers meanwhile.
+    h.pump_for(Duration::from_millis(1200));
+    assert_eq!(status(&h), NOTICE, "held while pressed");
+    h.driver.pressing(false, 300);
+    h.pump_for(Duration::from_millis(100));
+    assert_eq!(status(&h), NOTICE, "held for the double-click interval");
+    h.pump_until("the server's results", |s| {
+        s.renders.last().is_some_and(|v| v.footer.status.is_empty())
+    });
+}
+
 /// Opening the popup checks the server. With it gone a search shows the
 /// offline results and the notice at once; once the check of the next
 /// opening finds it back, a sync starts at once (the schedule would wait).

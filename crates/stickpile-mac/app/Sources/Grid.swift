@@ -136,6 +136,8 @@ final class FixedGridLayout: NSCollectionViewLayout {
 final class GridCollectionView: NSCollectionView {
     var onSelect: ((Int) -> Void)?
     var onActivate: ((Int) -> Void)?
+    /// The button went down on a cell (`true`) or up (`false`).
+    var onPress: ((Bool) -> Void)?
     /// The cell and where in this view the click was.
     var onMenu: ((Int, NSPoint) -> Void)?
 
@@ -149,11 +151,16 @@ final class GridCollectionView: NSCollectionView {
         }
         let p = convert(event.locationInWindow, from: nil)
         guard let index = indexPathForItem(at: p)?.item else { return }
+        onPress?(true)
         if event.clickCount == 2 {
             onActivate?(index)
         } else if event.clickCount == 1 {
             onSelect?(index)
         }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onPress?(false)
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -193,6 +200,10 @@ final class GridCell: NSView {
 
     override func mouseDown(with event: NSEvent) {
         grid?.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        grid?.mouseUp(with: event)
     }
 
     override func rightMouseDown(with event: NSEvent) {

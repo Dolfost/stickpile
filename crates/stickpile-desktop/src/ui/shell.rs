@@ -2159,6 +2159,24 @@ impl Shell {
                 });
             });
         }
+        // A press on the item grid holds results that would replace the
+        // shown ones, so the tile under it does not change before the
+        // release activates it. Watched before the cells (capture) and
+        // never claimed; the release is told once the click it makes (on
+        // the release) is handled. The end comes on a release, and when a
+        // drag takes the press over (the dragged sticker is taken then).
+        let press = gtk::GestureClick::builder()
+            .button(0)
+            .propagation_phase(gtk::PropagationPhase::Capture)
+            .build();
+        let this = self.clone();
+        press.connect_pressed(move |_, _, _, _| this.dispatch(Event::Pressing(true)));
+        let this = self.clone();
+        press.connect_end(move |_, _| {
+            let this = this.clone();
+            glib::idle_add_local_once(move || this.dispatch(Event::Pressing(false)));
+        });
+        w.grid.add_controller(press);
 
         // Page actions run from the main loop: some come from signals that
         // fire while a render holds the model (a field losing the focus).

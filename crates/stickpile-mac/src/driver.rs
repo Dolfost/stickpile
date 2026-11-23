@@ -94,6 +94,9 @@ struct State {
     /// counts the sessions opened, with the task that follows the current
     /// one (stopped when another opens).
     reach_watch: (u64, Option<tokio::task::AbortHandle>),
+    /// Counts the presses on the grid, so the release of an earlier one
+    /// (told after the double-click interval) does not end a later one.
+    presses: u64,
 }
 
 pub struct Driver {
@@ -200,6 +203,7 @@ impl Driver {
             downloads: Downloads::default(),
             panel: Panel::default(),
             reach_watch: (0, None),
+            presses: 0,
             cfg,
         };
         Arc::new_cyclic(|weak| Driver {
@@ -509,6 +513,30 @@ impl Driver {
 
     pub fn select(&self, index: u32) {
         self.dispatch(Event::Select(index as usize));
+    }
+
+    /// A button went down on a tile (`down`) or up ([`Event::Pressing`]).
+    /// The release is told `hold_ms` later, unless another press came:
+    /// the grid holds still between the clicks of a double click, whose
+    /// second click copies the tile under it.
+    pub fn pressing(&self, down: bool, hold_ms: u32) {
+        let press = {
+            let mut s = self.lock();
+            if down {
+                s.presses += 1;
+            }
+            s.presses
+        };
+        if down || hold_ms == 0 {
+            self.dispatch(Event::Pressing(down));
+            return;
+        }
+        self.after(Duration::from_millis(hold_ms.into()), move |d| {
+            let current = d.lock().presses == press;
+            if current {
+                d.dispatch(Event::Pressing(false));
+            }
+        });
     }
 
     pub fn activate(&self, index: u32) {

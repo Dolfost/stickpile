@@ -11,6 +11,7 @@ protocol PopupControl: AnyObject {
     func queryChanged(text: String)
     func select(index: UInt32)
     func activate(index: UInt32)
+    func pressing(down: Bool, holdMs: UInt32)
     func showTab(tab: TabId)
     func toggleHelp()
     func toggleSyntax()
@@ -123,6 +124,9 @@ final class PopupController: NSObject, PopupUi, MeActions, SettingsActions, Offl
         for grid in [v.itemsGrid, v.packsGrid] {
             grid.collection.onSelect = { [weak self] i in self?.send { $0.select(index: UInt32(i)) } }
             grid.collection.onActivate = { [weak self] i in self?.send { $0.activate(index: UInt32(i)) } }
+            grid.collection.onPress = { [weak self] down in
+                self?.send { $0.pressing(down: down, holdMs: UInt32(NSEvent.doubleClickInterval * 1000)) }
+            }
             grid.collection.onMenu = { [weak self, weak grid] i, point in
                 guard let self, let grid else { return }
                 self.menuAt = (grid, point)
