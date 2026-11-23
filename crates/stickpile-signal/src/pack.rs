@@ -427,7 +427,15 @@ pub async fn upload_pack(
     credentials: &Credentials,
     pack: &UploadPack,
 ) -> Result<UploadedPack, SignalError> {
-    let prepared = prepare(pack)?;
+    upload_prepared(client, credentials, &prepare(pack)?).await
+}
+
+/// [`upload_pack`] of a pack [`prepare`] checked already.
+pub(crate) async fn upload_prepared(
+    client: &SignalClient,
+    credentials: &Credentials,
+    prepared: &PreparedPack,
+) -> Result<UploadedPack, SignalError> {
     let form = client.upload_form(credentials, prepared.files.len()).await?;
     let unexpected = |why: &str| SignalError::Invalid(format!("Signal's upload form is unusable: {why}"));
     if !crate::link::valid_pack_id(&form.pack_id) {
@@ -459,7 +467,7 @@ pub async fn upload_pack(
     }
     Ok(UploadedPack {
         link,
-        stickers: pack.stickers.len(),
+        stickers: prepared.manifest.stickers.len(),
         cover_id: prepared.cover_id,
     })
 }

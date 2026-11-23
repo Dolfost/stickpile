@@ -8,6 +8,8 @@
 //! * Upload: [`upload_pack`] creates a new pack with the credentials of a
 //!   registered Signal account or linked device ([`Credentials`]) and
 //!   returns its link. Packs are immutable: an update is a new pack.
+//! * More than 200 stickers: [`split_parts`] makes several packs of them,
+//!   [`upload_parts`] uploads each as a new pack ([`parts`]).
 //! * Without credentials: [`signal_ready_zip`] builds a folder for Signal
 //!   Desktop's sticker creator and for signal-cli.
 //! * Files: [`STICKER_REQUIREMENTS`] and [`check_sticker`] state what Signal
@@ -24,6 +26,7 @@ pub mod image;
 pub mod link;
 pub mod manifest;
 pub mod pack;
+pub mod parts;
 
 pub use client::{
     SignalClient, SignalConfig, DEFAULT_CDN_URL, DEFAULT_SERVICE_URL, MAX_CIPHERTEXT_BYTES, SIGNAL_ROOT_CA_PEM,
@@ -40,6 +43,7 @@ pub use pack::{
     UploadPack, UploadSticker, UploadedPack, DEFAULT_EMOJI, MAX_ANIMATION_MS, MAX_STICKERS, MAX_STICKER_BYTES,
     STICKER_REQUIREMENTS, STICKER_SIDE_PX,
 };
+pub use parts::{part_title, split_parts, upload_parts, PartsUpload, UploadedPart};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignalError {

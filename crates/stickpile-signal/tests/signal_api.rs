@@ -6,8 +6,9 @@ mod mock_signal;
 use mock_signal::{png, start, webp, Shared, ACI, DEVICE, PASSWORD};
 use stickpile_signal::crypto::{derive_keys, encrypt};
 use stickpile_signal::{
-    import_pack, signal_ready_files, signal_ready_zip, upload_pack, Credentials, CryptoError, ImageFormat, Manifest,
-    ManifestSticker, PackKey, PackLink, SignalClient, SignalConfig, SignalError, UploadPack, UploadSticker,
+    import_pack, signal_ready_files, signal_ready_zip, split_parts, upload_pack, upload_parts, Credentials,
+    CryptoError, ImageFormat, Manifest, ManifestSticker, PackKey, PackLink, SignalClient, SignalConfig, SignalError,
+    UploadPack, UploadSticker,
 };
 
 const PACK_ID: &str = "0123456789abcdef0123456789abcdef";
@@ -387,4 +388,147 @@ fn the_signal_ready_zip_has_images_emoji_and_a_signal_cli_manifest() {
         ..sample_pack()
     })
     .is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Sets larger than one pack
+// ---------------------------------------------------------------------------
+
+/// Sticker `k` of a large set: a file and an emoji of its own (U+1F300
+/// onwards), so a pack read back says which sticker is which.
+fn nth(k: u32) -> UploadSticker {
+    let mut bytes = png(512, None, (k % 251) as u8);
+    bytes.extend(k.to_be_bytes());
+    upload_sticker(bytes, &char::from_u32(0x1F300 + k).unwrap().to_string())
+}
+
+fn index_of(s: &stickpile_signal::ImportedSticker) -> u32 {
+    s.emoji.as_deref().and_then(|e| e.chars().next()).unwrap() as u32 - 0x1F300
+}
+
+fn set_of(n: u32, cover: Option<Vec<u8>>) -> UploadPack {
+    UploadPack {
+        title: "Cats".into(),
+        author: "stickpile".into(),
+        stickers: (0..n).map(nth).collect(),
+        cover,
+    }
+}
+
+/// Uploads `whole` as parts and reads every part back through its link:
+/// (title, sticker indices, cover id, separate cover) per part.
+async fn round_trip(whole: UploadPack) -> (Vec<(String, Vec<u32>, Option<u32>, bool)>, Shared) {
+    let (service, cdn, state) = start().await;
+    let c = client(&service, &cdn);
+    let parts = split_parts(whole);
+    let up = upload_parts(&c, &creds(), &parts).await.unwrap();
+    assert!(up.failed.is_none(), "{:?}", up.failed);
+    let numbers: Vec<u32> = up.uploaded.iter().map(|u| u.number).collect();
+    assert_eq!(numbers, (1..=parts.len() as u32).collect::<Vec<_>>());
+    let mut out = Vec::new();
+    for (u, part) in up.uploaded.iter().zip(&parts) {
+        assert_eq!(u.pack.stickers, part.stickers.len());
+        let back = import_pack(&c, &PackLink::parse(&u.pack.link.url()).unwrap(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(back.skipped.is_empty(), "{:?}", back.skipped);
+        assert_eq!(back.title, u.title);
+        assert_eq!(back.author, "stickpile");
+        for (got, want) in back.stickers.iter().zip(&part.stickers) {
+            assert_eq!(got.bytes, want.bytes);
+        }
+        out.push((
+            back.title.clone(),
+            back.stickers.iter().map(index_of).collect(),
+            back.cover_id,
+            back.cover.is_some(),
+        ));
+    }
+    (out, state)
+}
+
+#[tokio::test]
+async fn signal_200_items_one_pack() {
+    let (parts, state) = round_trip(set_of(200, None)).await;
+    assert_eq!(parts.len(), 1);
+    let (title, order, cover, separate) = &parts[0];
+    assert_eq!(title, "Cats", "one pack keeps the title as it is");
+    assert_eq!(order, &(0..200).collect::<Vec<_>>());
+    assert_eq!((*cover, *separate), (Some(0), false));
+    assert_eq!(state.lock().unwrap().forms.len(), 1);
+}
+
+#[tokio::test]
+async fn signal_201_items_two_packs() {
+    let cover = webp(512, 9);
+    let (parts, state) = round_trip(set_of(201, Some(cover))).await;
+    let got: Vec<(&str, usize)> = parts.iter().map(|p| (p.0.as_str(), p.1.len())).collect();
+    assert_eq!(got, [("Cats", 200), ("Cats 2", 1)]);
+    assert_eq!(parts[1].1, [200]);
+    // Each part has the set's cover, as a file after its stickers.
+    assert_eq!((parts[0].2, parts[0].3), (Some(200), true));
+    assert_eq!((parts[1].2, parts[1].3), (Some(1), true));
+    let forms: Vec<usize> = state.lock().unwrap().forms.iter().map(|f| f.1).collect();
+    assert_eq!(forms, [201, 2]);
+}
+
+#[tokio::test]
+async fn signal_450_items_three_packs_with_links() {
+    let (parts, state) = round_trip(set_of(450, None)).await;
+    let titles: Vec<&str> = parts.iter().map(|p| p.0.as_str()).collect();
+    assert_eq!(titles, ["Cats", "Cats 2", "Cats 3"]);
+    // Every sticker exactly once across the packs, in order.
+    let all: Vec<u32> = parts.iter().flat_map(|p| p.1.clone()).collect();
+    assert_eq!(all, (0..450).collect::<Vec<_>>());
+    let sizes: Vec<usize> = parts.iter().map(|p| p.1.len()).collect();
+    assert_eq!(sizes, [200, 200, 50]);
+    // Without a cover each part shows its own first sticker.
+    assert!(parts.iter().all(|p| p.2 == Some(0) && !p.3));
+    let st = state.lock().unwrap();
+    let forms: Vec<usize> = st.forms.iter().map(|f| f.1).collect();
+    assert_eq!(forms, [200, 200, 50]);
+    assert!(st.refused.is_empty(), "{:?}", st.refused);
+    let packs: std::collections::HashSet<&str> = st
+        .objects
+        .keys()
+        .filter_map(|k| k.strip_suffix("/manifest.proto"))
+        .collect();
+    assert_eq!(packs.len(), 3, "three new packs");
+}
+
+#[tokio::test]
+async fn signal_failure_in_second_part_keeps_the_first() {
+    let (service, cdn, state) = start().await;
+    let c = client(&service, &cdn);
+    let parts = split_parts(set_of(450, None));
+    state.lock().unwrap().fail_form_after.insert(1, 413);
+    let up = upload_parts(&c, &creds(), &parts).await.unwrap();
+    assert_eq!(up.uploaded.len(), 1);
+    assert_eq!((up.uploaded[0].number, up.uploaded[0].title.as_str()), (1, "Cats"));
+    let (number, err) = up.failed.unwrap();
+    assert_eq!(number, 2);
+    assert!(
+        matches!(
+            err,
+            SignalError::RateLimited {
+                retry_after: Some(4320)
+            }
+        ),
+        "{err:?}"
+    );
+    // Part 1 is on Signal and reads back; part 3 was not tried.
+    let back = import_pack(&c, &up.uploaded[0].pack.link, 1 << 20).await.unwrap();
+    assert_eq!(back.stickers.len(), 200);
+    assert_eq!(state.lock().unwrap().forms.len(), 1);
+
+    // An invalid part: nothing is sent, and the error names the part.
+    let mut bad = split_parts(set_of(201, None));
+    bad[1].stickers[0].bytes = png(1024, None, 1);
+    let err = upload_parts(&c, &creds(), &bad).await.unwrap_err();
+    assert!(err.to_string().starts_with("part 2 of 2: sticker 1"), "{err}");
+    assert_eq!(
+        state.lock().unwrap().forms.len(),
+        1,
+        "no form for an invalid set of parts"
+    );
 }
