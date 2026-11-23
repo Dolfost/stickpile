@@ -1,20 +1,33 @@
-//! Reachability (docs/offline.md): the watch value and the background
-//! checks and their schedule. "Refused" is a closed port (the mock
-//! stopped); the schedule runs on paused time with a counted check.
+//! Reachability and results without waiting (docs/offline.md): the watch
+//! value, the background checks and their schedule, and searches that
+//! never wait for a server that does not answer (the short connect timeout
+//! of reads is tested in `client.rs`). "Hung" is a listener that accepts and
+//! never answers (like a tailnet peer that is gone), "refused" a closed
+//! port, "slow" the mock with a delay; the schedule runs on paused time
+//! with a counted check.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use stickpile_api::TokenRequest;
+use stickpile_api::{SearchHit, TargetApp, TokenRequest};
 
 use super::*;
 use crate::client::{ProbeFn, Reach, PROBE_FAST, PROBE_FAST_FOR, PROBE_SLOW, RECENTLY_UNREACHABLE};
 use crate::mock::dead_url;
+use crate::session::OFFLINE_AFTER;
 use crate::CoreError;
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
+}
+
+/// A server that accepts connections (the kernel does, into the backlog)
+/// and never answers. Closed when the listener is dropped.
+fn hung_server() -> (std::net::TcpListener, String) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    (listener, url)
 }
 
 /// A checked server for paused time: every check is counted and answered
@@ -60,6 +73,39 @@ impl Checked {
 async fn settle() {
     for _ in 0..10 {
         tokio::task::yield_now().await;
+    }
+}
+
+fn ids(hits: &[SearchHit]) -> Vec<String> {
+    let mut ids: Vec<String> = hits.iter().map(|h| h.item.id.clone()).collect();
+    ids.sort();
+    ids
+}
+
+fn sorted(items: &[&ItemSummary]) -> Vec<String> {
+    let mut ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+    ids.sort();
+    ids
+}
+
+/// What the offline index answers for `cat`: the two cats among them.
+fn offline_cats(session: &Session, target: Option<TargetApp>, items: &[ItemSummary]) -> Vec<String> {
+    let found = ids(&session.search_offline("cat", target, 10).unwrap().hits);
+    assert!(
+        found.contains(&items[0].id) && found.contains(&items[1].id),
+        "{found:?}"
+    );
+    found
+}
+
+/// A session on a server that never answers, its cache holding `items`.
+async fn hung_session(url: &str, dir: &Path, items: &[ItemSummary], fail_fast: bool) -> Session {
+    let session = Session::open(config_for(url, dir)).await.unwrap();
+    session.cache().upsert_items(items).unwrap();
+    if fail_fast {
+        session.with_fail_fast()
+    } else {
+        session
     }
 }
 
@@ -344,4 +390,176 @@ async fn watch_value_flips_when_server_returns() {
     assert!(rx.borrow_and_update().is_unreachable());
     client.forget_unreachable();
     assert_eq!(*rx.borrow_and_update(), Reach::Unknown);
+}
+
+#[tokio::test]
+async fn search_unreachable_answers_offline_at_once() {
+    let (_server, items) = seeded_server();
+    let (_hung, url) = hung_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = hung_session(&url, dir.path(), &items, true).await;
+
+    // A read finds the server away (it times out after `timeout_secs`).
+    assert!(session.client().me().await.unwrap_err().is_offline());
+    assert!(session.reach().borrow().is_unreachable());
+
+    let start = Instant::now();
+    let steps = session.search_steps("cat", Some(TargetApp::Generic), 10).await.unwrap();
+    let took = start.elapsed();
+    assert!(steps.first.offline && steps.then.is_none());
+    assert_eq!(
+        ids(&steps.first.hits),
+        offline_cats(&session, Some(TargetApp::Generic), &items)
+    );
+    // Well under the 2 s connect timeout: no request was made.
+    assert!(took < ms(100), "{took:?}");
+}
+
+#[tokio::test]
+async fn search_slow_server_gives_offline_then_server() {
+    let (server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await.with_fail_fast();
+    session.sync().await.unwrap();
+    server.state().search_delay = Some(Duration::from_secs(1));
+
+    let start = Instant::now();
+    let steps = session.search_steps("naahh", None, 10).await.unwrap();
+    let first_at = start.elapsed();
+    assert!(steps.first.offline);
+    assert_eq!(ids(&steps.first.hits), sorted(&[&items[1]]));
+    assert!(
+        first_at >= OFFLINE_AFTER && first_at < OFFLINE_AFTER + ms(300),
+        "{first_at:?}"
+    );
+
+    let server_step = steps.then.expect("the server's answer is to come");
+    let online = server_step.wait().await.unwrap().expect("the server answered");
+    let second_at = start.elapsed();
+    assert!(!online.offline);
+    assert_eq!(ids(&online.hits), sorted(&[&items[1]]));
+    assert!(second_at >= Duration::from_secs(1), "{second_at:?}");
+    assert_eq!(*session.reach().borrow(), Reach::Reachable);
+    let searches = server
+        .state()
+        .requests
+        .iter()
+        .filter(|r| r.starts_with("GET /api/v1/search"))
+        .count();
+    assert_eq!(searches, 1, "one request for both steps");
+}
+
+#[tokio::test]
+async fn search_refused_server_gives_offline_at_once() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await.with_fail_fast();
+    session.sync().await.unwrap();
+    server.stop();
+
+    let start = Instant::now();
+    let steps = session.search_steps("naahh", None, 10).await.unwrap();
+    assert!(steps.first.offline && steps.then.is_none());
+    assert_eq!(ids(&steps.first.hits), sorted(&[&items[1]]));
+    assert!(start.elapsed() < OFFLINE_AFTER, "{:?}", start.elapsed());
+    assert!(session.reach().borrow().is_unreachable());
+}
+
+#[tokio::test]
+async fn search_fast_server_gives_server_only() {
+    let (server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await.with_fail_fast();
+    session.sync().await.unwrap();
+
+    let start = Instant::now();
+    let steps = session.search_steps("cat", Some(TargetApp::Discord), 10).await.unwrap();
+    let took = start.elapsed();
+    assert!(!steps.first.offline && steps.then.is_none());
+    assert_eq!(ids(&steps.first.hits), sorted(&[&items[0], &items[1]]));
+    assert!(took < OFFLINE_AFTER, "{took:?}");
+    assert_eq!(*session.reach().borrow(), Reach::Reachable);
+}
+
+#[tokio::test]
+async fn search_hung_server_marks_unreachable_and_keeps_offline() {
+    let (_server, items) = seeded_server();
+    let (_hung, url) = hung_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = hung_session(&url, dir.path(), &items, true).await;
+    assert_eq!(*session.reach().borrow(), Reach::Unknown);
+
+    let start = Instant::now();
+    let steps = session.search_steps("cat", None, 10).await.unwrap();
+    let first_at = start.elapsed();
+    assert!(steps.first.offline);
+    assert_eq!(ids(&steps.first.hits), offline_cats(&session, None, &items));
+    assert!(
+        first_at >= OFFLINE_AFTER && first_at < OFFLINE_AFTER + ms(300),
+        "{first_at:?}"
+    );
+    // The request times out (`timeout_secs` = 2): nothing replaces the
+    // offline results, and the server is believed away.
+    let then = steps.then.expect("the server was asked");
+    assert!(then.wait().await.unwrap().is_none());
+    let failed_at = start.elapsed();
+    assert!(failed_at >= Duration::from_secs(2), "{failed_at:?}");
+    assert!(session.reach().borrow().is_unreachable());
+
+    // The next search does not ask it.
+    let start = Instant::now();
+    let steps = session.search_steps("cat", None, 10).await.unwrap();
+    assert!(steps.first.offline && steps.then.is_none());
+    assert!(start.elapsed() < ms(100), "{:?}", start.elapsed());
+}
+
+/// The CLI's search: no fail-fast, the server asked every time and waited
+/// for, the offline cache when it fails.
+#[tokio::test]
+async fn cli_search_unchanged() {
+    let (mut server, items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await;
+    session.sync().await.unwrap();
+
+    let online = session.search("cat", Some(TargetApp::Discord), 10).await.unwrap();
+    assert!(!online.offline);
+    assert_eq!(ids(&online.hits), sorted(&[&items[0], &items[1]]));
+
+    // Slow: the server's results, however long it takes within the timeout.
+    server.state().search_delay = Some(Duration::from_secs(1));
+    let start = Instant::now();
+    let slow = session.search("naahh", None, 10).await.unwrap();
+    assert!(!slow.offline);
+    assert!(start.elapsed() >= Duration::from_secs(1), "{:?}", start.elapsed());
+
+    // Refused: the offline cache at once, and the next search tries again.
+    server.state().search_delay = None;
+    server.stop();
+    let start = Instant::now();
+    let refused = session.search("naahh", None, 10).await.unwrap();
+    assert!(refused.offline);
+    assert_eq!(ids(&refused.hits), sorted(&[&items[1]]));
+    assert!(start.elapsed() < ms(500), "{:?}", start.elapsed());
+    server.restart();
+    assert!(!session.search("naahh", None, 10).await.unwrap().offline);
+    assert_eq!(*session.reach().borrow(), Reach::Unknown, "no state is kept");
+    tokio::time::sleep(ms(200)).await;
+    assert!(
+        !server.state().requests.iter().any(|r| r == "GET /healthz"),
+        "nothing checks the server"
+    );
+
+    // Hung: the timeout (`timeout_secs` = 2), then the offline cache, on
+    // every search.
+    let (_hung, url) = hung_server();
+    let other = tempfile::tempdir().unwrap();
+    let session = hung_session(&url, other.path(), &items, false).await;
+    for _ in 0..2 {
+        let start = Instant::now();
+        let out = session.search("cat", None, 10).await.unwrap();
+        assert!(out.offline);
+        assert_eq!(ids(&out.hits), offline_cats(&session, None, &items));
+        assert!(start.elapsed() >= Duration::from_secs(2), "{:?}", start.elapsed());
+    }
 }

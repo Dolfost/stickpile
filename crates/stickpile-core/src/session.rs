@@ -4,12 +4,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use stickpile_api::profiles::{choose_variant, ItemShape};
 use stickpile_api::routes::{self, path};
 use stickpile_api::{
-    CreateToken, ItemSummary, MediaKind, PairRequest, SearchHit, SetSource, SetSummary, TargetApp, TokenCreated,
-    TokenRequest, User, Variant, VariantInfo, Visibility,
+    CreateToken, ItemSummary, MediaKind, PairRequest, SearchHit, SearchResults, SetSource, SetSummary, TargetApp,
+    TokenCreated, TokenRequest, User, Variant, VariantInfo, Visibility,
 };
 use tokio::sync::watch;
 
@@ -34,6 +35,57 @@ pub struct SearchOutcome {
     /// True if the server was unreachable and the offline cache answered
     /// (metadata-only ranking, no image-content matches).
     pub offline: bool,
+}
+
+/// How long [`Session::search_steps`] waits for the server before the
+/// offline index answers first.
+pub const OFFLINE_AFTER: Duration = Duration::from_millis(300);
+
+/// What [`Session::search_steps`] answers: the results to show now, and
+/// maybe the server's to come.
+#[derive(Debug)]
+pub struct SearchSteps {
+    /// The server's results if it answered within [`OFFLINE_AFTER`]; else
+    /// the offline index's (`offline: true`).
+    pub first: SearchOutcome,
+    /// `Some` when `first` came from the offline index because the server
+    /// had not answered yet: its answer, to wait for.
+    pub then: Option<ServerStep>,
+}
+
+/// The server's answer to a search whose offline results were handed over
+/// first ([`SearchSteps::then`]). The request runs on its own: dropping
+/// this does not cancel it, so its outcome still tells the client whether
+/// the server is there ([`crate::client::Reach`]).
+#[derive(Debug)]
+pub struct ServerStep {
+    task: tokio::task::JoinHandle<Result<SearchResults>>,
+}
+
+impl ServerStep {
+    /// Wait for the server. `Ok(Some)`: its results (`offline: false`),
+    /// which replace the offline ones. `Ok(None)`: it could not be reached
+    /// or failed (5xx), and the offline results stand; a client made with
+    /// [`Session::with_fail_fast`] now believes it unreachable (a 5xx is an
+    /// answer, though). `Err`: another error, such as `401` (the offline
+    /// results stand, and the error says why the server gave none).
+    pub async fn wait(self) -> Result<Option<SearchOutcome>> {
+        let answer = self
+            .task
+            .await
+            .map_err(|e| CoreError::Other(format!("search task: {e}")))?;
+        match answer {
+            Ok(res) => Ok(Some(SearchOutcome {
+                hits: res.hits,
+                offline: false,
+            })),
+            Err(e) if falls_back(&e) => {
+                tracing::debug!("the server gave no results; the offline ones stand: {e}");
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// A list from the server, or from the offline cache when the server could
@@ -244,15 +296,68 @@ impl Session {
     }
 
     /// Server search with `target` compatibility hints; on [`crate::CoreError::Offline`]
-    /// falls back to the offline cache.
+    /// falls back to the offline cache. Waits for the server as long as the
+    /// request takes (the CLI); the clients that show results use
+    /// [`Session::search_steps`].
     pub async fn search(&self, query: &str, target: Option<TargetApp>, limit: usize) -> Result<SearchOutcome> {
-        let params = SearchParams {
-            q: query.to_string(),
-            limit: Some(limit),
-            offset: None,
-            target,
-        };
-        match self.client.search(&params).await {
+        let answer = self.client.search(&search_params(query, target, limit)).await;
+        self.search_answered(answer, query, target, limit)
+    }
+
+    /// A search that never waits for a server that does not answer
+    /// (docs/offline.md, "Results without waiting"). With the server
+    /// believed unreachable ([`Reach::Unreachable`]) the offline index
+    /// answers at once, without a request. Else the server is asked: its
+    /// results if they come within [`OFFLINE_AFTER`] (or the offline ones
+    /// at once when it fails, as [`Session::search`] falls back); if not,
+    /// the offline results first and the server's to wait for
+    /// ([`SearchSteps::then`]). Errors as [`Session::search`]. Meant for a
+    /// session made with [`Session::with_fail_fast`]; without it the server
+    /// is always asked.
+    pub async fn search_steps(&self, query: &str, target: Option<TargetApp>, limit: usize) -> Result<SearchSteps> {
+        if self.client.refuses_reads() {
+            return Ok(SearchSteps {
+                first: self.search_offline(query, target, limit)?,
+                then: None,
+            });
+        }
+        let client = self.client.clone();
+        let params = search_params(query, target, limit);
+        let mut task = tokio::spawn(async move { client.search(&params).await });
+        if let Ok(joined) = tokio::time::timeout(OFFLINE_AFTER, &mut task).await {
+            let answer = joined.map_err(|e| CoreError::Other(format!("search task: {e}")))?;
+            return Ok(SearchSteps {
+                first: self.search_answered(answer, query, target, limit)?,
+                then: None,
+            });
+        }
+        match self.search_offline(query, target, limit) {
+            Ok(first) => Ok(SearchSteps {
+                first,
+                then: Some(ServerStep { task }),
+            }),
+            Err(e) => {
+                // Nothing to show first: wait for the server like `search`.
+                tracing::debug!("no offline results to show first: {e}");
+                let step = ServerStep { task };
+                match step.wait().await? {
+                    Some(first) => Ok(SearchSteps { first, then: None }),
+                    None => Err(e),
+                }
+            }
+        }
+    }
+
+    /// The outcome of a search the server was asked: its results, or the
+    /// offline index's when it could not answer.
+    fn search_answered(
+        &self,
+        answer: Result<SearchResults>,
+        query: &str,
+        target: Option<TargetApp>,
+        limit: usize,
+    ) -> Result<SearchOutcome> {
+        match answer {
             Ok(res) => Ok(SearchOutcome {
                 hits: res.hits,
                 offline: false,
@@ -781,6 +886,15 @@ fn enter(runtime: Option<&tokio::runtime::Handle>) -> Option<tokio::runtime::Ent
         return None;
     }
     runtime.map(|rt| rt.enter())
+}
+
+fn search_params(query: &str, target: Option<TargetApp>, limit: usize) -> SearchParams {
+    SearchParams {
+        q: query.to_string(),
+        limit: Some(limit),
+        offset: None,
+        target,
+    }
 }
 
 /// Token name for a client on this machine, e.g. `stickpile-cli@laptop`.

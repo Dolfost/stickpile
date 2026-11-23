@@ -597,6 +597,13 @@ impl ApiClient {
         self.reach.as_ref().map_or(Reach::Unknown, |r| r.now())
     }
 
+    /// A read would fail at once now ([`ApiClient::believed_unreachable`]);
+    /// like such a read, this starts the background check again if it is
+    /// gone (its runtime ended).
+    pub(crate) fn refuses_reads(&self) -> bool {
+        self.reach.as_ref().is_some_and(|r| r.refuse_read())
+    }
+
     /// Wait until the state is another than `seen`, and return it: a long
     /// poll for a bridge that cannot hold a watch receiver (UniFFI).
     /// Without [`ApiClient::with_fail_fast`] it returns only if `seen` is

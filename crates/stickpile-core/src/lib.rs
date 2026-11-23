@@ -12,7 +12,8 @@
 //! * [`clipboard`] — which MIME offers to put on the clipboard for an item and
 //!   target, plus CLI clipboard backends (Wayland data-control, X11)
 //! * [`session`] — the high-level facade UI shells use (search with offline
-//!   fallback, thumbnails, prepare a copy, record usage)
+//!   fallback, or offline results first without waiting for the server;
+//!   thumbnails, prepare a copy, record usage)
 //! * [`offline`] - keeping stickers, packs or the library on the device:
 //!   which files, the plan, the background downloader (docs/offline.md)
 //! * `mock` (feature `mock`) — an in-process axum mock of the REST API for tests
@@ -41,7 +42,7 @@ pub use client::ApiClient;
 pub use client::Reach;
 pub use config::ClientConfig;
 pub use insert::{target_for_package, variant_for, InsertChoice};
-pub use session::{PreparedCopy, SearchOutcome, Session};
+pub use session::{PreparedCopy, SearchOutcome, SearchSteps, ServerStep, Session};
 pub use sync_policy::SyncPolicy;
 
 #[derive(Debug, thiserror::Error)]
