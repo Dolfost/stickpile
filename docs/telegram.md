@@ -247,44 +247,110 @@ Items are adapted to what Telegram accepts:
 
 The new mapping is returned in the job result and stored on the set.
 
-## Sets larger than one pack (design, being built)
+## Sets larger than one pack
 
 A Telegram pack holds at most 120 stickers (`MAX_PACK_STICKERS`). A set
 with more is published as several packs, its **parts**; later exports keep
-every part in step with the set. Duplicates (the `content_key` rule) and
-items without a rendition are decided once for the whole set.
+every part in step with the set. The `parts` module of
+`crates/stickpile-telegram` does this: `plan_parts` decides where each
+sticker goes, `export_parts` carries the plan out, and `part_pack_name` and
+`part_title` name the parts. A set of at most 120 stickers is one part, and
+exports exactly as a single pack did.
 
-- **Names and titles.** Part 1 keeps today's name, `<name>_by_<bot>`; part
-  k is `<name>_<k>_by_<bot>`, with `<name>` shortened when the whole would
-  pass 64 characters (it stays a valid pack name: starts with a letter, no
-  `__`). Part 1's title is the set's name; part k's is `<set name> <k>`,
-  cut to 64 characters. Every part gets the set's cover as its thumbnail.
-  One function in `stickpile-telegram` makes the names.
+**Names and titles.** Part 1 keeps the name a single pack has,
+`<name>_by_<bot>` (the default from the slug, or a name chosen at the first
+export). Part k is `<name>_<k>_by_<bot>`, with the suffix written as in
+part 1's name: `cats_by_my_bot` is followed by `cats_2_by_my_bot`,
+`cats_3_by_my_bot` and so on. When the whole would pass 64 characters,
+`<name>` is shortened, and a `_` left at its end goes too, so every part's
+name is a valid pack name (it starts with a letter and has no `__`). In the
+one case where the shortened name would be part 1's own (a 64-character
+part 1 name ending in `_2_by_<bot>`), it is shortened once more. Part 1's
+title is the set's name; part k's is `<set name> <k>`. Both have at most 64
+characters: a longer name is cut on characters (not bytes, so Cyrillic is
+cut cleanly), before ` <k>`, so the number stays. Every part gets the set's
+cover as its thumbnail.
+
+**Planning.** Before any call, `plan_parts` assigns the set's exportable
+items, in set order, to parts, from the mapping each part stored after the
+previous export:
+
+1. Items with the same media are exported once for the whole set, so a
+   duplicate never lands in a second pack. The one exported is the one
+   already published with that media, else one already published, else the
+   first in set order; the plan lists the others as duplicates. Items that
+   cannot become stickers (no rendition) are not among the items: like a
+   removed item, a published one frees its place.
+2. A published sticker stays in the part it was first published to, the
+   part whose mapping has its item. Moving an item in the set across a part
+   boundary does not move its sticker to another pack, and an item whose
+   media changed is replaced within its part.
+3. New stickers fill the first part with room, in set order: the existing
+   parts by number, then new parts, numbered from the lowest unused number.
+   A part emptied in the same export takes new stickers first.
+4. The order inside a part follows the set.
+5. A part left without stickers is planned for deletion, part 1 included:
+   the other parts keep their stickers.
+
+A set without exportable items is an error, never a plan that deletes every
+part.
+
+**Repack**, only on request, assigns every item again in set order: part 1
+gets the first 120, part 2 the next 120, and so on. The plan counts the
+published stickers that change part (`moved`), the number to show in a
+confirmation before the repack runs, and deletes the parts no longer
+needed.
+
+**Exporting.** `export_parts` makes and checks every name first, so an
+invalid one fails before any call. Then it exports the planned parts by
+number, each like a single pack ([Export](#export): created or updated,
+never emptied, with the cover as thumbnail), and hands each part's new
+state (its mapping and thumbnail key) to the caller to store as soon as
+that part is done. After every part is updated, it deletes the parts left
+empty with `deleteStickerSet` (Bot API 6.6, which deletes a set the bot
+created); an answer that the pack does not exist (`STICKERSET_INVALID`)
+counts as deleted. The caller then forgets the part. The report lists every part with its number,
+name, link (`https://t.me/addstickers/<name>`), title, number of stickers,
+`created_pack`, `added`, `removed`, `updated`, `reordered`, `thumbnail`,
+`thumbnail_changed`, `deleted` and the error where the export stopped, and
+sums them up. Part 1's fields are those of a single pack's export.
+
+**Failure.** The export stops at the first failure and then deletes
+nothing. Each part's state is stored as soon as that part is done, and the
+part that failed stores its state as far as it got
+(`export_pack_resumable`): the stickers it kept, the ones it added as far as
+reading the pack back confirms them, and the previous entries of its other
+items, so that they keep their part. When Telegram's answer to a call was
+lost, the pack read back shows whether the call took effect. The next
+export continues from there:
+
+- Names follow from the part number, so it finds the same packs and never
+  creates a second pack for a part.
+- A sticker the stored state does not know is deleted before the missing
+  ones are added, so none is doubled; at worst a sticker is uploaded again.
+- A part known to exist without a stored mapping (its first export failed
+  before any sticker was confirmed) is passed in with an empty state, and
+  is then filled or deleted, never left behind on Telegram.
+- A part whose pack was deleted by hand on Telegram is created again, as a
+  single pack is.
+- A repack that stopped is finished by the next repack. If an item ends up
+  in two parts' mappings (a repack stopped after an earlier part took the
+  sticker over), the lower part keeps it and the other drops its copy.
+
+**Server side** (design, being built):
+
 - **Ownership per part.** Every part's name is registered to the set's
   owner in `telegram_packs` before its pack is created
   ([Pack ownership](#pack-ownership)). A part name that belongs to someone
   else, is bound to another set, or exists on Telegram for another bot
   fails the export with a clear message before any change.
-- **Stable parts.** A sticker stays in the part it was first published
-  to, so a pack someone added keeps its stickers. New stickers fill the
-  first part with room, in set order; the order inside a part follows the
-  set; moving a sticker in the set across a part boundary does not move it
-  to another pack; a removed sticker frees its place.
-- **Repack, only on request.** "Repack the parts" on the export page,
-  `--repack` in the CLI and `repack: true` in the API assign every sticker
-  again in set order, after a confirmation that says how many stickers
-  move.
-- **Empty parts** are deleted on Telegram (`deleteStickerSet`, Bot API
-  6.6, which deletes a set the bot created) after the other parts are
-  updated; the result says so.
-- **Failure.** An export of several parts is one job. Each part's mapping
-  is stored as soon as that part is done, and a part that fails stores its
-  mapping as far as it got, so the next export continues from there and
-  never creates a duplicate pack or leaves an orphan.
+- **Repack surfaces.** "Repack the parts" on the export page, `--repack` in
+  the CLI and `repack: true` in the API, after a confirmation that says how
+  many stickers move.
 - **Results and compatibility.** The job's result keeps its fields for
-  part 1 and adds `parts` (each part's number, name, link, counts and
-  errors). `Set.telegram_pack` stays part 1's name, so older clients read a
-  set as before; the migration keeps every existing binding as part 1.
+  part 1 and adds `parts`. `Set.telegram_pack` stays part 1's name, so
+  older clients read a set as before; the migration keeps every existing
+  binding as part 1.
 - **Other platforms.** Signal packs hold 200 stickers and are split the
   same way (each publish uploads every part anew). Discord is unchanged (a
   server's slots are its own), and importing a Telegram pack still makes
@@ -296,7 +362,7 @@ items without a rendition are decided once for the whole set.
   import, and stickpile does not produce them on export.
 - **120 stickers per pack.** Telegram's limit for regular packs is 120
   (`addStickerToSet`). A larger set is published as several packs
-  ([Sets larger than one pack](#sets-larger-than-one-pack-design-being-built)).
+  ([Sets larger than one pack](#sets-larger-than-one-pack)).
 - **Rate limits.** Telegram answers floods with 429 and `retry_after`. Each
   call is retried up to 3 times after waiting `retry_after`, capped at 30 s
   per wait. A full re-export of a large pack makes a few hundred calls and
@@ -324,4 +390,14 @@ ownership migration, the disabled integration) against a compact mock in
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps
 in-memory pack state, serves file downloads, injects 429 answers, derives
 `file_unique_id` from the file content as Telegram does, and refuses to
-empty a pack. The tests need no network access.
+empty a pack. It checks Telegram's pack name and title rules, 1 to 50
+stickers in `createNewStickerSet` and 120 per pack, and deletes only packs
+of its own bot. It can also fail a method after a number of calls, before
+or after the call takes effect, to test exports that stop half-way.
+`tests/parts.rs` exports sets of several parts against the same mock:
+from scratch, again unchanged, failing between parts and in the middle of
+one (then continuing without a duplicate pack and with every sticker
+exactly once), deleting emptied parts after the others, a repack, a part
+deleted by hand, and a single pack bound before parts existed. The planner,
+the names and the titles have unit tests in `src/parts.rs`. The tests need
+no network access.
