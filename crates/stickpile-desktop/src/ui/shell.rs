@@ -326,6 +326,9 @@ pub struct Shell {
     /// Which session's reachability is followed ([`Shell::watch_reach`]):
     /// counts the sessions opened, so the watch of an old one ends.
     reach_watch: Cell<u64>,
+    /// Where the pointer was when the item tiles last changed: until it
+    /// moves, GTK's hover does not select ([`Shell::resting_over_new_tiles`]).
+    hover_lock: Cell<Option<(f64, f64)>>,
     /// The menu of a tile on screen, and its popover.
     menu: RefCell<Option<(Menu, gtk::Popover)>>,
     /// Where the last right click was: the cell and the point in it.
@@ -427,6 +430,7 @@ impl Shell {
             panel: RefCell::new(Panel::default()),
             panel_shown: RefCell::new(None),
             reach_watch: Cell::new(0),
+            hover_lock: Cell::new(None),
             menu: RefCell::new(None),
             menu_at: RefCell::new(None),
             confirm_shown: RefCell::new(None),
@@ -544,6 +548,28 @@ impl Shell {
                 }
             }
         });
+    }
+
+    /// Where the pointer is over the popup window, as GTK last knew it.
+    fn pointer_at(&self) -> Option<(f64, f64)> {
+        let surface = self.w.window.surface()?;
+        let pointer = surface.display().default_seat()?.pointer()?;
+        surface.device_position(&pointer).map(|(x, y, _)| (x, y))
+    }
+
+    /// The pointer has not moved since the item tiles last changed: a tile
+    /// GTK selects now is the one that came under it (GTK selects on hover
+    /// with single-click activation), not one the user went to. Once it
+    /// moves, hovering selects again.
+    fn resting_over_new_tiles(&self) -> bool {
+        let Some(at) = self.hover_lock.get() else {
+            return false;
+        };
+        if self.pointer_at() == Some(at) {
+            return true;
+        }
+        self.hover_lock.set(None);
+        false
     }
 
     fn reach_changed(self: &Rc<Self>, reach: Reach) {
@@ -1370,6 +1396,7 @@ impl Shell {
                 })
                 .collect();
             w.store.splice(0, w.store.n_items(), &objects);
+            self.hover_lock.set(self.pointer_at());
             let covers = self.covers.borrow();
             let packs: Vec<PackObject> = m
                 .packs()
@@ -2124,13 +2151,24 @@ impl Shell {
             button.connect_clicked(move |_| this.dispatch(Event::Confirm(yes)));
         }
 
-        for selection in [&w.selection, &w.pack_selection] {
+        for (selection, items) in [(&w.selection, true), (&w.pack_selection, false)] {
             let this = self.clone();
             selection.connect_selected_notify(move |sel| {
                 let i = sel.selected();
-                if !this.rendering.get() && i != gtk::INVALID_LIST_POSITION {
-                    this.dispatch(Event::Select(i as usize));
+                if this.rendering.get() || i == gtk::INVALID_LIST_POSITION {
+                    return;
                 }
+                if items && this.resting_over_new_tiles() {
+                    // GTK selects the tile under a resting pointer once the
+                    // tiles changed under it (the server's results in
+                    // place): not the user's choice, so the model's stays.
+                    let kept = this.model.borrow().selected();
+                    let was = this.rendering.replace(true);
+                    sel.set_selected(kept.map_or(gtk::INVALID_LIST_POSITION, |k| k as u32));
+                    this.rendering.set(was);
+                    return;
+                }
+                this.dispatch(Event::Select(i as usize));
             });
         }
 
