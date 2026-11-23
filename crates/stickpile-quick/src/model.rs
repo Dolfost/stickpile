@@ -307,6 +307,8 @@ pub enum Event {
     /// The results of [`Command::Search`] to show now: the server's, or
     /// the offline index's (`offline`) when the server did not answer
     /// within the delay (`Session::search_steps`) or is believed away.
+    /// While a pointer presses a tile or a menu of a tile is open they
+    /// wait ([`Event::Pressing`]).
     Results {
         generation: u64,
         outcome: Result<Results, String>,
@@ -324,10 +326,11 @@ pub enum Event {
         outcome: Result<Option<Results>, String>,
     },
     /// A pointer button went down on the grid (`true`) or was let go
-    /// (`false`). While it is down, results that replace the shown ones in
-    /// place wait, so the grid does not change under the press (the tile
-    /// it activates is the one it pressed). The shell reports the release
-    /// after the click it makes is handled.
+    /// (`false`). While it is down, the answers to the search wait (those
+    /// of a search typed further too), so the grid does not change under
+    /// the press (the tile it activates is the one it pressed); they are
+    /// handled in order when it ends. The shell reports the release after
+    /// the click it makes is handled.
     Pressing(bool),
     /// Most recently used items, newest first (answer to [`Command::LoadRecent`]).
     RecentLoaded(Vec<ItemSummary>),
@@ -1281,6 +1284,25 @@ enum Sel {
     Id(Option<String>),
 }
 
+/// An answer to the search that a press or the menu of a tile holds
+/// ([`Model::holds_results`]), with its generation, to handle once that
+/// ends.
+#[derive(Debug, Clone)]
+enum Held {
+    /// [`Event::Results`]: the first step, or a search run again in place.
+    Results(u64, Result<Results, String>),
+    /// [`Event::ServerResults`].
+    ServerResults(u64, Result<Option<Results>, String>),
+}
+
+impl Held {
+    fn generation(&self) -> u64 {
+        match self {
+            Held::Results(generation, _) | Held::ServerResults(generation, _) => *generation,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Model {
     cfg: ModelConfig,
@@ -1309,9 +1331,9 @@ pub struct Model {
     in_place: Option<u64>,
     /// A pointer is pressing the grid ([`Event::Pressing`]).
     pressing: bool,
-    /// Results to put in place once the press ends or the menu of a tile
-    /// closes, with their generation.
-    held: Option<(u64, Results)>,
+    /// The answers to the search that came while a press or the menu of a
+    /// tile held the grid, in order: handled once it ends.
+    held: Vec<Held>,
     most_used: Listing<ItemSummary>,
     favorites: Listing<ItemSummary>,
     packs: Packs,
@@ -1417,7 +1439,7 @@ impl Model {
             searching: false,
             in_place: None,
             pressing: false,
-            held: None,
+            held: Vec::new(),
             most_used: Listing::default(),
             favorites: Listing::default(),
             packs: Packs::default(),
@@ -1683,9 +1705,9 @@ impl Model {
 
     pub fn handle(&mut self, event: Event) -> Vec<Command> {
         let mut cmds = self.handle_event(event);
-        // Results held for a press or the menu of a tile go in once
+        // Answers held for a press or the menu of a tile are handled once
         // neither holds them any more.
-        if self.held.is_some() && !self.holds_results() {
+        if !self.held.is_empty() && !self.holds_results() {
             cmds.extend(self.release_held());
         }
         cmds
@@ -1913,7 +1935,7 @@ impl Model {
         self.searching = false;
         self.in_place = None;
         self.pressing = false;
-        self.held = None;
+        self.held.clear();
         self.showing = Showing::Recent;
         self.copying = None;
         self.status = Status::Idle;
@@ -2057,7 +2079,7 @@ impl Model {
         self.offline = false;
         self.searching = false;
         self.in_place = None;
-        self.held = None;
+        self.held.clear();
         self.showing = Showing::Recent;
         // Answers to searches for the old account are dropped.
         self.generation += 1;
@@ -2448,6 +2470,11 @@ impl Model {
         if generation != self.generation || self.query.trim().is_empty() {
             return Vec::new();
         }
+        if self.holds_grid() {
+            // A new search says "Searching" until the press ends.
+            self.hold(Held::Results(generation, outcome));
+            return Vec::new();
+        }
         self.searching = false;
         if self.in_place.take() == Some(generation) {
             return match outcome {
@@ -2485,7 +2512,15 @@ impl Model {
 
     /// The second step of a search ([`Event::ServerResults`]).
     fn server_results(&mut self, generation: u64, outcome: Result<Option<Results>, String>) -> Vec<Command> {
-        if generation != self.generation || self.query.trim().is_empty() || self.showing != Showing::Results {
+        if generation != self.generation || self.query.trim().is_empty() {
+            return Vec::new();
+        }
+        if self.holds_grid() {
+            // Handled after the first step if that waits too.
+            self.hold(Held::ServerResults(generation, outcome));
+            return Vec::new();
+        }
+        if self.showing != Showing::Results {
             return Vec::new();
         }
         match outcome {
@@ -2501,19 +2536,12 @@ impl Model {
     /// a sticker the user selected (keys, a pointer moved over it, a
     /// click, a menu) stays selected where it is now, or the same place
     /// when it is gone; the default selection goes to the first, the
-    /// server's best match. A copy in progress goes on (it has its item),
-    /// and while a pointer presses the grid or the menu of a tile is open
-    /// they wait ([`Model::holds_results`]). A status that tells what the
-    /// user did stays; one that describes the shown list (the offline
-    /// notice) is made again.
+    /// server's best match. A copy in progress goes on (it has its item).
+    /// A status that tells what the user did stays; one that describes the
+    /// shown list (the offline notice) is made again.
     fn replace_in_place(&mut self, mut r: Results) -> Vec<Command> {
         r.hits.truncate(self.cfg.max_results);
         let shown = self.tab == Tab::Search;
-        if shown && self.holds_results() {
-            self.held = Some((self.generation, r));
-            return Vec::new();
-        }
-        self.held = None;
         self.offline = r.offline;
         self.results = r.hits;
         self.results_target = self.target;
@@ -2535,19 +2563,37 @@ impl Model {
         self.pressing || self.keep.menu_open()
     }
 
-    /// Put in the results a press or a menu held, if they still answer
-    /// the current search.
+    /// The answers to the search wait ([`Model::holds_results`]): those
+    /// of a new search (the query changed, refined or not) as well as
+    /// those that replace the shown ones in place, since either would
+    /// change the grid under the press (GTK activates a tile on the
+    /// release) or under the menu (its entries act on its tile). A press
+    /// lasts a moment. Only the Search tab shows them.
+    fn holds_grid(&self) -> bool {
+        self.tab == Tab::Search && self.holds_results()
+    }
+
+    /// Keep an answer to the current search until the press or the menu
+    /// ends; those of an earlier one are dropped.
+    fn hold(&mut self, answer: Held) {
+        let generation = answer.generation();
+        self.held.retain(|h| h.generation() == generation);
+        self.held.push(answer);
+    }
+
+    /// Handle the answers a press or a menu held, in order, as they would
+    /// have been handled when they came; those that no longer answer the
+    /// current search (typed over, cleared, the popup opened again) are
+    /// dropped.
     fn release_held(&mut self) -> Vec<Command> {
-        match self.held.take() {
-            Some((generation, r))
-                if generation == self.generation
-                    && !self.query.trim().is_empty()
-                    && self.showing == Showing::Results =>
-            {
-                self.replace_in_place(r)
-            }
-            _ => Vec::new(),
+        let mut cmds = Vec::new();
+        for answer in std::mem::take(&mut self.held) {
+            cmds.extend(match answer {
+                Held::Results(generation, outcome) => self.results(generation, outcome),
+                Held::ServerResults(generation, outcome) => self.server_results(generation, outcome),
+            });
         }
+        cmds
     }
 
     fn recent_loaded(&mut self, items: Vec<ItemSummary>) -> Vec<Command> {

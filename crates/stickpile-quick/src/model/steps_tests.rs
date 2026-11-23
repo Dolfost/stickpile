@@ -394,6 +394,53 @@ fn swap_deferred_while_a_tile_is_pressed() {
     assert_eq!(ids(&m), ["y"]);
 }
 
+/// A search typed further while a tile is pressed waits too: the click
+/// acts on the tile it pressed, "Searching" meanwhile, and its answers
+/// (the first step, then the server's) are handled in order when the
+/// press ends, as they would have been when they came.
+#[test]
+fn a_new_search_waits_for_the_press_to_end() {
+    let typed = |m: &mut Model| {
+        m.handle(Event::QueryChanged("cats".into()));
+        let generation = m.generation();
+        let mut cmds = m.handle(Event::Results {
+            generation,
+            outcome: Ok(results(&["x", "y"], true)),
+        });
+        cmds.extend(server(m, &["z", "x", "c"]));
+        cmds
+    };
+    let mut unpressed = offline_first(&["a", "b", "c"]);
+    typed(&mut unpressed);
+
+    let mut m = offline_first(&["a", "b", "c"]);
+    m.handle(Event::Pressing(true));
+    assert!(typed(&mut m).is_empty());
+    assert_eq!(ids(&m), ["a", "b", "c"], "nothing moves under the press");
+    assert_eq!(m.status(), &Status::Searching);
+    let cmds = m.handle(Event::CopyAt {
+        index: 2,
+        toggle_sticker: false,
+    });
+    assert_eq!(copied(&cmds), Some("c"), "the tile it pressed");
+
+    let cmds = m.handle(Event::Pressing(false));
+    assert_eq!(ids(&m), ["z", "x", "c"]);
+    assert_eq!(ids(&m), ids(&unpressed));
+    assert_eq!(selected_id(&m), selected_id(&unpressed));
+    assert!(!m.is_offline());
+    assert!(loads_thumbnails(&cmds));
+    assert!(m.is_copying(), "the copy goes on");
+
+    // What a press held for a query cleared meanwhile is dropped: Recent.
+    let mut m = offline_first(&["a"]);
+    m.handle(Event::Pressing(true));
+    typed(&mut m);
+    m.handle(Event::QueryChanged(String::new()));
+    m.handle(Event::Pressing(false));
+    assert!(ids(&m).is_empty(), "Recent, empty");
+}
+
 #[test]
 fn copy_in_progress_not_dropped_by_the_swap() {
     let mut m = offline_first(&["a", "b"]);

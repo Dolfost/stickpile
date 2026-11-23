@@ -2197,12 +2197,13 @@ impl Shell {
                 });
             });
         }
-        // A press on the item grid holds results that would replace the
-        // shown ones, so the tile under it does not change before the
-        // release activates it. Watched before the cells (capture) and
-        // never claimed; the release is told once the click it makes (on
-        // the release) is handled. The end comes on a release, and when a
-        // drag takes the press over (the dragged sticker is taken then).
+        // A press on the item grid holds the search's results (the
+        // server's, a search typed further), so the tile under it does not
+        // change before the release activates it. Watched before the cells
+        // (capture) and never claimed; the release is told once the click
+        // it makes (on the release) is handled. The end comes on a
+        // release, and when a drag takes the press over (the dragged
+        // sticker is taken then).
         let press = gtk::GestureClick::builder()
             .button(0)
             .propagation_phase(gtk::PropagationPhase::Capture)

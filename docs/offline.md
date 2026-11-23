@@ -542,15 +542,19 @@ the popup model (`stickpile-desktop/src/backend.rs`,
   gone; the default selection (nothing moved) goes to the first, the
   server's best match. The same for the search run again when the server
   is back or a sync changed the cache. A status that tells what the user
-  did (a copy, a like) stays. While a pointer button
-  is down on the grid or the menu of a tile is open, the results wait
-  and go in when the press ends or the menu closes (`Event::Pressing`);
-  the click the press makes acts on the tile it pressed. GTK tells the
-  release after the click is handled; macOS also holds them for the
-  double-click interval after the release. GTK selects the tile under a
-  resting pointer once the tiles change; the shell undoes that until the
-  pointer moves, so a pointer that did not move does not count as the
-  user selecting.
+  did (a copy, a like) stays.
+- While a pointer button is down on the grid or the menu of a tile is
+  open, the answers to the search wait: the server's that replace the
+  shown ones, and those of a search typed further or another one (still
+  "Searching..."), since GTK activates a tile on the release. They are
+  handled in order when the press ends or the menu closes
+  (`Event::Pressing`), as they would have been when they came, unless
+  the search is no longer the current one; the click the press makes
+  acts on the tile it pressed. GTK tells the release after the click is
+  handled; macOS also holds them for the double-click interval after the
+  release. GTK selects the tile under a resting pointer once the tiles
+  change; the shell undoes that until the pointer moves, so a pointer
+  that did not move does not count as the user selecting.
 - The server back: the search shown from the offline index runs again
   in place, without "Searching..." over the results (a search still
   waiting for its answer runs again as a new one), and `Command::Sync`
