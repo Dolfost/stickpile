@@ -164,7 +164,7 @@ fn downloads(state: &AppState, set: &Set) -> Markup {
             @if set.item_count > 0 {
                 h3 #signal-zip { (t("Signal-ready zip")) }
                 p {
-                    (t("Every item as a 512x512 Signal sticker, numbered in order, with emoji.txt and a manifest.json for signal-cli. In Signal Desktop: File, Create/upload sticker pack, then drag the images in and pick the emoji emoji.txt lists."))
+                    (t("Every item as a 512x512 Signal sticker, numbered in order, with emoji.txt and a manifest.json for signal-cli; a set of more than 200 stickers gets one folder per pack. In Signal Desktop: File, Create/upload sticker pack, then drag the images in and pick the emoji emoji.txt lists."))
                     @if !signal::configured(state) {
                         " " (t("This server does not publish to Signal itself, so this is the way to make a Signal pack."))
                     }
