@@ -569,3 +569,48 @@ async fn export_parts_stops_when_a_part_cannot_be_stored() {
     assert!(err.to_string().contains("at most 120"), "{err}");
     assert!(state.lock().unwrap().calls.is_empty());
 }
+
+/// The packs holding the sticker made from `it`'s file.
+fn packs_with(state: &Shared, it: &ExportItem) -> Vec<String> {
+    let st = state.lock().unwrap();
+    st.packs
+        .iter()
+        .filter(|(_, p)| p.stickers.iter().any(|s| s.fuid == fuid(it)))
+        .map(|(n, _)| n.clone())
+        .collect()
+}
+
+/// Review finding: when the exported item of two items with the same media
+/// is removed, the item left is planned as a new sticker and goes to the
+/// first part with room: the very same sticker leaves part 2 for part 1
+/// without a repack (rule 5), and whoever added only part 2 loses it.
+#[tokio::test]
+async fn review_a_duplicate_left_alone_keeps_its_stickers_pack() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let store = Store::default();
+    run(&client, &store, &stars(0..130), None, false).await.unwrap();
+    // 20 stickers of part 1 go: 100 and 10, part 1 has room.
+    let mut items = stars(20..130);
+    run(&client, &store, &items, None, false).await.unwrap();
+    // A second item with the media of k125 (a copy moved in from another
+    // set, or a file replaced by the same one): exported once, in part 2.
+    let twin = ExportItem {
+        key: "twin".into(),
+        ..star(125)
+    };
+    items.push(twin.clone());
+    let report = run(&client, &store, &items, None, false).await.unwrap();
+    assert_eq!(report.totals().added, 0);
+    assert_eq!(packs_with(&state, &twin), [name(2)]);
+
+    // The duplicates check is resolved by deleting k125: its twin stays.
+    items.retain(|it| it.key != "k125");
+    run(&client, &store, &items, None, false).await.unwrap();
+    assert_each_once(&state, &store, &items);
+    assert_eq!(
+        packs_with(&state, &twin),
+        [name(2)],
+        "the sticker stays in the pack it was published to"
+    );
+}
