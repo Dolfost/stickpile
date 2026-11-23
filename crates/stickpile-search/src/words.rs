@@ -9,7 +9,7 @@ use std::collections::BinaryHeap;
 use std::ops::Bound;
 
 use crate::store::{Store, TokenEntry, TEXT};
-use crate::text::{osa_start_within, osa_start_within_in, tokenize};
+use crate::text::{osa_start_within, osa_start_within_in, tokenize_words};
 use crate::Viewer;
 
 /// Typos forgiven in a typed value of `len` characters when values are
@@ -87,12 +87,13 @@ fn offerable(e: &TokenEntry) -> bool {
 
 /// The one word `typed` is, as the index keeps words (`П'ятн` -> `пятн`,
 /// `Café` -> `cafe`): `Some("")` while nothing is typed; `None` for more
-/// than one word (`a-b`), none (`!!!`) or an emoji.
+/// than one word (`a-b`), none (`!!!`) or an emoji. Punctuation is left
+/// out (`what?` is `what`): it is never offered.
 pub fn text_word(typed: &str) -> Option<String> {
     if typed.trim().is_empty() {
         return Some(String::new());
     }
-    match tokenize(typed).as_slice() {
+    match tokenize_words(typed).as_slice() {
         [t] if t.word => Some(t.text.clone()),
         _ => None,
     }

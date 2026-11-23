@@ -238,6 +238,230 @@ fn x_lists_the_best_matches_first() {
     assert!(hits(&ix, "x:cats").iter().all(|h| h.matched.is_empty()));
 }
 
+// ---------------------------------------------------------------- punctuation
+
+/// Captions with punctuation, as OCR reads them or people type them.
+fn punctuated() -> Index {
+    index([
+        doc("q", "?"),
+        doc("qq", "??"),
+        doc("qx", "?!"),
+        doc("what", "what?"),
+        doc("what_sp", "WHAT ?"),
+        doc("what_no", "what"),
+        doc("whatever", "whatever?"),
+        doc("full", "\u{0447}\u{043e}\u{FF1F}"),
+        doc("wait", "wait..."),
+        doc("dots4", "...."),
+        doc("ellipsis", "\u{2026}"),
+        doc("dots2", "so.. ok."),
+        doc("wow", "wow!!!"),
+        doc("plain", "no punctuation here"),
+    ])
+}
+
+#[test]
+fn x_question_finds_runs_and_word_suffix() {
+    let ix = punctuated();
+    let questions = strs(&["full", "q", "qq", "qx", "what", "what_sp", "whatever"]);
+    assert_eq!(found(&ix, "x:?"), questions, "a token with `?` in it");
+    assert_eq!(found(&ix, "x:\u{FF1F}"), questions, "full width");
+    assert_eq!(found(&ix, "text:?"), questions);
+    assert_eq!(found(&ix, "x:??"), strs(&["qq"]));
+    assert_eq!(found(&ix, "x:?!"), strs(&["qx"]));
+    assert_eq!(found(&ix, "x:!"), strs(&["qx", "wow"]));
+    assert_eq!(found(&ix, "x:!!!!"), Vec::<String>::new());
+    // Wildcards there are none: `*` is itself.
+    assert!(found(&ix, "x:*").is_empty());
+    // A filter adds no label, and every match is as good as another.
+    assert!(hits(&ix, "x:?")
+        .iter()
+        .all(|h| h.matched.is_empty() && h.text_tier == 0));
+}
+
+#[test]
+fn x_ellipsis_needs_three_dots() {
+    let ix = punctuated();
+    let ellipses = strs(&["dots4", "ellipsis", "wait"]);
+    assert_eq!(found(&ix, "x:..."), ellipses, "not `..`");
+    assert_eq!(found(&ix, "x:\u{2026}"), ellipses);
+    assert_eq!(found(&ix, "x:...."), strs(&["dots4"]));
+    assert_eq!(
+        found(&ix, "x:.."),
+        strs(&["dots2", "dots4", "ellipsis", "wait"]),
+        "two dots are in three"
+    );
+    assert_eq!(found(&ix, "x:."), strs(&["dots2", "dots4", "ellipsis", "wait"]));
+}
+
+#[test]
+fn phrase_word_then_punctuation() {
+    let ix = punctuated();
+    // The word, then a token with `?` in it: right after the word or after
+    // a space; not the word alone, not another word it starts.
+    assert_eq!(found(&ix, "x:\"what?\""), strs(&["what", "what_sp"]));
+    assert_eq!(found(&ix, "x:what?"), strs(&["what", "what_sp"]), "unquoted the same");
+    assert_eq!(found(&ix, "x:\"what ?\""), strs(&["what", "what_sp"]));
+    assert_eq!(found(&ix, "x:wait..."), strs(&["wait"]));
+    assert_eq!(found(&ix, "x:\u{0447}\u{043e}?"), strs(&["full"]));
+    // The word as a word is matched: a typo is forgiven (and ranks so).
+    assert_eq!(found(&ix, "x:waht?"), strs(&["what", "what_sp"]));
+    assert!(hits(&ix, "x:waht?").iter().all(|h| h.text_tier == 3));
+    assert_eq!(found(&ix, "x:what"), strs(&["what", "what_no", "what_sp", "whatever"]));
+    // In this order, one after the other.
+    assert!(found(&ix, "x:\"? what\"").is_empty());
+    assert!(found(&ix, "x:\"what !\"").is_empty());
+    assert!(found(&ix, "x:\"wait ?\"").is_empty());
+    let ix = index([
+        doc("a", "wait... what?!"),
+        doc("b", "wait what"),
+        doc("c", "what? wait..."),
+        doc("d", "so ? ... ok"),
+    ]);
+    assert_eq!(found(&ix, "x:\"wait... what?\""), strs(&["a"]));
+    assert_eq!(
+        found(&ix, "x:\"wait what\""),
+        strs(&["a", "b"]),
+        "words alone: as before"
+    );
+    assert_eq!(found(&ix, "x:\"... wh\""), strs(&["a"]), "the last word by its start");
+    // Punctuation alone, several: between the same two words.
+    assert_eq!(found(&ix, "x:\"? ...\""), strs(&["d"]), "not c: a word between");
+    assert_eq!(found(&ix, "x:\"what? wait\""), strs(&["c"]));
+}
+
+/// Items with punctuation in the name or the text (not the keywords).
+fn named_punctuation() -> Index {
+    let named = |id: &str, name: &str, text: &str| Doc {
+        name: name.into(),
+        ..doc(id, text)
+    };
+    let mut ix = index([
+        named("name_q", "Really?", ""),
+        named("text_q", "plain", "really?"),
+        named("name_dots", "wait\u{2026}", ""),
+        named("text_dots", "plain", "so..."),
+        named("none", "nothing", "nothing"),
+    ]);
+    ix.upsert(Doc {
+        keywords: strs(&["huh?", "hm..."]),
+        ..named("kw", "plain", "")
+    });
+    ix
+}
+
+#[test]
+fn plain_punctuation_query_searches_text_and_name() {
+    let ix = named_punctuation();
+    // In the name first, as a word would be.
+    assert_eq!(ids(&ix, "?"), strs(&["name_q", "text_q"]), "not the keywords");
+    assert_eq!(hits(&ix, "?")[0].matched, ["name"]);
+    assert_eq!(hits(&ix, "?")[1].matched, ["text"]);
+    assert_eq!(found(&ix, "..."), strs(&["name_dots", "text_dots"]));
+    assert_eq!(found(&ix, "\u{2026}"), strs(&["name_dots", "text_dots"]));
+    assert_eq!(found(&ix, "\u{FF1F}"), strs(&["name_q", "text_q"]));
+    assert_eq!(
+        found(&ix, "? ..."),
+        strs(&["name_dots", "name_q", "text_dots", "text_q"]),
+        "either"
+    );
+    // `x:` looks at the text alone.
+    assert_eq!(found(&ix, "x:?"), strs(&["text_q"]));
+    assert!(found(&ix, "!").is_empty());
+    // One kind of match, one idf for all the runs with `?`: the rarer
+    // `??` does not outrank the `?` of a name.
+    let runs = index([
+        Doc {
+            name: "huh?".into(),
+            ..doc("name_q", "")
+        },
+        doc("text_qq", "??"),
+        doc("text_q1", "?"),
+        doc("text_q2", "so ?"),
+        doc("text_q3", "ok ?"),
+    ]);
+    assert_eq!(ids(&runs, "?")[0], "name_q");
+    assert_eq!(ids(&runs, "?").len(), 5);
+    // Before, a query of punctuation found everything (no word to rank by).
+    assert_eq!(found(&ix, "").len(), 6);
+    // No image side and no expansions: they would bring `none`.
+    let opts = SearchOptions {
+        limit: 100,
+        text_embedding: Some(vec![1.0, 0.0]),
+        expansions: vec![("nothing".into(), 1.0)],
+        ..Default::default()
+    };
+    let mut ix = ix;
+    let mut none = ix.get("none").cloned().unwrap();
+    none.embedding = Some(vec![1.0f32, 0.0].into());
+    ix.upsert(none);
+    let got: Vec<String> = ix
+        .search(&Query::parse("?"), &alice(), &opts)
+        .hits
+        .into_iter()
+        .map(|h| h.item_id)
+        .collect();
+    assert_eq!(got, strs(&["name_q", "text_q"]));
+    let got = ix.search(&Query::parse("nothing"), &alice(), &opts).hits;
+    assert!(got[0].matched.contains(&"image"), "the image side is there for words");
+}
+
+#[test]
+fn mixed_plain_query_keeps_words_fuzzy_and_punctuation_soft() {
+    let doc = |id: &str, text: &str| Doc {
+        name: "sticker".into(),
+        ..doc(id, text)
+    };
+    let ix = index([
+        doc("what_q", "what?"),
+        doc("what", "what"),
+        doc("waht", "waht"),
+        doc("huh", "huh?"),
+        doc("none", "nothing"),
+    ]);
+    // The words find as without the punctuation (a typo too); the
+    // punctuation finds nothing by itself (`huh`).
+    for (mixed, words) in [
+        ("what?", "what"),
+        ("waht?", "waht"),
+        ("what ?", "what"),
+        ("whta?!", "whta"),
+    ] {
+        assert_eq!(found(&ix, mixed), found(&ix, words), "{mixed}");
+    }
+    assert_eq!(found(&ix, "what?"), strs(&["waht", "what", "what_q"]));
+    // It lifts the items that have it: the same scores otherwise, so
+    // `what` comes first by its id without the `?`.
+    assert_eq!(ids(&ix, "what"), strs(&["what", "what_q", "waht"]));
+    assert_eq!(ids(&ix, "what?"), strs(&["what_q", "what", "waht"]));
+    assert_eq!(hits(&ix, "what?")[0].matched, ["text"]);
+    // A negated term leaves its punctuation out, as before.
+    assert_eq!(found(&ix, "-what?"), found(&ix, "-what"));
+}
+
+#[test]
+fn minus_x_question_excludes() {
+    let ix = punctuated();
+    let all = found(&ix, "");
+    let without = |q: &str| -> Vec<String> {
+        let got = found(&ix, q);
+        all.iter().filter(|id| !got.contains(id)).cloned().collect()
+    };
+    assert_eq!(without("-x:?"), found(&ix, "x:?"));
+    assert_eq!(without("-text:?"), found(&ix, "x:?"));
+    assert_eq!(without("-x:..."), strs(&["dots4", "ellipsis", "wait"]), "`..` stays");
+    assert_eq!(without("-x:\"what?\""), strs(&["what", "what_sp"]));
+    assert_eq!(found(&ix, "x:what -x:?"), strs(&["what_no"]));
+    // A `-` term of punctuation alone: the name and the text.
+    let ix = named_punctuation();
+    assert_eq!(
+        found(&ix, "-?"),
+        strs(&["kw", "name_dots", "none", "text_dots"]),
+        "not name_q, text_q; the keywords keep no punctuation"
+    );
+    assert_eq!(found(&ix, "-\u{2026}"), strs(&["kw", "name_q", "none", "text_q"]));
+}
+
 #[test]
 fn x_and_plain_words_together() {
     let ix = captions();
@@ -377,6 +601,20 @@ fn only_the_words_of_items_the_viewer_can_search() {
         viewer: &alice,
     };
     assert_eq!(TextWords::text_words(&viewed, "z", 12), strs(&["zany", "zebra"]));
+}
+
+#[test]
+fn punctuation_not_offered_as_text_word() {
+    let ix = index([doc("a", "??? lol"), doc("b", "?! what..."), doc("c", "\u{2026} lol!")]);
+    assert_eq!(words(&ix, ""), strs(&["lol", "what"]));
+    assert_eq!(words(&ix, "lo"), strs(&["lol"]));
+    for typed in ["?", "...", "\u{2026}", "?!", "!"] {
+        assert!(words(&ix, typed).is_empty(), "{typed}");
+        assert_eq!(text_word(typed), None, "{typed}");
+    }
+    // A value's punctuation is left out of the word typed, as before.
+    assert_eq!(text_word("what?"), Some("what".to_string()));
+    assert_eq!(words(&ix, "wha?"), strs(&["what"]));
 }
 
 #[test]

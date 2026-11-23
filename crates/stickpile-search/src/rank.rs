@@ -7,7 +7,7 @@ use std::ops::Bound;
 use stickpile_api::query::{Filter, Is, Query, Sort};
 use stickpile_api::Visibility;
 
-use crate::store::{IntMap, Slot, Store, EMOJI_NAME, FIELD_B, FIELD_LABEL, FIELD_WEIGHT, NFIELDS, TEXT};
+use crate::store::{IntMap, Punct, Slot, Store, EMOJI_NAME, FIELD_B, FIELD_LABEL, FIELD_WEIGHT, NFIELDS, TEXT};
 use crate::text::{
     dot, emoji_key, is_skin_tone, normalize, osa_within, padded_trigrams, squash_key, tokenize, tri_is_padded,
 };
@@ -114,6 +114,9 @@ struct QTok {
     text: String,
     chars: Vec<char>,
     word: bool,
+    /// Punctuation: it matches the punctuation tokens it is inside
+    /// ([`Store::punct_candidates`]).
+    punct: bool,
 }
 
 struct Term {
@@ -130,8 +133,25 @@ fn prepare(text: &str) -> Vec<QTok> {
             chars: t.text.chars().collect(),
             text: t.text,
             word: t.word,
+            punct: t.punct,
         })
         .collect()
+}
+
+/// Whether the punctuation tokens `marks` (`(at, token)` of one value, in
+/// order) have, at word position `at`, tokens matching the punctuation
+/// `gap` of a `text:` value, one each, in its order.
+fn gap_has(marks: &[(usize, u32)], at: usize, gap: &[IntMap<u32, Kind>]) -> bool {
+    if gap.is_empty() {
+        return true;
+    }
+    let mut want = gap.iter().peekable();
+    for (_, id) in marks.iter().filter(|(a, _)| *a == at) {
+        if want.peek().is_some_and(|c| c.contains_key(id)) {
+            want.next();
+        }
+    }
+    want.peek().is_none()
 }
 
 #[derive(Default, Clone, Copy)]
@@ -210,6 +230,9 @@ struct Filters<'a> {
     texts: TextFilter,
     /// Token-id sequences that must not occur in any own text field.
     exclude: Vec<Vec<u32>>,
+    /// The docs a `-` term of punctuation only (`-?`) leaves out: those
+    /// with it in the name or the text.
+    exclude_punct: IntMap<u32, ()>,
 }
 
 fn map_filter<T, U>(f: &Filter<T>, g: impl Fn(&T) -> U) -> Filter<U> {
@@ -261,15 +284,24 @@ impl TextFilter {
 impl<'a> Filters<'a> {
     fn new(store: &Store, q: &'a Query, viewer: &'a Viewer) -> Filters<'a> {
         let norm = |s: &String| normalize(s.trim());
-        // A token missing from the vocabulary cannot occur in any doc.
-        let run = |t: &String| -> Option<Vec<u32>> {
-            let toks = tokenize(t);
-            if toks.is_empty() {
-                return None;
+        let mut exclude = Vec::new();
+        let mut exclude_punct: IntMap<u32, ()> = IntMap::default();
+        for t in &q.exclude_text {
+            let (words, punct): (Vec<_>, Vec<_>) = tokenize(t).into_iter().partition(|t| !t.punct);
+            if words.is_empty() {
+                for p in &punct {
+                    for id in store.puncts_with(&p.text) {
+                        exclude_punct.extend(store.tokens[id as usize].postings.iter().map(|p| (p.doc, ())));
+                    }
+                }
+                continue;
             }
-            toks.iter().map(|t| store.vocab.get(&t.text).copied()).collect()
-        };
-        let exclude = q.exclude_text.iter().filter_map(run).collect();
+            // The words of a term with them, as without its punctuation. A
+            // token missing from the vocabulary cannot occur in any doc.
+            if let Some(run) = words.iter().map(|t| store.vocab.get(&t.text).copied()).collect() {
+                exclude.push(run);
+            }
+        }
         Filters {
             q,
             viewer,
@@ -280,6 +312,7 @@ impl<'a> Filters<'a> {
             owners: map_filter(&q.owners, |s| s.trim().to_lowercase()),
             texts: TextFilter::new(store, &q.texts),
             exclude,
+            exclude_punct,
         }
     }
 
@@ -306,6 +339,7 @@ impl<'a> Filters<'a> {
             && self.tags.accepts(|v| s.tags.contains(v))
             && self.owners.accepts(|v| s.owner == *v)
             && !self.excluded(s)
+            && (self.exclude_punct.is_empty() || !self.exclude_punct.contains_key(&idx))
     }
 
     /// A `-word` leaves out docs with it in any own field: every field but
@@ -354,9 +388,28 @@ impl Store {
         tf * (K1 + 1.0) / (tf + K1 * (1.0 - b + b * len as f32 / avg.max(1e-3)))
     }
 
+    /// The punctuation tokens with `value` inside: `?` is in `?`, `??` and
+    /// `?!`; `...` in `....`, not in `..`.
+    fn puncts_with<'a>(&'a self, value: &'a str) -> impl Iterator<Item = u32> + 'a {
+        self.puncts
+            .iter()
+            .copied()
+            .filter(move |id| self.tokens[*id as usize].text.contains(value))
+    }
+
+    /// The candidates of a punctuation token ([`Self::puncts_with`]): one
+    /// kind of match, as good as the token itself; no prefix, typo or
+    /// substring tier.
+    fn punct_candidates(&self, q: &QTok) -> IntMap<u32, Kind> {
+        self.puncts_with(&q.text).map(|id| (id, Kind::Exact)).collect()
+    }
+
     /// Vocabulary tokens matching one query token by the kinds of `rule`,
-    /// each with its best kind.
+    /// each with its best kind; punctuation by [`Self::punct_candidates`].
     fn candidates(&self, q: &QTok, rule: Rule) -> IntMap<u32, Kind> {
+        if q.punct {
+            return self.punct_candidates(q);
+        }
         let mut best: IntMap<u32, Kind> = IntMap::default();
         let better = |new: Kind, old: Kind| match rule.tiered {
             true => new.tier() < old.tier(),
@@ -457,13 +510,22 @@ impl Store {
     fn text_matches(&self, value: &str, negated: bool) -> IntMap<u32, u8> {
         let mut out: IntMap<u32, u8> = IntMap::default();
         let toks = prepare(value);
-        let n = toks.len();
-        let cands: Vec<IntMap<u32, Kind>> = toks
-            .iter()
-            .enumerate()
-            .map(|(i, t)| self.candidates(t, Rule::text(i + 1 == n, negated)))
-            .collect();
-        if n == 0 || cands.iter().any(IntMap::is_empty) {
+        // The words (and emojis) in a row, and the punctuation around them:
+        // `gaps[i]` before word `i`, `gaps[n]` after the last. The last word
+        // is the one being typed when nothing follows it.
+        let n = toks.iter().filter(|t| !t.punct).count();
+        let ends_in_word = toks.last().is_some_and(|t| !t.punct);
+        let mut cands: Vec<IntMap<u32, Kind>> = Vec::with_capacity(n);
+        let mut gaps: Vec<Vec<IntMap<u32, Kind>>> = (0..=n).map(|_| Vec::new()).collect();
+        for t in &toks {
+            if t.punct {
+                gaps[cands.len()].push(self.punct_candidates(t));
+            } else {
+                let last = ends_in_word && cands.len() + 1 == n;
+                cands.push(self.candidates(t, Rule::text(last, negated)));
+            }
+        }
+        if toks.is_empty() || cands.iter().chain(gaps.iter().flatten()).any(IntMap::is_empty) {
             return out;
         }
         let in_text = |c: &IntMap<u32, Kind>| -> Vec<(u32, u8)> {
@@ -477,32 +539,65 @@ impl Store {
                 })
                 .collect()
         };
-        if n == 1 {
-            for (doc, tier) in in_text(&cands[0]) {
+        let punct = gaps.iter().any(|g| !g.is_empty());
+        // One word or one punctuation alone (`x:lo`, `x:?`): the texts with it.
+        let single = match (n, punct) {
+            (1, false) => Some(&cands[0]),
+            (0, _) if gaps[0].len() == 1 => Some(&gaps[0][0]),
+            _ => None,
+        };
+        if let Some(c) = single {
+            for (doc, tier) in in_text(c) {
                 out.entry(doc).and_modify(|t| *t = (*t).min(tier)).or_insert(tier);
             }
             return out;
         }
-        // A phrase: the texts with its rarest word, read word by word.
+        // A phrase: the texts with its rarest token, read word by word (and
+        // gap by gap).
         let postings_of = |c: &IntMap<u32, Kind>| {
             c.keys()
                 .map(|id| self.tokens[*id as usize].postings.len())
                 .sum::<usize>()
         };
-        let pivot = (0..n).min_by_key(|&i| postings_of(&cands[i])).unwrap_or(0);
-        let mut docs: Vec<u32> = in_text(&cands[pivot]).into_iter().map(|(d, _)| d).collect();
+        let pivot = cands
+            .iter()
+            .chain(gaps.iter().flatten())
+            .min_by_key(|c| postings_of(c))
+            .expect("a token");
+        let mut docs: Vec<u32> = in_text(pivot).into_iter().map(|(d, _)| d).collect();
         docs.sort_unstable();
         docs.dedup();
+        let words_at = |v: &[u32]| {
+            v.iter()
+                .zip(&cands)
+                .try_fold(0u8, |worst, (id, c)| c.get(id).map(|k| worst.max(k.tier())))
+        };
         for doc in docs {
-            let best = self.slot(doc).fields[TEXT]
-                .iter()
-                .flat_map(|v| v.windows(n))
-                .filter_map(|w| {
-                    w.iter()
-                        .zip(&cands)
-                        .try_fold(0u8, |worst, (id, c)| c.get(id).map(|k| worst.max(k.tier())))
+            let slot = self.slot(doc);
+            let best = if punct {
+                // The text is one value; its punctuation by word position.
+                let marks: Vec<(usize, u32)> = self
+                    .marks_of(doc)
+                    .iter()
+                    .filter(|p| p.field as usize == TEXT)
+                    .map(|p| (p.at as usize, p.id))
+                    .collect();
+                slot.fields[TEXT].first().and_then(|v| {
+                    (0..(v.len() + 1).saturating_sub(n))
+                        .filter_map(|k| {
+                            let tier = words_at(&v[k..k + n])?;
+                            let gaps_ok = gaps.iter().enumerate().all(|(j, g)| gap_has(&marks, k + j, g));
+                            gaps_ok.then_some(tier)
+                        })
+                        .min()
                 })
-                .min();
+            } else {
+                slot.fields[TEXT]
+                    .iter()
+                    .flat_map(|v| v.windows(n))
+                    .filter_map(words_at)
+                    .min()
+            };
             if let Some(tier) = best {
                 out.insert(doc, tier);
             }
@@ -510,12 +605,46 @@ impl Store {
         out
     }
 
+    /// The idf of a punctuation token, one for all the tokens it is inside
+    /// (`cands`), from their docs together: a `?` in `??` counts as one in
+    /// `?`, as the match is one kind.
+    fn punct_idf(&self, cands: &IntMap<u32, Kind>) -> f32 {
+        let df = cands
+            .keys()
+            .fold(0u32, |n, id| n.saturating_add(self.tokens[*id as usize].df));
+        self.idf(df)
+    }
+
+    /// What [`Self::term_hits`] gives one doc for a punctuation token of
+    /// candidates `cands` and idf `idf` ([`Self::punct_idf`]), read from
+    /// the doc's [`Store::marks`] rather than from every posting: each
+    /// candidate in a field scored as its posting is (its count there, the
+    /// field's length in words).
+    fn punct_hit(&self, doc: u32, cands: &IntMap<u32, Kind>, idf: f32) -> TermHit {
+        let mut h = TermHit::default();
+        let marks = self.marks_of(doc);
+        for (i, m) in marks.iter().enumerate() {
+            let same = |o: &Punct| o.id == m.id && o.field == m.field;
+            let Some(kind) = cands.get(&m.id) else { continue };
+            if marks[..i].iter().any(same) {
+                continue;
+            }
+            let (f, tf) = (m.field as usize, marks.iter().filter(|o| same(o)).count());
+            let q = kind.quality();
+            let s = q * idf * self.sat(tf.min(255) as u8, self.slot(doc).lens[f], f);
+            h.add(f, s, q, false);
+        }
+        h
+    }
+
     fn term_hits(&self, term: &Term) -> IntMap<u32, TermHit> {
         let mut hits: IntMap<u32, TermHit> = IntMap::default();
         if let [tok] = term.toks.as_slice() {
-            for (id, kind) in self.candidates(tok, WORD) {
+            let cands = self.candidates(tok, WORD);
+            let joint = tok.punct.then(|| self.punct_idf(&cands));
+            for (id, kind) in cands {
                 let e = &self.tokens[id as usize];
-                let (q, idf) = (kind.quality(), self.idf(e.df));
+                let (q, idf) = (kind.quality(), joint.unwrap_or_else(|| self.idf(e.df)));
                 for p in &e.postings {
                     let f = p.field as usize;
                     let s = q * idf * self.sat(p.tf, p.len, f);
@@ -590,8 +719,15 @@ impl Store {
 
         let mut seen: Vec<Vec<String>> = Vec::new();
         let mut terms: Vec<Term> = Vec::new();
+        // The punctuation of the terms (the `?` of `what?`), each once.
+        let mut puncts: Vec<QTok> = Vec::new();
         for text in &query.text {
-            let toks = prepare(text);
+            let (toks, punct): (Vec<QTok>, Vec<QTok>) = prepare(text).into_iter().partition(|t| !t.punct);
+            for p in punct {
+                if puncts.len() < MAX_USER_TERMS && !puncts.iter().any(|q| q.text == p.text) {
+                    puncts.push(p);
+                }
+            }
             let key: Vec<String> = toks.iter().map(|t| t.text.clone()).collect();
             if toks.is_empty() || seen.contains(&key) || seen.len() >= MAX_USER_TERMS {
                 continue;
@@ -603,13 +739,28 @@ impl Store {
             });
             seen.push(key);
         }
+        // A query of punctuation only (`?`, `...`): each is a term, found in
+        // the name and the text; no expansions and no image side, as for
+        // filters. With words, it lifts what they find (below).
+        let only_punct = terms.is_empty() && !puncts.is_empty();
+        if only_punct {
+            for (bit, p) in std::mem::take(&mut puncts).into_iter().enumerate() {
+                terms.push(Term {
+                    toks: vec![p],
+                    weight: 1.0,
+                    user_bit: Some(bit as u32),
+                });
+            }
+        }
         let n_user = terms.len();
         if n_user == 0 {
             return self.browse(&filters, query.sort, opts.offset, limit);
         }
-        for (text, weight) in opts.expansions.iter().take(MAX_EXPANSIONS) {
+        let expansions = if only_punct { &[][..] } else { &opts.expansions[..] };
+        for (text, weight) in expansions.iter().take(MAX_EXPANSIONS) {
             let weight = if weight.is_nan() { 0.0 } else { weight.clamp(0.0, 1.0) };
-            let toks = prepare(text);
+            let mut toks = prepare(text);
+            toks.retain(|t| !t.punct);
             let key: Vec<String> = toks.iter().map(|t| t.text.clone()).collect();
             if weight <= 0.0 || toks.is_empty() || seen.contains(&key) {
                 continue;
@@ -646,25 +797,47 @@ impl Store {
                 }
             }
         }
+        // The punctuation beside words: it lifts the items a word found
+        // that have it too (a term that is never required and finds
+        // nothing by itself), and does not count for coordination. Read
+        // from the items that pass, with the labels it adds.
+        let lifts: Vec<(IntMap<u32, Kind>, f32)> = puncts
+            .iter()
+            .map(|p| self.punct_candidates(p))
+            .filter(|c| !c.is_empty())
+            .map(|c| {
+                let idf = self.punct_idf(&c);
+                (c, idf)
+            })
+            .collect();
+        let mut lifted: IntMap<u32, u16> = IntMap::default();
         let by_score = |a: &(u32, f32), b: &(u32, f32)| {
             b.1.total_cmp(&a.1)
                 .then_with(|| tiebreak(&self.slot(a.0).doc, &self.slot(b.0).doc))
         };
-        let mut lexical: Vec<(u32, f32)> = acc
-            .iter()
-            .filter(|(d, _)| filters.pass(**d, self.slot(**d)))
-            .map(|(d, a)| {
-                // Coordination: reward docs that match more of the user's terms;
-                // expansion-only matches count as half a term.
-                let matched = (a.mask.count_ones() as f32).max(0.5);
-                (*d, a.score * matched / n_user as f32)
-            })
-            .collect();
+        let mut lexical: Vec<(u32, f32)> = Vec::with_capacity(acc.len());
+        for (d, a) in acc.iter().filter(|(d, _)| filters.pass(**d, self.slot(**d))) {
+            let mut score = a.score;
+            for (cands, idf) in lifts.iter().filter(|_| a.mask != 0) {
+                let h = self.punct_hit(*d, cands, *idf);
+                score += (0..NFIELDS).map(|f| FIELD_WEIGHT[f] * h.field[f]).sum::<f32>();
+                let labels = (0..NFIELDS)
+                    .filter(|f| h.field[*f] > 0.0)
+                    .fold(0, |l, f| l | FIELD_LABEL[f]);
+                if labels != 0 {
+                    *lifted.entry(*d).or_default() |= labels;
+                }
+            }
+            // Coordination: reward docs that match more of the user's terms;
+            // expansion-only matches count as half a term.
+            let matched = (a.mask.count_ones() as f32).max(0.5);
+            lexical.push((*d, score * matched / n_user as f32));
+        }
         lexical.sort_by(by_score);
 
         // Vector side.
         let mut vector: Vec<(u32, f32)> = Vec::new();
-        if let Some(qv) = opts.text_embedding.as_deref().filter(|v| !v.is_empty()) {
+        if let Some(qv) = opts.text_embedding.as_deref().filter(|v| !v.is_empty() && !only_punct) {
             let norm = dot(qv, qv).sqrt();
             if norm.is_finite() && norm > 0.0 {
                 let qv: Vec<f32> = qv.iter().map(|x| x / norm).collect();
@@ -698,6 +871,9 @@ impl Store {
             let r = fused.entry(*idx).or_insert_with(|| row(*idx));
             r.score += rrf(rank);
             r.labels |= acc[idx].labels;
+            if !lifted.is_empty() {
+                r.labels |= lifted.get(idx).copied().unwrap_or(0);
+            }
         }
         for (rank, (idx, _)) in vector.iter().enumerate() {
             let r = fused.entry(*idx).or_insert_with(|| row(*idx));

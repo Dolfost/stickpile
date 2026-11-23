@@ -86,6 +86,49 @@ fn is_inner_separator(c: char) -> bool {
     )
 }
 
+/// Hyphens, dashes and the minus sign: they separate words as a space
+/// does and make no token (`big-chungus` is two words in a row, and `-`
+/// is the query's negation).
+fn is_dash(c: char) -> bool {
+    matches!(c, '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{2E3A}' | '\u{2E3B}')
+}
+
+/// Format characters (zero-width spaces and joiners, direction marks,
+/// the soft hyphen, tags): invisible, so they make no token.
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
+}
+
+/// Punctuation or a symbol that makes a token with its neighbours (`?`,
+/// `...`, `?!`, `*`, `#`, `%`): not a letter or digit, a space, a control or
+/// format character, a mark or part of an emoji; nor a dash ([`is_dash`]),
+/// an apostrophe (removed) or `"` (the query's phrase quote, which no query
+/// can search for).
+fn is_punct(c: char) -> bool {
+    !(c.is_alphanumeric()
+        || c.is_whitespace()
+        || c.is_control()
+        || c == '"'
+        || is_dash(c)
+        || is_apostrophe(c)
+        || is_format(c)
+        || is_combining_mark(c)
+        || is_pictographic(c)
+        || is_skin_tone(c)
+        || is_variation_selector(c))
+}
+
 /// Collapse runs of the same letter. See [`crate::squash`].
 pub(crate) fn squash(word: &str) -> String {
     let mut out = String::with_capacity(word.len());
@@ -129,8 +172,22 @@ pub(crate) fn squash_key(word: &str) -> String {
 pub(crate) struct Token {
     pub text: String,
     /// Contains letters or digits (eligible for prefix/squash/fuzzy/substring);
-    /// false for emoji tokens, which only match exactly.
+    /// false for emoji tokens, which only match exactly, and punctuation.
     pub word: bool,
+    /// A run of punctuation and symbols ([`is_punct`]: `?`, `...`, `?!`),
+    /// matched by containment and kept beside the words of its field
+    /// (docs/search.md, "Tokens").
+    pub punct: bool,
+}
+
+impl Token {
+    fn new(text: String, word: bool) -> Token {
+        Token {
+            text,
+            word,
+            punct: false,
+        }
+    }
 }
 
 /// `text` without the apostrophes that sit between two letters, before
@@ -155,32 +212,64 @@ fn join_apostrophes(text: &str) -> String {
     out
 }
 
-/// Normalise and split into word and emoji tokens (UAX #29 word boundaries).
-/// Emoji keep ZWJ sequences and flags whole; skin tones and variation
-/// selectors are dropped. Apostrophes are removed (`can't` -> `cant`,
-/// ``п`ятниця`` -> `пятниця`).
+/// Normalise and split into word, emoji and punctuation tokens (UAX #29
+/// word boundaries). Emoji keep ZWJ sequences and flags whole; skin tones
+/// and variation selectors are dropped. Apostrophes are removed (`can't`
+/// -> `cant`, ``п`ятниця`` -> `пятниця`). A run of punctuation and symbols
+/// ([`is_punct`]) up to a space, a word, an emoji or a dash is one token
+/// (`what?!` -> `what`, `?!`); [`normalize`] has made `…` `...` and a
+/// full-width `？` `?`.
 pub(crate) fn tokenize(text: &str) -> Vec<Token> {
     let norm = join_apostrophes(&normalize(text));
     let mut out = Vec::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut Vec<Token>| {
+        if !run.is_empty() {
+            out.push(Token {
+                text: std::mem::take(run),
+                word: false,
+                punct: true,
+            });
+        }
+    };
     for seg in norm.split_word_bounds() {
         if seg.chars().any(is_pictographic) {
+            flush(&mut run, &mut out);
             let e: String = seg
                 .chars()
                 .filter(|c| !is_skin_tone(*c) && !is_variation_selector(*c))
                 .collect();
             if !e.is_empty() {
-                out.push(Token { text: e, word: false });
+                out.push(Token::new(e, false));
             }
         } else if seg.chars().any(char::is_alphanumeric) {
+            flush(&mut run, &mut out);
             for part in seg.split(is_inner_separator) {
                 let w: String = part.chars().filter(|c| !is_apostrophe(*c)).collect();
                 if w.chars().any(char::is_alphanumeric) {
-                    out.push(Token { text: w, word: true });
+                    out.push(Token::new(w, true));
+                }
+            }
+        } else {
+            for c in seg.chars() {
+                if is_punct(c) {
+                    run.push(c);
+                } else {
+                    flush(&mut run, &mut out);
                 }
             }
         }
     }
+    flush(&mut run, &mut out);
     out
+}
+
+/// [`tokenize`] without the punctuation: the tokens of the fields that
+/// keep none (keywords, tags, the vibe, the set, the emojis).
+pub(crate) fn tokenize_words(text: &str) -> Vec<Token> {
+    let mut toks = tokenize(text);
+    toks.retain(|t| !t.punct);
+    toks
 }
 
 /// Emoji comparison key for `e:` filters: variation selectors removed.

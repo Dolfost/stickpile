@@ -18,8 +18,8 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 
 | Syntax | Meaning |
 |---|---|
-| `word`, `"a phrase"` | Soft text term, ranked. A phrase (or a term with inner punctuation such as `big-chungus`) must match consecutive words. |
-| `-word`, `-"a phrase"` | No text field (the item text included) may contain this word or phrase (whole words, after normalisation). |
+| `word`, `"a phrase"` | Soft text term, ranked. A phrase (or a term with inner punctuation such as `big-chungus`) must match consecutive words. Punctuation alone (`?`, `...`) finds the items with it in the name or the item text; beside words (`what?`) it only lifts the items the words find ([punctuation](#matching)). |
+| `-word`, `-"a phrase"` | No text field (the item text included) may contain this word or phrase (whole words, after normalisation). `-?`: neither the name nor the item text has a `?`. |
 | `e:😂`, `emoji:😂` | The item has this emoji. |
 | `e:skull`, `emoji:thumbs_up` | The item has an emoji this English name selects ([emoji names](#emoji-names)): `e:skull` is 💀, ☠️ and the others with a word starting with `skull` in their name or keywords. |
 | `set:cats`, `s:cats`, `set:"my cats"` | Set slug or set name (case- and accent-insensitive). The set id also works. |
@@ -28,6 +28,7 @@ truth. Server, CLI, desktop popup and mobile clients all parse the same way.
 | `type:gif` | `still`/`image`, `animated`/`animation`, `video`, or a format: `png jpeg jpg webp gif mp4 webm`. |
 | `by:alice`, `b:alice`, `user:alice` | Owner username, case-insensitive. |
 | `text:"no thoughts"`, `x:thoughts` | The item text (the words written in the picture) has these words, one after another, after normalisation. Each word matches as a plain word does (a typo, squashed, inside a word from 3 letters), and the last also by its start, from the first letter: `x:l` finds "lol", `x:"no thou"` finds "NO THOUGHTS" ([the item text](#matching)). Only the text: a name with the words does not count. |
+| `x:?`, `x:...`, `x:"what?"` | Punctuation in the item text: a run of punctuation and symbols with this inside (`x:?` finds `?`, `??`, `?!` and "what?"; `x:...` finds `...`, `....` and `…`, not `..`), also after a word (`x:"what?"`: the word `what`, then a `?`). [Punctuation](#matching). |
 | `is:mine`, `is:liked`, `is:public` | Own items, items you liked, items in public sets. |
 | `q>70`, `likes>=2`, `copies<5` | Comparisons with `> >= < <= =`. Several are ANDed: `q>=50 q<90`. Items without a quality score never pass a `q` filter. |
 | `sort:relevance` (default), `sort:recent`/`new`, `sort:likes`, `sort:copies`/`used`/`popular`, `sort:quality` | Result order. |
@@ -51,17 +52,21 @@ Rules:
 - `text:` values are kept lowercased in `Query.texts`; the search
   tokenizes them like the indexed text and wants their words one after
   another in the item's text, each matched as described under
-  [Matching](#matching) ("The item text"). A value without a word
-  (`text:!!!`) finds nothing. `-text:` leaves out the items with the words
-  themselves or the start of the last one, never a typo or a word inside
-  another, so it hides no more than was typed. While a `text:` value is
-  typed the words written on the items are offered
+  [Matching](#matching) ("The item text"); its punctuation as well
+  (`text:!!!` finds the items with `!!!` or `!!!!`, `x:"what?"` the word
+  then a `?`). A value with neither (`text:-`) finds nothing. `-text:`
+  leaves out the items with the words themselves or the start of the last
+  one, never a typo or a word inside another, so it hides no more than
+  was typed; punctuation it leaves out as `text:` finds it. While a
+  `text:` value is typed the words written on the items are offered
   ([Suggestions](#suggestions)); the value goes out as typed (`resolve`
   leaves it alone: `x:lo` is not narrowed to one word). A server from
   before the text field (0.7.0) reads `text:hi` as the plain words
   `text:hi`; a server up to 0.8.1 takes whole words only, so a half-typed
   `x:lo` sent to it finds the word "lo" alone, and it offers no words for
-  `x:`.
+  `x:`. A server up to 0.8.7 knows no punctuation: it answers `x:?` (a
+  value of punctuation only) with nothing, a plain `?` with every item
+  (as filters alone), and `x:"what?"`, `what?` as `x:what`, `what`.
 - An `e:` value made of letters (with `_` or `-` between words) is an
   emoji name, anything else an emoji. `Query.emojis` keeps the values as
   typed (the normalised query writes `e:skull`); `stickpile-search` turns a
@@ -115,6 +120,12 @@ Examples:
 | `x:п'ятн` | "п'ятниця" written with any apostrophe (`'`, `’`, `ʼ`, a backtick), typed with any. |
 | `-x:lo` | Items without a word starting with `lo` in their text; `-x:lool` leaves out "lool" and the words it starts, not "lol". |
 | `x:кіт -tag:nsfw` | Items with `Кіт` written on them, without the `nsfw` tag. |
+| `x:?` | Items whose picture says "?", "???", "?!", "what?" or "что？". |
+| `x:...` | "...", "wait...", "....", "…"; not "so..". |
+| `x:"what?"` | "what?", "WHAT ?!"; not "what" alone or "whatever?". |
+| `-x:?` | Items with no `?` written on them. |
+| `?`, `...` | Items with `?` (`...`) in the name or written on them, ranked as for a word (the name weighs more). |
+| `what?` | The items `what` finds, those with a `?` in the name or the text lifted. |
 | `cafe` | Also `Café`, and the other way round. |
 | `😂` | Items with 😂 in their emojis (ranked first) or in their text. |
 | `laugh` | Also items tagged with 😂 or 🤣 (built-in emoji vocabulary). |
@@ -160,21 +171,54 @@ whole. Variation selectors (U+FE0F) are dropped, so `❤️` equals `❤`.
   ``п`ятниця`` are all the word `пятниця`, in the items and in queries.
 - Each emoji is a token of its own. ZWJ sequences and flags stay whole, and
   skin tones are dropped (`👍🏽` → `👍`).
-- **Punctuation (design, being built).** A run of punctuation and symbols
-  in the item text and the name (`...`, `?`, `!?`, `???`, `*`, `#`, `%`)
-  becomes a token of its own (`word: false`, like an emoji), NFKC
-  normalised (full-width `？` is `?`) and with `…` written as `...`. A
-  punctuation value matches a token that contains it: `x:?` finds `?`,
-  `??`, `?!` and the `?` of "what?"; `x:...` finds `...`, `....` and `…`,
-  not `..`. No prefix, typo or substring tier applies to it, and these
-  tokens do not count in the field lengths of the ranking, so plain-word
-  ranking does not change. A plain query of punctuation only (`?`, `...`)
-  searches like `x:?`, `x:...` instead of nothing; in a mixed one
-  (`what?`) the words stay fuzzy and the punctuation is a soft extra term.
-  `x:"what?"` is the word followed by a token containing `?`. `-x:?`
-  excludes. `?` and `*` are not wildcards. The `x:` word offers leave
-  punctuation out. A server older than this answers such queries with
-  nothing; the index is rebuilt in memory at start, so no migration.
+- **Punctuation.** A run of punctuation and symbols (`?`, `...`, `?!`,
+  `???`, `*`, `#`, `%`: any character that is not a letter, a digit, a
+  space, an invisible character or part of an emoji) is a token of its
+  own, up to a space, a word, an emoji or a dash: `what?!` is the word
+  `what` and `?!`, `wait...what` is `wait`, `...`, `what`. The
+  normalisation above writes `…` as `...`, the full-width `？` and `！` as
+  `?` and `!`, `‼` as `!!`. Not punctuation tokens: hyphens and dashes
+  (`-`, `–`, `—`: they separate words as a space does, so `big-chungus`
+  stays two words in a row, and `-` negates in a query), the apostrophes
+  (removed), `"` (the query's quote, which no query could search for),
+  and `_ . :` inside a word (separators, as above: `file.png`).
+  - Only the name and the item text keep their punctuation (a keyword,
+    a tag, the vibe and the set are words: `huh?` as a keyword is the
+    word `huh`). It is kept beside the words of its field, not among
+    them (`Store::marks`): a phrase of words matches over it (`"no
+    thoughts"` finds "NO... THOUGHTS"), and the field lengths of the
+    ranking count words and emojis only, so a plain word ranks exactly as
+    without the punctuation.
+  - A query token of punctuation matches the punctuation tokens it is
+    inside, and that is its only match kind (no prefix, typo or substring
+    tier, no wildcard: `?` and `*` mean themselves): `x:?` finds `?`, `??`,
+    `?!` and the `?` of "what?"; `x:...` finds `...`, `....` and `…`, not
+    `..`.
+  - In a `text:` value it stands where it is typed: `x:"what?"` is the
+    word `what` (matched as any word of a value, but not by its start,
+    as the value does not end with it) followed by a token with `?` in it,
+    right after it or after a space ("what?", "WHAT ?!"); `x:"wait...
+    what"` wants the `...` between the two words. A word phrase leaves
+    the punctuation between its words out of account (`x:"wait what"`
+    finds "wait... what"). Several punctuation tokens with no word
+    between (`x:"? ..."`) must sit, in this order, between the same two
+    words. `-text:` leaves out what `text:` finds.
+  - A plain query of punctuation only (`?`, `...`, `? !`) looks for each
+    in the name and the item text, ranked as a word is ([lexical
+    score](#lexical-score): the name weighs more than the text); the runs
+    it is inside count as one term with one document frequency, so a rare
+    `??` does not outrank a `?` for being rare. Expansions and the image
+    side are left out, as for filters. In a query with words (`what?`,
+    `cat ?`) the words find the items as without the punctuation, and the
+    punctuation lifts those of them that have it in the name or the text
+    (scored as above): it is never required, finds nothing by itself, and
+    does not count for coordination. A `-` term of
+    punctuation only (`-?`) leaves out the items with it in the name or
+    the text; in a `-` term with words (`-what?`) the words count alone.
+  - The `x:` word offers never offer punctuation ([Suggestions](#suggestions)).
+  - A server up to 0.8.7 knows none of this ([Query syntax](#query-syntax)).
+    The index is built in memory at start, so a new server needs no
+    migration.
 
 **Per-token match kinds.** Each query word is looked up in the vocabulary of
 indexed tokens. Emoji tokens only match exactly.
@@ -310,7 +354,8 @@ lexical           = Σ_t weight_t · term_score(t)  ·  max(matched_user_terms, 
 ```
 
 - `avglen_f` is averaged over documents where the field is non-empty, so
-  rarely used fields such as tags are not penalised.
+  rarely used fields such as tags are not penalised. `len_f` counts the
+  words and emojis of the field, not its punctuation.
 - A phrase uses its own document frequency (documents containing the phrase).
 - The last factor is coordination: a document that matches more of the
   user's words ranks higher, so `sad cat` puts "sad cat" above plain "cat".
@@ -369,7 +414,8 @@ it to about 0.2–0.25 for ViT-B/32, in line with
   both sides gets both contributions. A document found only by the vector
   side still appears, labelled `image`. `Hit::score` is the fused score.
 - **Ties** go to copies (desc), then `updated_at` (desc), then `item_id`.
-- **Filter-only queries** (no text, or only punctuation) return every
+- **Filter-only queries** (no text, or text with no word, emoji or
+  punctuation token, such as a lone `-`) return every
   visible document that passes the filters. They are ordered by copies,
   likes, then `updated_at` (all descending), with score 0. Expansions and
   the embedding are ignored.
@@ -413,7 +459,8 @@ the words written on the items, the text that OCR read or a person typed:
   the most items first, then alphabetically. This is the order the line
   gives tags and vibes (`stickpile_search::offer_tier`).
 - Words of one letter and numbers alone are not offered, nor anything
-  for a value of several words (`x:a-b`).
+  for a value of several words (`x:a-b`), nor punctuation: `x:?` offers
+  nothing, and `x:what?` offers as `x:what`.
 - The words are as the index keeps them: lower case, without accents and
   apostrophes (`x:п'ят` offers `пятниця`), which find what they were
   written as.
@@ -511,7 +558,8 @@ their own and searches it with the whole syntax:
   `text:` find it.
 - Words are ranked as above. As the pack's old substring filter did, a
   word also finds the items with it anywhere in the name, a keyword, an
-  emoji or a tag (`c`, `at` while `cat` is typed); those come after the
+  emoji or a tag (`c`, `at` while `cat` is typed; `?` in a keyword
+  `huh?`, which the index keeps as the word `huh`); those come after the
   ranked ones, in pack order.
 - Filters alone keep the pack's order; `sort:` other than relevance sorts
   as above. A `text:` value lists the items it matched best first, each

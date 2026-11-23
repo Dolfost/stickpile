@@ -222,11 +222,15 @@ fn tokenize_words_and_emojis() {
         tokenize("🤷‍♂️"),
         vec![Token {
             text: "🤷\u{200d}♂".into(),
-            word: false
+            word: false,
+            punct: false,
         }]
     );
     assert_eq!(tokenize("🇺🇦").len(), 1);
-    assert!(tokenize(" - !? ").is_empty());
+    // A dash is no token; other punctuation is (see tokenize_keeps_punctuation_runs).
+    let punct: Vec<(String, bool)> = tokenize(" - !? ").into_iter().map(|t| (t.text, t.punct)).collect();
+    assert_eq!(punct, [("!?".to_string(), true)]);
+    assert!(tokenize(" - \u{2014} ").is_empty());
 }
 
 /// The Ukrainian apostrophe as people type it: ASCII, U+2019, U+02BC and
@@ -255,6 +259,87 @@ fn every_apostrophe_form_is_the_same_word() {
     let words = |t: &str| -> Vec<String> { tokenize(t).into_iter().map(|t| t.text).collect() };
     assert_eq!(words("`code` it's 80's"), ["code", "its", "80", "s"]);
     assert_eq!(words("rock'n'roll"), ["rocknroll"]);
+}
+
+/// (text, punct) of each token.
+fn kinds(text: &str) -> Vec<(String, bool)> {
+    tokenize(text).into_iter().map(|t| (t.text, t.punct)).collect()
+}
+
+fn kind_list(v: &[(&str, bool)]) -> Vec<(String, bool)> {
+    v.iter().map(|(t, p)| (t.to_string(), *p)).collect()
+}
+
+/// A run of punctuation and symbols is a token of its own, beside the
+/// words: up to a space, a word, an emoji or a dash.
+#[test]
+fn tokenize_keeps_punctuation_runs() {
+    assert_eq!(kinds("what?"), kind_list(&[("what", false), ("?", true)]));
+    assert_eq!(kinds("WHAT?!"), kind_list(&[("what", false), ("?!", true)]));
+    assert_eq!(
+        kinds("??? ?! ... ....  .."),
+        kind_list(&[("???", true), ("?!", true), ("...", true), ("....", true), ("..", true)])
+    );
+    assert_eq!(
+        kinds("wait...what"),
+        kind_list(&[("wait", false), ("...", true), ("what", false)])
+    );
+    assert_eq!(
+        kinds("50% *nice* #1"),
+        kind_list(&[
+            ("50", false),
+            ("%", true),
+            ("*", true),
+            ("nice", false),
+            ("*", true),
+            ("#", true),
+            ("1", false)
+        ])
+    );
+    assert_eq!(
+        kinds("lol😂!!!"),
+        kind_list(&[("lol", false), ("😂", false), ("!!!", true)])
+    );
+    let t = tokenize("?!");
+    assert!(!t[0].word && t[0].punct, "not a word, not an emoji");
+    // Inside a word they stay separators, as before: no token.
+    assert_eq!(
+        kinds("my_cats file.png a:b big-chungus"),
+        kind_list(&[
+            ("my", false),
+            ("cats", false),
+            ("file", false),
+            ("png", false),
+            ("a", false),
+            ("b", false),
+            ("big", false),
+            ("chungus", false)
+        ])
+    );
+    // Dashes, apostrophes, `"`, invisible characters: no token.
+    assert!(tokenize(" - \u{2013} \u{2014} ' ` \" \u{200B} \u{00AD} ").is_empty());
+    assert_eq!(kinds("\"no\" -- 'yes'"), kind_list(&[("no", false), ("yes", false)]));
+}
+
+#[test]
+fn fullwidth_question_mark_is_ascii() {
+    assert_eq!(kinds("\u{FF1F}"), kind_list(&[("?", true)]));
+    assert_eq!(kinds("что\u{FF1F}\u{FF01}"), kind_list(&[("что", false), ("?!", true)]));
+    // The other forms of `?` and `!` that NFKC folds.
+    assert_eq!(
+        kinds("\u{FE56} \u{2047} \u{2048} \u{2049} \u{203C}"),
+        kind_list(&[("?", true), ("??", true), ("?!", true), ("!?", true), ("!!", true)])
+    );
+}
+
+#[test]
+fn ellipsis_char_is_three_dots() {
+    assert_eq!(kinds("\u{2026}"), kind_list(&[("...", true)]));
+    assert_eq!(
+        kinds("wait\u{2026}what\u{2026}?"),
+        kind_list(&[("wait", false), ("...", true), ("what", false), ("...?", true)])
+    );
+    assert_eq!(kinds("\u{2026}\u{2026}"), kind_list(&[("......", true)]));
 }
 
 #[test]
@@ -934,6 +1019,62 @@ fn ranking_sanity() {
     assert!(o.hits.windows(2).all(|w| w[0].score >= w[1].score));
 }
 
+/// Punctuation is kept beside the words, not among them: the field
+/// lengths and the phrases are those of the words, so a plain word scores
+/// exactly as in the same library without punctuation.
+#[test]
+fn punctuation_not_counted_in_field_lengths() {
+    let library = |punct: bool| {
+        let p = |plain: &str, with: &str| if punct { with.to_string() } else { plain.to_string() };
+        index([
+            with("a", |d| {
+                d.name = p("big cat", "big... cat?!");
+                d.text = p("no thoughts\nhead empty", "NO THOUGHTS???\n... head, empty!");
+                d.keywords = strs(&["cat", "meme"]);
+            }),
+            with("b", |d| {
+                d.name = p("cat", "cat!!!");
+                d.text = p("cat", "* cat *");
+            }),
+            with("c", |d| {
+                d.name = p("", "???");
+                d.text = p("thoughts", "thoughts?");
+                d.tags = strs(&["cat"]);
+            }),
+            with("d", |d| {
+                d.name = p("sleepy dog", "sleepy dog \u{2026}");
+                d.text = p("", "?!");
+            }),
+            named("e", "a long name with many words and one cat in it"),
+        ])
+    };
+    let (plain, punct) = (library(false), library(true));
+    assert_eq!(plain.store.field_len_sum, punct.store.field_len_sum);
+    assert_eq!(plain.store.field_nonempty, punct.store.field_nonempty);
+    assert!(!punct.store.puncts.is_empty() && plain.store.puncts.is_empty());
+    let opts = SearchOptions {
+        limit: 100,
+        ..Default::default()
+    };
+    for q in [
+        "cat",
+        "big cat",
+        "\"big cat\"",
+        "thoughts",
+        "\"no thoughts head\"",
+        "x:thoughts",
+        "x:\"thoughts head\"",
+        "sleepi",
+        "dog -big",
+        "cat x:cat",
+    ] {
+        let a = run(&plain, q, &alice(), &opts);
+        let b = run(&punct, q, &alice(), &opts);
+        assert!(!a.hits.is_empty(), "{q}");
+        assert_eq!(a, b, "{q}: the same hits, scores and labels");
+    }
+}
+
 // ---------------------------------------------------------------- the text field
 
 /// Docs with words in the picture (`Doc::text`).
@@ -993,7 +1134,7 @@ fn text_filter_wants_consecutive_words() {
         "the start of a word (being typed)"
     );
     assert!(sorted_ids(&ix, "text:nowhere", &alice()).is_empty(), "unknown word");
-    assert!(sorted_ids(&ix, "text:!!!", &alice()).is_empty(), "no word at all");
+    assert!(sorted_ids(&ix, "text:!!!", &alice()).is_empty(), "no item has `!!!`");
     // With soft terms the filter cuts, the words rank.
     assert_eq!(ids(&ix, "head x:thoughts"), strs(&["phrase"]));
 }
@@ -1410,11 +1551,10 @@ fn random_doc(rng: &mut Rng, id: usize, words: &[&str]) -> Doc {
     })
 }
 
-#[test]
-fn incremental_index_equals_fresh_rebuild() {
-    let words = [
-        "cat", "cats", "sleepy", "sleepi", "naah", "nah", "кіт", "café", "chungus", "big", "dog", "doge",
-    ];
+/// Random upserts, removals and counter changes over docs made of
+/// `words`; then the index answers `queries` as one built from scratch,
+/// which is returned.
+fn incremental_equals_fresh(words: &[&str], queries: &[&str]) -> Index {
     let mut rng = Rng(0x5eed);
     let mut ix = Index::new();
     let mut live: std::collections::BTreeMap<String, Doc> = Default::default();
@@ -1422,7 +1562,7 @@ fn incremental_index_equals_fresh_rebuild() {
         match rng.below(10) {
             0..=5 => {
                 let id = rng.below(60);
-                let d = random_doc(&mut rng, id, &words);
+                let d = random_doc(&mut rng, id, words);
                 live.insert(d.item_id.clone(), d.clone());
                 ix.upsert(d);
             }
@@ -1455,6 +1595,40 @@ fn incremental_index_equals_fresh_rebuild() {
         fresh.store.vocab.keys().collect::<Vec<_>>()
     );
     assert_eq!(ix.store.field_len_sum, fresh.store.field_len_sum);
+    assert_eq!(ix.store.field_nonempty, fresh.store.field_nonempty);
+    let puncts = |ix: &Index| -> Vec<String> {
+        let mut v: Vec<String> = ix
+            .store
+            .puncts
+            .iter()
+            .map(|id| ix.store.tokens[*id as usize].text.clone())
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(puncts(&ix), puncts(&fresh));
+    for q in queries.iter().copied() {
+        for v in [alice(), viewer("bob")] {
+            let opts = SearchOptions {
+                limit: 1000,
+                ..Default::default()
+            };
+            let a = run(&ix, q, &v, &opts);
+            let b = run(&fresh, q, &v, &opts);
+            assert_eq!(a.total, b.total, "{q}");
+            let ai: Vec<_> = a.hits.iter().map(|h| (&h.item_id, &h.matched)).collect();
+            let bi: Vec<_> = b.hits.iter().map(|h| (&h.item_id, &h.matched)).collect();
+            assert_eq!(ai, bi, "{q}");
+        }
+    }
+    fresh
+}
+
+#[test]
+fn incremental_index_equals_fresh_rebuild() {
+    let words = [
+        "cat", "cats", "sleepy", "sleepi", "naah", "nah", "кіт", "café", "chungus", "big", "dog", "doge",
+    ];
     let queries = [
         "cat",
         "sleepy cat",
@@ -1474,19 +1648,44 @@ fn incremental_index_equals_fresh_rebuild() {
         "x:chugnus",
         "x:\"big ch\" -x:sl",
     ];
-    for q in queries {
-        for v in [alice(), viewer("bob")] {
-            let opts = SearchOptions {
-                limit: 1000,
-                ..Default::default()
-            };
-            let a = run(&ix, q, &v, &opts);
-            let b = run(&fresh, q, &v, &opts);
-            assert_eq!(a.total, b.total, "{q}");
-            let ai: Vec<_> = a.hits.iter().map(|h| (&h.item_id, &h.matched)).collect();
-            let bi: Vec<_> = b.hits.iter().map(|h| (&h.item_id, &h.matched)).collect();
-            assert_eq!(ai, bi, "{q}");
-        }
+    incremental_equals_fresh(&words, &queries);
+}
+
+/// The same with punctuation in the names, the texts, the keywords and
+/// the tags.
+#[test]
+fn incremental_and_fresh_index_agree_with_punctuation() {
+    let words = [
+        "cat", "what?", "what", "wait...", "?!", "\u{2026}", "\u{FF1F}", "??", "..", "big", "dog!", "#1", "*",
+    ];
+    let queries = [
+        "x:?",
+        "x:...",
+        "x:..",
+        "x:!",
+        "x:\"what?\"",
+        "x:\"wait... cat\"",
+        "x:\"? !\"",
+        "-x:?",
+        "x:cat -x:...",
+        "?",
+        "...",
+        "? ...",
+        "what?",
+        "cat ?",
+        "-?",
+        "-what?",
+        "big -...",
+        "cat",
+        "\"big cat\"",
+        "",
+    ];
+    let fresh = incremental_equals_fresh(&words, &queries);
+    for q in ["x:?", "x:...", "?", "what?", "x:\"what?\"", "-?"] {
+        assert!(
+            run(&fresh, q, &alice(), &SearchOptions::default()).total > 0,
+            "{q} finds something"
+        );
     }
 }
 

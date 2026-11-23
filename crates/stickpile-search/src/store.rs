@@ -2,11 +2,11 @@
 //! (prefix via the ordered vocabulary, squashed forms, trigrams), and the
 //! maintenance operations that keep them consistent.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
-use crate::text::{emoji_base, emoji_key, normalize, padded_trigrams, squash_key, tokenize, Token};
+use crate::text::{emoji_base, emoji_key, normalize, padded_trigrams, squash_key, tokenize, tokenize_words, Token};
 use crate::{emoji_names, Doc};
 
 /// Multiplicative hasher for integer keys (ids, trigram keys); not DoS-resistant,
@@ -72,6 +72,9 @@ pub(crate) struct TokenEntry {
     pub text: String,
     pub chars: Box<[char]>,
     pub word: bool,
+    /// Punctuation ([`Token::punct`]): its postings are in the name and
+    /// the text only, and the docs keep it in [`Store::marks`].
+    pub punct: bool,
     /// Distinct padded trigrams (word tokens only), for the fuzzy count filter.
     pub trigrams: u16,
     /// Number of docs containing the token in any field.
@@ -80,11 +83,26 @@ pub(crate) struct TokenEntry {
     pub postings: Vec<Posting>,
 }
 
+/// A punctuation token ([`Token::punct`]) of the name or the text, kept
+/// beside the words of its field rather than among them ([`Store::marks`]):
+/// the words stay in a row for phrases, and the field lengths of the
+/// ranking count words only. Those fields have one value each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Punct {
+    pub field: u8,
+    /// The words of the value before it: 0 before the first, the value's
+    /// length after the last (`what?` -> 1).
+    pub at: u16,
+    pub id: u32,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Slot {
     pub doc: Doc,
-    /// Per field, per value (one keyword, one tag...), the token ids in order.
+    /// Per field, per value (one keyword, one tag...), the word and emoji
+    /// token ids in order.
     pub fields: [Vec<Vec<u32>>; NFIELDS],
+    /// Words and emojis per field.
     pub lens: [u16; NFIELDS],
     /// Emojis with variation selectors removed, and additionally without skin tones.
     pub emoji_keys: Vec<String>,
@@ -110,20 +128,28 @@ pub(crate) struct Store {
     pub squashed: HashMap<String, Vec<u32>>,
     /// Padded trigram -> word tokens containing it.
     pub trigrams: IntMap<u64, Vec<u32>>,
+    /// The punctuation tokens: few, so a value is looked for inside each.
+    pub puncts: BTreeSet<u32>,
+    /// Per slot (as [`Store::slots`]), the punctuation of its name and text
+    /// in field and text order, if it has some: beside the slots, which
+    /// the plain words read and need not carry it.
+    pub marks: Vec<Option<Box<[Punct]>>>,
     pub field_len_sum: [u64; NFIELDS],
     pub field_nonempty: [u32; NFIELDS],
 }
 
+/// The tokens of each field value. Only the name and the text keep their
+/// punctuation: keywords, tags, the vibe and the set are words.
 fn analyze(doc: &Doc) -> [Vec<Vec<Token>>; NFIELDS] {
-    let many = |vals: &[String]| -> Vec<Vec<Token>> { vals.iter().map(|v| tokenize(v)).collect() };
+    let many = |vals: &[String]| -> Vec<Vec<Token>> { vals.iter().map(|v| tokenize_words(v)).collect() };
     let mut f: [Vec<Vec<Token>>; NFIELDS] = Default::default();
     f[NAME] = vec![tokenize(&doc.name)];
     f[KEYWORD] = many(&doc.keywords);
     f[EMOJI] = many(&doc.emojis);
-    f[VIBE] = doc.vibe.iter().map(|v| tokenize(v)).collect();
+    f[VIBE] = doc.vibe.iter().map(|v| tokenize_words(v)).collect();
     f[TAG] = many(&doc.tags);
-    let set_name = tokenize(&doc.set_name);
-    let set_slug = tokenize(&doc.set_slug);
+    let set_name = tokenize_words(&doc.set_name);
+    let set_slug = tokenize_words(&doc.set_slug);
     f[SET] = if set_slug == set_name {
         vec![set_name]
     } else {
@@ -135,7 +161,7 @@ fn analyze(doc: &Doc) -> [Vec<Vec<Token>>; NFIELDS] {
         .flatten()
         .filter(|t| !t.word && seen.insert(t.text.as_str()))
         .filter_map(|t| emoji_names::names(&t.text))
-        .map(tokenize)
+        .map(tokenize_words)
         .collect();
     f[EMOJI_NAME] = names;
     f[TEXT] = vec![tokenize(&doc.text)];
@@ -152,6 +178,11 @@ impl Store {
 
     pub fn slot(&self, idx: u32) -> &Slot {
         self.slots[idx as usize].as_ref().expect("live slot")
+    }
+
+    /// The punctuation of the name and the text of slot `idx` ([`Store::marks`]).
+    pub fn marks_of(&self, idx: u32) -> &[Punct] {
+        self.marks.get(idx as usize).and_then(Option::as_deref).unwrap_or(&[])
     }
 
     pub fn get(&self, item_id: &str) -> Option<&Doc> {
@@ -221,11 +252,15 @@ impl Store {
                 self.trigrams.entry(t).or_default().push(id);
             }
         }
+        if tok.punct {
+            self.puncts.insert(id);
+        }
         self.vocab.insert(tok.text.clone(), id);
         self.tokens[id as usize] = TokenEntry {
             text: tok.text.clone(),
             chars,
             word: tok.word,
+            punct: tok.punct,
             trigrams,
             df: 0,
             postings: Vec::new(),
@@ -240,21 +275,41 @@ impl Store {
             (self.slots.len() - 1) as u32
         });
         let mut fields: [Vec<Vec<u32>>; NFIELDS] = Default::default();
+        let mut punct: Vec<Punct> = Vec::new();
         let mut lens = [0u16; NFIELDS];
         let mut distinct: Vec<u32> = Vec::new();
         for (f, values) in analyzed.iter().enumerate() {
+            let first_punct = punct.len();
             fields[f] = values
                 .iter()
-                .map(|v| v.iter().map(|t| self.intern(t)).collect())
+                .map(|v| {
+                    let mut words = Vec::with_capacity(v.len());
+                    for t in v {
+                        let id = self.intern(t);
+                        if t.punct {
+                            let at = words.len().min(u16::MAX as usize) as u16;
+                            punct.push(Punct { field: f as u8, at, id });
+                        } else {
+                            words.push(id);
+                        }
+                    }
+                    words
+                })
                 .collect();
+            // The words count, the punctuation does not: plain words rank
+            // as without it.
             let len: usize = fields[f].iter().map(Vec::len).sum();
-            if len == 0 {
-                continue;
+            if len > 0 {
+                lens[f] = len.min(u16::MAX as usize) as u16;
+                self.field_len_sum[f] += len as u64;
+                self.field_nonempty[f] += 1;
             }
-            lens[f] = len.min(u16::MAX as usize) as u16;
-            self.field_len_sum[f] += len as u64;
-            self.field_nonempty[f] += 1;
-            let mut ids: Vec<u32> = fields[f].iter().flatten().copied().collect();
+            let mut ids: Vec<u32> = fields[f]
+                .iter()
+                .flatten()
+                .copied()
+                .chain(punct[first_punct..].iter().map(|p| p.id))
+                .collect();
             ids.sort_unstable();
             for run in ids.chunk_by(|a, b| a == b) {
                 let posting = Posting {
@@ -274,6 +329,10 @@ impl Store {
         }
         let emoji_keys: Vec<String> = doc.emojis.iter().map(|e| emoji_key(e)).collect();
         let emoji_bases = emoji_keys.iter().map(|e| emoji_base(e)).collect();
+        if self.marks.len() <= idx as usize {
+            self.marks.resize(idx as usize + 1, None);
+        }
+        self.marks[idx as usize] = (!punct.is_empty()).then(|| punct.into());
         let slot = Slot {
             fields,
             lens,
@@ -317,6 +376,9 @@ impl Store {
                 }
                 distinct.extend(values.iter().flatten());
             }
+            if let Some(marks) = self.marks.get_mut(idx as usize).and_then(Option::take) {
+                distinct.extend(marks.iter().map(|p| p.id));
+            }
             distinct.sort_unstable();
             distinct.dedup();
             for id in distinct {
@@ -350,6 +412,9 @@ impl Store {
             if e.word {
                 squash_keys.push(squash_key(&e.text));
                 tri_keys.extend(padded_trigrams(&e.chars));
+            }
+            if e.punct {
+                self.puncts.remove(&id);
             }
             self.free_tokens.push(id);
         }
