@@ -423,10 +423,12 @@ value of `stickpile_core::Reach`:
 - `Session::check_server()` (`ApiClient::check_now()`) checks at once in
   the background, whatever the value: when the popup or the app opens,
   and on Android when a network appears (`ConnectivityManager`; no new
-  permission). Nothing if a check is waiting for its answer already.
-  Callable from any thread: outside a Tokio runtime the check runs on the
-  runtime of the client's last request. A failed check starts an outage
-  like a failed request.
+  permission). Asked for while a check waits for its answer (it may have
+  gone out before the network appeared), another goes out at once if that
+  one fails; one that finds the server answers both. Callable from any
+  thread: outside a Tokio runtime the check runs on the runtime of the
+  client's last request. A failed check starts an outage like a failed
+  request.
 - `ApiClient::forget_unreachable()` makes the value `Unknown`, so the
   next read goes out: what the user asks for tries the server whatever it
   did a moment ago (Android's `sync_now`, `offline_run`, `prepare`).

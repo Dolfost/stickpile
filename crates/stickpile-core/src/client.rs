@@ -246,10 +246,8 @@ struct ReachState {
     /// The wake-up of the check task while one runs.
     prober: Option<Arc<Notify>>,
     /// A check was asked for ([`ApiClient::check_now`]) and has not
-    /// started yet.
+    /// started yet, nor has the server answered since.
     asked: bool,
-    /// A check is waiting for its answer.
-    probing: bool,
     /// The runtime of the last request, where a check asked for outside a
     /// runtime (from a UI thread) runs.
     runtime: Option<tokio::runtime::Handle>,
@@ -318,10 +316,14 @@ impl Reachability {
     }
 
     /// The outage is over (`Reachable`) or forgotten (`Unknown`). A check
-    /// task waiting for its next turn ends.
+    /// task waiting for its next turn ends. The server answered
+    /// (`Reachable`): that answers a check asked for too.
     fn set_up(&self, to: Reach) {
         let s = &mut *self.state();
         s.down_since = None;
+        if to == Reach::Reachable {
+            s.asked = false;
+        }
         self.value.send_if_modified(|v| {
             let changed = *v != to;
             *v = to;
@@ -339,13 +341,12 @@ impl Reachability {
         }
     }
 
-    /// [`ApiClient::check_now`].
+    /// [`ApiClient::check_now`]. Asked for while a check waits for its
+    /// answer (it may have gone out before a network appeared), another
+    /// goes out once that one fails; one that succeeds answers both.
     fn check_now(self: &Arc<Self>) {
         {
             let mut s = self.state();
-            if s.probing {
-                return;
-            }
             s.asked = true;
             if let Some(wake) = &s.prober {
                 wake.notify_waiters();
@@ -435,15 +436,15 @@ impl CheckTask {
                         return self.end(&mut s);
                     }
                     s.asked = false;
-                    s.probing = true;
                 }
                 (reach.probe)()
             };
             last = tokio::time::Instant::now();
             let result = probe.await;
             let Some(reach) = self.reach.upgrade() else { return };
+            // A check asked for meanwhile goes out next, at once, unless
+            // this one found the server.
             reach.record(&result);
-            reach.state().probing = false;
         }
     }
 
@@ -452,7 +453,6 @@ impl CheckTask {
     fn end(&self, s: &mut ReachState) {
         if s.prober.as_ref().is_some_and(|w| Arc::ptr_eq(w, &self.wake)) {
             s.prober = None;
-            s.probing = false;
         }
     }
 }
@@ -643,8 +643,9 @@ impl ApiClient {
     /// Check the server now with `GET /healthz`, in the background: when
     /// the popup or the app opens, or a network appeared. The answer
     /// updates [`ApiClient::reach`] (a failure starts the outage and its
-    /// checks, as a failed request does). Nothing if a check is waiting for
-    /// its answer already, and nothing without
+    /// checks, as a failed request does). Asked for while a check waits for
+    /// its answer, another goes out at once if that one fails (it may have
+    /// gone out before a network appeared). Nothing without
     /// [`ApiClient::with_fail_fast`]. Callable from any thread: outside a
     /// Tokio runtime the check runs on the runtime of the client's last
     /// request (or the one it was made fail-fast on).
