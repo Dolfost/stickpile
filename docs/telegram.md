@@ -247,13 +247,56 @@ Items are adapted to what Telegram accepts:
 
 The new mapping is returned in the job result and stored on the set.
 
+## Sets larger than one pack (design, being built)
+
+A Telegram pack holds at most 120 stickers (`MAX_PACK_STICKERS`). A set
+with more is published as several packs, its **parts**; later exports keep
+every part in step with the set. Duplicates (the `content_key` rule) and
+items without a rendition are decided once for the whole set.
+
+- **Names and titles.** Part 1 keeps today's name, `<name>_by_<bot>`; part
+  k is `<name>_<k>_by_<bot>`, with `<name>` shortened when the whole would
+  pass 64 characters (it stays a valid pack name: starts with a letter, no
+  `__`). Part 1's title is the set's name; part k's is `<set name> <k>`,
+  cut to 64 characters. Every part gets the set's cover as its thumbnail.
+  One function in `stickpile-telegram` makes the names.
+- **Ownership per part.** Every part's name is registered to the set's
+  owner in `telegram_packs` before its pack is created
+  ([Pack ownership](#pack-ownership)). A part name that belongs to someone
+  else, is bound to another set, or exists on Telegram for another bot
+  fails the export with a clear message before any change.
+- **Stable parts.** A sticker stays in the part it was first published
+  to, so a pack someone added keeps its stickers. New stickers fill the
+  first part with room, in set order; the order inside a part follows the
+  set; moving a sticker in the set across a part boundary does not move it
+  to another pack; a removed sticker frees its place.
+- **Repack, only on request.** "Repack the parts" on the export page,
+  `--repack` in the CLI and `repack: true` in the API assign every sticker
+  again in set order, after a confirmation that says how many stickers
+  move.
+- **Empty parts** are deleted on Telegram (`deleteStickerSet`, Bot API
+  6.6, which deletes a set the bot created) after the other parts are
+  updated; the result says so.
+- **Failure.** An export of several parts is one job. Each part's mapping
+  is stored as soon as that part is done, and a part that fails stores its
+  mapping as far as it got, so the next export continues from there and
+  never creates a duplicate pack or leaves an orphan.
+- **Results and compatibility.** The job's result keeps its fields for
+  part 1 and adds `parts` (each part's number, name, link, counts and
+  errors). `Set.telegram_pack` stays part 1's name, so older clients read a
+  set as before; the migration keeps every existing binding as part 1.
+- **Other platforms.** Signal packs hold 200 stickers and are split the
+  same way (each publish uploads every part anew). Discord is unchanged (a
+  server's slots are its own), and importing a Telegram pack still makes
+  one set.
+
 ## Limitations
 
 - **Animated `.tgs` stickers** are a stretch goal. They are skipped on
   import, and stickpile does not produce them on export.
 - **120 stickers per pack.** Telegram's limit for regular packs is 120
-  (`addStickerToSet`). Exporting a larger set fails before any change is
-  made, so split the set.
+  (`addStickerToSet`). A larger set is published as several packs
+  ([Sets larger than one pack](#sets-larger-than-one-pack-design-being-built)).
 - **Rate limits.** Telegram answers floods with 429 and `retry_after`. Each
   call is retried up to 3 times after waiting `retry_after`, capped at 30 s
   per wait. A full re-export of a large pack makes a few hundred calls and
