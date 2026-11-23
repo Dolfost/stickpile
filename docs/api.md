@@ -200,7 +200,7 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 |---|---|---|
 | `GET /api/v1/sets?scope=` | -> `[SetSummary]` | `mine` (default), `contributing` (sets the caller [contributes to](collaboration.md)), `public` (all users' public sets), `all` (own, contributed and others' public). Others' unlisted sets are never listed. Summaries carry the `description` too. |
 | `POST /api/v1/sets` | `CreateSet` -> `Set` (201) | Slug `[a-z0-9-]`, 1-64 characters, unique per owner (409). |
-| `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, contributed, unlisted or public sets. `Set.role` and `Set.permissions` say what the caller may do ([collaboration.md](collaboration.md)). |
+| `GET /api/v1/sets/{id}` | -> `SetDetail` | Own, contributed, unlisted or public sets. `Set.role` and `Set.permissions` say what the caller may do ([collaboration.md](collaboration.md)). `Set.telegram_pack` is the Telegram pack the set is published as (its first, when there are several); `Set.telegram_parts` lists every pack of a set published as several because it is larger than one (`PublishedPart`: `number`, `name`, `url`, `stickers`; left out for one pack and by servers up to 0.8.8). |
 | `PATCH /api/v1/sets/{id}` | `UpdateSet` -> `Set` | `slug`, `visibility`, `aspect_ratio` and `recommended_px` are the owner's; `name`, `description` and `cover_item_id` need the `edit_pack` permission (the owner has every permission). Read-only git packs -> 403. `null` clears `aspect_ratio` / `recommended_px`. `cover_item_id`: an item of this set as its cover (400 otherwise), `null` goes back to the first item; either one also removes the set's [cover image](#cover-image) (the cover is what was chosen last), leaving it out keeps it. `Set.cover_item_id` is the chosen cover and `SetSummary.cover_item_id` the item lists show without a cover image (the chosen cover, else the first item). A chosen cover that is deleted or moved to another set no longer counts. Bumps `version` when something changed. |
 | `DELETE /api/v1/sets/{id}` | -> 204 | Owner only (also for read-only git packs). Audited. |
 | `PUT /api/v1/sets/{id}/order` | `ReorderItems` -> `SetDetail` | `edit_pack` permission. `item_ids` must list every item exactly once (else 400). |
@@ -215,7 +215,8 @@ The CLI has `stickpile login --code <code>` ([cli.md](cli.md#logging-in)).
 | `POST /api/v1/sets/gitpack` | `CreateGitPack` -> `GitPackCreated` (201) | Bind a new set to a git repository; the clone runs as a `git_pull` job. The webhook secret is only shown here. 400 for a URL outside `git.allowed_schemes` (or with credentials, a transport helper, ...), a bad branch, subdir or slug; 409 for a taken slug. See [git-packs.md](git-packs.md). |
 | `POST /api/v1/sets/{id}/pull` | -> `Job` | Owner only (read-only packs included); a queued pull is reused. 400 if the set is not a git pack. |
 | `POST /api/v1/hooks/git/{id}` | raw body -> `Job` (202) | **Unauthenticated** forge webhook: `X-Stickpile-Webhook-Secret` or `X-Gitlab-Token` with the secret, or `X-Hub-Signature-256` (HMAC-SHA256 of the body). 401 without, 403 with a wrong secret or signature, 404 for an unknown set or one that is not a git pack, 429 over 60 calls per minute per client IP. |
-| `POST /api/v1/sets/{id}/telegram/export` | `TelegramExport` -> `Job` | Owner only. 400 for a bad pack name/title or when the caller has no Telegram user id and `telegram.default_owner_user_id` is unset. See [telegram.md](telegram.md). |
+| `POST /api/v1/sets/{id}/telegram/export` | `TelegramExport` -> `Job` | Owner only. 400 for a bad pack name/title or when the caller has no Telegram user id and `telegram.default_owner_user_id` is unset. `repack` (default false; also `"true"`/`"false"` as text) assigns every sticker to the packs again in set order, moving published stickers between packs; servers up to 0.8.8 ignore it. See [telegram.md](telegram.md#sets-larger-than-one-pack). |
+| `GET /api/v1/sets/{id}/telegram/plan?repack=` | -> `TelegramPlan` | Owner only. What an export would do to the set's packs, without changing anything: `parts` (every pack after it, `PublishedPart` with the planned `stickers`), `delete` (packs it would delete), `moved` (published stickers that change pack; only a repack moves any), `repack`. The count a repack's confirmation shows. Items whose sticker is not rendered yet count as exportable while their renditions are still to be made. 400 when no item can become a sticker, 404 without Telegram (and from servers up to 0.8.8), 503 when Telegram does not answer. Example: `{"repack": true, "parts": [{"number": 1, "name": "cats_by_my_bot", "url": "https://t.me/addstickers/cats_by_my_bot", "stickers": 120}], "delete": [{"number": 2, "name": "cats_2_by_my_bot", "url": "https://t.me/addstickers/cats_2_by_my_bot"}], "moved": 5}`. |
 | `POST /api/v1/telegram/import` | `TelegramImport` -> `Job` | Into a new set; 409 if the slug is taken; counts as an upload for rate limiting. |
 | `POST /api/v1/discord/import` | `DiscordImport` -> `Job` | A Discord server's stickers (`stickers`, default true) and/or emoji (`emojis`, default false) into a new set named after the server; `guild_id` is the server id or a `discord.com/channels/` link (400 otherwise, and when neither kind is chosen); 409 if a given `slug` is taken; counts as an upload. See [discord.md](discord.md#in-the-server). |
 | `POST /api/v1/signal/import` | `SignalImport` -> `Job` | A Signal pack from its `link` (`https://signal.art/addstickers/#pack_id=...&pack_key=...` or `sgnl://addstickers/?...`; 400 otherwise) into a new set named after its title; 409 if a given `slug` is taken; counts as an upload. Needs no Signal account. The link is removed from the job when it finishes. See [signal.md](signal.md#in-the-server). |
@@ -329,14 +330,20 @@ read the publish state: others who can read the set get 403, everyone else
   Signal pack's `https://signal.art/addstickers/#...` link),
   `published_at` (the last successful publish), `last_status` (`done` or
   `failed`), `last_finished_at`, `last_error`, `last_result` (the result of
-  the last successful publish, kind-specific) and `job` (a publish that is
-  queued or running).
+  the last successful publish, kind-specific), `job` (a publish that is
+  queued or running) and, for a set published as several packs because it
+  is larger than one (Telegram: 120 stickers), `parts`: every pack as a
+  `PublishedPart` (`number`, `name`, `url`, `stickers`), part 1 (or the
+  lowest part left) being `target` and `url`. `parts` is left out for one
+  pack and by servers up to 0.8.8.
 - `POST /api/v1/sets/{id}/publish` with
   `{"platforms": ["telegram"], "options": {"telegram": {"pack_name": "cats", "title": "Cats"}}}`
   queues one job per platform, in the order given (a platform listed twice
   once), and returns `{"jobs": [Job, ...]}`. `options` is optional; each
   platform's object is what its own export takes, all strings:
-  Telegram's `TelegramExport` (`pack_name`, `title`, both optional);
+  Telegram's `TelegramExport` (`pack_name`, `title` and `repack`, all
+  optional; `repack` as `"true"` or `true`, see
+  [telegram.md](telegram.md#sets-larger-than-one-pack));
   Discord's `DiscordExport` (`guild_id`, required the first time and then
   defaulting to the server used last, also accepted as `guild`; `kind`,
   `stickers` (default) or `emojis`); Signal takes none. For example
@@ -556,7 +563,7 @@ Filters (they never change the counts):
   is 400.
 - `kind`: one `ProblemKind` (`exact_duplicate`, `near_duplicate`, `similar`,
   `in_other_set`, `missing_files`, `processing_failed`, `git_failed`,
-  `telegram_failed`, `telegram_too_many`, `telegram_unsupported`,
+  `telegram_failed`, `telegram_unsupported`,
   `telegram_outdated`, `no_emoji`, `not_emoji`, `telegram_trimmed`,
   `low_resolution`, `ai_unreviewed`, `empty_set`); unknown kinds are 400.
   New kinds may be added; show unknown ones by their `message`.
@@ -708,7 +715,7 @@ kind-specific:
 | `git_pull` | binding, `POST /sets/{id}/pull`, webhook, scheduler | `commit`, `changed`; after an import also `version`, `created`, `updated`, `unchanged`, `removed`, `errors`; `pushed` when local edits were pushed instead |
 | `git_push` | every change of a push-mode pack (debounced 5 s) | `pushed`, `committed`, `commit`, `version`, or `skipped` |
 | `telegram_import` | `POST /telegram/import` | `set_id`, `slug`, `pack_name`, `url`, `imported`, `skipped`, `bound` |
-| `telegram_export` | `POST /sets/{id}/telegram/export`, `POST /sets/{id}/publish` | `pack_name`, `url` (`https://t.me/addstickers/<name>`), `created_pack`, `added`, `removed`, `updated`, `reordered`, `exported`, `skipped` |
+| `telegram_export` | `POST /sets/{id}/telegram/export`, `POST /sets/{id}/publish` | `pack_name`, `url` (`https://t.me/addstickers/<name>`), `title`, `created_pack`, `added`, `removed`, `updated`, `reordered`, `thumbnail`, `thumbnail_changed` (all of part 1, or the lowest part left, as for one pack), `exported`, `skipped`; `parts` (every pack: `number`, `name`, `url`, `title`, `stickers`, `created_pack`, `added`, `removed`, `updated`, `reordered`, `thumbnail`, `thumbnail_changed`, `deleted`) and `moved` (stickers a repack moved to another pack), not from servers up to 0.8.8 |
 | `whatsapp_export` | `POST /sets/{id}/whatsapp` | a `WhatsappBuild` (`packs`, `skipped`, `file`, `url`, ...) plus `set_id` and `reused` |
 | `discord_import` | `POST /discord/import` | `set_id`, `slug`, `guild_id`, `guild_name`, `url`, `imported`, `skipped` (`[{kind, remote_id, reason}]`), `bound` (expressions linked for publishing back) |
 | `discord_export` | `POST /sets/{id}/publish` | `guild_id`, `guild_name`, `kind` (`sticker` or `emoji`), `url`, `added`, `removed`, `updated`, `unchanged`, `exported`, `skipped` (`[{item_id, name, reason}]`), `notes`, `slots`, `animated_slots`, `premium_tier` |

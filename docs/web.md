@@ -686,6 +686,21 @@ every set page. Three sections:
   is changed; Signal that packs cannot be changed, so every publish
   uploads new packs with new links, and that a set of more than 200
   stickers becomes several packs.
+  A set published as several packs (more stickers than one pack holds;
+  `Publication.parts`, for any platform) lists every pack in its row
+  instead, each with its link and sticker count, and the note "Published
+  as N packs."; Telegram adds how the packs are kept (120 stickers each, a
+  published sticker stays in its pack, new ones go to the first pack with
+  room, a pack left empty is deleted) and **Repack the parts**. That link
+  opens a confirmation (with htmx in a box under the table, without
+  JavaScript as a page of its own, `/sets/{id}/export/telegram/repack`)
+  that says what a repack does, how many published stickers move to
+  another pack, how many stickers each pack would hold and which packs
+  would be deleted, from `GET /api/v1/sets/{id}/telegram/plan?repack=true`;
+  nothing changes until "Repack now", which queues the Telegram publish
+  with `repack` and comes back with its status box. The set page's
+  "Telegram:" line links every pack, and its "Publish to Telegram" /
+  "Update Telegram pack" button is unchanged.
   Tick several rows and press "Publish to the selected platforms" to queue
   one job per platform, or press a row's own "Publish to X only". The page
   comes back with the queued jobs' status boxes. Errors (no platform
@@ -762,9 +777,8 @@ a sentence about what is wrong and the items concerned:
 | Processing failed (warning) | Generating the variants failed (with the job's error) or never ran; still queued is fine. |
 | Git sync failed (error) | The git pack's last pull or push failed. |
 | Publishing to Telegram failed (error) | The set's newest Telegram export job failed (also before the first successful publish). |
-| Too many stickers for Telegram (error) | A published set has more stickers than a pack holds (120): publishing fails. |
 | Cannot become Telegram stickers (warning) | In a published set: videos longer than 10 s, animations and videos without ffmpeg, and items whose sticker rendition could not be made. Publishing leaves them out. |
-| Telegram pack out of date (warning or info) | In a published set: items not in the pack yet, items with a new file, stickers of deleted items (warning), or only metadata or order changed since the last successful publish (info). |
+| Telegram pack out of date (warning or info) | In a published set: items not in the pack yet, items with a new file, stickers of deleted items (warning), or only metadata or order changed since the last successful publish (info). A set larger than one pack (120 stickers) is published as several packs, which are compared together; that it is larger is no problem. |
 | No emoji (warning) | In a published set: items without an emoji; Telegram gets 🙂 for them. |
 | Emoji entries that are not emoji (warning when published, else info) | Words typed into the emoji field; Telegram drops them. |
 | Cut short on Telegram (info) | In a published set: animations and videos longer than 3 s; the pack gets the first 3 s. |

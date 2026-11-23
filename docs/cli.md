@@ -651,10 +651,31 @@ and the clone job. See [docs/git-packs.md](git-packs.md).
 ```sh
 stickpile telegram import Animals --slug animals --visibility private --wait
 stickpile telegram export cats --pack cats --title "Cats" --wait   # pack cats_by_<bot>
+stickpile telegram export cats --repack --wait                     # asks first
 ```
 
 Both run as server jobs. `--wait` polls until the job is done and exits 1 if
-it failed. See [docs/telegram.md](telegram.md).
+it failed. A set larger than one Telegram pack (120 stickers) is published
+as several packs, its parts (`cats_by_<bot>`, `cats_2_by_<bot>`, ...); a
+finished export prints every part's link and sticker count after the
+result:
+
+```text
+  part 1:   https://t.me/addstickers/cats_by_my_bot (120 stickers)
+  part 2:   https://t.me/addstickers/cats_2_by_my_bot (5 stickers)
+```
+
+with `(deleted: no stickers left)` for a part whose pack was deleted and
+`moved:` for the stickers a repack moved. `--repack` puts every sticker
+into the parts again in set order: it first prints what that does and how
+many published stickers move to another pack, from the server's plan
+(`GET /api/v1/sets/{id}/telegram/plan?repack=true`), and asks
+`Repack the parts? [y/N]`. `--yes` (`-y`) does not ask; without a terminal
+it is required (`refusing to repack without confirmation; pass --yes`). A
+server up to 0.8.8 publishes a set as one pack and has no plan: `--repack`
+then fails with "nothing to repack; publish without --repack" and changes
+nothing. `sets show` lists every pack (`telegram: cats_by_my_bot,
+cats_2_by_my_bot (2 packs)`). See [docs/telegram.md](telegram.md).
 
 ### `publish`
 
@@ -664,6 +685,7 @@ stickpile publish cats --to telegram --wait
 stickpile publish cats --to telegram -O telegram.pack_name=cats -O telegram.title="My cats"
 stickpile publish cats --to discord -O discord.guild_id=100000000000000001 -O discord.kind=emojis
 stickpile publish cats --to telegram,discord,signal --wait   # Discord: the server used last
+stickpile publish cats --to telegram --repack --yes --wait
 ```
 
 Without `--to`, a table of the platforms the server knows: whether each is
@@ -678,6 +700,11 @@ server id, required the first time, afterwards the server used last;
 `discord.guild=...` works too) and `kind` (`stickers` or `emojis`); Signal
 has none, and every publish makes a new Signal pack with a new link (a
 set of more than 200 stickers: a new pack per 200).
+`--repack` (Telegram only, with `--yes` to skip the question) asks for a
+repack of the Telegram parts as `telegram export --repack` does; a set
+published as several packs gets a list of them under the table (`telegram:
+published as 2 packs:`), and a finished Telegram job prints every part's
+link.
 `--wait` waits for every job; the command exits 1 if any failed. Only the
 set's owner may publish. See [discord.md](discord.md#in-the-server) and
 [signal.md](signal.md#in-the-server).

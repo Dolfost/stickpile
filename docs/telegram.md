@@ -106,7 +106,10 @@ Skipped stickers are listed in the job report with a reason:
 If the imported pack was made by your bot (its name ends in
 `_by_<bot username>`, checked with `getMe`) and you may publish to it (see
 [Pack ownership](#pack-ownership)), the set is **bound** to it
-(`Set.telegram_pack`). Anyone else gets an unbound copy. The export mapping is seeded from the import: each
+(`Set.telegram_pack`) as its part 1. Anyone else gets an unbound copy, and
+so does an import of a pack that is a part of a set published as several
+packs ([Sets larger than one pack](#sets-larger-than-one-pack)): the pack
+stays with that set. The export mapping is seeded from the import: each
 imported sticker's `file_unique_id`, together with the item's media hash,
 identifies the sticker. The first export then keeps the existing stickers
 instead of re-uploading them.
@@ -130,7 +133,11 @@ to a pack, in the `telegram_packs` table (migration
   be adopted by an **admin**, by importing it or exporting to it. A regular
   user gets "already exists but was not published through this server".
 - A pack follows exactly one set. Publishing another of your sets to the
-  same pack moves the binding to that set.
+  same pack moves the binding to that set, every part of a set published as
+  several packs with it.
+- Each part of a set larger than one pack is a pack of its own, claimed and
+  checked the same way ([Sets larger than one
+  pack](#sets-larger-than-one-pack)).
 - A name stays claimed even if the first export failed after the claim, or
   the set was deleted, so nobody else can take over the pack. Deleting the
   user releases their claims; only an admin can adopt the packs after that.
@@ -144,31 +151,37 @@ Telegram is the first platform of the publish registry
 (`crates/stickpile-server/src/service/publish.rs`), next to Discord
 ([discord.md](discord.md)) and Signal ([signal.md](signal.md)). In the web UI, publishing lives on the set's export
 page, `/sets/{id}/export` ([web.md](web.md#export-and-publish)): its
-Publish section has a row for Telegram with the pack's link, when it was
-last published and what that changed, the last error, the pack name and
-title fields and the Telegram user id hint, and a checkbox to publish to
-Telegram together with other platforms. The set page's "Publish to
-Telegram" / "Update Telegram pack" button leads there; the older form at
-`/sets/{id}/telegram` still works.
+Publish section has a row for Telegram with the pack's link (every pack's,
+with its sticker count, for a set published as several, and "Repack the
+parts"), when it was last published and what that changed, the last error,
+the pack name and title fields and the Telegram user id hint, and a
+checkbox to publish to Telegram together with other platforms. The set
+page's "Publish to Telegram" / "Update Telegram pack" button leads there;
+the older form at `/sets/{id}/telegram` still works.
 
 In the API, `POST /api/v1/sets/{id}/publish` with `{"platforms":
-["telegram"], "options": {"telegram": {"pack_name": ..., "title": ...}}}`
-queues the same `telegram_export` job as the route below, which stays as it
-is; `GET /api/v1/sets/{id}/publish` reports where the set is published
-([api.md](api.md#publishing)). Every finished `telegram_export` job, from
-either route, is recorded with the set (`set_publications`, migration 0012):
-when it was last published, that result and the last error. The pack
-binding itself stays in `sets.telegram_*`.
+["telegram"], "options": {"telegram": {"pack_name": ..., "title": ...,
+"repack": ...}}}` queues the same `telegram_export` job as the route below,
+which stays as it is; `GET /api/v1/sets/{id}/publish` reports where the
+set is published ([api.md](api.md#publishing)), every pack in
+`Publication.parts` when there are several. Every finished
+`telegram_export` job, from either route, is recorded with the set
+(`set_publications`, migration 0012): when it was last published, that
+result and the last error. The packs themselves are stored in
+`telegram_parts` (migration 0017, see [Sets larger than one
+pack](#sets-larger-than-one-pack)).
 
 ## Export
 
 `POST /api/v1/sets/{id}/telegram/export` with `{"pack_name": null, "title":
-null}` (the set's owner only, read-only git packs included) queues a
+null}` (the set's owner only, read-only git packs included; `"repack": true`
+asks for a [repack](#sets-larger-than-one-pack)) queues a
 `telegram_export` job and returns it. Without a Telegram user id for the
 caller (their own, else `telegram.default_owner_user_id`) the request is a
-`400` that says how to set one. The job runs `export_pack`. By default it
-uses the previously bound pack name (or `<slug>_by_<bot>`) and the set name
-as title. A given pack name without the `_by_<bot username>` suffix gets it
+`400` that says how to set one. The job runs `export_parts`, which exports
+each pack like `export_pack`; a set of at most 120 stickers is one pack.
+By default it uses the previously bound pack name (or `<slug>_by_<bot>`)
+and the set name as title. A given pack name without the `_by_<bot username>` suffix gets it
 appended (`test` becomes `test_by_<bot>`). A name that ends in another bot's
 suffix (`x_by_other_bot`) fails the job with an explanation, because a bot
 can edit only its own packs.
@@ -187,10 +200,13 @@ A set with no exportable item fails the job.
 The job result has `pack_name`, `url` (`https://t.me/addstickers/<name>`),
 `title`, `created_pack`, `added`, `removed`, `updated`, `reordered`,
 `thumbnail` (the pack has the set's cover as its thumbnail),
-`thumbnail_changed`, `exported` and `skipped` (`[{item_id, name, reason}]`). The pack name and the
-new mapping are stored on the set (`sets.telegram_pack`,
-`sets.telegram_mapping`). Exporting under a different pack name starts that
-pack with an empty mapping.
+`thumbnail_changed`, `exported` and `skipped` (`[{item_id, name, reason}]`),
+then `parts` (every pack of the set, see [Sets larger than one
+pack](#sets-larger-than-one-pack); one for a set of at most 120 stickers)
+and `moved`. The pack name and the new mapping are stored with the set
+(`sets.telegram_pack`, and the pack's row in `telegram_parts`). Exporting
+under a different pack name starts that pack with an empty mapping and
+leaves the old packs on Telegram as they are, no longer bound to the set.
 
 **First export.** The pack does not exist yet: `getStickerSet` answers
 `STICKERSET_INVALID`. `createNewStickerSet` creates it with the first 50
@@ -223,8 +239,8 @@ a transparent square of exactly that size, as PNG. A cover image (a still
 uploaded for the set, never a sticker of the pack) is rendered from its
 stored original, a cover item from its grid thumbnail (a still frame for
 animations and videos). The key of what was sent (`image:` and the image's
-hash, or the cover item and its media hash) is stored on the set
-(`sets.telegram_thumbnail`), so the thumbnail is uploaded only when the
+hash, or the cover item and its media hash) is stored with the pack
+(`telegram_parts.thumbnail`), so the thumbnail is uploaded only when the
 cover changes: a new image, another item, or the image removed (back to the
 chosen item). Going back to "First item" with no image drops the thumbnail
 stickpile set, and Telegram shows the first sticker again. A thumbnail set
@@ -339,20 +355,66 @@ export continues from there:
   parts' mappings (the repack stopped after an earlier part took the
   sticker over), the lower part keeps it and the other drops its copy.
 
-**Server side** (design, being built):
+**On the server** (`service/telegram.rs`, the `telegram_export` job):
 
-- **Ownership per part.** Every part's name is registered to the set's
-  owner in `telegram_packs` before its pack is created
-  ([Pack ownership](#pack-ownership)). A part name that belongs to someone
-  else, is bound to another set, or exists on Telegram for another bot
-  fails the export with a clear message before any change.
-- **Repack surfaces.** "Repack the parts" on the export page, `--repack` in
-  the CLI and `repack: true` in the API, after a confirmation that says how
-  many stickers move.
-- **Results and compatibility.** The job's result keeps its fields for
-  part 1 and adds `parts`. `Set.telegram_pack` stays part 1's name, so
-  older clients read a set as before; the migration keeps every existing
-  binding as part 1.
+- **Storage.** Every part of a set is a row of `telegram_parts` (migration
+  `0017_telegram_parts.sql`): its number, pack name, title, mapping,
+  thumbnail key and sticker count. `sets.telegram_base` is part 1's name,
+  which every part's name derives from. `sets.telegram_pack` names the
+  set's first pack: part 1, or, when part 1 was emptied while later parts
+  still hold stickers, the lowest part left, so that older clients keep a
+  working link; part 1's name stays the base, so the parts keep their
+  names. The migration makes every existing binding part 1 of its set,
+  unchanged (the same pack, mapping and thumbnail key), and stores its
+  name as the base. `sets.telegram_mapping` and `sets.telegram_thumbnail`
+  are retired: the migration moves them to part 1 and clears them, and
+  nothing reads or writes them since.
+- **Before any change.** The export plans the parts (`plan_parts_skipping`
+  with the stored states; a part registered without a state is passed in
+  empty), makes every part's name and checks each one against
+  [Pack ownership](#pack-ownership): a name that belongs to another
+  stickpile user, is a part of (or the base of) another of the user's sets,
+  or exists on Telegram without being published through this server (an
+  admin may adopt it, as a single pack) fails the export with a message
+  that names the part, and nothing on Telegram changes. Then every new
+  name is claimed for the set's owner in `telegram_packs` and registered as
+  a row without a state, before its pack is created.
+- **Exporting.** `export_parts` runs the plan, and each part's state is
+  stored as soon as that part is done (on failure, as far as it got); a
+  part whose pack was deleted is forgotten. A retried job, or the next
+  export, continues from there with the same names: no second pack for a
+  part, and none left behind.
+- **Deleted parts' numbers are never used again.** Telegram does not say
+  whether a deleted pack's name can be created again, so a pack stickpile
+  deleted is marked in `telegram_packs.deleted_at`, and the planner never
+  gives its number to a new part or uses it in a repack: after part 2 was
+  deleted, the next new part is part 3. As the mark is on the name, this
+  holds after a rename or a move of the binding too.
+- **Moving and renaming.** Publishing another of the user's sets under a
+  set's part 1 name moves the whole binding: every part goes to that set,
+  each without a mapping (as a single pack's binding moved before), and is
+  then filled or deleted. Publishing under a new name starts from nothing
+  and leaves the old packs on Telegram, unbound and still claimed, as an
+  export under a new name always did. Either takes effect when its export
+  starts, once every name passed the checks: an export that then fails is
+  continued under the new name by the next one. Asking for one of the
+  set's own pack names (for example the one `Set.telegram_pack` shows)
+  keeps the parts as they are.
+- **Repack.** Only on request: `repack: true` in the API (also as text,
+  `"true"`, in the publish options), "Repack the parts" on the export page,
+  `--repack` in the CLI. Before it, `GET /api/v1/sets/{id}/telegram/plan?repack=true`
+  says how many published stickers move (`moved`), which parts would hold
+  how many and which would be deleted, without changing anything; the web
+  page and the CLI show that and ask for a confirmation.
+- **Results.** The job's result keeps every field it had for one pack, for
+  part 1 (or the lowest part left), so older clients read it as before,
+  and adds `parts` (every part's `number`, `name`, `url`, `title`,
+  `stickers`, `created_pack`, `added`, `removed`, `updated`, `reordered`,
+  `thumbnail`, `thumbnail_changed`, `deleted`) and `moved`. `Set.telegram_parts`
+  and `Publication.parts` list every pack of a set published as several
+  (empty for one pack). The problems check compares the set with the
+  mappings of every part together, and a set of more than 120 stickers is
+  no problem any more.
 - **Other platforms.** Signal packs hold 200 stickers and are split the
   same way (each publish uploads every part anew). Discord is unchanged (a
   server's slots are its own), and importing a Telegram pack still makes
@@ -386,7 +448,18 @@ side (import with skipped `.tgs` and duplicates, binding and seeding,
 export create and update, ordering, emoji, titles, owner resolution, pack
 name validation, pack ownership between users and admin adoption, the
 ownership migration, the disabled integration) against a compact mock in
-`tests/integrations_support/mock_bot.rs`.
+`tests/integrations_support/mock_bot.rs`, which also deletes packs and can
+fail a method on purpose. For sets larger than one pack it tests the parts
+migration, a pack bound before parts exporting unchanged as part 1, 250
+items as three packs with their links, new items filling the first part
+with room, deleted and reordered items moving nothing, the repack count
+matching what moves, emptied parts deleted on Telegram (part 1 too, with
+the link moving to the part left), deleted part numbers not used again,
+part names owned by another user or bound to another set failing before
+any change, exports failing between parts and in the middle of one and then
+continuing without a duplicate, what a 0.8.8 client reads, and the export
+page. `crates/stickpile-cli/tests/server_e2e.rs` runs `--repack` in the CLI
+against the real server and the same mock.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps
