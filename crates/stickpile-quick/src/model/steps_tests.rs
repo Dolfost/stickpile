@@ -64,6 +64,9 @@ fn server(m: &mut Model, ids: &[&str]) -> Vec<Command> {
     })
 }
 
+/// The sticker the user selected stays selected where it is now; the
+/// default selection (the first, nothing moved) goes to the server's
+/// first, its best match, which Enter copies.
 #[test]
 fn two_step_results_replace_in_place_keeping_selection() {
     let mut m = offline_first(&["a", "b", "c", "d"]);
@@ -73,19 +76,29 @@ fn two_step_results_replace_in_place_keeping_selection() {
 
     let cmds = server(&mut m, &["x", "c", "a", "y", "b"]);
     assert_eq!(ids(&m), ["x", "c", "a", "y", "b"], "the server's results, in its order");
-    assert_eq!(selected_id(&m), Some("c"), "the selected sticker stays selected");
+    assert_eq!(
+        selected_id(&m),
+        Some("c"),
+        "the sticker the user selected stays selected"
+    );
     assert_eq!(m.selected(), Some(1), "where it is now");
     assert!(!m.is_offline());
     assert!(loads_thumbnails(&cmds), "the stickers the cache did not hold");
     assert_eq!(m.query(), "cat");
 
-    // Not moved by the user: the sticker selected first stays selected too
-    // (Enter copies what was seen selected).
+    // A pointer moved over a tile (the shell's Select) is the user's too.
+    let mut m = offline_first(&["a", "b", "c"]);
+    m.handle(Event::Select(2));
+    server(&mut m, &["c", "x", "a"]);
+    assert_eq!(selected_id(&m), Some("c"));
+    assert_eq!(m.selected(), Some(0));
+
+    // Not moved by the user: the server's first, not the offline first.
     let mut m = offline_first(&["a", "b"]);
     assert_eq!(selected_id(&m), Some("a"));
     server(&mut m, &["b", "a"]);
-    assert_eq!(selected_id(&m), Some("a"));
-    assert_eq!(m.selected(), Some(1));
+    assert_eq!(m.selected(), Some(0));
+    assert_eq!(selected_id(&m), Some("b"));
 }
 
 /// When the selected sticker is not among the server's results: the same
@@ -225,6 +238,17 @@ fn server_back_reruns_search_and_starts_sync() {
     assert_eq!(m.status(), &Status::Idle);
     assert!(!m.is_offline());
 
+    // Not moved by the user: the server's first.
+    let mut m = offline_first(&["a", "b", "c"]);
+    m.handle(Event::Reachable(false));
+    let cmds = m.handle(Event::Reachable(true));
+    let (_, _, generation, _) = search_of(&cmds).expect("searched again");
+    m.handle(Event::Results {
+        generation,
+        outcome: Ok(results(&["c", "a", "x"], false)),
+    });
+    assert_eq!(selected_id(&m), Some("c"));
+
     // Nothing was missed: nothing to do.
     assert!(m.handle(Event::Reachable(true)).is_empty());
     // An outage with the server's results shown: a sync only.
@@ -260,6 +284,15 @@ fn server_back_reruns_search_and_starts_sync() {
     });
     assert_eq!(ids(&m), ["b", "a", "n"]);
     assert_eq!(selected_id(&m), Some("b"));
+    // Not moved: the first of the new ones.
+    let mut m = offline_first(&["a", "b"]);
+    let cmds = m.handle(Event::LibraryChanged);
+    let (_, _, generation, _) = search_of(&cmds).expect("searched again");
+    m.handle(Event::Results {
+        generation,
+        outcome: Ok(results(&["n", "a", "b"], true)),
+    });
+    assert_eq!(selected_id(&m), Some("n"));
 }
 
 #[test]
@@ -313,7 +346,7 @@ fn server_results_for_an_old_generation_are_ignored() {
 fn swap_deferred_while_a_tile_is_pressed() {
     let mut m = offline_first(&["a", "b", "c"]);
     assert!(m.handle(Event::Pressing(true)).is_empty());
-    let cmds = server(&mut m, &["c", "x", "a"]);
+    let cmds = server(&mut m, &["x", "c", "a"]);
     assert!(cmds.is_empty());
     assert_eq!(ids(&m), ["a", "b", "c"], "nothing moves under the press");
     assert_eq!(m.status(), &Status::Offline);
@@ -324,18 +357,18 @@ fn swap_deferred_while_a_tile_is_pressed() {
     assert_eq!(copied(&cmds), Some("c"), "the tile it pressed");
 
     let cmds = m.handle(Event::Pressing(false));
-    assert_eq!(ids(&m), ["c", "x", "a"]);
-    assert_eq!(selected_id(&m), Some("c"));
+    assert_eq!(ids(&m), ["x", "c", "a"]);
+    assert_eq!(selected_id(&m), Some("c"), "the clicked sticker stays selected");
     assert!(loads_thumbnails(&cmds));
     assert!(m.is_copying(), "the copy goes on");
 
     // An open menu of a tile holds them too (its entries act on that tile).
     let mut m = offline_first(&["a", "b"]);
     m.handle(Event::OpenMenu(Some(1)));
-    assert!(server(&mut m, &["b", "x"]).is_empty());
+    assert!(server(&mut m, &["x", "b"]).is_empty());
     assert_eq!(ids(&m), ["a", "b"]);
     m.handle(Event::CloseMenu);
-    assert_eq!(ids(&m), ["b", "x"]);
+    assert_eq!(ids(&m), ["x", "b"]);
     assert_eq!(selected_id(&m), Some("b"));
 
     // What a press held for a search typed over meanwhile is dropped.

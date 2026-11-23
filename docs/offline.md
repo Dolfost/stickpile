@@ -514,18 +514,21 @@ the popup model (`stickpile-desktop/src/backend.rs`,
   (Ukrainian "Немає зв'язку: показано збережені стікери"), as on Android,
   shown with the offline results and gone when the server's replace them.
   "Searching..." lasts until the first step.
-- In place: the selected sticker stays selected wherever it is now,
-  whether or not the user moved the selection; when it is gone, the same
-  place in the grid if the user had moved the selection (as fresh data
-  for a shown list), else the first, the server's best. A status that
-  tells what the user did (a copy, a like) stays. While a pointer button
+- In place, as fresh data for a shown list: a sticker the user selected
+  (keys, a pointer moved onto it, a click, the menu of a tile) stays
+  selected wherever it is now, or the same place in the grid when it is
+  gone; the default selection (nothing moved) goes to the first, the
+  server's best match. The same for the search run again when the server
+  is back or a sync changed the cache. A status that tells what the user
+  did (a copy, a like) stays. While a pointer button
   is down on the grid or the menu of a tile is open, the results wait
   and go in when the press ends or the menu closes (`Event::Pressing`);
   the click the press makes acts on the tile it pressed. GTK tells the
   release after the click is handled; macOS also holds them for the
   double-click interval after the release. GTK selects the tile under a
   resting pointer once the tiles change; the shell undoes that until the
-  pointer moves.
+  pointer moves, so a pointer that did not move does not count as the
+  user selecting.
 - The server back: the search shown from the offline index runs again
   in place, without "Searching..." over the results (a search still
   waiting for its answer runs again as a new one), and `Command::Sync`

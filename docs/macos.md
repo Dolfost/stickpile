@@ -132,8 +132,9 @@ A search never waits for a server that does not answer, as in the Linux
 popup ([desktop.md](desktop.md#offline-behaviour)): the saved stickers at
 once (or after 300 ms while the server is believed there) with "Offline:
 showing saved stickers" in the status, the server's results in their
-place when they come, without moving the selection off the selected
-sticker; the server is checked when the popup opens and in the
+place when they come, without moving the selection off a sticker you
+selected (with nothing selected, the server's first result is); the
+server is checked when the popup opens and in the
 background, and when it is back the search runs again and a sync starts.
 The status and the grid come in `ViewState` as for any search. The grid
 reports the mouse button on a tile (`Popup::pressing(down, hold_ms)`,

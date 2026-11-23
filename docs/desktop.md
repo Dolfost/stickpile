@@ -734,12 +734,15 @@ The Offline group under it holds the [options](configuration.md#keeping-stickers
   cache's results show first with the same notice, and the server's
   replace them in place when they come (they include image-content
   matches and stickers the cache does not hold). The replacement does not
-  jump: the selected sticker stays selected wherever it is in the new
-  list (when it is not in it: the same place if you had moved the
-  selection, else the first), a copy in progress goes on, and while a
-  mouse button is held on a tile or the menu of a tile is open the
-  results wait until the button is up or the menu closed. A pointer
-  resting over the grid does not select the tile that came under it.
+  jump: a sticker you selected (with the keys, by moving the pointer onto
+  it, with a click or its menu) stays selected wherever it is in the new
+  list, or the same place in the grid when it is not in it; if you
+  selected nothing, the first of the new results is selected (the
+  server's best match, which Enter copies). A copy in progress goes on,
+  and while a mouse button is held on a tile or the menu of a tile is
+  open the results wait until the button is up or the menu closed. A
+  pointer resting over the grid does not select the tile that came under
+  it.
 - Whether the server answers is checked in the background: when the popup
   opens, every 15 s for the first 5 minutes of an outage, then every
   minute. When it answers again, the search shown from the cache runs

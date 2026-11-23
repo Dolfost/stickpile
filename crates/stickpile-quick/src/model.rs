@@ -313,9 +313,10 @@ pub enum Event {
     },
     /// The server's answer to a search whose offline results came first
     /// ([`Event::Results`] of the same generation). `Ok(Some)`: they
-    /// replace the shown ones in place: the selected sticker stays
-    /// selected, and while a pointer presses a tile or a menu of a tile is
-    /// open they wait ([`Event::Pressing`]). `Ok(None)`: the server gave
+    /// replace the shown ones in place: a sticker the user selected stays
+    /// selected (the default selection goes to the server's first), and
+    /// while a pointer presses a tile or a menu of a tile is open they
+    /// wait ([`Event::Pressing`]). `Ok(None)`: the server gave
     /// none, the offline results and their notice stand. `Err`: why it gave
     /// none (the offline results stand).
     ServerResults {
@@ -1278,11 +1279,6 @@ enum Sel {
     Refresh,
     /// Coming back to a view: this entry, else the first.
     Id(Option<String>),
-    /// Results replacing the shown ones in place (the server's after the
-    /// offline index's): the selected item where it is now, whether or not
-    /// the user moved the selection; when it is gone, as [`Sel::Refresh`]
-    /// (the same place if the user moved the selection, else the first).
-    Swap,
 }
 
 #[derive(Debug, Clone)]
@@ -1811,7 +1807,9 @@ impl Model {
             Event::CopySelected { toggle_sticker } => self.enter(toggle_sticker),
             Event::CopyAt { index, toggle_sticker } => match self.view() {
                 View::Items if index < self.entries.len() => {
+                    // A click on a tile is the user's choice.
                     self.selected = Some(index);
+                    self.touched = true;
                     self.copy_at(index, toggle_sticker)
                 }
                 View::Packs => self.open_pack_at(index),
@@ -2411,8 +2409,8 @@ impl Model {
 
     /// Search the current query again at once. Results on screen stay
     /// there without "Searching", and the new ones replace them in place
-    /// ([`Sel::Swap`]); a search still waiting for its answer goes out
-    /// again as it was.
+    /// ([`Model::replace_in_place`]); a search still waiting for its
+    /// answer goes out again as it was.
     fn search_again(&mut self) -> Command {
         self.generation += 1;
         if self.searching || self.showing != Showing::Results {
@@ -2499,12 +2497,15 @@ impl Model {
     }
 
     /// Results of the current generation that replace the shown ones
-    /// without a jump: the selected sticker stays selected ([`Sel::Swap`]),
-    /// a copy in progress goes on (it has its item), and while a pointer
-    /// presses the grid or the menu of a tile is open they wait
-    /// ([`Model::holds_results`]). A status that tells what the user did
-    /// stays; one that describes the shown list (the offline notice) is
-    /// made again.
+    /// without a jump, as fresh data for the shown list ([`Sel::Refresh`]):
+    /// a sticker the user selected (keys, a pointer moved over it, a
+    /// click, a menu) stays selected where it is now, or the same place
+    /// when it is gone; the default selection goes to the first, the
+    /// server's best match. A copy in progress goes on (it has its item),
+    /// and while a pointer presses the grid or the menu of a tile is open
+    /// they wait ([`Model::holds_results`]). A status that tells what the
+    /// user did stays; one that describes the shown list (the offline
+    /// notice) is made again.
     fn replace_in_place(&mut self, mut r: Results) -> Vec<Command> {
         r.hits.truncate(self.cfg.max_results);
         let shown = self.tab == Tab::Search;
@@ -2520,7 +2521,7 @@ impl Model {
         if !shown {
             return Vec::new();
         }
-        self.rebuild(Sel::Swap);
+        self.rebuild(Sel::Refresh);
         if self.copying.is_none() && self.status.describes_view() {
             self.status = self.search_status();
         }
@@ -2826,11 +2827,6 @@ impl Model {
             Sel::Keep => keep(self),
             Sel::Refresh if self.touched => keep(self),
             Sel::Refresh => 0,
-            Sel::Swap => match prev_id.as_deref().and_then(|id| self.position(id)) {
-                Some(i) => i,
-                None if self.touched => keep(self),
-                None => 0,
-            },
             Sel::Id(id) => {
                 let found = id.as_deref().and_then(|id| self.position(id));
                 self.touched = found.is_some();
