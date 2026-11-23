@@ -10,6 +10,11 @@ use stickpile_api::Role;
 use stickpile_server::app::{spawn_for_tests, TestServerHandle};
 use stickpile_server::service::users::{self, NewUser};
 
+/// The server tests' mock of the Telegram Bot API.
+#[allow(dead_code)]
+#[path = "../../stickpile-server/tests/integrations_support/mock_bot.rs"]
+mod mock_bot;
+
 const PASSWORD: &str = "correct horse battery staple";
 
 struct Env {
@@ -155,12 +160,19 @@ impl Server {
             .enable_all()
             .build()
             .unwrap();
+        Server::start_on(rt, |_| {})
+    }
+
+    /// With `f` applied to the configuration, on `rt` (which may already run
+    /// mocks the server talks to).
+    fn start_on(rt: tokio::runtime::Runtime, f: impl FnOnce(&mut stickpile_server::Config)) -> Server {
         let data = tempfile::tempdir().unwrap();
         let mut cfg = stickpile_server::Config::default();
         cfg.server.listen = "127.0.0.1:0".parse().unwrap();
         cfg.server.data_dir = data.path().join("data");
         cfg.server.secure_cookies = false;
         cfg.media.workers = 1;
+        f(&mut cfg);
         let handle = rt.block_on(spawn_for_tests(cfg)).unwrap();
         rt.block_on(users::create(
             &handle.state.db,
@@ -645,4 +657,125 @@ fn rechecks_against_the_real_server() {
     );
     let list = env.json(&["recheck", "list"]);
     assert_eq!(list.as_array().unwrap().len(), 2, "alice does not see the server's");
+}
+
+/// A distinct small still for each `n`.
+fn png_n(n: u32) -> Vec<u8> {
+    let img = image::RgbaImage::from_fn(24, 24, |x, y| {
+        let v = n.wrapping_mul(2_654_435_761).wrapping_add(x * 31 + y * 17);
+        image::Rgba([(v >> 8) as u8, (v >> 16) as u8, (v >> 24) as u8 ^ (x as u8), 255])
+    });
+    let mut out = Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// `telegram export --repack` and `publish --to telegram --repack` say how
+/// many published stickers move and ask first (`--yes` does not); every
+/// export prints every pack's link.
+#[test]
+fn cli_repack_asks_with_count() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (bot_url, mock) = rt.block_on(mock_bot::start());
+    let token = tempfile::tempdir().unwrap();
+    let token_file = token.path().join("token");
+    std::fs::write(&token_file, mock_bot::TOKEN).unwrap();
+    let server = Server::start_on(rt, |c| {
+        c.telegram.enabled = true;
+        c.telegram.bot_token_file = Some(token_file.clone());
+        c.telegram.api_url = bot_url;
+        c.telegram.default_owner_user_id = Some(777);
+    });
+    let env = Env::new(&server.url());
+    std::fs::write(env.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    let pw = env.path("pw");
+    env.ok(&["login", "-u", "alice", "--password-file", pw.to_str().unwrap()]);
+    env.ok(&["sets", "create", "big", "--name", "Big"]);
+    let mut files = Vec::new();
+    for n in 1..=125 {
+        let p = env.path(&format!("{n:03}.png"));
+        std::fs::write(&p, png_n(n)).unwrap();
+        files.push(p.to_str().unwrap().to_string());
+    }
+    let mut args = vec!["upload", "big"];
+    args.extend(files.iter().map(String::as_str));
+    env.ok(&args);
+    let (p1, p2) = (
+        format!("big_by_{}", mock_bot::BOT),
+        format!("big_2_by_{}", mock_bot::BOT),
+    );
+
+    // The first export makes two packs; both links are printed.
+    let out = env.ok(&["telegram", "export", "big", "--wait"]);
+    assert!(
+        out.contains(&format!("part 1:   https://t.me/addstickers/{p1} (120 stickers)")),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!("part 2:   https://t.me/addstickers/{p2} (5 stickers)")),
+        "{out}"
+    );
+    let out = env.ok(&["sets", "show", "big"]);
+    assert!(out.contains(&format!("telegram:    {p1}, {p2} (2 packs)")), "{out}");
+    let out = env.ok(&["publish", "big"]);
+    assert!(out.contains("telegram: published as 2 packs:"), "{out}");
+
+    // Three stickers of part 1 go (the CLI has no command for that): a
+    // repack would move three of part 2's.
+    let db = server.handle.as_ref().unwrap().state.db.clone();
+    server
+        .rt
+        .block_on(
+            sqlx::query(
+                "DELETE FROM items WHERE id IN (SELECT id FROM items WHERE set_id = (SELECT id FROM sets WHERE \
+                 slug = 'big') ORDER BY position LIMIT 3)",
+            )
+            .execute(&db),
+        )
+        .unwrap();
+    let calls = mock.lock().unwrap().calls.len();
+    // Without a terminal it asks for --yes, after saying how many move.
+    for args in [
+        &["telegram", "export", "big", "--repack", "--wait"][..],
+        &["publish", "big", "--to", "telegram", "--repack", "--wait"],
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("3 published stickers move to other packs"),
+            "{args:?}: {stdout}"
+        );
+        assert!(stdout.contains(&format!("part 1: {p1} (120 stickers)")), "{stdout}");
+        assert!(stdout.contains(&format!("part 2: {p2} (2 stickers)")), "{stdout}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("refusing to repack without confirmation; pass --yes"),
+            "{stderr}"
+        );
+    }
+    // The plan reads (getMe) and changes nothing.
+    let writes: Vec<String> = mock.lock().unwrap().calls[calls..]
+        .iter()
+        .filter(|c| !c.starts_with("get"))
+        .cloned()
+        .collect();
+    assert!(writes.is_empty(), "nothing on Telegram changed: {writes:?}");
+    // --repack needs telegram among the platforms.
+    let out = env.run(&["publish", "big", "--to", "signal", "--repack", "--yes"]);
+    assert!(!out.status.success());
+
+    // With --yes it repacks.
+    let out = env.ok(&["telegram", "export", "big", "--repack", "--yes", "--wait"]);
+    assert!(out.contains("moved:    3 stickers to another pack"), "{out}");
+    assert!(
+        out.contains(&format!("part 2:   https://t.me/addstickers/{p2} (2 stickers)")),
+        "{out}"
+    );
+    let m = mock.lock().unwrap();
+    assert_eq!((m.packs[&p1].stickers.len(), m.packs[&p2].stickers.len()), (120, 2));
 }

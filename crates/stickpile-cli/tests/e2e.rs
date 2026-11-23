@@ -432,6 +432,49 @@ fn server_override_and_admin_wrappers() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("server unreachable"));
 }
 
+/// The mock server, like stickpile 0.8.8, publishes a set as one Telegram
+/// pack and has no plan of parts: `--repack` says there is nothing to
+/// repack and changes nothing; an export without it works as before.
+#[test]
+fn telegram_repack_on_a_server_before_parts() {
+    let server = MockServer::start();
+    let env = Env::new(&server.url);
+    std::fs::write(env.path("pw"), "secret\n").unwrap();
+    env.ok(&[
+        "login",
+        "-u",
+        "alice",
+        "--password-file",
+        env.path("pw").to_str().unwrap(),
+    ]);
+    env.ok(&["sets", "create", "cats", "--name", "Cats"]);
+    for args in [
+        &["telegram", "export", "cats", "--repack", "--yes"][..],
+        &["publish", "cats", "--to", "telegram", "--repack", "--yes"],
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("nothing to repack; publish without --repack"),
+            "{args:?}: {err}"
+        );
+    }
+    assert!(
+        !server
+            .state()
+            .requests
+            .iter()
+            .any(|r| r.ends_with("/telegram/export") || (r.starts_with("POST") && r.ends_with("/publish"))),
+        "nothing was published: {:?}",
+        server.state().requests
+    );
+    let job = env.json(&["telegram", "export", "cats", "--wait"]);
+    assert_eq!(job["status"], "done");
+    let out = env.ok(&["publish", "cats", "--to", "telegram"]);
+    assert!(out.contains("telegram_export"), "{out}");
+}
+
 /// The mock server, like stickpile 0.7.0, has no rechecks: the CLI says the
 /// server is too old instead of "not found".
 #[test]

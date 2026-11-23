@@ -1029,6 +1029,17 @@ impl ApiClient {
         self.post(&path(routes::SET_TELEGRAM_EXPORT, &[set_id]), req).await
     }
 
+    /// What a Telegram export of the set would do to its packs (owner), without
+    /// changing anything; with `repack`, how many published stickers a repack
+    /// moves. Servers before parts answer 404.
+    pub async fn telegram_plan(&self, set_id: &str, repack: bool) -> Result<TelegramPlan> {
+        self.get(
+            &path(routes::SET_TELEGRAM_PLAN, &[set_id]),
+            &[("repack", repack.to_string())],
+        )
+        .await
+    }
+
     pub async fn telegram_import(&self, req: &TelegramImport) -> Result<Job> {
         self.post(routes::TELEGRAM_IMPORT, req).await
     }

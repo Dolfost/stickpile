@@ -3922,6 +3922,7 @@ name = "stickpile-cli"
 version = "0.8.8"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "image",
  "rpassword",

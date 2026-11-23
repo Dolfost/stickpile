@@ -34,3 +34,5 @@ sqlx.workspace = true
 stickpile-setfmt.workspace = true
 image.workspace = true
 tempfile.workspace = true
+# server_e2e.rs includes the server tests' mock of the Telegram Bot API.
+axum.workspace = true

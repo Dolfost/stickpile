@@ -532,7 +532,11 @@ fn print_set(d: &SetDetail) {
             println!("  git error:   {e}");
         }
     }
-    if let Some(p) = &s.telegram_pack {
+    if !s.telegram_parts.is_empty() {
+        // A set larger than one pack is published as several.
+        let names: Vec<&str> = s.telegram_parts.iter().map(|p| p.name.as_str()).collect();
+        println!("  telegram:    {} ({} packs)", names.join(", "), names.len());
+    } else if let Some(p) = &s.telegram_pack {
         println!("  telegram:    {p}");
     }
     if let Some((w, h)) = s.aspect_ratio {
@@ -857,6 +861,21 @@ async fn publish(ctx: &Ctx, a: PublishArgs) -> Result<()> {
             ]);
         }
         t.print();
+        // A set larger than one pack is published as several, its parts.
+        for p in list.iter().filter(|p| !p.parts.is_empty()) {
+            println!("{}: published as {} packs:", p.platform, p.parts.len());
+            for part in &p.parts {
+                let link = part.url.as_deref().unwrap_or(&part.name);
+                match part.stickers {
+                    Some(n) => println!(
+                        "  part {}: {link} ({n} sticker{})",
+                        part.number,
+                        if n == 1 { "" } else { "s" }
+                    ),
+                    None => println!("  part {}: {link}", part.number),
+                }
+            }
+        }
         for p in list.iter().filter(|p| p.last_status == Some(JobStatus::Failed)) {
             if let Some(e) = &p.last_error {
                 println!("{}: the last publish failed: {e}", p.platform);
@@ -868,6 +887,13 @@ async fn publish(ctx: &Ctx, a: PublishArgs) -> Result<()> {
     for (platform, key, value) in a.options {
         let entry = options.entry(platform).or_insert_with(|| json!({}));
         entry[key] = serde_json::Value::String(value);
+    }
+    if a.repack {
+        if !a.to.iter().any(|p| p.trim() == "telegram") {
+            bail!("--repack is for Telegram packs: add telegram to --to");
+        }
+        confirm_repack(ctx, &client, &id, &a.set, a.yes).await?;
+        options.entry("telegram".into()).or_insert_with(|| json!({}))["repack"] = json!(true);
     }
     let req = PublishRequest {
         platforms: a.to,
@@ -899,6 +925,9 @@ async fn publish(ctx: &Ctx, a: PublishArgs) -> Result<()> {
             );
             if let Some(r) = &job.result {
                 println!("  result:   {r}");
+                if job.kind == JobKind::TelegramExport {
+                    print_telegram_parts(r);
+                }
             }
             if let Some(e) = &job.error {
                 println!("  error:    {e}");
@@ -1321,13 +1350,125 @@ async fn telegram(ctx: &Ctx, cmd: TelegramCmd) -> Result<()> {
                 .await?;
             show_job(ctx, &client, job, wait).await
         }
-        TelegramCmd::Export { set, pack, title, wait } => {
+        TelegramCmd::Export {
+            set,
+            pack,
+            title,
+            wait,
+            repack,
+            yes,
+        } => {
             let id = resolve_set(&client, &set).await?;
-            let job = client
-                .telegram_export(&id, &TelegramExport { pack_name: pack, title })
-                .await?;
+            if repack {
+                confirm_repack(ctx, &client, &id, &set, yes).await?;
+            }
+            let req = TelegramExport {
+                pack_name: pack,
+                title,
+                repack,
+            };
+            let job = client.telegram_export(&id, &req).await?;
             show_job(ctx, &client, job, wait).await
         }
+    }
+}
+
+/// The confirmation a repack asks for: what it does and how many published
+/// stickers move, from the server's plan.
+pub(crate) fn repack_summary(set: &str, plan: &TelegramPlan) -> String {
+    let moved = match plan.moved {
+        0 => "no published sticker moves to another pack".to_string(),
+        1 => "1 published sticker moves to another pack".to_string(),
+        n => format!("{n} published stickers move to other packs"),
+    };
+    let mut s = format!(
+        "Repacking puts the stickers of {set} into its Telegram packs again in set order, 120 per pack: {moved}."
+    );
+    for p in &plan.parts {
+        let n = p.stickers.unwrap_or(0);
+        s.push_str(&format!(
+            "\n  part {}: {} ({n} sticker{})",
+            p.number,
+            p.name,
+            if n == 1 { "" } else { "s" }
+        ));
+    }
+    for p in &plan.delete {
+        s.push_str(&format!(
+            "\n  part {}: {} (deleted: no stickers left)",
+            p.number, p.name
+        ));
+    }
+    s
+}
+
+/// Before `--repack`: show what the repack does and how many published
+/// stickers move, then ask (`--yes` does not; without a terminal it is
+/// required). A server older than parts has no plan, and nothing to
+/// repack: it publishes a set as one pack.
+async fn confirm_repack(ctx: &Ctx, client: &ApiClient, set_id: &str, set: &str, yes: bool) -> Result<()> {
+    let plan = match client.telegram_plan(set_id, true).await {
+        Ok(plan) => plan,
+        Err(CoreError::Api { status: 404, error })
+            if error.code == "not_found" && !error.message.contains("Telegram integration is disabled") =>
+        {
+            bail!(
+                "this server publishes a set as one Telegram pack (it is older than packs in parts), so there is \
+                 nothing to repack; publish without --repack"
+            )
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let summary = repack_summary(set, &plan);
+    if ctx.json {
+        eprintln!("{summary}");
+    } else {
+        println!("{summary}");
+    }
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!("refusing to repack without confirmation; pass --yes");
+    }
+    let answer = prompt_line("Repack the parts? [y/N] ")?;
+    if !matches!(answer.to_lowercase().as_str(), "y" | "yes") {
+        bail!("aborted");
+    }
+    Ok(())
+}
+
+/// The packs of a finished Telegram export, from its result: every part with
+/// its link and sticker count (a set larger than one pack has several), the
+/// parts deleted because no sticker was left, and how many stickers a
+/// repack moved. Nothing for a server older than parts (no `parts`).
+fn print_telegram_parts(result: &serde_json::Value) {
+    let Some(parts) = result.get("parts").and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for p in parts {
+        let number = p["number"].as_u64().unwrap_or(0);
+        let name = p["name"].as_str().unwrap_or("?");
+        if p["deleted"].as_bool() == Some(true) {
+            println!("  part {number}:   {name} (deleted: no stickers left)");
+        } else {
+            let n = p["stickers"].as_u64().unwrap_or(0);
+            let url = p["url"].as_str().unwrap_or(name);
+            println!(
+                "  part {number}:   {url} ({n} sticker{})",
+                if n == 1 { "" } else { "s" }
+            );
+        }
+    }
+    if let Some(n) = result
+        .get("moved")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|n| *n > 0)
+    {
+        println!(
+            "  moved:    {n} sticker{} to another pack",
+            if n == 1 { "" } else { "s" }
+        );
     }
 }
 
@@ -1354,6 +1495,9 @@ async fn show_job(ctx: &Ctx, client: &ApiClient, job: Job, wait: bool) -> Result
         }
         if let Some(r) = &job.result {
             println!("  result:   {r}");
+            if job.kind == JobKind::TelegramExport {
+                print_telegram_parts(r);
+            }
         }
         if let Some(e) = &job.error {
             println!("  error:    {e}");
@@ -1663,6 +1807,35 @@ async fn admin(ctx: &Ctx, cmd: AdminCmd) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repack_confirmation_says_how_many_move() {
+        let part = |number, name: &str, stickers| PublishedPart {
+            number,
+            name: name.into(),
+            url: None,
+            stickers,
+        };
+        let plan = TelegramPlan {
+            repack: true,
+            parts: vec![part(1, "cats_by_bot", Some(120)), part(2, "cats_2_by_bot", Some(1))],
+            delete: vec![part(3, "cats_3_by_bot", None)],
+            moved: 7,
+        };
+        assert_eq!(
+            repack_summary("cats", &plan),
+            "Repacking puts the stickers of cats into its Telegram packs again in set order, 120 per pack: 7 \
+             published stickers move to other packs.\n  part 1: cats_by_bot (120 stickers)\n  part 2: \
+             cats_2_by_bot (1 sticker)\n  part 3: cats_3_by_bot (deleted: no stickers left)"
+        );
+        let none = TelegramPlan {
+            moved: 0,
+            ..plan.clone()
+        };
+        assert!(repack_summary("cats", &none).contains(": no published sticker moves to another pack."));
+        let one = TelegramPlan { moved: 1, ..plan };
+        assert!(repack_summary("cats", &one).contains(": 1 published sticker moves to another pack."));
+    }
 
     #[test]
     fn backup_dir_names_are_safe() {

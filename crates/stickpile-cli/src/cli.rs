@@ -584,6 +584,14 @@ pub struct PublishArgs {
     /// Wait for the jobs to finish
     #[arg(long, requires = "to")]
     pub wait: bool,
+    /// Telegram: put every sticker into the parts (packs of 120) again in
+    /// set order, moving published stickers between packs; asks first,
+    /// saying how many move
+    #[arg(long, requires = "to")]
+    pub repack: bool,
+    /// Do not ask for confirmation (--repack)
+    #[arg(long, short, requires = "repack")]
+    pub yes: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -599,7 +607,8 @@ pub enum TelegramCmd {
         #[arg(long)]
         wait: bool,
     },
-    /// Publish a set as a Telegram sticker pack (create or update)
+    /// Publish a set as a Telegram sticker pack (create or update); a set
+    /// larger than one pack (120 stickers) becomes several packs, its parts
     Export {
         set: String,
         /// Pack short name; _by_<bot> is appended if missing [default: the bound pack, else <slug>_by_<bot>]
@@ -609,6 +618,13 @@ pub enum TelegramCmd {
         title: Option<String>,
         #[arg(long)]
         wait: bool,
+        /// Put every sticker into the parts again in set order, moving
+        /// published stickers between packs; asks first, saying how many move
+        #[arg(long)]
+        repack: bool,
+        /// Do not ask for confirmation (--repack)
+        #[arg(long, short, requires = "repack")]
+        yes: bool,
     },
 }
 
@@ -978,6 +994,8 @@ mod tests {
             &["pull", "y", "--wait"],
             &["telegram", "import", "Animals", "--slug", "animals"],
             &["telegram", "export", "cats", "--pack", "cats_by_bot", "--title", "Cats"],
+            &["telegram", "export", "cats", "--repack", "--yes", "--wait"],
+            &["publish", "cats", "--to", "telegram", "--repack", "-y"],
             &["job", "abc", "--wait"],
             &[
                 "recheck",
@@ -1021,6 +1039,11 @@ mod tests {
         assert!(parse(&["export", "cats", "--format", "rar", "-o", "x.rar"]).is_err());
         assert!(parse(&["publish", "cats", "-O", "nodot=1", "--to", "telegram"]).is_err());
         assert!(parse(&["publish", "cats", "--wait"]).is_err(), "--wait needs --to");
+        assert!(parse(&["publish", "cats", "--repack"]).is_err(), "--repack needs --to");
+        assert!(
+            parse(&["telegram", "export", "cats", "--yes"]).is_err(),
+            "--yes is for --repack"
+        );
         let cli = parse(&[
             "publish",
             "cats",
