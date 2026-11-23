@@ -137,8 +137,11 @@ internal class ImeLibrary(private val app: StickpileApp) {
     }
 
     /**
-     * Whether an account is signed in, asking the server (for when there is
-     * nothing to show yet). Unknown (offline, no cached account) counts as yes.
+     * Whether an account is signed in (for when there is nothing to show
+     * yet): the server's answer, or the account the phone last saw when the
+     * server is away or does not answer within 300 ms (the library's
+     * `account`), so the empty Recent tab never waits for the request's
+     * timeout. Unknown (offline, no cached account) counts as yes.
      */
     suspend fun signedIn(): Boolean = try {
         call { it.account() } != null

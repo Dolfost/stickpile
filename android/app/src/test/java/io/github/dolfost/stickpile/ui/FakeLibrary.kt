@@ -1,6 +1,7 @@
 package io.github.dolfost.stickpile.ui
 
 import io.github.dolfost.stickpile.rust.Account
+import io.github.dolfost.stickpile.rust.AccountAnswer
 import io.github.dolfost.stickpile.rust.CacheCleared
 import io.github.dolfost.stickpile.rust.KeepReason
 import io.github.dolfost.stickpile.rust.OfflineEstimate
@@ -24,6 +25,7 @@ import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.PackList
 import io.github.dolfost.stickpile.rust.NoHandle
 import io.github.dolfost.stickpile.rust.PairingLink
+import io.github.dolfost.stickpile.rust.PendingAccount
 import io.github.dolfost.stickpile.rust.PendingSearch
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchAnswer
@@ -103,6 +105,15 @@ class FakeLibrary : StickpileLibraryInterface {
     override suspend fun account(): Account? {
         calls += "account"
         return account.invoke()
+    }
+
+    /** The server's word to come on the account [accountSteps] answers; null: none. */
+    var pendingAccount: () -> PendingAccount? = { null }
+
+    /** Answers with [account] and [pendingAccount]; recorded as `account`. */
+    override suspend fun accountSteps(): AccountAnswer {
+        calls += "account"
+        return AccountAnswer(account.invoke(), pendingAccount())
     }
 
     override fun clearCache(): CacheCleared {
@@ -354,6 +365,20 @@ class FakePending(private val answer: suspend () -> ItemList?) : PendingSearch(N
     var closed = false
 
     override suspend fun serverResults(): ItemList? = answer()
+
+    override fun close() {
+        closed = true
+    }
+}
+
+/**
+ * The server's word on a cached account: [answer] gives it (null: the
+ * token was refused; throwing: no answer). [closed] once let go.
+ */
+class FakePendingAccount(private val answer: suspend () -> Account?) : PendingAccount(NoHandle) {
+    var closed = false
+
+    override suspend fun serverAccount(): Account? = answer()
 
     override fun close() {
         closed = true

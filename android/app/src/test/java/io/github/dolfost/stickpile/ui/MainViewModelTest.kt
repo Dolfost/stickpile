@@ -1,5 +1,6 @@
 package io.github.dolfost.stickpile.ui
 
+import io.github.dolfost.stickpile.rust.Account
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
@@ -8,6 +9,7 @@ import io.github.dolfost.stickpile.ui.main.MainRoute
 import io.github.dolfost.stickpile.ui.main.MainViewModel
 import io.github.dolfost.stickpile.ui.main.isAnotherAccount
 import io.github.dolfost.stickpile.ui.main.routeAfterAccountCheck
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -69,6 +71,62 @@ class MainViewModelTest {
         vm.start()
         advanceUntilIdle()
         assertEquals(listOf("account"), library.calls)
+    }
+
+    /**
+     * The server slow or away at the start: the library opens with the
+     * account the phone last saw, and a revoked token signs out once the
+     * server answers.
+     */
+    @Test
+    fun theCachedAccountOpensTheLibraryAndARefusedTokenSignsOutAfter() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val word = CompletableDeferred<Account?>()
+        val pending = FakePendingAccount { word.await() }
+        library.pendingAccount = { pending }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        assertEquals("not waiting for the server", MainRoute.Library, vm.route)
+        assertEquals(listOf<StickpileLibraryInterface>(library), signedIn)
+
+        word.complete(null)
+        advanceUntilIdle()
+        assertEquals(MainRoute.Onboarding(), vm.route)
+        assertTrue(pending.closed)
+    }
+
+    @Test
+    fun aConfirmedOrUnansweredCachedAccountStays() = runTest(main.dispatcher) {
+        library.account = { alice }
+        library.pendingAccount = { FakePendingAccount { alice } }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        assertEquals(MainRoute.Library, vm.route)
+
+        // No word from the server (away): the account stands.
+        library.pendingAccount = { FakePendingAccount { throw unreachable() } }
+        vm.check()
+        advanceUntilIdle()
+        assertEquals(MainRoute.Library, vm.route)
+    }
+
+    @Test
+    fun aSignInDropsTheWaitForTheAccountBefore() = runTest(main.dispatcher) {
+        library.account = { alice }
+        val word = CompletableDeferred<Account?>()
+        library.pendingAccount = { FakePendingAccount { word.await() } }
+        val vm = model()
+        vm.start()
+        advanceUntilIdle()
+        vm.signInElsewhere()
+        vm.onSignedIn(alice.copy(username = "bob"))
+        assertEquals(MainRoute.KeyboardSetup, vm.route)
+        // The old token's refusal comes late: the new sign-in stays.
+        word.complete(null)
+        advanceUntilIdle()
+        assertEquals(MainRoute.KeyboardSetup, vm.route)
     }
 
     @Test

@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.dolfost.stickpile.rust.Account
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
+import io.github.dolfost.stickpile.rust.PendingAccount
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Failure
@@ -132,10 +133,10 @@ class MainViewModel(
                 return@launch
             }
             library = lib
-            val result = catching { lib.account() }
+            val result = catching { lib.accountSteps() }
             result.exceptionOrNull()?.let { log.failed(Doing.CHECKING_ACCOUNT, it) }
-            account = result.getOrNull()
-            var next = routeAfterAccountCheck(result)
+            account = result.getOrNull()?.account
+            var next = routeAfterAccountCheck(result.map { it.account })
             if (next == MainRoute.Library) signedIn(lib)
             val link = pendingLink
             if (link != null || pendingElsewhere) {
@@ -144,6 +145,27 @@ class MainViewModel(
                 next = MainRoute.Onboarding(link, canCancel = next == MainRoute.Library)
             }
             route = next
+            result.getOrNull()?.pending?.let { confirm(it) }
+        }
+    }
+
+    /**
+     * The account the screens go on with is the one the phone last saw,
+     * because the server had not answered yet (it is slow or away): its
+     * word on it, once it comes. A refused token (a revoked one) signs out
+     * as it would have at the start; no answer leaves the account as it
+     * is. A new check or sign-in drops the wait.
+     */
+    private suspend fun confirm(pending: PendingAccount) {
+        val server = pending.use { catching { it.serverAccount() } }
+        server.exceptionOrNull()?.let { log.failed(Doing.CHECKING_ACCOUNT, it) }
+        if (server.isSuccess && server.getOrNull() == null) {
+            account = null
+            route = when (val now = route) {
+                MainRoute.Library, MainRoute.KeyboardSetup -> MainRoute.Onboarding()
+                is MainRoute.Onboarding -> now.copy(canCancel = false)
+                else -> now
+            }
         }
     }
 
@@ -194,6 +216,8 @@ class MainViewModel(
 
     /** Onboarding signed [account] in: on to the keyboard walk-through, which names it. */
     fun onSignedIn(account: Account) {
+        // A word on the account before this sign-in is no longer news.
+        checking?.cancel()
         if (isAnotherAccount(this.account, account)) accountChanged()
         this.account = account
         stale = false
