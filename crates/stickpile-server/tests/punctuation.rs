@@ -31,7 +31,7 @@ const ITEMS: &[(&str, &str, Visibility, &str, &str)] = &[
         "alice",
         Visibility::Private,
         "eighth",
-        "\u{0447}\u{043e}\u{FF1F}",
+        "\u{0449}\u{043e}\u{FF1F}",
     ),
     ("wait", "alice", Visibility::Private, "ninth", "wait..."),
     ("dots4", "alice", Visibility::Private, "tenth", "...."),

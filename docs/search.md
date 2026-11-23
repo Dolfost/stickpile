@@ -120,7 +120,7 @@ Examples:
 | `x:п'ятн` | "п'ятниця" written with any apostrophe (`'`, `’`, `ʼ`, a backtick), typed with any. |
 | `-x:lo` | Items without a word starting with `lo` in their text; `-x:lool` leaves out "lool" and the words it starts, not "lol". |
 | `x:кіт -tag:nsfw` | Items with `Кіт` written on them, without the `nsfw` tag. |
-| `x:?` | Items whose picture says "?", "???", "?!", "what?" or "что？". |
+| `x:?` | Items whose picture says "?", "???", "?!", "what?" or "що？". |
 | `x:...` | "...", "wait...", "....", "…"; not "so..". |
 | `x:"what?"` | "what?", "WHAT ?!"; not "what" alone or "whatever?". |
 | `-x:?` | Items with no `?` written on them. |

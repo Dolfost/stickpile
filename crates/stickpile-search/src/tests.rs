@@ -324,7 +324,7 @@ fn tokenize_keeps_punctuation_runs() {
 #[test]
 fn fullwidth_question_mark_is_ascii() {
     assert_eq!(kinds("\u{FF1F}"), kind_list(&[("?", true)]));
-    assert_eq!(kinds("что\u{FF1F}\u{FF01}"), kind_list(&[("что", false), ("?!", true)]));
+    assert_eq!(kinds("що\u{FF1F}\u{FF01}"), kind_list(&[("що", false), ("?!", true)]));
     // The other forms of `?` and `!` that NFKC folds.
     assert_eq!(
         kinds("\u{FE56} \u{2047} \u{2048} \u{2049} \u{203C}"),

@@ -250,7 +250,7 @@ fn punctuated() -> Index {
         doc("what_sp", "WHAT ?"),
         doc("what_no", "what"),
         doc("whatever", "whatever?"),
-        doc("full", "\u{0447}\u{043e}\u{FF1F}"),
+        doc("full", "\u{0449}\u{043e}\u{FF1F}"),
         doc("wait", "wait..."),
         doc("dots4", "...."),
         doc("ellipsis", "\u{2026}"),
@@ -303,7 +303,7 @@ fn phrase_word_then_punctuation() {
     assert_eq!(found(&ix, "x:what?"), strs(&["what", "what_sp"]), "unquoted the same");
     assert_eq!(found(&ix, "x:\"what ?\""), strs(&["what", "what_sp"]));
     assert_eq!(found(&ix, "x:wait..."), strs(&["wait"]));
-    assert_eq!(found(&ix, "x:\u{0447}\u{043e}?"), strs(&["full"]));
+    assert_eq!(found(&ix, "x:\u{0449}\u{043e}?"), strs(&["full"]));
     // The word as a word is matched: a typo is forgiven (and ranks so).
     assert_eq!(found(&ix, "x:waht?"), strs(&["what", "what_sp"]));
     assert!(hits(&ix, "x:waht?").iter().all(|h| h.text_tier == 3));
