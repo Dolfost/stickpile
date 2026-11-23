@@ -13,6 +13,7 @@ import io.github.dolfost.stickpile.rust.LibraryDirs
 import io.github.dolfost.stickpile.rust.LibraryException
 import io.github.dolfost.stickpile.rust.StickpileLibrary
 import io.github.dolfost.stickpile.sync.CacheChanges
+import io.github.dolfost.stickpile.sync.NetworkWatch
 import io.github.dolfost.stickpile.ui.library.Thumbnails
 import java.io.File
 import android.util.Log
@@ -54,6 +55,27 @@ class StickpileApp : Application() {
             val choices = offline.current
             lib.setOfflineOptions(choices.options)
             if (choices.paused) lib.pauseOffline()
+            // A network that appears gets the server checked at once.
+            NetworkWatch.start(this) { lib.checkServer() }
+        }
+    }
+
+    private var backOnlineSync: Job? = null
+
+    /**
+     * The server answers again after it was away (the app or the keyboard
+     * saw it, [io.github.dolfost.stickpile.sync.ServerWatch]): sync now, as
+     * "Sync now" does, so what changed meanwhile comes in and the unsent
+     * uses go out; one at a time, whoever saw it. Call on the main thread.
+     */
+    fun syncBackOnline() {
+        if (backOnlineSync?.isActive == true) return
+        backOnlineSync = scope.launch {
+            try {
+                cacheChanges.after(library.syncNow())
+            } catch (e: LibraryException) {
+                Log.i(TAG, "sync after the server came back failed: ${e.javaClass.simpleName}")
+            }
         }
     }
 
