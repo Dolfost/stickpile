@@ -67,7 +67,8 @@ async fn a_dropped_client_stops_checking_its_server() {
 #[tokio::test(start_paused = true)]
 async fn a_check_asked_for_while_one_is_out_is_not_lost() {
     let checks = Arc::new(AtomicUsize::new(0));
-    // A check to a host that is gone takes the connect timeout (2 s).
+    // A check to a host that is gone takes the connect timeout (the
+    // client's timeout, 2 s here).
     let client = counted(&checks, Duration::from_secs(2));
     client.check_now();
     settle().await;
@@ -97,20 +98,18 @@ async fn a_check_asked_for_while_one_is_out_is_not_lost() {
     );
 }
 
-/// "Reads ... connect within 2 s ...; `timeout_secs` still bounds the whole
-/// request, so a server that accepts the connection and never answers takes
-/// that long" (docs/offline.md, "Connect timeout"). Over https, which every
-/// server behind `tailscale serve` is, reqwest counts the TLS handshake (and
-/// the DNS lookup) in the connect timeout: a handshake that takes longer
-/// than 2 s (one lost SYN costs 1 s, then two round trips on a slow mobile
-/// link or a relayed tailnet path) is an unreachable server, and the
-/// background check uses the same pool, so it cannot find it again either.
-/// A listener that takes connections and never answers stands for the slow
-/// handshake here: over http the read waits for `timeout_secs`, over https
-/// it gives up after 2 s. Ignored: a decision for the owner (and 6 s of
-/// real time); run it with `--ignored`.
+/// Over https, which every server behind `tailscale serve` is, reqwest
+/// counts the TLS handshake (and the DNS lookup) in the connect timeout. A
+/// shorter connect timeout for reads (2 s, in this round before the review)
+/// made a handshake that takes longer (one lost SYN costs 1 s, then two
+/// round trips on a slow mobile link or a relayed tailnet path) an
+/// unreachable server, and the background check, on the same pool, could
+/// not find it again either. Reads and the check connect within
+/// `timeout_secs`, as in 0.8.7 (the owner's decision). A listener that
+/// takes connections and never answers stands for the slow handshake
+/// here: over https a read waits for `timeout_secs` as over http. 8 s of
+/// real time.
 #[tokio::test]
-#[ignore = "the TLS handshake counts in the 2 s connect timeout: owner's decision"]
 async fn reads_over_https_get_timeout_secs_for_the_handshake() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

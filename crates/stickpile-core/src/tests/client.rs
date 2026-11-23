@@ -645,39 +645,57 @@ fn blackhole() -> (tokio::net::TcpListener, Vec<std::net::TcpStream>, String) {
     (listener, held, format!("http://{addr}"))
 }
 
-/// Reads connect within 2 s, so a host that is gone is recognised quickly;
-/// a transfer connects within `timeout_secs` (here 4 s) as before.
+/// Reads and the background check connect within `timeout_secs` (here
+/// 3 s), as in 0.8.7, so a host that is gone is recognised after that long
+/// (a search does not wait for it: docs/offline.md, "Results without
+/// waiting"). A transfer connects within it too and runs within its own
+/// timeout (here 4 s): a server that takes the connection and never
+/// answers keeps it longer than a read.
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn interactive_connect_timeout_is_2s() {
+async fn reads_and_checks_connect_within_timeout_secs() {
     use std::time::Instant;
     let ms = Duration::from_millis;
-    let (_listener, _held, url) = blackhole();
-    let client = ApiClient::new(&url, Duration::from_secs(4)).unwrap();
+    let timeout = Duration::from_secs(3);
+    let (_listener, _held, gone) = blackhole();
+    let client = ApiClient::new(&gone, timeout).unwrap();
+    let checked = ApiClient::new(&gone, timeout).unwrap().with_fail_fast();
+    let hung = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let silent = ApiClient::new(&format!("http://{}", hung.local_addr().unwrap()), timeout)
+        .unwrap()
+        .with_transfer_timeout(Duration::from_secs(4));
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("file");
     let read = async {
         let start = Instant::now();
         let err = client.me().await.unwrap_err();
-        (start.elapsed(), err)
+        assert!(err.is_offline(), "{err}");
+        start.elapsed()
+    };
+    let check = async {
+        let start = Instant::now();
+        checked.check_now();
+        let now = checked.reach_changed(crate::Reach::Unknown).await;
+        assert!(now.is_unreachable(), "{now:?}");
+        start.elapsed()
     };
     let transfer = async {
         let start = Instant::now();
-        let err = client
+        let err = silent
             .download("/api/v1/items/x/file/original", &dest)
             .await
             .unwrap_err();
-        (start.elapsed(), err)
+        assert!(err.is_offline(), "{err}");
+        start.elapsed()
     };
-    let ((read_took, read_err), (transfer_took, transfer_err)) = tokio::join!(read, transfer);
-    assert!(read_err.is_offline(), "{read_err}");
-    assert!(transfer_err.is_offline(), "{transfer_err}");
+    let (read, check, transfer) = tokio::join!(read, check, transfer);
     assert!(
-        read_took >= ms(1900) && read_took < ms(3000),
-        "a read connects within 2 s: {read_took:?}"
+        read >= ms(2900) && read < ms(3900),
+        "a read connects within timeout_secs: {read:?}"
     );
     assert!(
-        transfer_took >= ms(3900),
-        "a transfer connects within timeout_secs: {transfer_took:?}"
+        check >= ms(2900) && check < ms(3900),
+        "a check connects within timeout_secs: {check:?}"
     );
+    assert!(transfer >= ms(3900), "a transfer runs within its timeout: {transfer:?}");
 }

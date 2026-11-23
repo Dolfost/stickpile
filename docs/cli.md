@@ -190,7 +190,7 @@ own_packs = false       # keep the packs you own
 | `cache_max_mb` | `512` | LRU cap for cached thumbnails and copied files |
 | `default_target` | `"generic"` | target app when none is given |
 | `prefer_stickers` | `false` | copy Telegram sticker renditions by default |
-| `timeout_secs` | `5` | request timeout before the offline fallback (reads connect within 2 s; transfers get 10 min) |
+| `timeout_secs` | `5` | request timeout before the offline fallback (transfers get 10 min) |
 | `ui.columns` | `6` | popup grid columns at the default window size (> 0); a resized window reflows |
 | `ui.thumb_px` | `128` | popup thumbnail size (>= 32) |
 | `ui.hide_on_copy` | `true` | hide the popup after copying |
@@ -797,9 +797,8 @@ The cache (`cache_dir`) keeps:
 - **Copy history**: the "recently used" list.
 - **Usage queue**: copy events not yet uploaded.
 
-When the server is unreachable (connection refused, no connection within
-2 s for a read, timeout after `timeout_secs`, or a 502/503/504 from the
-proxy):
+When the server is unreachable (connection refused, timeout after
+`timeout_secs`, or a 502/503/504 from the proxy):
 
 | command | offline |
 |---|---|

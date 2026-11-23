@@ -9,10 +9,8 @@
 //!   without an `ApiError` body) become [`CoreError::Offline`] so callers can
 //!   fall back to the offline cache.
 //! * Ordinary requests use the configured `timeout_secs`; uploads, imports,
-//!   exports and file downloads use [`ApiClient::transfer_timeout`]. Reads
-//!   with the ordinary timeout connect within
-//!   [`INTERACTIVE_CONNECT_TIMEOUT`] (2 s), the others within
-//!   `timeout_secs`.
+//!   exports and file downloads use [`ApiClient::transfer_timeout`]. Every
+//!   request connects within `timeout_secs`.
 //! * Opt-in ([`ApiClient::with_fail_fast`]): once a request finds the server
 //!   unreachable, reads fail as offline at once instead of each waiting for
 //!   the timeout, `GET /healthz` checks the server in the background until
@@ -180,14 +178,6 @@ pub struct RecheckStarted {
 /// The message of a read refused because the server is believed
 /// unreachable ([`ApiClient::with_fail_fast`]).
 pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached; it is checked again in the background";
-
-/// How long a read (a `GET` with the ordinary timeout: searches, lists,
-/// the sync, `/healthz`) may take to connect, so that a server that is
-/// gone (a tailnet peer that left, a host that is off) is recognised
-/// quickly. `timeout_secs` still bounds the whole request; writes,
-/// uploads, imports, exports and file downloads connect within
-/// `timeout_secs` as before. Never more than the client's timeout.
-pub const INTERACTIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// While a server is believed unreachable ([`ApiClient::with_fail_fast`]),
 /// `GET /healthz` checks it this often for the first [`PROBE_FAST_FOR`] of
@@ -465,13 +455,10 @@ impl Drop for CheckTask {
     }
 }
 
-/// Async REST client. Cheap to clone (shares the connection pools and token).
+/// Async REST client. Cheap to clone (shares the connection pool and token).
 #[derive(Clone)]
 pub struct ApiClient {
-    /// Reads with the ordinary timeout: they connect within
-    /// [`INTERACTIVE_CONNECT_TIMEOUT`].
-    http_read: reqwest::Client,
-    /// Writes and transfers: they connect within `timeout`.
+    /// Every request connects within `timeout`.
     http: reqwest::Client,
     base: String,
     token: Arc<RwLock<Option<String>>>,
@@ -499,16 +486,13 @@ impl ApiClient {
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(CoreError::Other(format!("server URL must be http(s): {base_url:?}")));
         }
-        let http = |connect: Duration| {
-            reqwest::Client::builder()
-                .connect_timeout(connect)
-                .user_agent(concat!("stickpile-core/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .map_err(|e| CoreError::Other(format!("HTTP client: {e}")))
-        };
+        let http = reqwest::Client::builder()
+            .connect_timeout(timeout)
+            .user_agent(concat!("stickpile-core/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| CoreError::Other(format!("HTTP client: {e}")))?;
         Ok(ApiClient {
-            http_read: http(INTERACTIVE_CONNECT_TIMEOUT.min(timeout))?,
-            http: http(timeout)?,
+            http,
             base: base_url.trim_end_matches('/').to_string(),
             token: Arc::new(RwLock::new(None)),
             timeout,
@@ -531,7 +515,6 @@ impl ApiClient {
     /// server makes of us by tailnet identity alone.
     pub fn anonymous(&self) -> ApiClient {
         ApiClient {
-            http_read: self.http_read.clone(),
             http: self.http.clone(),
             base: self.base.clone(),
             token: Arc::new(RwLock::new(None)),
@@ -562,7 +545,7 @@ impl ApiClient {
     /// Shared with the clones made from now on. The checks run on a Tokio
     /// runtime: the one of the request that failed, or of the last request.
     pub fn with_fail_fast(mut self) -> ApiClient {
-        let http = self.http_read.clone();
+        let http = self.http.clone();
         let url = self.url(routes::HEALTH);
         let timeout = self.timeout;
         let probe: ProbeFn = Arc::new(move || {
@@ -686,15 +669,9 @@ impl ApiClient {
 
     // -- plumbing -----------------------------------------------------------
 
-    /// A request with the ordinary timeout; a read connects within
-    /// [`INTERACTIVE_CONNECT_TIMEOUT`].
+    /// A request with the ordinary timeout.
     fn request(&self, method: Method, route_path: &str, auth: bool) -> Result<RequestBuilder> {
-        let http = if method == Method::GET {
-            &self.http_read
-        } else {
-            &self.http
-        };
-        let rb = http.request(method, self.url(route_path)).timeout(self.timeout);
+        let rb = self.http.request(method, self.url(route_path)).timeout(self.timeout);
         Ok(self.authorize(rb, auth))
     }
 
@@ -726,12 +703,11 @@ impl ApiClient {
             return self.answer(rb.send().await, pass_429).await;
         };
         reach.note_runtime();
-        let (http, request) = rb.build_split();
-        let request = request.map_err(map_reqwest)?;
+        let request = rb.build().map_err(map_reqwest)?;
         if *request.method() == Method::GET && reach.refuse_read() {
             return Err(CoreError::Offline(RECENTLY_UNREACHABLE.into()));
         }
-        let result = self.answer(http.execute(request).await, pass_429).await;
+        let result = self.answer(self.http.execute(request).await, pass_429).await;
         reach.record(&result);
         result
     }

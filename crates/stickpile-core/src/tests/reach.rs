@@ -1,10 +1,10 @@
 //! Reachability and results without waiting (docs/offline.md): the watch
 //! value, the background checks and their schedule, and searches that
-//! never wait for a server that does not answer (the short connect timeout
-//! of reads is tested in `client.rs`). "Hung" is a listener that accepts and
-//! never answers (like a tailnet peer that is gone), "refused" a closed
-//! port, "slow" the mock with a delay; the schedule runs on paused time
-//! with a counted check.
+//! never wait for a server that does not answer (the connect timeout of
+//! reads and checks is tested in `client.rs`). "Hung" is a listener that
+//! accepts and never answers (like a tailnet peer that is gone), "refused"
+//! a closed port, "slow" the mock with a delay; the schedule runs on paused
+//! time with a counted check.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -432,7 +432,7 @@ async fn search_unreachable_answers_offline_at_once() {
         ids(&steps.first.hits),
         offline_cats(&session, Some(TargetApp::Generic), &items)
     );
-    // Well under the 2 s connect timeout: no request was made.
+    // Well under the timeout (2 s here): no request was made.
     assert!(took < ms(100), "{took:?}");
 }
 

@@ -486,16 +486,16 @@ first, cached, then }`.
 
 ### Connect timeout
 
-Reads with the ordinary timeout (`GET`: searches, item lists, the sync,
-`/healthz`) connect within 2 s (`INTERACTIVE_CONNECT_TIMEOUT`, a constant,
-never more than `timeout_secs`), so a host that is gone is recognised
-quickly; `timeout_secs` still bounds the whole request, so a server that
-accepts the connection and never answers takes that long. Writes connect
-within `timeout_secs`; uploads, imports, exports and file downloads
-connect within `timeout_secs` and run within the transfer timeout (10
-minutes), as before. The client keeps two connection pools for this
-(reqwest sets the connect timeout per pool). The CLI shares the client, so
-its reads connect within 2 s too.
+Every request, the background check too, connects within `timeout_secs`
+(5 s by default), as in 0.8.7, and an ordinary one runs within it;
+uploads, imports, exports and file downloads run within the transfer
+timeout (10 minutes). Over https the TLS handshake (and the DNS lookup)
+counts in the connect timeout. A shorter one for reads (2 s, tried in this
+round) made a handshake that takes longer (a lost SYN, a slow mobile link,
+a relayed tailnet path) an unreachable server, which the check, connecting
+the same way, could not find again. Searches do not wait for the timeout:
+the offline results come after `OFFLINE_AFTER`, and while the value is
+`Unreachable` reads fail at once.
 
 ### What the shells do
 
