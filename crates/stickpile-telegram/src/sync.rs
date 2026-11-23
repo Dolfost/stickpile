@@ -15,7 +15,7 @@ pub const TGS_SKIP_REASON: &str = "animated .tgs stickers are not supported (str
 const MAX_EMOJIS: usize = 20;
 const MAX_KEYWORDS: usize = 20;
 const MAX_KEYWORD_CHARS: usize = 64;
-const MAX_TITLE_CHARS: usize = 64;
+pub(crate) const MAX_TITLE_CHARS: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct ImportedSticker {
@@ -675,7 +675,7 @@ fn keyword_list(it: &ExportItem) -> Vec<String> {
     out
 }
 
-fn clamp_title(title: &str, fallback: &str) -> String {
+pub(crate) fn clamp_title(title: &str, fallback: &str) -> String {
     let t: String = title.trim().chars().take(MAX_TITLE_CHARS).collect();
     if t.is_empty() {
         fallback.chars().take(MAX_TITLE_CHARS).collect()
