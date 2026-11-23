@@ -140,14 +140,30 @@ pub fn clean_lines(frames: Vec<Vec<TextLine>>, min_confidence: f32) -> String {
 
 /// One line as it is stored: [`clean_text`], private-use and replacement
 /// characters removed, whitespace runs as one space; `None` when no letter
-/// or digit is left (frames, borders and specks read as `|`, `_`, `~`).
+/// or digit is left and the line is no [`punctuation_line`]
+/// (frames, borders and specks read as `|`, `_`, `~`, `•`, `-`).
 fn printable_line(text: &str) -> Option<String> {
     let cleaned: String = clean_text(text)
         .chars()
         .filter(|c| !matches!(c, '\u{FFFD}' | '\u{E000}'..='\u{F8FF}'))
         .collect();
     let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    line.chars().any(char::is_alphanumeric).then_some(line)
+    (line.chars().any(char::is_alphanumeric) || punctuation_line(&line)).then_some(line)
+}
+
+/// A line without a letter or digit that is still writing: a question or
+/// an exclamation (`???`, `?!`, `!!!`, full-width `？` too) or an ellipsis
+/// (`...`, `…`), which a sticker may say alone. Specks are not read as
+/// those (docs/ai.md, "OCR and the text field").
+fn punctuation_line(line: &str) -> bool {
+    line.contains("...")
+        || line.chars().any(|c| {
+            matches!(
+                c,
+                '?' | '!' | '\u{00A1}' | '\u{00BF}' | '\u{2026}' | '\u{203C}' | '\u{203D}' | '\u{2047}'
+                    ..='\u{2049}' | '\u{FE56}' | '\u{FE57}' | '\u{FF01}' | '\u{FF1F}'
+            )
+        })
 }
 
 /// Lines compare equal across frames when they differ only in case and spacing.
@@ -258,6 +274,80 @@ mod tests {
         );
         assert_eq!(got, "no thoughts\nhead empty");
         assert_eq!(clean_lines(vec![vec![], vec![TextLine::new("x", 0.1)]], 0.5), "");
+    }
+
+    /// A sticker may say only "???" or "?!": such a line is writing.
+    #[test]
+    fn punctuation_only_lines_are_kept() {
+        for line in [
+            "???",
+            "?!",
+            "!?",
+            "!!!",
+            "!",
+            "?",
+            "...",
+            "....",
+            "\u{2026}",
+            "? !",
+            "\u{FF1F}\u{FF01}",
+            "\u{00BF}?",
+        ] {
+            assert_eq!(printable_line(line).as_deref(), Some(line), "{line}");
+        }
+        assert_eq!(printable_line("  ?   ! ").as_deref(), Some("? !"));
+        let got = clean_lines(
+            vec![vec![
+                line("???", 0.99, 0.0, 0.0),
+                line("|", 0.99, 0.0, 100.0),
+                line("?!", 0.3, 0.0, 200.0),
+            ]],
+            MIN_CONFIDENCE,
+        );
+        assert_eq!(got, "???", "an unsure one still goes");
+    }
+
+    /// Frames, borders, lines and specks, as the reader read them in the
+    /// rendered pictures of the punctuation round (`•` at 0.99, `—`, `–`,
+    /// `_`, `□□`) and as it may (`|`, `~`, `.`, `..`).
+    #[test]
+    fn speck_lines_are_dropped() {
+        for speck in [
+            "|",
+            "_",
+            "~",
+            "\u{2022}",
+            "\u{2022} \u{2022} \u{2022}",
+            "-",
+            "\u{2013}",
+            "\u{2014}",
+            "\u{2212}",
+            ".",
+            "..",
+            ". . .",
+            ",",
+            "'",
+            "`",
+            "\u{25A1}\u{25A1}",
+            "*",
+            "/",
+            ":",
+            ";",
+            "\u{00B0}",
+            "^",
+            "=",
+        ] {
+            assert_eq!(printable_line(speck), None, "{speck}");
+        }
+        let got = clean_lines(
+            vec![vec![
+                line("\u{2022}", 0.99, 0.0, 0.0),
+                line("\u{2013}", 0.67, 0.0, 100.0),
+                line("\u{2022}", 0.99, 0.0, 200.0),
+            ]],
+            MIN_CONFIDENCE,
+        );
+        assert_eq!(got, "");
     }
 
     #[test]

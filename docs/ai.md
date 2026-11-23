@@ -494,7 +494,11 @@ found through `ocr::clean_lines`, the rules every reader shares:
   a line, in the reader's order;
 - printable text only: `clean_text`, private-use and replacement
   characters removed, whitespace runs as one space, a line without a
-  letter or digit (frames, borders, specks) dropped;
+  letter or digit (frames, borders, specks) dropped, unless it has a `?`,
+  a `!` or an ellipsis (`...`, `…`), as a sticker saying only "???" or
+  "?!" has (`ocr::punctuation_line`; the specks, lines and borders of the
+  pictures rendered to check it were read as `•`, `–`, `—`, `_` or
+  nothing, never as those);
 - a row already read in an earlier frame (case and spacing aside) is not
   repeated; the same row twice in one frame stays;
 - the lines joined with `\n`, cut at 2000 characters.
@@ -554,7 +558,7 @@ detection and the PP-OCRv5 mobile `cyrillic` recogniser, chosen by the
 no polygon clipper; [what it implements](#what-the-rust-side-implements)).
 It returns every recognised box (often a word) with its score and its
 bounds in frame pixels; `ocr::clean_lines` keeps those at or above 0.5 with
-a letter or digit and puts them into rows.
+a letter or digit (or a `?`, a `!`, an ellipsis) and puts them into rows.
 
 On top of RapidOCR it
 
