@@ -1861,6 +1861,69 @@ fn perf_synthetic_library() {
             println!("  {label:<22} {q:<28} {per:>10.2?}  total={total}");
         }
     }
+    // The same 50k library with punctuation in about a third of the names
+    // and of the texts (the rows above are without).
+    let n = 50_000;
+    let (mut docs, _) = synthetic_library(n, dim, &mut Rng(42));
+    let mut rng = Rng(7);
+    let marks = ["?", "??", "?!", "...", "\u{2026}", "!", "!!!", "*", "#"];
+    for d in &mut docs {
+        if rng.below(3) == 0 {
+            d.name = format!("{}{}", d.name, rng.pick(&marks));
+        }
+        if rng.below(3) == 0 {
+            d.text = format!("{} {}", d.keywords.join(" "), rng.pick(&marks));
+        }
+    }
+    let start = Instant::now();
+    let mut ix = Index::new();
+    for d in docs {
+        ix.upsert(d);
+    }
+    println!(
+        "n={n} with punctuation: indexed in {:.2?}, vocab {}, punctuation tokens {}",
+        start.elapsed(),
+        ix.store.vocab_len(),
+        ix.store.puncts.len()
+    );
+    let v = viewer("user0");
+    let mine = |i: usize| ix.get(&format!("item{i:06}")).filter(|d| d.owner_id == v.user_id);
+    // The word of the rows above, and the last word of a text with `?`.
+    let w0 = (0..n)
+        .find_map(|i| {
+            let mut words = mine(i)?.name.split(' ');
+            let first = words.next()?;
+            words.next().map(|_| first.to_string())
+        })
+        .unwrap();
+    let w2 = (0..n)
+        .find_map(|i| {
+            let d = mine(i).filter(|d| d.text.ends_with(" ?"))?;
+            d.keywords.last().cloned()
+        })
+        .unwrap();
+    for (label, q) in [
+        ("exact word", w0.clone()),
+        ("2-char prefix", w0.chars().take(2).collect()),
+        ("x:?", "x:?".to_string()),
+        ("x:...", "x:...".to_string()),
+        ("?", "?".to_string()),
+        ("...", "...".to_string()),
+        ("word?", format!("{w0}?")),
+        ("2-char prefix?", format!("{}?", w0.chars().take(2).collect::<String>())),
+        ("x:\"word?\"", format!("x:\"{w2}?\"")),
+        ("-x:?", "-x:?".to_string()),
+    ] {
+        let query = Query::parse(&q);
+        let runs = 20;
+        let start = Instant::now();
+        let mut total = 0;
+        for _ in 0..runs {
+            total = ix.search(&query, &v, &SearchOptions::default()).total;
+        }
+        let per = start.elapsed() / runs;
+        println!("  {label:<22} {q:<28} {per:>10.2?}  total={total}");
+    }
 }
 
 /// `text:` against a plain word of the same length (docs/search.md,

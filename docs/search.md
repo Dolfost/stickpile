@@ -606,6 +606,26 @@ cd /data/stickpile && nix develop -c cargo test -p stickpile-search --release --
 | emoji name (`e:skull`, 1.7k hits at 50k) | 0.67 ms | 2.3 ms |
 | 1-letter emoji name (`e:s`, 747 emojis) | 0.65 ms | 2.6 ms |
 
+Punctuation: the rows above have none, and took the time they took
+before punctuation tokens to within 4 % (medians of 7 runs on one
+P-core, alternating with the index before them). The last rows of
+`perf_synthetic_library` add a run of punctuation (`?`, `??`, `?!`,
+`...`, `…`, `!`, `!!!`, `*`, `#`) to about a third of the names and of
+the texts of the 50k library (8 punctuation tokens), median of 7 runs of
+the mean of 20:
+
+| query | hits | time |
+|---|---|---|
+| `vetosa` (a word, as above) | 38 | 0.05 ms |
+| `vetosa?` (the word, the `?` lifting) | 38 | 0.05 ms |
+| `ve` / `ve?` | 4,260 | 1.5 ms / 1.75 ms |
+| `x:?` | 2,097 | 0.44 ms |
+| `x:...` | 1,372 | 0.29 ms |
+| `x:"tehopu?"` (a word, then `?`) | 2 | 0.04 ms |
+| `?` | 3,902 | 1.3 ms |
+| `...` | 2,601 | 0.72 ms |
+| `-x:?` | 16,129 | 1.9 ms |
+
 `perf_emoji_names`, run alone so that the names table is not loaded yet
 (`... --nocapture perf_emoji_names`): the first use parses the table in
 about 3 ms; then a name takes 0.2 to 0.3 ms, and 0.9 ms when no word
