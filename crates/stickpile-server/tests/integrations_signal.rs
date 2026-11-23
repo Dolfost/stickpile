@@ -13,7 +13,7 @@ use common::{png, TestServer, TestUser};
 use integrations_support::mock_signal::{self, Shared, ACI, DEVICE, PASSWORD};
 use integrations_support::run_jobs_now;
 use serde_json::{json, Value};
-use stickpile_api::{routes, Job, JobKind, JobStatus, Publication, PublishJobs, SetDetail, Visibility};
+use stickpile_api::{routes, Job, JobKind, JobStatus, Publication, PublishJobs, PublishedPart, SetDetail, Visibility};
 use stickpile_signal::crypto::{derive_keys, encrypt};
 use stickpile_signal::{
     check_sticker, import_pack, ImageFormat, Manifest, ManifestSticker, PackKey, PackLink, SignalClient, SignalConfig,
@@ -513,4 +513,443 @@ async fn the_import_page_queues_an_import_and_forgets_a_bad_link() {
     let r = b.post_form("/signal/import", &[("link", &link.url())]).await;
     assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
     assert!(location(&r).starts_with("/jobs/"));
+}
+
+// ---------------------------------------------------------------------------
+// Sets larger than one pack
+// ---------------------------------------------------------------------------
+
+/// The emoji of the `k`-th item of a large set, one of its own (U+1F300
+/// onwards), so a pack read back says which item each sticker is.
+fn nth_emoji(k: u32) -> String {
+    char::from_u32(0x1F300 + k).unwrap().to_string()
+}
+
+fn emoji_index(emoji: Option<&str>) -> u32 {
+    emoji.and_then(|e| e.chars().next()).unwrap() as u32 - 0x1F300
+}
+
+/// Adds `n` distinct stills to the set, 50 per upload, item `k` with
+/// `nth_emoji(k)`.
+async fn fill(srv: &TestServer, u: &TestUser, set_id: &str, n: u32) {
+    let mut start = 0;
+    while start < n {
+        let end = (start + 50).min(n);
+        let names: Vec<String> = (start..end).map(|k| format!("s{k:04}.png")).collect();
+        let files: Vec<(&str, Vec<u8>)> = names
+            .iter()
+            .zip(start..end)
+            .map(|(name, k)| (name.as_str(), png(10_000 + u64::from(k))))
+            .collect();
+        let meta: Vec<Value> = (start..end).map(|k| json!({"emojis": [nth_emoji(k)]})).collect();
+        let res: Vec<stickpile_api::UploadResult> =
+            srv.upload(u, set_id, files, Some(json!(meta))).await.expect(200).json();
+        assert!(res.iter().all(|r| r.item.is_some() && !r.already_in_set), "{res:?}");
+        start = end;
+    }
+    drop_variant_jobs(srv).await;
+}
+
+async fn read_back(sg: &Sg, url: &str) -> stickpile_signal::ImportedPack {
+    import_pack(&client(sg), &PackLink::parse(url).unwrap(), 1 << 20)
+        .await
+        .unwrap()
+}
+
+async fn signal_publication(srv: &TestServer, u: &TestUser, set_id: &str) -> Publication {
+    let list: Vec<Publication> = srv
+        .get(u, &routes::path(routes::SET_PUBLISH, &[set_id]))
+        .await
+        .expect(200)
+        .json();
+    list.into_iter().find(|p| p.platform == "signal").unwrap()
+}
+
+fn summary(result: &Value) -> String {
+    stickpile_server::service::publish::platform("signal")
+        .unwrap()
+        .summary(result)
+}
+
+fn form_sizes(sg: &Sg) -> Vec<usize> {
+    sg.mock.lock().unwrap().forms.iter().map(|f| f.1).collect()
+}
+
+/// (number, title, stickers, has a link) of a result's parts.
+fn result_parts(r: &Value) -> Vec<(u64, String, u64, bool)> {
+    r["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["number"].as_u64().unwrap(),
+                p["title"].as_str().unwrap().to_string(),
+                p["stickers"].as_u64().unwrap(),
+                p["url"].is_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn signal_200_items_one_pack() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "full", Visibility::Private).await;
+    fill(srv, &alice, &set.id, 200).await;
+    let j = publish(srv, &alice, &set.id).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    // Exactly as before parts: one pack, no `parts`.
+    assert_eq!(r["exported"], 200, "{r}");
+    assert!(r.get("parts").is_none(), "{r}");
+    assert_eq!(form_sizes(&sg), [200]);
+    let pack = read_back(&sg, r["url"].as_str().unwrap()).await;
+    assert_eq!(pack.title, "full");
+    let order: Vec<u32> = pack.stickers.iter().map(|s| emoji_index(s.emoji.as_deref())).collect();
+    assert_eq!(order, (0..200).collect::<Vec<_>>());
+    let p = signal_publication(srv, &alice, &set.id).await;
+    assert!(p.parts.is_empty(), "{p:?}");
+    assert_eq!(p.url.as_deref(), r["url"].as_str());
+    assert_eq!(summary(&r), "200 stickers in a new pack, 0 left out");
+}
+
+#[tokio::test]
+async fn signal_450_items_three_packs_with_links() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "big", Visibility::Private).await;
+    fill(srv, &alice, &set.id, 450).await;
+    let j = publish(srv, &alice, &set.id).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    assert_eq!(
+        result_parts(&r),
+        [
+            (1, "big".to_string(), 200, true),
+            (2, "big 2".to_string(), 200, true),
+            (3, "big 3".to_string(), 50, true),
+        ]
+    );
+    // Today's fields are part 1's.
+    let parts = r["parts"].as_array().unwrap();
+    assert_eq!(r["url"], parts[0]["url"]);
+    assert_eq!((r["title"].as_str(), r["exported"].as_u64()), (Some("big"), Some(200)));
+    assert_eq!(r["skipped"], json!([]));
+    // One upload form per part (no cover: each part's first sticker).
+    assert_eq!(form_sizes(&sg), [200, 200, 50]);
+    // Every link opens its own pack; together they hold every item once,
+    // in set order.
+    let mut order = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    for p in parts {
+        let pack = read_back(&sg, p["url"].as_str().unwrap()).await;
+        assert_eq!(pack.title, p["title"].as_str().unwrap());
+        assert_eq!(pack.author, "alice");
+        assert!(ids.insert(pack.pack_id.clone()), "a new pack per part");
+        assert_eq!(pack.cover_id, Some(0));
+        for s in &pack.stickers {
+            check(&s.bytes);
+            order.push(emoji_index(s.emoji.as_deref()));
+        }
+    }
+    assert_eq!(order, (0..450).collect::<Vec<_>>());
+    assert_eq!(summary(&r), "450 stickers in 3 new packs, 0 left out");
+}
+
+#[tokio::test]
+async fn signal_publication_lists_parts() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "cats", Visibility::Private).await;
+    fill(srv, &alice, &set.id, 201).await;
+    srv.put_cover(&alice, &set.id, "cover.png", png(9)).await.expect(200);
+    let r = publish(srv, &alice, &set.id).await.result.unwrap();
+    assert_eq!(
+        result_parts(&r),
+        [(1, "cats".to_string(), 200, true), (2, "cats 2".to_string(), 1, true)]
+    );
+    // Both parts carry the set's cover as a file of their own.
+    assert_eq!(form_sizes(&sg), [201, 2]);
+    let p = signal_publication(srv, &alice, &set.id).await;
+    let want: Vec<PublishedPart> = r["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| PublishedPart {
+            number: x["number"].as_u64().unwrap() as u32,
+            name: x["title"].as_str().unwrap().into(),
+            url: x["url"].as_str().map(str::to_string),
+            stickers: x["stickers"].as_u64().map(|n| n as u32),
+        })
+        .collect();
+    assert_eq!(p.parts, want);
+    assert_eq!(p.url, want[0].url, "the set's link is part 1's");
+    assert_eq!(p.target.as_deref(), Some("cats"));
+    for part in &p.parts {
+        let pack = read_back(&sg, part.url.as_deref().unwrap()).await;
+        assert_eq!(pack.cover_id, Some(pack.stickers.len() as u32), "{}", part.name);
+        check(&pack.cover.unwrap().bytes);
+    }
+    assert_eq!(
+        summary(p.last_result.as_ref().unwrap()),
+        "201 stickers in 2 new packs, 0 left out"
+    );
+
+    // Publishing again uploads every part anew: new links for both.
+    publish(srv, &alice, &set.id).await;
+    let again = signal_publication(srv, &alice, &set.id).await;
+    assert_eq!(again.parts.len(), 2);
+    for (a, b) in again.parts.iter().zip(&p.parts) {
+        assert_eq!((a.number, &a.name, a.stickers), (b.number, &b.name, b.stickers));
+        assert_ne!(a.url, b.url);
+    }
+    assert_eq!(again.url, again.parts[0].url);
+
+    // One item fewer: one pack again, and no parts.
+    let d: SetDetail = srv
+        .get(&alice, &routes::path(routes::SET, &[&set.id]))
+        .await
+        .expect(200)
+        .json();
+    srv.delete(&alice, &routes::path(routes::ITEM, &[&d.items[0].id]))
+        .await
+        .expect(204);
+    let r = publish(srv, &alice, &set.id).await.result.unwrap();
+    assert!(r.get("parts").is_none(), "{r}");
+    let one = signal_publication(srv, &alice, &set.id).await;
+    assert!(one.parts.is_empty(), "{one:?}");
+    assert_eq!(one.url.as_deref(), r["url"].as_str());
+    assert_eq!(form_sizes(&sg), [201, 2, 201, 2, 201]);
+}
+
+#[tokio::test]
+async fn signal_failure_in_second_part_reports_first_parts_link() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "cats", Visibility::Private).await;
+    fill(srv, &alice, &set.id, 201).await;
+    let good = publish(srv, &alice, &set.id).await;
+    assert_eq!(good.status, JobStatus::Done, "{good:?}");
+    let before = signal_publication(srv, &alice, &set.id).await;
+    assert_eq!(before.parts.len(), 2);
+
+    // The next publish gets a form for part 1, then the rate limit.
+    sg.mock.lock().unwrap().fail_form_after.insert(3, 413);
+    let j = publish(srv, &alice, &set.id).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    assert_eq!(j.attempts, 1, "rate limits are not retried");
+    let error = j.error.clone().unwrap();
+    assert_eq!(
+        error,
+        "part 2 of 2: Signal rate limit reached; try again in 4320 s (part 1 was uploaded; its link is in the job's result)"
+    );
+    // The failed job's result has the link of the part that was uploaded.
+    let r = j.result.unwrap();
+    assert_eq!(
+        result_parts(&r),
+        [(1, "cats".to_string(), 200, true), (2, "cats 2".to_string(), 1, false)]
+    );
+    assert!(r["parts"][1]["error"].as_str().unwrap().contains("rate limit"), "{r}");
+    let uploaded = r["parts"][0]["url"].as_str().unwrap();
+    assert_eq!(r["url"].as_str(), Some(uploaded));
+    let pack = read_back(&sg, uploaded).await;
+    assert_eq!((pack.title.as_str(), pack.stickers.len()), ("cats", 200));
+    assert!(before.parts.iter().all(|p| p.url.as_deref() != Some(uploaded)));
+    // The set keeps the links of its last complete publish.
+    let after = signal_publication(srv, &alice, &set.id).await;
+    assert_eq!(after.parts, before.parts);
+    assert_eq!(after.url, before.url);
+    assert_eq!(after.last_result, before.last_result);
+    assert_eq!(after.last_status, Some(JobStatus::Failed));
+    assert_eq!(after.last_error.as_deref(), Some(error.as_str()));
+}
+
+#[tokio::test]
+async fn signal_retry_after_a_failure_in_second_part_uploads_every_part_anew() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "cats", Visibility::Private).await;
+    fill(srv, &alice, &set.id, 201).await;
+    // A server error for part 2's form: the job is retried, and the retry
+    // uploads part 1 again (the first attempt's pack stays unused).
+    sg.mock.lock().unwrap().fail_form_after.insert(1, 503);
+    let j = publish(srv, &alice, &set.id).await;
+    assert_eq!((j.status, j.attempts), (JobStatus::Done, 2), "{j:?}");
+    assert_eq!(form_sizes(&sg), [200, 200, 1]);
+    let r = j.result.unwrap();
+    assert_eq!(
+        result_parts(&r),
+        [(1, "cats".to_string(), 200, true), (2, "cats 2".to_string(), 1, true)]
+    );
+    let packs = sg
+        .mock
+        .lock()
+        .unwrap()
+        .objects
+        .keys()
+        .filter(|k| k.ends_with("/manifest.proto"))
+        .count();
+    assert_eq!(packs, 3, "the first attempt's part 1, then both parts");
+    let p = signal_publication(srv, &alice, &set.id).await;
+    assert_eq!(p.url.as_deref(), r["url"].as_str());
+    assert_eq!(p.parts.len(), 2);
+    assert_eq!(p.last_status, Some(JobStatus::Done));
+}
+
+#[tokio::test]
+async fn signal_zip_split() {
+    // The zip needs no Signal account.
+    let srv = TestServer::start().await;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "zip-cats", Visibility::Public).await;
+    fill(&srv, &alice, &set.id, 202).await;
+    // An item that cannot become a sticker is left out of the whole set
+    // and takes no place in a pack: 201 stickers, 200 + 1.
+    let d: SetDetail = srv
+        .get(&alice, &routes::path(routes::SET, &[&set.id]))
+        .await
+        .expect(200)
+        .json();
+    sqlx::query(
+        "DELETE FROM media_variants WHERE variant = 'original' AND media_id = (SELECT media_id FROM items WHERE id = ?)",
+    )
+    .bind(&d.items[5].id)
+    .execute(&srv.state.db)
+    .await
+    .unwrap();
+    let r = srv
+        .get(&alice, &routes::path(routes::SET_SIGNAL_ZIP, &[&set.id]))
+        .await
+        .expect(200);
+    assert!(r.header("content-disposition").unwrap().contains("zip-cats-signal.zip"));
+    let files = zip_entries(&r.body);
+    // One folder per pack, named like WhatsApp's packs, and a README.
+    let mut folders: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for name in files.keys() {
+        match name.split_once('/') {
+            Some((dir, file)) => folders.entry(dir).or_default().push(file),
+            None => assert!(name == "README.txt" || name == "left-out.txt", "{name}"),
+        }
+    }
+    assert_eq!(folders.keys().copied().collect::<Vec<_>>(), ["zip-cats", "zip-cats-2"]);
+    assert_eq!(folders["zip-cats"].len(), 203, "200 stickers, manifest, emoji, README");
+    assert_eq!(
+        folders["zip-cats-2"],
+        ["001.webp", "README.txt", "emoji.txt", "manifest.json"]
+    );
+    let readme = String::from_utf8_lossy(&files["README.txt"]).to_string();
+    assert!(
+        readme.contains("zip-cats/  zip-cats (200 stickers)\nzip-cats-2/  zip-cats 2 (1 sticker)\n"),
+        "{readme}"
+    );
+    for (dir, title, n) in [("zip-cats", "zip-cats", 200), ("zip-cats-2", "zip-cats 2", 1)] {
+        let m: Value = serde_json::from_slice(&files[&format!("{dir}/manifest.json")]).unwrap();
+        assert_eq!(m["title"], title);
+        assert_eq!(m["stickers"].as_array().unwrap().len(), n);
+        assert_eq!(m["cover"]["file"], "001.webp");
+    }
+    // Every other item once, in set order.
+    let emoji: String = ["zip-cats", "zip-cats-2"]
+        .iter()
+        .map(|d| String::from_utf8_lossy(&files[&format!("{d}/emoji.txt")]).to_string())
+        .collect();
+    let order: Vec<u32> = emoji
+        .lines()
+        .map(|l| emoji_index(l.split_once(' ').map(|(_, e)| e)))
+        .collect();
+    assert_eq!(order, (0..202).filter(|k| *k != 5).collect::<Vec<_>>());
+    check(&files["zip-cats-2/001.webp"]);
+    assert_eq!(
+        String::from_utf8_lossy(&files["left-out.txt"]),
+        "These items of the set are in none of the packs:\n\ns0005: the original file is missing\n"
+    );
+}
+
+/// `Publication` as a 0.8.8 client reads it: without `parts`.
+mod v0_8_8 {
+    use serde::Deserialize;
+    use serde_json::Value;
+    use stickpile_api::{Job, JobStatus};
+
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    pub struct Publication {
+        pub platform: String,
+        pub name: String,
+        pub configured: bool,
+        pub target: Option<String>,
+        pub url: Option<String>,
+        pub published_at: Option<i64>,
+        pub last_status: Option<JobStatus>,
+        pub last_finished_at: Option<i64>,
+        pub last_error: Option<String>,
+        pub last_result: Option<Value>,
+        pub job: Option<Job>,
+    }
+}
+
+#[tokio::test]
+async fn old_client_reads_signal_publication() {
+    let sg = setup(true).await;
+    let srv = &sg.srv;
+    let alice = srv.user("alice").await;
+    let set = srv.create_set(&alice, "cats", Visibility::Private).await;
+    let signal_json = |list: Value| -> Value {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["platform"] == "signal")
+            .unwrap()
+            .clone()
+    };
+
+    // What a 0.8.8 server stored (one pack) is listed as before: no parts.
+    let pack_id = "0123456789abcdef0123456789abcdef";
+    let old_url = PackLink::new(pack_id, PackKey::random()).unwrap().url();
+    stickpile_server::service::publish::bind(
+        &srv.state.db,
+        &set.id,
+        "signal",
+        Some("cats"),
+        Some(&old_url),
+        Some(&json!({"pack_id": pack_id, "stickers": 3})),
+    )
+    .await
+    .unwrap();
+    let raw: Value = srv
+        .get(&alice, &routes::path(routes::SET_PUBLISH, &[&set.id]))
+        .await
+        .expect(200)
+        .json();
+    let raw = signal_json(raw);
+    assert!(raw.get("parts").is_none(), "{raw}");
+    let new: Publication = serde_json::from_value(raw).unwrap();
+    assert_eq!((new.url.as_deref(), new.parts.len()), (Some(old_url.as_str()), 0));
+
+    // A publish of several packs reads on 0.8.8: the set's link is part 1's.
+    fill(srv, &alice, &set.id, 201).await;
+    let r = publish(srv, &alice, &set.id).await.result.unwrap();
+    let raw: Value = srv
+        .get(&alice, &routes::path(routes::SET_PUBLISH, &[&set.id]))
+        .await
+        .expect(200)
+        .json();
+    let raw = signal_json(raw);
+    assert_eq!(raw["parts"].as_array().unwrap().len(), 2, "{raw}");
+    let old: v0_8_8::Publication = serde_json::from_value(raw).unwrap();
+    assert_eq!(old.url.as_deref(), r["parts"][0]["url"].as_str());
+    assert_eq!(old.target.as_deref(), Some("cats"));
+    assert_eq!(old.last_status, Some(JobStatus::Done));
+    // The job result keeps the fields 0.8.8 knows, for part 1.
+    let last = old.last_result.unwrap();
+    assert_eq!(last["url"], r["parts"][0]["url"]);
+    assert_eq!(last["exported"], 200);
+    assert!(last["skipped"].is_array() && last["notes"].is_array());
 }

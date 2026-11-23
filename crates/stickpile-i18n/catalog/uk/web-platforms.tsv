@@ -40,11 +40,12 @@ a Signal pack holds at most 200 stickers	набір Signal вміщує щона
 
 # Signal: publishing and the Signal-ready zip (service/signal.rs,
 # web/export.rs), import (web/integrations.rs).
-Signal packs cannot be changed: every publish uploads a new pack with a new link. People who added an older pack keep its stickers.	Набори Signal не можна змінити: кожна публікація завантажує новий набір із новим посиланням. Хто додав старіший набір, зберігає його стікери.
+Signal packs cannot be changed: every publish uploads new packs with new links. People who added an older pack keep its stickers. A pack holds at most 200 stickers, so a larger set becomes several packs.	Набори Signal не можна змінити: кожна публікація завантажує нові набори з новими посиланнями. Хто додав старіший набір, зберігає його стікери. Набір Signal вміщує щонайбільше 200 стікерів, тож більший набір стане кількома.
 link must be a Signal sticker pack link: https://signal.art/addstickers/#pack_id=...&pack_key=... or sgnl://addstickers/?pack_id=...&pack_key=...	link має бути посиланням на набір стікерів Signal: https://signal.art/addstickers/#pack_id=...&pack_key=... або sgnl://addstickers/?pack_id=...&pack_key=...
 no item of this set can become a Signal sticker	жоден стікер цього набору не підходить для Signal
 options.signal: Signal takes no options	options.signal: Signal не має параметрів
 {exported} stickers in a new pack, {skipped} left out	Стікерів у новому наборі: {exported}; пропущено {skipped}
+{exported} stickers in {packs} new packs, {skipped} left out	Стікерів у {packs} нових наборах: {exported}; пропущено {skipped}
 the Signal integration is disabled on this server (signal.enabled)	інтеграцію з Signal вимкнено на цьому сервері (signal.enabled)
 Signal import	Імпорт із Signal
 Signal export	Експорт у Signal

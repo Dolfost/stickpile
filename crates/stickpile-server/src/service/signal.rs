@@ -12,13 +12,16 @@
 //!   `signal.credentials_file` reads as credentials. The `SignalExport` job
 //!   ([`export_job`]) renders every item as a 512x512 sticker
 //!   ([`crate::service::renditions`]) and uploads a **new** pack each time
-//!   (Signal packs cannot change); the newest link is the set's
-//!   publication link.
+//!   (Signal packs cannot change), several of 200 stickers each for a
+//!   larger set (`stickpile_signal::split_parts`); the newest link (part
+//!   1's) is the set's publication link, the parts are its
+//!   `Publication.parts`.
 //! * [`ready_zip`]: the Signal-ready zip (`stickpile_signal::signal_ready_zip`)
 //!   for anyone who can read the set, with or without Signal configured:
-//!   the same stickers for Signal Desktop's sticker creator or signal-cli.
-//!   The last one is kept in `<data_dir>/exports/<set id>/signal/` and
-//!   reused while the set is unchanged.
+//!   the same stickers for Signal Desktop's sticker creator or signal-cli,
+//!   one folder per pack when there are several. The last one is kept in
+//!   `<data_dir>/exports/<set id>/signal/` and reused while the set is
+//!   unchanged.
 
 use std::path::PathBuf;
 
@@ -26,10 +29,9 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use stickpile_api::{Job, JobKind, SignalImport, Visibility};
+use stickpile_api::{Job, JobKind, PublishedPart, SignalImport, Visibility};
 use stickpile_signal::{
     Credentials, ImageFormat, PackFile, PackLink, SignalClient, SignalConfig, SignalError, UploadPack, UploadSticker,
-    MAX_STICKERS,
 };
 
 use crate::auth::CurrentUser;
@@ -43,7 +45,7 @@ use crate::index;
 use crate::jobs::{self, JobError, JobResult, JobRow};
 use crate::service::cover;
 use crate::service::hydrate;
-use crate::service::publish::{self, BoxFuture, Platform, PlatformOption};
+use crate::service::publish::{self, BoxFuture, Platform, PlatformOption, PublicationRow};
 use crate::service::renditions::{self, Kind, Rendered};
 use crate::service::sets::{self, NewSet};
 use crate::service::upload::{self, clean_list, stem_for, ItemInput, UploadFile};
@@ -54,8 +56,9 @@ use crate::state::AppState;
 pub const PLATFORM: &str = "signal";
 
 const DISABLED: &str = "the Signal integration is disabled on this server (signal.enabled)";
-/// Changes when the zip would come out differently for the same set.
-const ZIP_FORMAT: &str = "signal-zip-1";
+/// Changes when the zip would come out differently for the same set
+/// (2: sets of more than 200 stickers as one folder per pack).
+const ZIP_FORMAT: &str = "signal-zip-2";
 const ZIP_MANIFEST: &str = "manifest.json";
 
 /// Pack import (and the integration as a whole) is on: `signal.enabled`.
@@ -261,14 +264,25 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
 // The pack of a set
 // ---------------------------------------------------------------------------
 
-/// A set as a Signal pack, with the items left out and the notes.
+/// A set as Signal stickers, with the items left out and the notes. More
+/// than [`stickpile_signal::MAX_STICKERS`] stickers are uploaded as several
+/// packs ([`Built::parts`]).
 struct Built {
     pack: UploadPack,
     skipped: Vec<Value>,
     notes: Vec<Value>,
 }
 
-/// Render the set's items (and its cover) as Signal stickers.
+impl Built {
+    /// The packs the set is uploaded as, part 1 first
+    /// (`stickpile_signal::split_parts`): 200 stickers each in set order.
+    fn parts(self) -> (Vec<UploadPack>, Vec<Value>, Vec<Value>) {
+        (stickpile_signal::split_parts(self.pack), self.skipped, self.notes)
+    }
+}
+
+/// Render the set's items (and its cover) as Signal stickers. Items that
+/// cannot become one are left out here, once for the whole set.
 async fn build(state: &AppState, set: &SetRow) -> Result<Built, JobError> {
     let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
     let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
@@ -277,11 +291,6 @@ async fn build(state: &AppState, set: &SetRow) -> Result<Built, JobError> {
     let mut skipped = Vec::new();
     let mut notes = Vec::new();
     for r in &rows {
-        if stickers.len() == MAX_STICKERS {
-            skipped
-                .push(json!({"item_id": r.id, "name": r.name, "reason": "a Signal pack holds at most 200 stickers"}));
-            continue;
-        }
         let original = renditions::original(state, &variants, r);
         match renditions::render(state, r, original, Kind::Signal).await? {
             Rendered::Made(m) => {
@@ -331,7 +340,82 @@ pub async fn prepare_export(state: &AppState, user: &CurrentUser, set_id: &str, 
     Ok(json!({ "set_id": set.id }))
 }
 
-/// `SignalExport` job: upload the set as a new pack.
+/// One part of a set published as several packs, as
+/// `set_publications.state.parts` keeps it (empty for one pack).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredPart {
+    number: u32,
+    title: String,
+    pack_id: String,
+    /// The pack's `signal.art` link (it holds the pack key, like `url`).
+    url: String,
+    stickers: u32,
+}
+
+/// The packs of the last successful publish when there were several (the
+/// set's `Publication.parts`); none for one pack and for what servers
+/// before parts stored.
+fn published_parts(row: Option<&PublicationRow>) -> Vec<PublishedPart> {
+    let stored: Vec<StoredPart> = row
+        .and_then(PublicationRow::state_json)
+        .and_then(|s| serde_json::from_value(s.get("parts")?.clone()).ok())
+        .unwrap_or_default();
+    stored
+        .into_iter()
+        .map(|p| PublishedPart {
+            number: p.number,
+            name: p.title,
+            url: Some(p.url),
+            stickers: Some(p.stickers),
+        })
+        .collect()
+}
+
+/// Part `number`'s line in a job result: what it holds, its link once
+/// uploaded, the error where the publish stopped.
+fn part_result(number: u32, title: &str, stickers: usize, url: Option<String>, error: Option<String>) -> Value {
+    let mut v = json!({"number": number, "title": title, "stickers": stickers});
+    if let Some(url) = url {
+        v["url"] = json!(url);
+    }
+    if let Some(error) = error {
+        v["error"] = json!(error);
+    }
+    v
+}
+
+/// A failed publish of several packs keeps, as its job's result, the parts
+/// it uploaded before the failure: their links are nowhere else (the set
+/// keeps the links of its last complete publish), and they stay out of the
+/// error, which is logged, because a link holds its pack's key.
+async fn keep_partial_result(state: &AppState, job: &JobRow, result: &Value) {
+    if let Err(e) = sqlx::query("UPDATE jobs SET result = ? WHERE id = ?")
+        .bind(result.to_string())
+        .bind(&job.id)
+        .execute(&state.db)
+        .await
+    {
+        tracing::error!(job = %job.id, "keeping the parts a failed Signal publish uploaded: {e}");
+    }
+}
+
+/// The job error of a publish of `count` parts that stopped at part
+/// `number`, retried or not as the Signal error says.
+fn part_error(e: SignalError, number: u32, count: usize, uploaded: usize) -> JobError {
+    let done = match uploaded {
+        0 => String::new(),
+        1 => " (part 1 was uploaded; its link is in the job's result)".to_string(),
+        n => format!(" (parts 1 to {n} were uploaded; their links are in the job's result)"),
+    };
+    let message = format!("part {number} of {count}: {e}{done}");
+    match signal_error(e) {
+        JobError::Retry(_) => JobError::Retry(message),
+        JobError::Fatal(_) => JobError::Fatal(message),
+    }
+}
+
+/// `SignalExport` job: upload the set as a new pack, or as several new
+/// packs of at most 200 stickers when it has more ([`Built::parts`]).
 pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
     let p = job.payload();
     let set_id = p["set_id"]
@@ -357,23 +441,67 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
             "nothing to publish: no item of the set can become a Signal sticker".into(),
         ));
     }
-    let up = stickpile_signal::upload_pack(&client, &creds, &built.pack)
+    let (parts, skipped, notes) = built.parts();
+    let several = parts.len() > 1;
+    let up = stickpile_signal::upload_parts(&client, &creds, &parts)
         .await
         .map_err(signal_error)?;
-    let url = up.link.url();
-    let stored = json!({"pack_id": up.link.pack_id, "stickers": up.stickers});
-    publish::bind(&state.db, &set.id, PLATFORM, Some(&set.name), Some(&url), Some(&stored)).await?;
-    Ok(Some(json!({
+    let mut lines: Vec<Value> = up
+        .uploaded
+        .iter()
+        .map(|u| part_result(u.number, &u.title, u.pack.stickers, Some(u.pack.link.url()), None))
+        .collect();
+    // Today's fields are part 1's: its link is the set's publication link.
+    let first = up.uploaded.first();
+    let mut result = json!({
         "set_id": set.id,
         "title": set.name,
-        "url": url,
-        "exported": up.stickers,
-        "skipped": built.skipped,
-        "notes": built.notes,
-    })))
+        "url": first.map(|u| u.pack.link.url()),
+        "exported": first.map_or(0, |u| u.pack.stickers),
+        "skipped": skipped,
+        "notes": notes,
+    });
+    if let Some((number, e)) = up.failed {
+        if !several {
+            return Err(signal_error(e));
+        }
+        let part = &parts[number as usize - 1];
+        lines.push(part_result(
+            number,
+            &part.title,
+            part.stickers.len(),
+            None,
+            Some(e.to_string()),
+        ));
+        result["parts"] = json!(lines);
+        keep_partial_result(state, job, &result).await;
+        return Err(part_error(e, number, parts.len(), up.uploaded.len()));
+    }
+    let Some(first) = first else {
+        return Err(JobError::Fatal("no Signal pack was uploaded".into()));
+    };
+    let url = first.pack.link.url();
+    let mut stored = json!({"pack_id": first.pack.link.pack_id, "stickers": first.pack.stickers});
+    if several {
+        let kept: Vec<StoredPart> = up
+            .uploaded
+            .iter()
+            .map(|u| StoredPart {
+                number: u.number,
+                title: u.title.clone(),
+                pack_id: u.pack.link.pack_id.clone(),
+                url: u.pack.link.url(),
+                stickers: u.pack.stickers as u32,
+            })
+            .collect();
+        stored["parts"] = json!(kept);
+        result["parts"] = json!(lines);
+    }
+    publish::bind(&state.db, &set.id, PLATFORM, Some(&set.name), Some(&url), Some(&stored)).await?;
+    Ok(Some(result))
 }
 
-/// Signal in the publish registry: a new pack per publish.
+/// Signal in the publish registry: new packs on every publish.
 pub struct SignalPlatform;
 
 impl Platform for SignalPlatform {
@@ -407,18 +535,36 @@ impl Platform for SignalPlatform {
         Box::pin(prepare_export(state, user, set_id, options))
     }
 
+    fn parts(&self, _set: &SetRow, row: Option<&PublicationRow>) -> Vec<PublishedPart> {
+        published_parts(row)
+    }
+
     fn summary(&self, r: &Value) -> String {
-        let exported = r.get("exported").and_then(Value::as_u64).unwrap_or(0);
         let skipped = r.get("skipped").and_then(Value::as_array).map_or(0, Vec::len);
-        tf(
-            "{exported} stickers in a new pack, {skipped} left out",
-            &[("exported", &exported), ("skipped", &skipped)],
-        )
+        match r.get("parts").and_then(Value::as_array).filter(|p| p.len() > 1) {
+            Some(parts) => {
+                let exported: u64 = parts
+                    .iter()
+                    .filter_map(|p| p.get("stickers").and_then(Value::as_u64))
+                    .sum();
+                tf(
+                    "{exported} stickers in {packs} new packs, {skipped} left out",
+                    &[("exported", &exported), ("packs", &parts.len()), ("skipped", &skipped)],
+                )
+            }
+            None => {
+                let exported = r.get("exported").and_then(Value::as_u64).unwrap_or(0);
+                tf(
+                    "{exported} stickers in a new pack, {skipped} left out",
+                    &[("exported", &exported), ("skipped", &skipped)],
+                )
+            }
+        }
     }
 
     fn notice(&self, _state: &AppState, _user: &CurrentUser) -> Option<&'static str> {
         Some(t(
-            "Signal packs cannot be changed: every publish uploads a new pack with a new link. People who added an older pack keep its stickers.",
+            "Signal packs cannot be changed: every publish uploads new packs with new links. People who added an older pack keep its stickers. A pack holds at most 200 stickers, so a larger set becomes several packs.",
         ))
     }
 }
@@ -478,6 +624,16 @@ fn job_to_app(e: JobError) -> AppError {
     AppError::internal(e.to_string())
 }
 
+/// The zip's folder of part `number` of a set of several packs: `<slug>`,
+/// `<slug>-2`, `<slug>-3`, ... (as WhatsApp's packs are named).
+fn part_folder(slug: &str, number: u32) -> String {
+    if number <= 1 {
+        slug.to_string()
+    } else {
+        format!("{slug}-{number}")
+    }
+}
+
 /// The Signal-ready zip of a set the caller can read: its download name and
 /// bytes. Made on the first request after a change (that counts as an
 /// upload for rate limiting) and kept until the set changes.
@@ -501,10 +657,18 @@ pub async fn ready_zip(state: &AppState, user: &CurrentUser, set_id: &str) -> Ap
     if built.pack.stickers.is_empty() {
         return Err(AppError::bad_request("no item of this set can become a Signal sticker"));
     }
-    let mut files = stickpile_signal::signal_ready_files(&built.pack).map_err(|e| AppError::internal(e.to_string()))?;
-    if !built.skipped.is_empty() {
-        let mut text = String::from("These items of the set are not in the pack:\n\n");
-        for s in &built.skipped {
+    let (parts, skipped, _) = built.parts();
+    // One part: the folder at the top, as before parts; several: one folder
+    // per part, named like WhatsApp's packs.
+    let mut files = stickpile_signal::signal_ready_parts_files(&parts, |n| part_folder(&set.slug, n))
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    if !skipped.is_empty() {
+        let mut text = String::from(if parts.len() > 1 {
+            "These items of the set are in none of the packs:\n\n"
+        } else {
+            "These items of the set are not in the pack:\n\n"
+        });
+        for s in &skipped {
             text.push_str(&format!(
                 "{}: {}\n",
                 s["name"].as_str().unwrap_or(""),
@@ -568,5 +732,36 @@ mod tests {
     fn summary() {
         let r = json!({"exported": 3, "skipped": [{}]});
         assert_eq!(SignalPlatform.summary(&r), "3 stickers in a new pack, 1 left out");
+        let r =
+            json!({"exported": 200, "skipped": [], "parts": [{"stickers": 200}, {"stickers": 200}, {"stickers": 50}]});
+        assert_eq!(SignalPlatform.summary(&r), "450 stickers in 3 new packs, 0 left out");
+    }
+
+    #[test]
+    fn parts_come_from_the_stored_state() {
+        let row = |state: Value| PublicationRow {
+            state: Some(state.to_string()),
+            ..Default::default()
+        };
+        // What 0.8.8 stored: one pack, no parts.
+        let old = row(json!({"pack_id": "ab", "stickers": 3}));
+        assert!(published_parts(Some(&old)).is_empty());
+        assert!(published_parts(None).is_empty());
+        let new = row(json!({"pack_id": "ab", "stickers": 200, "parts": [
+            {"number": 1, "title": "Cats", "pack_id": "ab", "url": "https://signal.art/addstickers/#1", "stickers": 200},
+            {"number": 2, "title": "Cats 2", "pack_id": "cd", "url": "https://signal.art/addstickers/#2", "stickers": 1},
+        ]}));
+        let parts = published_parts(Some(&new));
+        assert_eq!(
+            parts[1],
+            PublishedPart {
+                number: 2,
+                name: "Cats 2".into(),
+                url: Some("https://signal.art/addstickers/#2".into()),
+                stickers: Some(1),
+            }
+        );
+        assert_eq!(part_folder("cats", 1), "cats");
+        assert_eq!(part_folder("cats", 3), "cats-3");
     }
 }

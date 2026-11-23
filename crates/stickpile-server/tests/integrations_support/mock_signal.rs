@@ -49,6 +49,10 @@ pub struct MockState {
     pub unauthorized: u32,
     /// How many more form requests to answer with 413 and Retry-After.
     pub rate_limited: u32,
+    /// Form requests to fail once, by how many forms were issued before
+    /// them: `{1: 413}` issues the first form and answers the next request
+    /// with 413 and Retry-After (another status as it is).
+    pub fail_form_after: HashMap<usize, u16>,
     /// Field names of every CDN upload, in order.
     pub upload_fields: Vec<Vec<String>>,
     /// CDN uploads refused, with the reason.
@@ -138,6 +142,14 @@ async fn service(State(state): State<Shared>, req: Request) -> Response {
         st.rate_limited -= 1;
         let mut r = StatusCode::PAYLOAD_TOO_LARGE.into_response();
         r.headers_mut().insert("retry-after", HeaderValue::from_static("4320"));
+        return r;
+    }
+    let issued = st.forms.len();
+    if let Some(status) = st.fail_form_after.remove(&issued) {
+        let mut r = StatusCode::from_u16(status).unwrap().into_response();
+        if status == 413 {
+            r.headers_mut().insert("retry-after", HeaderValue::from_static("4320"));
+        }
         return r;
     }
     let Ok(count) = count.parse::<usize>() else {
