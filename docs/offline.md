@@ -380,40 +380,116 @@ The plan for the shells, as in the brief, section 4.9:
   downloads beyond what a pick needs.
 - **home-manager module**: the `[offline]` options, mirrored (done).
 
-## Reachability and results without waiting (design, being built)
+## Reachability and results without waiting
 
-A search never waits for a server that does not answer. In
-`stickpile-core`, built once and used by the GTK popup, the macOS app,
-the Android app and the keyboard (the CLI and the web UI keep their
-behaviour):
+A search never waits for a server that does not answer. Built once in
+`stickpile-core` (`client.rs`, `session.rs`) and tested there
+(`crates/stickpile-core/src/tests/reach.rs`), for the GTK popup, the macOS
+app, the Android app and the keyboard. The CLI and the web UI keep their
+behaviour.
 
-- **Reachability for every client.** The fail-fast reachability of
-  `ApiClient::with_fail_fast` is used by every client that shows
-  results, and it publishes its state as a watch value: `Unknown`,
-  `Reachable`, `Unreachable { since }`. While the server is believed
-  unreachable a background task probes `GET /healthz` every 15 s for 5
-  minutes, then every 60 s, whether or not anything reads; it starts on
-  any offline failure and stops when the server answers. A shell can ask
-  for a probe at once: when the popup or the app opens, and on Android
-  when a network appears (`ConnectivityManager`; no new permission).
-- **Two-step search.** With the state `Unreachable`, a search answers
-  from the offline index at once, marked offline. With `Reachable` or
-  `Unknown` it asks the server; if the server has not answered after
-  300 ms, the offline results are handed over first and the server's
-  follow in the same generation when they come. A failure then marks the
-  state `Unreachable` and the offline results stay. One core API yields
-  the offline answer and then, maybe, the server's; the popup model and
-  the Android bridge consume it.
-- **Short connect timeout.** Searches and other interactive reads connect
-  within 2 s, so a peer that is gone is recognised quickly; `timeout_secs`
-  still bounds the rest, and uploads, imports and file downloads keep
-  their timeouts.
-- **Back online.** When the watch value turns `Reachable`, the shells run
-  the current search again online, start a sync and drop the offline
-  notice.
-- **Results do not jump.** The server's results replace the offline ones
-  in place: the selected sticker stays selected (by id) when it is still
-  in them, a copy or insert in progress is not dropped, and the grid is
-  not reordered under a pointer or a finger pressing a tile. The server
-  stays authoritative: its results include semantic and image matches
-  and items the cache does not hold.
+### Reachability
+
+A client opts in with `Session::with_fail_fast()`
+(`ApiClient::with_fail_fast()`); every client that shows results does,
+the CLI does not. What it knows of the server is a `tokio::sync::watch`
+value of `stickpile_core::Reach`:
+
+| value | meaning |
+|---|---|
+| `Unknown` | nothing asked yet, or the outage was forgotten (`forget_unreachable`) |
+| `Reachable` | the server answered the last request or check (any status, an error too) |
+| `Unreachable { since }` | a request found no server (no connection, a timeout, a proxy's 502 to 504 without an API error) and nothing answered since; `since` is the first failure of the outage |
+
+- `Session::reach()` (`ApiClient::reach()`) gives a receiver,
+  `ApiClient::reach_now()` the value. `Session::reach_changed(seen)`
+  waits until the value is another than `seen` and returns it: a long
+  poll for a bridge that cannot hold a receiver (UniFFI). Without
+  fail-fast the value is `Unknown` and never changes.
+- While `Unreachable`, reads (`GET`) fail at once with
+  `CoreError::Offline` ("the server could not be reached; it is checked
+  again in the background"), without a request, so a caller with the
+  offline cache answers from it straight away. Writes are always sent.
+- While `Unreachable`, a background task checks `GET /healthz` every 15 s
+  for the first 5 minutes of the outage, then every 60 s (`PROBE_FAST`,
+  `PROBE_FAST_FOR`, `PROBE_SLOW`), whether or not anything reads. It
+  starts on any offline failure and stops when the value leaves
+  `Unreachable`. Reads never check the server themselves; they only start
+  the task again when it is gone (its Tokio runtime ended). Any answer
+  ends the outage: a check, a write, or a request that was out already.
+- `Session::check_server()` (`ApiClient::check_now()`) checks at once in
+  the background, whatever the value: when the popup or the app opens,
+  and on Android when a network appears (`ConnectivityManager`; no new
+  permission). Nothing if a check is waiting for its answer already.
+  Callable from any thread: outside a Tokio runtime the check runs on the
+  runtime of the client's last request. A failed check starts an outage
+  like a failed request.
+- `ApiClient::forget_unreachable()` makes the value `Unknown`, so the
+  next read goes out: what the user asks for tries the server whatever it
+  did a moment ago (Android's `sync_now`, `offline_run`, `prepare`).
+
+This replaces the window of the earlier fail-fast
+(`with_fail_fast(window)`, five minutes on Android): a failure was
+believed for the window, the server was checked only while reads came
+in, and after the window one read tried the server in the foreground,
+waiting for the timeout. Now a failure is believed until the server
+answers, and the schedule of checks (or `check_server`) finds it; no read
+waits for it.
+
+### Results without waiting
+
+`Session::search_steps(query, target, limit)` returns `SearchSteps {
+first, then }`:
+
+- With the value `Unreachable`: `first` from the offline index at once
+  (`offline: true`), `then: None`. No request.
+- Else the server is asked. If it answers within 300 ms
+  (`OFFLINE_AFTER`), `first` is its results and `then` is `None`; if it
+  fails within that time (refused, a 5xx), `first` is the offline
+  index's, as `Session::search` falls back. If it has not answered by
+  then, `first` is the offline index's (`offline: true`) and `then` the
+  server's answer to come: `ServerStep::wait()` gives `Some(results)`
+  (`offline: false`), which replace the offline ones; `None` when the
+  server could not be reached or failed (after an offline failure the
+  value is `Unreachable`), and the offline results stand; or an error
+  such as `401`, which says why the server gave none.
+- The request runs as its own task: dropping `then` (a newer search came)
+  does not cancel it, so its outcome still tells whether the server is
+  there.
+- Errors as `Session::search` (a bad query, not signed in).
+
+`Session::search` is unchanged: the server is asked every time and waited
+for (up to `timeout_secs`), and the offline cache answers when it fails.
+The CLI uses it.
+
+### Connect timeout
+
+Reads with the ordinary timeout (`GET`: searches, item lists, the sync,
+`/healthz`) connect within 2 s (`INTERACTIVE_CONNECT_TIMEOUT`, a constant,
+never more than `timeout_secs`), so a host that is gone is recognised
+quickly; `timeout_secs` still bounds the whole request, so a server that
+accepts the connection and never answers takes that long. Writes connect
+within `timeout_secs`; uploads, imports, exports and file downloads
+connect within `timeout_secs` and run within the transfer timeout (10
+minutes), as before. The client keeps two connection pools for this
+(reqwest sets the connect timeout per pool). The CLI shares the client, so
+its reads connect within 2 s too.
+
+### What the shells do
+
+- Open the session with `with_fail_fast()`, and call `check_server()`
+  when the popup or the app opens (on Android also when a network
+  appears).
+- Search with `search_steps` in the current generation: show `first`
+  (with the offline notice when `first.offline`); when `then` is `Some`,
+  wait for it in the same generation, and drop it with the generation.
+- The server stays authoritative: its results include semantic and image
+  matches and items the cache does not hold, and they replace the
+  offline ones in place. Results do not jump: the selected sticker stays
+  selected (by `SearchHit.item.id`) when it is still in them, a copy or
+  insert in progress is not dropped, and the grid is not reordered under
+  a pointer or a finger pressing a tile. `None` keeps the offline results
+  and the notice.
+- Subscribe to `reach()` (or poll `reach_changed`): when it turns
+  `Reachable` after `Unreachable`, run the current search again, start a
+  sync and drop the offline notice.
