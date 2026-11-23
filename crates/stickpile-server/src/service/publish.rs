@@ -36,7 +36,7 @@ use std::pin::Pin;
 
 use serde_json::Value;
 use sqlx::SqlitePool;
-use stickpile_api::{Job, JobKind, JobStatus, Publication, PublishJobs, PublishRequest, TelegramExport};
+use stickpile_api::{Job, JobKind, JobStatus, Publication, PublishJobs, PublishRequest, PublishedPart, TelegramExport};
 
 use crate::auth::CurrentUser;
 use crate::authz;
@@ -116,6 +116,12 @@ pub trait Platform: Send + Sync {
     fn published(&self, set: &SetRow, row: Option<&PublicationRow>) -> (Option<String>, Option<String>) {
         let _ = set;
         row.map(|r| (r.target.clone(), r.url.clone())).unwrap_or_default()
+    }
+    /// Every pack the set is published as when the platform split it into
+    /// parts, part 1 included ([`Publication::parts`]); by default none.
+    fn parts(&self, set: &SetRow, row: Option<&PublicationRow>) -> Vec<PublishedPart> {
+        let _ = (set, row);
+        Vec::new()
     }
     /// One line about a finished publish, from its job result, in the
     /// request's language.
@@ -372,7 +378,7 @@ fn publication(
             .and_then(|s| serde_json::from_str(s).ok()),
         job,
         // Filled by the platforms that split a set into parts.
-        parts: Vec::new(),
+        parts: p.parts(set, row),
     }
 }
 
