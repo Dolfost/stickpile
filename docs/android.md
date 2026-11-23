@@ -88,6 +88,26 @@ cover image, else its first sticker).
   in (an emoji in place of the name). The values come from the offline cache: right after
   signing in they come once the first sync is over, also for what is
   typed already.
+- **Results without waiting.** A search never waits for a server that
+  does not answer ([offline.md](offline.md), "Reachability and results
+  without waiting"). With the server known to be away, the stickers saved
+  on this phone show at once under "Offline: showing what is saved on
+  this phone."; when the server is slow to answer (or has just gone, and
+  nothing knows it yet), they show after 300 ms with the same notice, and
+  the server's results take their place when they come (the notice goes
+  with it). The server's results replace the others without moving what
+  you are on: while a finger is on the grid (pressing a sticker, scrolling)
+  they wait until it lifts; the details stay open and a share being
+  prepared goes on; at the top the grid stays at the top, so the best
+  results come first, and scrolled down, the sticker first in view stays
+  where it is while it is still among them. When the server comes back
+  (a network appears, the app opens, or the check in the background
+  finds it), what is shown loads again in place, from the server, and a
+  sync starts. The other lists (Liked, Most used, Packs, a pack and the
+  search inside it) are read as before: while the server is not known to
+  be away they wait for it (up to the timeout, 5 s by default, when it
+  does not answer), and once it is known to be away they answer from the
+  phone at once until it is back. Recent never asks the server.
 - **Search in a pack.** With a pack open (Packs tab), the field says
   "Search in <pack>" and searches only that pack, with the whole syntax
   (`v:tired`, `type:gif`, `-t:nsfw`, `is:liked`, `sort:copies`, words),
@@ -199,6 +219,16 @@ Using it:
   carry the offline marks of the app ([Keeping stickers
   offline](#keeping-stickers-offline)); the keyboard has no offline
   settings of its own.
+- Its search does not wait for a server that does not answer, as in the
+  app ([Results without waiting](#the-library)): the stickers saved on
+  the phone show at once when the server is known to be away, else after
+  300 ms when it is slow, with "Offline: showing saved stickers." on the
+  status line, and the server's results take their place when they come
+  (the line goes then). They wait while a finger is on the grid; the
+  details, an insert going on and the emoji filter chosen stay; at the
+  top the grid stays at the top. Each time the keyboard opens the server
+  is checked; when it is back, what is shown loads again from it and the
+  app syncs.
 - The keyboard button at the top goes back to your keyboard at any time.
 
 Its settings (in the app's settings): the keyboard height (the sticker
@@ -324,11 +354,15 @@ The app syncs in the background every 15 minutes when there is a network
 that went through, the files kept offline download
 ([Keeping stickers offline](#keeping-stickers-offline)). Offline, search, the
 lists and the thumbnails come from the cache, and stickers inserted before
-or kept offline can be inserted again. When the server stops answering, only the first
-list waits for it (5 s by default); for the next five minutes the lists
-come from the cache at once, while the server is checked in the
-background every 15 seconds, and once it answers they are live again.
-Sync now (or pulling the grid down) always tries the server.
+or kept offline can be inserted again. When the server stops answering, a
+search shows what is saved on the phone after 300 ms (at once once the
+server is known to be away), and only the first other list waits for it
+(5 s by default). From then on everything comes from the cache at once,
+while the server is checked in the background (every 15 seconds for five
+minutes, then every minute, and at once when a network appears or the app
+or the keyboard opens); once it answers, what is shown loads again from
+it and a sync starts. Sync now (or pulling the grid down) always tries
+the server.
 
 ## Build from source
 
@@ -427,7 +461,10 @@ WorkManager, which runs the background sync and the offline downloads
 (no permission of their own), adds `WAKE_LOCK`,
 `ACCESS_NETWORK_STATE`, `RECEIVE_BOOT_COMPLETED` and `FOREGROUND_SERVICE`
 to the merged manifest, all granted at install time without a prompt; the
-owner chose to keep all four (2026-11-15). AndroidX also declares a
+owner chose to keep all four (2026-11-15). The app itself uses
+`ACCESS_NETWORK_STATE` too, for nothing but noticing that a network
+appeared, so that a server found away is checked again at once
+(`sync.NetworkWatch`); it asks for no permission of its own for it. AndroidX also declares a
 signature-level permission of the app's own
 (`io.github.dolfost.stickpile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`),
 which no other app can hold. Nothing else.
@@ -499,6 +536,11 @@ object StickpileLibrary
 
   // reading (offline: from the cache, ItemList.offline = true)
   async fn search(query: String, target: Target, limit: u32) throws -> ItemList
+                                                       // waits for the server (the provider)
+  async fn search_steps(query: String, target: Target, limit: u32) throws -> SearchAnswer
+                                                       // never waits for a server that does not
+                                                       // answer: the offline results first, the
+                                                       // server's to come (the app, the keyboard)
   fn recent(limit: u32) -> List<Item>
   async fn favorites(limit: u32) throws -> ItemList
   async fn most_used(limit: u32) throws -> ItemList
@@ -557,6 +599,19 @@ object StickpileLibrary
                        accepted_mime_types: List<String>, sticker: Boolean) -> List<Boolean>
                                                        // per item: prepare would work offline
   fn server_unreachable() -> Boolean                   // the lists answer from the cache now
+
+  // the server's reachability (docs/offline.md; no network unless said)
+  fn server_reach() -> ServerReach
+  async fn server_reach_change(seen: ServerReach) throws -> ServerReach
+                                                       // waits until it differs from seen; follows
+                                                       // a new server's session
+  fn check_server()                                    // checks now, in the background (network);
+                                                       // any thread
+
+object PendingSearch                                   // SearchAnswer.pending
+  async fn server_results() throws -> ItemList?        // the server's results (offline = false);
+                                                       // null: it failed, the offline ones stand;
+                                                       // once
   async fn offline_run() throws -> OfflineOutcome      // the downloader (network); stops when the
                                                        // coroutine is cancelled
   fn offline_status() -> OfflineStatus
@@ -589,6 +644,10 @@ record Item        { id: String, name: String, set_id: String, set_name: String,
                      text: String }     // the words in the picture, "\n" between lines;
                                         // "" for none and from a 0.7.0 server (default "")
 record ItemList    { items: List<Item>, offline: Boolean }
+record SearchAnswer { list: ItemList,               // to show now
+                     pending: PendingSearch? }      // the server's results to come, or null
+enum   ServerReach { Unknown, Reachable,
+                     Unreachable { since: Timestamp } }  // Kotlin: java.time.Instant
 record Pack        { id: String, slug: String, name: String, owner: String,
                      item_count: u32, mine: Boolean }
 record PackList    { packs: List<Pack>, offline: Boolean }
@@ -830,8 +889,8 @@ Behaviour the signatures do not show:
   uses the best rendition when it is here, else that one, so a mark and
   a pick agree. The app asks with no package and `image/*`, `video/*`
   (what its share uses), the keyboard with the field's package and its
-  types plus those. `server_unreachable` is the fail-fast state above: the
-  lists answer from the cache now.
+  types plus those. `server_unreachable` is the fail-fast state below
+  (`server_reach` is `Unreachable`): the lists answer from the cache now.
 - **Pack covers.** `pack_cover` is the pack's own cover image, else its
   cover item's thumbnail (the first item unless one was chosen; offline,
   the first cached item by name), fetched unless cached. Null for a pack
@@ -846,7 +905,35 @@ Behaviour the signatures do not show:
   every 15 s for five minutes, then every 60 s, whether or not anything
   reads; when it answers, the reads go to it again. What the user asks
   for tries the server whatever it did a moment ago: `sync_now`,
-  `prepare`, `toggle_like`, `upload` and the logins.
+  `prepare`, `toggle_like`, `upload` and the logins. What the library
+  knows is `server_reach` (`Unknown` until a request or check, `Reachable`,
+  `Unreachable { since }`, the core's `Reach`), and `server_reach_change`
+  waits until it differs from what the caller saw (a long poll, cancelled
+  with the coroutine; it follows the new session after a server change).
+  `check_server` checks at once in the background, from any thread: the
+  app calls it when its library screen resumes, the keyboard each time it
+  opens, and `sync.NetworkWatch` when a network appears (a default-network
+  callback of `ConnectivityManager`, registered when the library opens).
+  The library screen and the keyboard follow the value
+  (`sync.ServerWatch`): when it turns `Reachable` after an `Unreachable`
+  since the last `Reachable` (or while what they show came from the
+  cache), they load what they show again in place and the app syncs
+  (`StickpileApp.syncBackOnline`, one at a time).
+- **Results without waiting.** `search_steps` is `Session::search_steps`:
+  with the server believed unreachable the offline cache answers at once
+  and nothing is asked (`SearchAnswer.pending` null); else the server is
+  asked, and its results come if they are there within 300 ms; if not,
+  the offline cache's come first (`list.offline = true`) with
+  `pending`, whose `server_results` waits for the server's: they replace
+  the offline ones, or null when it failed (the offline ones stand, the
+  server is then believed unreachable), or it throws what the server
+  answered instead (`Unauthorized`). Cancelling the wait (the coroutine)
+  leaves the request running, so that its outcome still tells whether the
+  server is there. The app and the keyboard search with it, in the
+  generation of the search (a newer search drops the wait), and close the
+  `PendingSearch` once answered. `search` stays as it was, waiting for
+  the server, for the provider's one answer; `pack_search` and the other
+  lists have no second step.
 - **Pairing input.** `parse_pairing_link` returns the server URL
   normalised (above), the one `login_pairing` contacts, and null for a
   link whose URL has a user name or password, a query or a fragment.
@@ -932,6 +1019,16 @@ is one process; these pieces are shared by its parts:
   login, `cancel(context)` after a logout (in the app's scope, also when
   the settings screen went) and when onboarding saved another server
   address.
+- The server's reachability: `sync.NetworkWatch` asks the library to check
+  the server when a network appears (registered once, when
+  `StickpileApp.library` opens), and `sync.ServerWatch` (pure, tested on
+  the JVM) is how the library screen (`ui.library.LibraryViewModel`) and
+  the keyboard (`ime.PickerView`, while it is shown) follow the library's
+  `server_reach_change`: back after an outage, they load what they show
+  again in place and call `StickpileApp.syncBackOnline`, which runs one
+  `sync_now` at a time. Both replace a list in place only once no finger
+  is on the grid (`LibraryViewModel.pressing`, the keyboard's
+  `RecyclerView` touch listener).
 - `provider.PreparedFiles`: `uriFor(context, prepared)` turns a file from
   `StickpileLibrary.prepare` into a `/prepared/<token>/<name>` provider URI,
   for the input method's `commitContent` and for sharing from the app;
