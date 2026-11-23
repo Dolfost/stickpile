@@ -16,11 +16,14 @@
 //!
 //! Layout: `001.webp` ... (3-digit numbers in pack order, the extension
 //! from the file's format), `cover.<ext>` for a separate cover,
-//! `manifest.json`, `emoji.txt`, `README.txt`.
+//! `manifest.json`, `emoji.txt`, `README.txt`. A set of several packs
+//! ([`crate::split_parts`]) has that layout once per part, each in a
+//! folder of its own, and a `README.txt` naming the folders
+//! ([`signal_ready_parts_files`]).
 
 use serde_json::json;
 
-use crate::pack::{prepare, UploadPack};
+use crate::pack::{prepare, PreparedPack, UploadPack};
 use crate::SignalError;
 
 /// One file of the folder.
@@ -56,7 +59,11 @@ manifest.json>. It prints the link to the new pack.
 /// like an upload ([`crate::check_sticker`], 1-200 stickers, a title and an
 /// author).
 pub fn signal_ready_files(pack: &UploadPack) -> Result<Vec<PackFile>, SignalError> {
-    let prepared = prepare(pack)?;
+    Ok(folder_files(&prepare(pack)?))
+}
+
+/// [`signal_ready_files`] of a pack [`prepare`] checked already.
+fn folder_files(prepared: &PreparedPack) -> Vec<PackFile> {
     let mut files = Vec::new();
     let mut stickers_json = Vec::new();
     let mut emoji_lines = String::new();
@@ -101,7 +108,63 @@ pub fn signal_ready_files(pack: &UploadPack) -> Result<Vec<PackFile>, SignalErro
         path: "README.txt".into(),
         bytes: readme.into_bytes(),
     });
-    Ok(files)
+    files
+}
+
+const PARTS_README: &str = "\
+This set is several Signal sticker packs made by stickpile, one per folder:
+a Signal pack holds at most 200 stickers. Make each folder a pack of its
+own; the README.txt in it says how. signal-cli takes a folder's
+manifest.json once the zip is unpacked.
+
+";
+
+/// The Signal-ready folders of a set uploaded as several packs
+/// ([`crate::split_parts`]): part k's files ([`signal_ready_files`]) in the
+/// folder `folder(k)`, then a `README.txt` naming the folders. One part is
+/// [`signal_ready_files`] as it is, without a folder. Every part is
+/// checked like an upload; the error names the part that is invalid.
+pub fn signal_ready_parts_files(
+    parts: &[UploadPack],
+    folder: impl Fn(u32) -> String,
+) -> Result<Vec<PackFile>, SignalError> {
+    match parts {
+        [] => Err(SignalError::Invalid("no Signal pack to write".into())),
+        [one] => signal_ready_files(one),
+        _ => {
+            let mut prepared = Vec::with_capacity(parts.len());
+            for (i, part) in parts.iter().enumerate() {
+                prepared.push(prepare(part).map_err(|e| match e {
+                    SignalError::Invalid(why) => {
+                        SignalError::Invalid(format!("part {} of {}: {why}", i + 1, parts.len()))
+                    }
+                    e => e,
+                })?);
+            }
+            let mut files = Vec::new();
+            let mut readme = String::from(PARTS_README);
+            for (i, p) in prepared.iter().enumerate() {
+                let dir = folder(i as u32 + 1);
+                let title = p.manifest.title.as_deref().unwrap_or_default();
+                let n = p.manifest.stickers.len();
+                let stickers = if n == 1 {
+                    "1 sticker".to_string()
+                } else {
+                    format!("{n} stickers")
+                };
+                readme.push_str(&format!("{dir}/  {title} ({stickers})\n"));
+                files.extend(folder_files(p).into_iter().map(|f| PackFile {
+                    path: format!("{dir}/{}", f.path),
+                    bytes: f.bytes,
+                }));
+            }
+            files.push(PackFile {
+                path: "README.txt".into(),
+                bytes: readme.into_bytes(),
+            });
+            Ok(files)
+        }
+    }
 }
 
 /// The Signal-ready folder as a zip (stored, not compressed: the images

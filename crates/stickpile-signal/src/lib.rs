@@ -11,7 +11,8 @@
 //! * More than 200 stickers: [`split_parts`] makes several packs of them,
 //!   [`upload_parts`] uploads each as a new pack ([`parts`]).
 //! * Without credentials: [`signal_ready_zip`] builds a folder for Signal
-//!   Desktop's sticker creator and for signal-cli.
+//!   Desktop's sticker creator and for signal-cli
+//!   ([`signal_ready_parts_files`]: one folder per part).
 //! * Files: [`STICKER_REQUIREMENTS`] and [`check_sticker`] state what Signal
 //!   accepts so the server can render fitting files.
 //!
@@ -34,7 +35,7 @@ pub use client::{
 };
 pub use credentials::Credentials;
 pub use crypto::CryptoError;
-pub use folder::{signal_ready_files, signal_ready_zip, zip_stored, PackFile};
+pub use folder::{signal_ready_files, signal_ready_parts_files, signal_ready_zip, zip_stored, PackFile};
 pub use image::{inspect, ImageFormat, ImageInfo};
 pub use link::{PackKey, PackLink};
 pub use manifest::{Manifest, ManifestSticker};

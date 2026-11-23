@@ -6,9 +6,9 @@ mod mock_signal;
 use mock_signal::{png, start, webp, Shared, ACI, DEVICE, PASSWORD};
 use stickpile_signal::crypto::{derive_keys, encrypt};
 use stickpile_signal::{
-    import_pack, signal_ready_files, signal_ready_zip, split_parts, upload_pack, upload_parts, Credentials,
-    CryptoError, ImageFormat, Manifest, ManifestSticker, PackKey, PackLink, SignalClient, SignalConfig, SignalError,
-    UploadPack, UploadSticker,
+    import_pack, signal_ready_files, signal_ready_parts_files, signal_ready_zip, split_parts, upload_pack,
+    upload_parts, zip_stored, Credentials, CryptoError, ImageFormat, Manifest, ManifestSticker, PackKey, PackLink,
+    SignalClient, SignalConfig, SignalError, UploadPack, UploadSticker,
 };
 
 const PACK_ID: &str = "0123456789abcdef0123456789abcdef";
@@ -531,4 +531,53 @@ async fn signal_failure_in_second_part_keeps_the_first() {
         1,
         "no form for an invalid set of parts"
     );
+}
+
+#[test]
+fn signal_zip_split() {
+    let parts = split_parts(set_of(201, Some(webp(512, 9))));
+    let files = signal_ready_parts_files(&parts, |n| if n == 1 { "cats".into() } else { format!("cats-{n}") }).unwrap();
+    let zip = read_zip(&zip_stored(&files).unwrap());
+    let names: Vec<&str> = zip.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names.len(), 200 + 4 + 1 + 4 + 1);
+    assert_eq!(names[0], "cats/001.png");
+    assert_eq!(
+        names[200..],
+        [
+            "cats/cover.webp",
+            "cats/manifest.json",
+            "cats/emoji.txt",
+            "cats/README.txt",
+            "cats-2/001.png",
+            "cats-2/cover.webp",
+            "cats-2/manifest.json",
+            "cats-2/emoji.txt",
+            "cats-2/README.txt",
+            "README.txt",
+        ]
+    );
+    let get = |name: &str| &zip.iter().find(|(n, _)| n == name).unwrap().1;
+    let m: serde_json::Value = serde_json::from_slice(get("cats-2/manifest.json")).unwrap();
+    assert_eq!(
+        (m["title"].as_str(), m["stickers"].as_array().unwrap().len()),
+        (Some("Cats 2"), 1)
+    );
+    assert_eq!(m["cover"]["file"], "cover.webp");
+    assert_eq!(get("cats-2/001.png"), &nth(200).bytes);
+    let readme = String::from_utf8(get("README.txt").clone()).unwrap();
+    assert!(
+        readme.contains("cats/  Cats (200 stickers)\ncats-2/  Cats 2 (1 sticker)\n"),
+        "{readme}"
+    );
+    // One part is the folder as it was, at the top.
+    let one = split_parts(sample_pack());
+    assert_eq!(
+        signal_ready_parts_files(&one, |_| unreachable!()).unwrap(),
+        signal_ready_files(&sample_pack()).unwrap()
+    );
+    // An invalid part is named.
+    let mut bad = parts;
+    bad[1].title = " ".into();
+    let err = signal_ready_parts_files(&bad, |n| format!("p{n}")).unwrap_err();
+    assert!(err.to_string().starts_with("part 2 of 2:"), "{err}");
 }
