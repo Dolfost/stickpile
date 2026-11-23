@@ -330,6 +330,12 @@ pub struct PartUpdate {
     /// `None`: the part's pack was deleted (or was gone already), forget the
     /// part.
     pub state: Option<PackState>,
+    /// With `state` None: the part's pack existed, so its name must not be
+    /// given to a part again: `deleteStickerSet` deleted it, or the part's
+    /// previous state shows it was created (a pack deleted by hand on
+    /// Telegram is gone already). False for a part whose pack was never
+    /// created, and for a part that is kept.
+    pub retire: bool,
 }
 
 /// What an export did to one part.
@@ -444,7 +450,7 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for PartsError<E>
 /// `persist` gets its new state as soon as it is done. Only after every part
 /// is done are the parts in `plan.delete` deleted (`deleteStickerSet`; a
 /// pack that is gone already counts as deleted), each handed to `persist`
-/// with no state.
+/// with no state, and `retire` when its pack existed.
 ///
 /// The export stops at the first failure: the failed part's state as far as
 /// it got goes to `persist`, nothing is deleted, and the error carries the
@@ -527,6 +533,7 @@ where
             number: part.number,
             name: name.clone(),
             state: Some(state),
+            retire: false,
         };
         if let Err(e) = persist(update).await {
             return stop(PartsFailure::Persist(e), report);
@@ -544,21 +551,29 @@ where
             url: pack_url(name),
             ..PartReport::default()
         };
-        match api.delete_sticker_set(name).await {
-            Ok(()) => {}
-            Err(e) if e.is_missing_sticker_set() => {}
+        // A pack that is gone already existed if the part's state shows it
+        // was created; else the part was registered for an export that
+        // stopped before its pack was made.
+        let created = job
+            .previous
+            .get(&number)
+            .is_some_and(|s| !s.mapping.is_empty() || s.thumbnail.is_some());
+        let retire = match api.delete_sticker_set(name).await {
+            Ok(()) => true,
+            Err(e) if e.is_missing_sticker_set() => created,
             Err(e) => {
                 line.error = Some(e.to_string());
                 report.parts.push(line);
                 return stop(PartsFailure::Telegram(e), report);
             }
-        }
+        };
         line.deleted = true;
         report.parts.push(line);
         let update = PartUpdate {
             number,
             name: name.clone(),
             state: None,
+            retire,
         };
         if let Err(e) = persist(update).await {
             return stop(PartsFailure::Persist(e), report);

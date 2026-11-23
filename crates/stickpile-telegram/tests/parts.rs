@@ -358,19 +358,30 @@ async fn export_parts_deletes_empty_parts_after_the_others() {
     }
     let last = store.updates().pop().unwrap();
     assert_eq!(
-        (last.number, last.name.as_str(), last.state),
-        (2, name(2).as_str(), None)
+        (last.number, last.name.as_str(), last.state, last.retire),
+        (2, name(2).as_str(), None, true)
     );
     assert!(!store.states().contains_key(&2), "the part is forgotten");
     assert_each_once(&state, &store, &items);
 
-    // A part that is gone from Telegram already counts as deleted.
+    // A part that is gone from Telegram already counts as deleted. Its name
+    // is retired only when its state shows that its pack existed: part 4
+    // was registered for an export that stopped before creating it, part 5
+    // was deleted by hand.
     let mut states = store.states();
     states.insert(4, PackState::default());
+    states.insert(5, store.states()[&1].clone());
     *store.0.lock().unwrap() = (states, Vec::new());
     let report = run(&client, &store, &items, None, false).await.unwrap();
-    assert!(report.part(4).unwrap().deleted);
-    assert!(!store.states().contains_key(&4));
+    assert!(report.part(4).unwrap().deleted && report.part(5).unwrap().deleted);
+    assert!(!store.states().contains_key(&4) && !store.states().contains_key(&5));
+    let retired: Vec<(u32, bool)> = store
+        .updates()
+        .iter()
+        .filter(|u| u.state.is_none())
+        .map(|u| (u.number, u.retire))
+        .collect();
+    assert_eq!(retired, [(4, false), (5, true)]);
     assert_each_once(&state, &store, &items);
 }
 
@@ -400,6 +411,7 @@ async fn export_single_part_binding_unchanged() {
         number: 1,
         name: PART1.into(),
         state: Some(single.state()),
+        retire: false,
     });
 
     reset_calls(&state);

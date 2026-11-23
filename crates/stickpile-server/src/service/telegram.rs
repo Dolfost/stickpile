@@ -655,8 +655,9 @@ async fn register_parts(
 
 /// Store what the export did to one part, as soon as it is done with it: its
 /// state (mapping, thumbnail key, title, sticker count), or, when its pack
-/// was deleted, forget the part and mark the name as deleted, so that it is
-/// never given to a part again. A set deleted meanwhile is left alone.
+/// was deleted, forget the part and, if the pack existed (`retire`), mark
+/// the name as deleted, so that it is never given to a part again. A set
+/// deleted meanwhile is left alone.
 async fn store_part(db: &SqlitePool, set_id: &str, title: &str, u: PartUpdate) -> Result<(), JobError> {
     let now = ids::now();
     let mut tx = db.begin().await.map_err(retry)?;
@@ -694,12 +695,14 @@ async fn store_part(db: &SqlitePool, set_id: &str, title: &str, u: PartUpdate) -
                 .execute(&mut *tx)
                 .await
                 .map_err(retry)?;
-            sqlx::query("UPDATE telegram_packs SET deleted_at = ? WHERE name = ?")
-                .bind(now)
-                .bind(&u.name)
-                .execute(&mut *tx)
-                .await
-                .map_err(retry)?;
+            if u.retire {
+                sqlx::query("UPDATE telegram_packs SET deleted_at = ? WHERE name = ?")
+                    .bind(now)
+                    .bind(&u.name)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(retry)?;
+            }
         }
     }
     sync_link(&mut tx, set_id).await.map_err(retry)?;

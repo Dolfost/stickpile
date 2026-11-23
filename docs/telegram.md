@@ -325,7 +325,11 @@ state (its mapping and thumbnail key) to the caller to store as soon as
 that part is done. After every part is updated, it deletes the parts left
 empty with `deleteStickerSet` (Bot API 6.6, which deletes a set the bot
 created); an answer that the pack does not exist (`STICKERSET_INVALID`)
-counts as deleted. The caller then forgets the part. The report lists every part with its number,
+counts as deleted. The caller then forgets the part, and learns whether
+its pack existed: `deleteStickerSet` deleted it, or the part's state
+shows it was created (a pack deleted by hand). A part registered for an
+export that stopped before its pack was made had no pack. The report
+lists every part with its number,
 name, link (`https://t.me/addstickers/<name>`), title, number of stickers,
 `created_pack`, `added`, `removed`, `updated`, `reordered`, `thumbnail`,
 `thumbnail_changed`, `deleted` and the error where the export stopped, and
@@ -389,7 +393,10 @@ export continues from there:
   deleted is marked in `telegram_packs.deleted_at`, and the planner never
   gives its number to a new part or uses it in a repack: after part 2 was
   deleted, the next new part is part 3. As the mark is on the name, this
-  holds after a rename or a move of the binding too.
+  holds after a rename or a move of the binding too. A part whose pack
+  never existed (its export stopped before creating it, and the set
+  shrank before the next one) is forgotten without the mark: its number
+  is used again.
 - **Moving and renaming.** Publishing another of the user's sets under a
   set's part 1 name moves the whole binding: every part goes to that set,
   each without a mapping (as a single pack's binding moved before), and is
