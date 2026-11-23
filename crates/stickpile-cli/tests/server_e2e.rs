@@ -779,3 +779,66 @@ fn cli_repack_asks_with_count() {
     let m = mock.lock().unwrap();
     assert_eq!((m.packs[&p1].stickers.len(), m.packs[&p2].stickers.len()), (120, 2));
 }
+
+/// Review finding: `--repack` together with `--pack <another name>` asks
+/// with the plan of the set's current packs ("3 published stickers move"),
+/// but the job publishes under the new name from nothing: new packs, the
+/// old ones left as they are, `moved: 0`. What was confirmed is not what
+/// happens.
+#[test]
+fn review_repack_with_another_pack_name_confirms_what_happens() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (bot_url, mock) = rt.block_on(mock_bot::start());
+    let token = tempfile::tempdir().unwrap();
+    let token_file = token.path().join("token");
+    std::fs::write(&token_file, mock_bot::TOKEN).unwrap();
+    let server = Server::start_on(rt, |c| {
+        c.telegram.enabled = true;
+        c.telegram.bot_token_file = Some(token_file.clone());
+        c.telegram.api_url = bot_url;
+        c.telegram.default_owner_user_id = Some(777);
+    });
+    let env = Env::new(&server.url());
+    std::fs::write(env.path("pw"), format!("{PASSWORD}\n")).unwrap();
+    let pw = env.path("pw");
+    env.ok(&["login", "-u", "alice", "--password-file", pw.to_str().unwrap()]);
+    env.ok(&["sets", "create", "big", "--name", "Big"]);
+    let mut files = Vec::new();
+    for n in 1..=125 {
+        let p = env.path(&format!("{n:03}.png"));
+        std::fs::write(&p, png_n(n)).unwrap();
+        files.push(p.to_str().unwrap().to_string());
+    }
+    let mut args = vec!["upload", "big"];
+    args.extend(files.iter().map(String::as_str));
+    env.ok(&args);
+    env.ok(&["telegram", "export", "big", "--wait"]);
+    let db = server.handle.as_ref().unwrap().state.db.clone();
+    server
+        .rt
+        .block_on(
+            sqlx::query(
+                "DELETE FROM items WHERE id IN (SELECT id FROM items WHERE set_id = (SELECT id FROM sets WHERE \
+                 slug = 'big') ORDER BY position LIMIT 3)",
+            )
+            .execute(&db),
+        )
+        .unwrap();
+
+    let out = env.run(&[
+        "telegram", "export", "big", "--pack", "other", "--repack", "--yes", "--wait",
+    ]);
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let confirmed_moves = stdout.contains("3 published stickers move to other packs");
+    let other = format!("other_by_{}", mock_bot::BOT);
+    let made_new_packs = mock.lock().unwrap().packs.contains_key(&other);
+    assert!(
+        !(confirmed_moves && made_new_packs),
+        "the CLI confirmed a repack of big's packs (3 stickers move), the job published new packs under \
+         {other}: {stdout}"
+    );
+}
