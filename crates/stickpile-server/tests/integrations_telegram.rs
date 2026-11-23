@@ -1873,13 +1873,52 @@ async fn review_failed_rename_loses_the_parts() {
     let unbound = unbound_packs(&tg).await;
     let twice = doubled(&tg);
     assert!(
-        link_after_failure.as_deref() == Some(p1.as_str()) && moved.is_empty() && unbound.is_empty() && twice.is_empty(),
+        link_after_failure.as_deref() == Some(p1.as_str())
+            && moved.is_empty()
+            && unbound.is_empty()
+            && twice.is_empty(),
         "after the failed rename: telegram_pack {link_after_failure:?}, parts {rows_after_failure:?}; after going \
          back to \"cats\": {} published stickers moved without a repack, packs bound to no set {unbound:?}, {} \
          stickers in two packs",
         moved.len(),
         twice.len()
     );
+}
+
+/// Finding (minor): a part registered for an export that stopped before its
+/// pack was created is "deleted" when the set shrinks (`deleteStickerSet`
+/// answers that the pack does not exist), and its never-used name is
+/// retired: the next part the set needs skips the number.
+#[tokio::test]
+async fn review_a_part_never_created_is_not_retired() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 250).await;
+    // Parts 1 and 2 are created, part 3's creation keeps failing.
+    tg.mock
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("createNewStickerSet".into(), 2);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    tg.mock.lock().unwrap().fail_after.clear();
+    assert!(
+        !packs(&tg).contains_key(&part_name("cats", 3)),
+        "part 3 was never created"
+    );
+    // The last ten items go before the next export: part 3 is not needed.
+    delete_items(srv, &alice, &ids[240..]).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    // Later the set grows past two packs again.
+    add_items(srv, &alice, &set.id, 8000, 5).await;
+    let numbers: Vec<u32> = plan(srv, &alice, &set.id, false)
+        .await
+        .parts
+        .iter()
+        .map(|p| p.number)
+        .collect();
+    assert_eq!(numbers, [1, 2, 3], "a name no pack ever had is not retired");
 }
 
 /// Finding: publishing another of the user's sets under a set's name moves
@@ -1926,7 +1965,10 @@ async fn review_failed_takeover_loses_the_first_sets_parts() {
         .filter(|c| c == "addStickerToSet" || c == "replaceStickerInSet" || c == "createNewStickerSet")
         .count();
     let after = item_packs(srv, &cats.id).await;
-    let moved = after.iter().filter(|(item, pack)| placed.get(*item) != Some(*pack)).count();
+    let moved = after
+        .iter()
+        .filter(|(item, pack)| placed.get(*item) != Some(*pack))
+        .count();
     assert!(
         link_after_failure.as_deref() == Some(p1.as_str()) && moved == 0 && uploads == 0,
         "after dogs' failed takeover: cats' telegram_pack {link_after_failure:?}; cats' next export: {moved} \
