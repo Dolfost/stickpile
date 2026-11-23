@@ -69,14 +69,19 @@ fn invalid(message: impl Into<String>) -> TelegramError {
 ///   else the first in set order. The others are listed in `duplicates`.
 /// * An item already published (its key is in the mapping of a part of
 ///   `previous`; the lowest part if in several) stays in that part.
-/// * New items fill the first part with room, in set order: the parts of
-///   `previous` by number, then new parts, numbered from the lowest number
-///   not in use.
+/// * An item not published whose media is (under another key, such as the
+///   duplicate exported until it was removed) goes to the part with that
+///   media (the lowest if in several) while it has room, so the sticker
+///   stays in its pack.
+/// * Other new items fill the first part with room, in set order: the parts
+///   of `previous` by number, then new parts, numbered from the lowest
+///   number not in use.
 /// * The order inside a part is the set's order. A removed item frees its
 ///   place; a part of `previous` left without items is listed in `delete`.
 /// * `repack`: every item is assigned again in set order (part 1 gets the
 ///   first `capacity` items, and so on), and `moved` counts the published
-///   stickers that change part.
+///   stickers that change part (for an item not published whose media is,
+///   from the part with that media).
 ///
 /// Fails, before any call, without items, with duplicate item keys, with a
 /// `capacity` of 0, with a part numbered 0, or when a part of `previous`
@@ -123,11 +128,23 @@ pub fn plan_parts_skipping(
     // Where each item is published: the lowest part whose mapping has it,
     // with the media it was published with.
     let mut published: HashMap<&str, (u32, &str)> = HashMap::new();
+    // Where each media is published, whichever item it was published for:
+    // the lowest part with a sticker of it.
+    let mut media: HashMap<&str, u32> = HashMap::new();
     for (&number, state) in previous {
         for (key, (content, _)) in &state.mapping {
             published.entry(key.as_str()).or_insert((number, content.as_str()));
+            media.entry(content.as_str()).or_insert(number);
         }
     }
+    // The part an item's sticker is in now: its own, else the one with its
+    // media.
+    let part_of = |it: &ExportItem| {
+        published
+            .get(it.key.as_str())
+            .map(|&(number, _)| number)
+            .or_else(|| media.get(it.content_key.as_str()).copied())
+    };
 
     // One item per media.
     let rank = |it: &ExportItem| match published.get(it.key.as_str()) {
@@ -162,20 +179,19 @@ pub fn plan_parts_skipping(
             if n % capacity == 0 {
                 number = numbers.next().ok_or_else(|| invalid("too many parts"))?;
             }
-            if published
-                .get(items[i].key.as_str())
-                .is_some_and(|(was, _)| *was != number)
-            {
+            if part_of(&items[i]).is_some_and(|was| was != number) {
                 moved += 1;
             }
             parts.entry(number).or_default().push(i);
         }
     } else {
         let mut new = Vec::new();
+        let mut known_media = Vec::new();
         for &i in &exported {
-            match published.get(items[i].key.as_str()) {
-                Some(&(number, _)) => parts.entry(number).or_default().push(i),
-                None => new.push(i),
+            match (published.get(items[i].key.as_str()), part_of(&items[i])) {
+                (Some(&(number, _)), _) => parts.entry(number).or_default().push(i),
+                (None, Some(number)) => known_media.push((number, i)),
+                (None, None) => new.push(i),
             }
         }
         if let Some((number, held)) = parts.iter().find(|(_, held)| held.len() > capacity) {
@@ -184,6 +200,17 @@ pub fn plan_parts_skipping(
                 held.len()
             )));
         }
+        // A sticker published for another item stays in its pack while the
+        // pack has room.
+        for (number, i) in known_media {
+            let part = parts.entry(number).or_default();
+            if part.len() < capacity {
+                part.push(i);
+            } else {
+                new.push(i);
+            }
+        }
+        new.sort_unstable();
         let mut candidates = previous
             .keys()
             .copied()
@@ -835,6 +862,44 @@ mod tests {
         its[125].content_key = "new media".into();
         let plan = plan_parts(&its, &previous, CAP, false).unwrap();
         assert_eq!(layout(&plan, &its), [(1, a.clone()), (2, b.clone())]);
+    }
+
+    #[test]
+    fn plan_a_twin_left_keeps_the_part_of_its_media() {
+        let (a, b) = (named("a", 0..100), named("b", 0..10));
+        let previous = PartStates::from([(1, state(&a)), (2, state(&b))]);
+        // b003 was exported for itself and its twin; b003 is removed, the
+        // twin is left. Part 1 has room, yet the sticker stays in part 2.
+        let b_rest: Vec<String> = b.iter().filter(|k| *k != "b003").cloned().collect();
+        let mut its = items(&cat(&[&a, &b_rest]));
+        its.insert(0, item_with("twin", "c-b003"));
+        let plan = plan_parts(&its, &previous, CAP, false).unwrap();
+        assert!(plan.duplicates.is_empty());
+        assert_eq!(
+            layout(&plan, &its),
+            [(1, a.clone()), (2, cat(&[&one("twin"), &b_rest]))]
+        );
+        assert_eq!(plan.moved, 0);
+
+        // A repack counts it from part 2.
+        let plan = plan_parts(&its, &previous, CAP, true).unwrap();
+        assert_eq!(sizes(&plan), [(1, 110)]);
+        assert_eq!(plan.moved, 10, "part 2's nine and the twin's sticker");
+
+        // Without room there, it is new: b003's media changed, so its
+        // sticker is replaced within the full part 2, and the twin with
+        // b003's old media goes to the first part with room.
+        let full = named("b", 0..CAP);
+        let previous = PartStates::from([(1, state(&a)), (2, state(&full))]);
+        let mut its = items(&cat(&[&a, &full]));
+        its[100 + 3].content_key = "new media".into();
+        its.push(item_with("twin", "c-b003"));
+        its.push(item_with("x", "c-x"));
+        let plan = plan_parts(&its, &previous, CAP, false).unwrap();
+        assert_eq!(
+            layout(&plan, &its),
+            [(1, cat(&[&a, &one("twin"), &one("x")])), (2, full.clone())]
+        );
     }
 
     #[test]
