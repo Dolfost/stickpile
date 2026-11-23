@@ -1,0 +1,1 @@
+Search the punctuation on your stickers: x:? finds every sticker whose text has a question mark, x:... an ellipsis, and a plain ? or ... works too. When the server is out of reach, the app and the keyboard show saved stickers at once instead of waiting, check for the server in the background and switch to its results by themselves when it answers. The app also opens at once then.
