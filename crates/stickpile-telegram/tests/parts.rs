@@ -480,6 +480,41 @@ async fn export_parts_repack_moves_each_sticker_once() {
 }
 
 #[tokio::test]
+async fn export_parts_repack_that_stops_is_continued() {
+    for then_repack in [false, true] {
+        let (base, state) = start().await;
+        let client = api(&base);
+        let store = Store::default();
+        run(&client, &store, &stars(0..250), None, false).await.unwrap();
+        let items = stars((60..120).chain(180..250));
+        run(&client, &store, &items, None, false).await.unwrap();
+
+        // The repack takes part 2's stickers into part 1, then stops while
+        // part 2 deletes them.
+        state
+            .lock()
+            .unwrap()
+            .fail_after
+            .insert("deleteStickerFromSet".into(), 10);
+        let err = run(&client, &store, &items, None, true).await.unwrap_err();
+        assert_eq!(err.report.parts.iter().map(|p| p.number).collect::<Vec<_>>(), [1, 2]);
+        assert!(state.lock().unwrap().packs.contains_key(&name(3)), "nothing deleted");
+        state.lock().unwrap().fail_after.clear();
+
+        // A normal export after it, or the repack again (a retried job),
+        // leaves every sticker in exactly one pack.
+        let report = run(&client, &store, &items, None, then_repack).await.unwrap();
+        let parts: Vec<(u32, usize, bool)> = report.parts.iter().map(|p| (p.number, p.stickers, p.deleted)).collect();
+        if then_repack {
+            assert_eq!(parts, [(1, 120, false), (2, 10, false), (3, 0, true)]);
+        } else {
+            assert_eq!(parts, [(1, 120, false), (3, 10, false), (2, 0, true)]);
+        }
+        assert_each_once(&state, &store, &items);
+    }
+}
+
+#[tokio::test]
 async fn export_parts_stops_when_a_part_cannot_be_stored() {
     let (base, state) = start().await;
     let client = api(&base);
