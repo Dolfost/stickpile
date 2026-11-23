@@ -7,7 +7,7 @@
 //! between publishes: every publish uploads every part as a new pack
 //! ([`upload_parts`]).
 
-use crate::pack::{prepare, upload_prepared, UploadPack, UploadedPack, MAX_STICKERS, MAX_TITLE_CHARS};
+use crate::pack::{prepare, upload_prepared, PreparedPack, UploadPack, UploadedPack, MAX_STICKERS, MAX_TITLE_CHARS};
 use crate::{Credentials, SignalClient, SignalError};
 
 /// Part `number`'s title: part 1 is `title` itself, part k is
@@ -84,6 +84,25 @@ pub struct PartsUpload {
     pub failed: Option<(u32, SignalError)>,
 }
 
+/// [`prepare`] part `i` of `parts`; when there are several, an error names
+/// the part (`part 2 of 3: ...`).
+pub(crate) fn prepare_part(parts: &[UploadPack], i: usize) -> Result<PreparedPack, SignalError> {
+    match prepare(&parts[i]) {
+        Err(SignalError::Invalid(why)) if parts.len() > 1 => Err(SignalError::Invalid(format!(
+            "part {} of {}: {why}",
+            i + 1,
+            parts.len()
+        ))),
+        other => other,
+    }
+}
+
+/// Checks every part of `parts` like an upload, keeping none of the copies
+/// [`prepare`] makes (a large set would be held twice).
+pub(crate) fn check_parts(parts: &[UploadPack]) -> Result<(), SignalError> {
+    (0..parts.len()).try_for_each(|i| prepare_part(parts, i).map(drop))
+}
+
 /// Uploads `parts` ([`split_parts`]) as new packs, one after the other
 /// ([`crate::upload_pack`] each), and stops at the first failure.
 ///
@@ -96,28 +115,15 @@ pub async fn upload_parts(
     credentials: &Credentials,
     parts: &[UploadPack],
 ) -> Result<PartsUpload, SignalError> {
-    let several = parts.len() > 1;
-    let mut prepared = Vec::with_capacity(parts.len());
-    for (i, part) in parts.iter().enumerate() {
-        match prepare(part) {
-            Ok(p) => prepared.push(p),
-            Err(SignalError::Invalid(why)) if several => {
-                return Err(SignalError::Invalid(format!(
-                    "part {} of {}: {why}",
-                    i + 1,
-                    parts.len()
-                )))
-            }
-            Err(e) => return Err(e),
-        }
-    }
+    check_parts(parts)?;
     let mut out = PartsUpload {
         uploaded: Vec::with_capacity(parts.len()),
         failed: None,
     };
-    for (i, p) in prepared.iter().enumerate() {
+    for i in 0..parts.len() {
         let number = i as u32 + 1;
-        match upload_prepared(client, credentials, p).await {
+        let p = prepare_part(parts, i)?;
+        match upload_prepared(client, credentials, &p).await {
             Ok(pack) => out.uploaded.push(UploadedPart {
                 number,
                 title: p.manifest.title.clone().unwrap_or_default(),

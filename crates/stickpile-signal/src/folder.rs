@@ -24,6 +24,7 @@
 use serde_json::json;
 
 use crate::pack::{prepare, PreparedPack, UploadPack};
+use crate::parts::{check_parts, prepare_part};
 use crate::SignalError;
 
 /// One file of the folder.
@@ -132,18 +133,11 @@ pub fn signal_ready_parts_files(
         [] => Err(SignalError::Invalid("no Signal pack to write".into())),
         [one] => signal_ready_files(one),
         _ => {
-            let mut prepared = Vec::with_capacity(parts.len());
-            for (i, part) in parts.iter().enumerate() {
-                prepared.push(prepare(part).map_err(|e| match e {
-                    SignalError::Invalid(why) => {
-                        SignalError::Invalid(format!("part {} of {}: {why}", i + 1, parts.len()))
-                    }
-                    e => e,
-                })?);
-            }
+            check_parts(parts)?;
             let mut files = Vec::new();
             let mut readme = String::from(PARTS_README);
-            for (i, p) in prepared.iter().enumerate() {
+            for i in 0..parts.len() {
+                let p = prepare_part(parts, i)?;
                 let dir = folder(i as u32 + 1);
                 let title = p.manifest.title.as_deref().unwrap_or_default();
                 let n = p.manifest.stickers.len();
@@ -153,7 +147,7 @@ pub fn signal_ready_parts_files(
                     format!("{n} stickers")
                 };
                 readme.push_str(&format!("{dir}/  {title} ({stickers})\n"));
-                files.extend(folder_files(p).into_iter().map(|f| PackFile {
+                files.extend(folder_files(&p).into_iter().map(|f| PackFile {
                     path: format!("{dir}/{}", f.path),
                     bytes: f.bytes,
                 }));
