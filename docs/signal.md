@@ -4,7 +4,9 @@ stickpile can:
 
 - **import** a Signal sticker pack from its link into a new set;
 - **upload** a set as a new Signal sticker pack, with the credentials of a
-  Signal account, and return the pack's link;
+  Signal account, and return the pack's link; a set of more than 200
+  stickers becomes several packs ([Sets larger than one
+  pack](#sets-larger-than-one-pack));
 - build a **Signal-ready zip** for people without credentials: the images
   and emoji for Signal Desktop's sticker creator, and a manifest signal-cli
   can upload as it is.
@@ -150,8 +152,9 @@ Desktop's creator does).
 then one every 72 minutes (Signal-Server `RateLimiters`, `stickerPack`).
 Signal answers 413 (older servers) or 429 with `Retry-After`; the upload
 fails with "Signal rate limit reached; try again in N s" and is not
-retried. A 401 or 403 means the credentials are wrong or the device was
-unlinked.
+retried. Every pack needs a form of its own, so uploading a set as k packs
+([Sets larger than one pack](#sets-larger-than-one-pack)) takes k forms. A
+401 or 403 means the credentials are wrong or the device was unlinked.
 
 ### Credentials
 
@@ -217,7 +220,7 @@ that is the personal account's device and is not recommended.
 
 | | |
 |---|---|
-| Stickers per pack | 1 to 200 (Signal-Desktop creator `MAX_STICKERS`; the service issues forms for at most 201 files: 200 and a cover) |
+| Stickers per pack | 1 to 200 (Signal-Desktop creator `MAX_STICKERS`; the service issues forms for at most 201 files: 200 and a cover); a larger set is several packs ([below](#sets-larger-than-one-pack)) |
 | File size | 300 KiB each (`MAX_STICKER_BYTE_SIZE`; the service allows 301 KiB of ciphertext) |
 | Still stickers | PNG or WebP, at most 512x512 (render exactly 512x512; the creator draws every still image onto a 512x512 canvas) |
 | Animated stickers | APNG only (not GIF, not animated WebP), square, at most 512x512, looping forever, at most 3 s |
@@ -231,6 +234,49 @@ forever; other images resized to 512x512 WebP) and `util/useStickerDropzone.ts`
 animations, 300 KB, 3 seconds, 512x512). `check_sticker(bytes)` checks a
 file against these rules from its header; `STICKER_REQUIREMENTS` states
 them for the renderer.
+
+## Sets larger than one pack
+
+A Signal pack holds at most 200 stickers. A set with more is uploaded as
+several packs, its **parts** (`crates/stickpile-signal/src/parts.rs`, the
+same word and titles as for [Telegram](telegram.md#sets-larger-than-one-pack)).
+A set of at most 200 stickers is one part and uploads exactly as a single
+pack did.
+
+**Splitting.** `split_parts` takes the stickers in set order and fills the
+packs one after the other: part 1 gets the first 200, part 2 the next 200,
+and so on (450 stickers: 200, 200 and 50). The items that cannot become
+stickers are left out before that, once for the whole set, so they take no
+place in any part.
+
+**Titles.** Part 1's title is the set's name; part k's is `<name> <k>`
+(`Cats`, `Cats 2`, `Cats 3`). Both have at most 128 characters
+(`part_title`): a longer name is cut on characters (not bytes), before
+` <k>`, so the number stays. Every part has the same author.
+
+**Cover.** Every part gets the set's cover, uploaded with each part as a
+file of its own after its stickers; a set without a cover shows each
+part's own first sticker.
+
+**No stability rule.** Signal packs cannot be changed, so nothing has to
+stay where it was: every publish uploads every part as a new pack with a
+new link, and which sticker lands in which part follows only the set's
+order at that publish. People who added an older part keep it as it was.
+
+**Uploading.** `upload_parts` checks every part first: when one is invalid
+nothing is sent, and the error names the part (`part 2 of 3: sticker 1:
+...`). Then it uploads the parts by number, each like a single pack (an
+upload form each, see the rate limit above), and stops at the first
+failure. It returns the parts uploaded, each with its number, title and
+link, and the part that failed with its error; the parts after it are not
+tried.
+
+**A failed upload** leaves the parts before it on Signal: stickpile cannot
+delete a Signal pack. Their links are only in the failed job's result
+([In the server](#in-the-server)), so nobody gets them unless that link is
+handed out. Uploads are not resumed: the next publish, or a retry of the
+same job, uploads every part anew, and the packs of the failed attempt stay
+unused.
 
 ## Signal-ready zip
 
@@ -260,6 +306,24 @@ README.txt               how to use the folder, title, author, cover
 
 The zip is stored without compression (the images are compressed already)
 with fixed timestamps, so the same pack gives the same bytes.
+
+**Several packs.** `signal_ready_parts_files(parts, folder)` writes a set
+of several parts as one archive with a folder per part, each with the
+layout above (its own stickers numbered from `001`, manifest, `emoji.txt`
+and `README.txt`), and a `README.txt` at the top naming the folders:
+
+```
+cats/  Cats (200 stickers)
+cats-2/  Cats 2 (200 stickers)
+cats-3/  Cats 3 (50 stickers)
+```
+
+The server names the folders like WhatsApp's packs: `<slug>`, `<slug>-2`,
+`<slug>-3`, ... ([whatsapp.md](whatsapp.md#from-items-to-stickers)). Each
+folder is made into a pack of its own: in Signal Desktop by dragging that
+folder's images in, with signal-cli by giving it that folder's
+`manifest.json` once the zip is unpacked. One part is written as above,
+without a folder.
 
 ## TLS
 
@@ -307,24 +371,63 @@ from the crate's `STICKER_REQUIREMENTS`, and every file passes
   at 5 frames per second; past that the item is left out (`does not fit the
   300 KB limit of Signal stickers, even smaller and at 5 frames per
   second`). An animation whose frames all look the same becomes a still;
-- the emoji: the item's first emoji, else `🙂` (`sticker_emoji`); at most
-  200 stickers (`a Signal pack holds at most 200 stickers` for the rest);
+- the emoji: the item's first emoji, else `🙂` (`sticker_emoji`); more
+  than 200 stickers are several packs
+  ([Sets larger than one pack](#sets-larger-than-one-pack)); until 0.8.8
+  the rest was left out (`a Signal pack holds at most 200 stickers`);
 - the cover: the set's cover image or chosen cover item as a still, else
-  the first sticker; the title is the set's name, the author the owner's
-  display name (else the username).
+  the first sticker (of each part); the title is the set's name (part k:
+  `<name> <k>`), the author the owner's display name (else the username).
 
 **Publishing** is the `signal` platform of the publish registry
 (`service::signal`, docs/api.md "Publishing"); it takes no options. Only
 the set's owner publishes. The `signal_export` job uploads a **new** pack
-every time (packs cannot be changed): the newest `signal.art` link becomes
+every time (packs cannot be changed), or new packs for every part of a set
+of more than 200 stickers: the newest `signal.art` link (part 1's) becomes
 the set's publication link (`set_publications`, with the pack id in
 `state`), and the export page says so next to the row ("Signal packs
-cannot be changed: every publish uploads a new pack with a new link.").
-Older links keep working and keep showing the older stickers. The result
-has `url`, `title`, `exported`, `skipped` and `notes`; the page shows it as
+cannot be changed: every publish uploads new packs with new links. People
+who added an older pack keep its stickers. A pack holds at most 200
+stickers, so a larger set becomes several packs."). Older links keep
+working and keep showing the older stickers. The result has `url`,
+`title`, `exported`, `skipped` and `notes`; the page shows it as
 `3 stickers in a new pack, 0 left out`. A rate limit (a burst of 50 forms,
 then one every 72 minutes) and refused credentials fail the job at once
 with the crate's message; network errors and 5xx answers are retried.
+
+**Several parts.** For a set of more than one part the result keeps those
+fields for part 1 (`url`, `title` and `exported` are part 1's link, the
+set's name and part 1's sticker count; `skipped` and `notes` are the whole
+set's) and adds `parts`, every part with its `number`, `title`, `url` and
+`stickers`:
+
+```json
+{"set_id": "...", "title": "Cats", "url": "https://signal.art/addstickers/#pack_id=...&pack_key=...",
+ "exported": 200, "skipped": [], "notes": [],
+ "parts": [
+   {"number": 1, "title": "Cats", "url": "https://signal.art/addstickers/#pack_id=...", "stickers": 200},
+   {"number": 2, "title": "Cats 2", "url": "https://signal.art/addstickers/#pack_id=...", "stickers": 200},
+   {"number": 3, "title": "Cats 3", "url": "https://signal.art/addstickers/#pack_id=...", "stickers": 50}]}
+```
+
+The page shows it as `450 stickers in 3 new packs, 0 left out`. The set's
+`Publication` keeps part 1's link as `url` (and the set's name as
+`target`), and its `parts` list every part of the last successful publish
+(`number`, the title as `name`, `url`, `stickers`; kept in
+`set_publications.state`); for one pack `parts` is empty, as from a server
+before parts, and a 0.8.8 client reads the publication as before.
+
+**A failed publish of several parts** fails the job with the part and what
+happened, e.g. `part 2 of 3: Signal rate limit reached; try again in 4320 s
+(part 1 was uploaded; its link is in the job's result)`. The failed job
+keeps a result: the fields above, with the parts it uploaded and, last, the
+part that failed with its `error` and no `url`. The links are there and not
+in the error because errors are logged and a link holds its pack's key.
+The set's publication stays that of its last complete publish (`url`,
+`parts`, `last_result`); `last_status` and `last_error` say that the last
+one failed. The packs uploaded before the failure stay on Signal, unused.
+A retried job (network errors, 5xx) uploads every part anew, and its result
+is what the last attempt did.
 
 **Import**: `POST /api/v1/signal/import` (`SignalImport`: `link` in
 either form, optional `slug` and `visibility`) or the web page
@@ -352,11 +455,14 @@ who can read the set, whether Signal is configured or not, and the
 says, when the server does not publish to Signal, that this is the way to
 make a pack). It is `signal_ready_files` of the same renditions plus a
 `left-out.txt` naming the items that are not in it, stored without
-compression. Made on the first request after a change (that counts as an
-upload for rate limiting; a large animated set takes a while), it is kept
-in `<data_dir>/exports/<set id>/signal/` and served again while the items,
-their emoji, the set's name, cover and owner name are unchanged. A set
-with nothing to put in it answers 400.
+compression; a set of more than 200 stickers gets one folder per part,
+`<slug>/`, `<slug>-2/`, ... ([Several packs](#signal-ready-zip)), with
+`README.txt` and `left-out.txt` at the top. The download is
+`<slug>-signal.zip` either way. Made on the first request after a change
+(that counts as an upload for rate limiting; a large animated set takes a
+while), it is kept in `<data_dir>/exports/<set id>/signal/` and served
+again while the items, their emoji, the set's name, cover and owner name
+are unchanged. A set with nothing to put in it answers 400.
 
 **Disabled**: without `signal.enabled` the import route answers 404 and the
 import page does not exist; without readable credentials the platform is
@@ -370,7 +476,17 @@ publish through the registry (a new pack each time, read back with
 `import_pack` and checked with `check_sticker`), the rate limit and wrong
 credentials, imports from both link forms with the cover and the link
 removed from the finished job, the Signal-ready zip with and without Signal
-configured, the import page, and the routes when Signal is off.
+configured, the import page, and the routes when Signal is off. Sets
+larger than one pack (`signal_*` tests, items carrying an emoji of their
+own so a pack read back shows which item each sticker is): 200 items as one
+pack exactly as before, 450 as three packs with numbered titles and every
+item once in set order, `Publication.parts` and the set's cover in every
+part, a new link for every part on each publish and no parts once the set
+fits one pack, a rate limit at part 2 (the error, the failed job's result
+with part 1's link, the publication left as it was), a 5xx at part 2
+retried with every part uploaded anew, the zip with a folder per part and
+an item left out of the whole set, and a 0.8.8 client's `Publication`
+reading the new answer (and a 0.8.8 row read by the new server).
 
 The crate's own tests:
 
@@ -380,12 +496,17 @@ zip against an in-process axum mock of Signal's service and CDN on two
 auth user and password, issues upload policies like Signal-Server, checks
 the CDN form fields and their order, the policy values and the size limits,
 stores the encrypted files, answers 403 for missing files and 413 with
-`Retry-After` when told to. The tests cover: encryption round trips and
+`Retry-After` when told to, and fails a chosen form request
+(`fail_form_after`). The tests cover: encryption round trips and
 MAC failures (unit tests), the manifest round trip and known bytes, both
 link forms and bad links, import with missing, damaged and oversized files
 and a separate cover, wrong keys, an upload whose link the import reads
 back byte for byte, wrong credentials, the rate limit, invalid packs
 refused before any request, credentials file formats, secrets kept out of
-errors and `Debug`, the pinned certificate's fingerprint, and the zip (read
-back through its central directory with CRC checks). The tests need no
-network access.
+errors and `Debug`, the pinned certificate's fingerprint, the zip (read
+back through its central directory with CRC checks), and parts: 200, 201
+and 450 stickers uploaded and read back pack by pack (titles, covers,
+order, one form each), a failure at part 2 (part 1 uploaded, part 3 not
+tried), an invalid part refused before any request, the zip with a folder
+per part; `src/parts.rs` has unit tests for the split and the titles. The
+tests need no network access.

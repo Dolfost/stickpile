@@ -676,7 +676,8 @@ bad option. `-O PLATFORM.KEY=VALUE` (repeatable) sets one of a platform's
 options: Telegram's `pack_name` and `title`; Discord's `guild_id` (the
 server id, required the first time, afterwards the server used last;
 `discord.guild=...` works too) and `kind` (`stickers` or `emojis`); Signal
-has none, and every publish makes a new Signal pack with a new link.
+has none, and every publish makes a new Signal pack with a new link (a
+set of more than 200 stickers: a new pack per 200).
 `--wait` waits for every job; the command exits 1 if any failed. Only the
 set's owner may publish. See [discord.md](discord.md#in-the-server) and
 [signal.md](signal.md#in-the-server).

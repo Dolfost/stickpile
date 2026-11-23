@@ -657,7 +657,8 @@ every set page. Three sections:
   offered whether or not the server publishes to Signal; when it does not,
   the text says this is the way to make a Signal pack. It is made when it
   is downloaded (a large animated set takes a while) and items that cannot
-  become Signal stickers are listed in its `left-out.txt`
+  become Signal stickers are listed in its `left-out.txt`; a set of more
+  than 200 stickers gets a folder per pack
   ([signal.md](signal.md#signal-ready-zip)).
 - **WhatsApp sticker packs**, for anyone who can read the set too: "Build
   WhatsApp packs" queues a job (htmx shows its status box; without
@@ -683,7 +684,8 @@ every set page. Three sections:
   no default owner are set; Discord that the bot must be in the server with
   the Create Expressions permission and only what stickpile created there
   is changed; Signal that packs cannot be changed, so every publish
-  uploads a new pack with a new link.
+  uploads new packs with new links, and that a set of more than 200
+  stickers becomes several packs.
   Tick several rows and press "Publish to the selected platforms" to queue
   one job per platform, or press a row's own "Publish to X only". The page
   comes back with the queued jobs' status boxes. Errors (no platform
