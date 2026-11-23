@@ -1741,3 +1741,60 @@ async fn old_client_reads_set_and_publication() {
     assert_eq!(j.status, JobStatus::Done, "{j:?}");
     assert_eq!(j.result.unwrap()["moved"], 0);
 }
+
+#[tokio::test]
+async fn web_export_page_lists_parts() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    let b = web_common::Browser::login(srv, &alice).await;
+    let html = b.get(&format!("/sets/{}/export", set.id)).await.expect(200).text();
+    web_common::assert_clean_html(&html);
+    for (name, count) in [(&p1, "120 stickers"), (&p2, "5 stickers")] {
+        assert!(
+            html.contains(&format!("href=\"https://t.me/addstickers/{name}\"")),
+            "{name}: {html}"
+        );
+        assert!(html.contains(count), "{count}");
+    }
+    assert!(html.contains("Published as 2 packs."), "{html}");
+    assert!(html.contains("A Telegram pack holds at most 120 stickers."));
+    let confirm = format!("/sets/{}/export/telegram/repack", set.id);
+    assert!(html.contains(&format!("href=\"{confirm}\"")), "{html}");
+    // The set page links every pack; its button is unchanged.
+    let page = b.get(&format!("/sets/{}", set.id)).await.expect(200).text();
+    assert!(page.contains(&format!("https://t.me/addstickers/{p2}")));
+    assert!(page.contains("Update Telegram pack"));
+
+    // Repack: the confirmation says how many stickers move.
+    delete_items(srv, &alice, &ids[..2]).await;
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let frag = b.get_htmx(&confirm).await.expect(200);
+    web_common::assert_fragment(&frag);
+    let text = frag.text();
+    assert!(text.contains("2 published stickers move to other packs."), "{text}");
+    assert!(text.contains(&format!("hx-post=\"{confirm}\"")), "{text}");
+    let page = b.get(&confirm).await.expect(200);
+    web_common::assert_page(&page);
+    assert!(page.text().contains("2 published stickers move to other packs."));
+    assert!(writes_since(&tg, calls).is_empty(), "asking changes nothing");
+    // Without JavaScript the form posts and the page shows the job.
+    let r = b.post_form(&confirm, &[]).await;
+    assert_eq!(r.status, reqwest::StatusCode::SEE_OTHER, "{}", r.text());
+    let to = web_common::location(&r);
+    assert!(to.starts_with(&format!("/sets/{}/export?jobs=", set.id)), "{to}");
+    run_jobs_now(srv).await;
+    let m = packs(&tg);
+    assert_eq!((m[&p1].len(), m[&p2].len()), (120, 3));
+    // In Ukrainian.
+    sqlx::query("UPDATE users SET language = 'uk' WHERE id = ?")
+        .bind(&alice.id)
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    let html = b.get(&format!("/sets/{}/export", set.id)).await.expect(200).text();
+    assert!(html.contains("Опубліковано як 2 набори."), "{html}");
+    assert!(html.contains("Перепакувати частини"));
+}

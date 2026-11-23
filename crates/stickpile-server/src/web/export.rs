@@ -9,7 +9,10 @@
 //!   where the set is published, when, the last result (with what was
 //!   left out or changed) and the platform's options, prefilled with what
 //!   the set was published with last; tick several and publish them with
-//!   one button. The owner only.
+//!   one button. The owner only. A set published as several packs (more
+//!   stickers than one holds, `Publication::parts`) lists every pack with
+//!   its link and sticker count; for Telegram, "Repack the parts" asks
+//!   first, saying how many published stickers move.
 //!
 //! The forms post and redirect back here; background jobs are shown with
 //! the job fragment, which polls itself with htmx (without JavaScript the
@@ -18,6 +21,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
@@ -32,9 +36,9 @@ use super::integrations::{job_fragment, job_running};
 use super::layout::{self, Nav};
 use super::Ctx;
 use crate::error::AppResult;
-use crate::i18n::{t, t_dyn, tf};
+use crate::i18n::{t, t_dyn, tf, tp};
 use crate::service::publish::PublicationRow;
-use crate::service::{publish, sets, signal, ui, whatsapp};
+use crate::service::{publish, sets, signal, telegram, ui, whatsapp};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -42,10 +46,18 @@ pub fn routes() -> Router<AppState> {
         .route("/sets/{id}/export", get(page))
         .route("/sets/{id}/export/whatsapp", post(whatsapp_build))
         .route("/sets/{id}/export/publish", post(publish_submit))
+        .route(
+            "/sets/{id}/export/telegram/repack",
+            get(repack_confirm).post(repack_submit),
+        )
 }
 
 fn export_url(id: &str) -> String {
     format!("/sets/{id}/export")
+}
+
+fn repack_url(id: &str) -> String {
+    format!("/sets/{id}/export/telegram/repack")
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -255,7 +267,7 @@ fn publish_section(state: &AppState, ctx: &Ctx, set: &Set, publications: &[Publi
                         } }
                         tbody {
                             @for p in &configured {
-                                (publication_row(state, ctx, p, view, only_one, &back))
+                                (publication_row(state, ctx, &set.id, p, view, only_one, &back))
                             }
                         }
                     }
@@ -263,9 +275,49 @@ fn publish_section(state: &AppState, ctx: &Ctx, set: &Set, publications: &[Publi
                         button.primary type="submit" { (t("Publish to the selected platforms")) }
                     }
                 }
+                // "Repack the parts" shows its confirmation here (htmx),
+                // outside the publish form: it has a form of its own.
+                div #telegram-repack aria-live="polite" {}
             }
             div #publish-jobs aria-live="polite" {
                 @for job in &view.jobs { (job_fragment(job, Some(&back))) }
+            }
+        }
+    }
+}
+
+/// Every pack a set published as several is (`Publication::parts`), each
+/// with its link and sticker count, and a note; for Telegram also how the
+/// packs are kept and "Repack the parts".
+fn parts_list(p: &Publication, set_id: &str) -> Markup {
+    html! {
+        ul.link-list {
+            @for part in &p.parts {
+                li {
+                    @match &part.url {
+                        Some(url) if url.starts_with("https://") => {
+                            a href=(url) rel="noopener noreferrer" target="_blank" { (part.name) }
+                        }
+                        _ => { (part.name) }
+                    }
+                    @if let Some(n) = part.stickers {
+                        ", " (plural(u64::from(n), "sticker", "stickers"))
+                    }
+                }
+            }
+        }
+        p.hint {
+            (tp(p.parts.len() as u64, "Published as {n} pack.", "Published as {n} packs."))
+            @if p.platform == "telegram" {
+                " " (t("A Telegram pack holds at most 120 stickers. A published sticker stays in its pack, new stickers go to the first pack with room, and a pack left without stickers is deleted."))
+            }
+        }
+        @if p.platform == "telegram" {
+            @let url = repack_url(set_id);
+            p {
+                a.button.small href=(url) hx-get=(url) hx-target="#telegram-repack" hx-swap="innerHTML" {
+                    (t("Repack the parts"))
+                }
             }
         }
     }
@@ -297,6 +349,7 @@ fn result_details(result: &Value) -> Markup {
 fn publication_row(
     state: &AppState,
     ctx: &Ctx,
+    set_id: &str,
     p: &Publication,
     view: &View<'_>,
     only_one: bool,
@@ -325,12 +378,16 @@ fn publication_row(
                 }
             }
             td {
-                @match (&p.target, &p.url) {
-                    (Some(target), Some(url)) if url.starts_with("https://") => {
-                        a href=(url) rel="noopener noreferrer" target="_blank" { (target) }
+                @if p.parts.is_empty() {
+                    @match (&p.target, &p.url) {
+                        (Some(target), Some(url)) if url.starts_with("https://") => {
+                            a href=(url) rel="noopener noreferrer" target="_blank" { (target) }
+                        }
+                        (Some(target), _) => { (target) }
+                        _ => { span.muted { (t("not yet")) } }
                     }
-                    (Some(target), _) => { (target) }
-                    _ => { span.muted { (t("not yet")) } }
+                } @else {
+                    (parts_list(p, set_id))
                 }
             }
             td {
@@ -441,6 +498,76 @@ pub async fn publish_submit(
         }
         Err(e) => Err(e),
     }
+}
+
+/// "Repack the parts": what a repack of the set's Telegram packs would do,
+/// how many published stickers it moves, and the button that does it. The
+/// fragment for htmx (into `#telegram-repack`), else a page. The owner
+/// only.
+pub async fn repack_confirm(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Markup> {
+    let set = sets::detail(&state, &ctx.user, &id).await?.set;
+    // Who may not repack gets the error page; a plan that cannot be made
+    // (nothing to export, Telegram not answering) is shown in the box.
+    let plan = match telegram::plan(&state, &ctx.user, &set.id, true).await {
+        Err(e) if e.code == "not_found" || e.code == "forbidden" => return Err(e),
+        Err(e) if !e.status.is_client_error() && e.status != StatusCode::SERVICE_UNAVAILABLE => return Err(e),
+        plan => plan,
+    };
+    let back = export_url(&set.id);
+    let action = repack_url(&set.id);
+    let body = html! {
+        section.repack aria-labelledby="repack-head" {
+            @if !ctx.htmx { p.crumbs { a href=(back) { "← " (set.name) } } }
+            @let heading = tf("Repack the Telegram packs of {name}?", &[("name", &set.name)]);
+            @if ctx.htmx { h2 #repack-head { (heading) } } @else { h1 #repack-head { (heading) } }
+            p { (t("A repack puts the stickers into the packs again in set order: the first pack gets the first 120, the next pack the next 120, and so on. Packs left without stickers are deleted.")) }
+            @match &plan {
+                Err(e) => { (layout::alert("error", &t_dyn(&e.message))) }
+                Ok(plan) => {
+                    p {
+                        strong {
+                            @if plan.moved == 0 {
+                                (t("No published sticker moves to another pack."))
+                            } @else {
+                                (tp(u64::from(plan.moved), "{n} published sticker moves to another pack.", "{n} published stickers move to other packs."))
+                            }
+                        }
+                        @if plan.moved > 0 {
+                            " " (t("Someone who added only some of the packs in Telegram loses the stickers that move out of them."))
+                        }
+                    }
+                    ul.link-list {
+                        @for part in &plan.parts {
+                            li { (part.name) ": " (plural(u64::from(part.stickers.unwrap_or(0)), "sticker", "stickers")) }
+                        }
+                        @for part in &plan.delete {
+                            li { (part.name) ": " (t("deleted")) }
+                        }
+                    }
+                    form.inline-row method="post" action=(action) hx-post=(action) hx-target="#telegram-repack" hx-swap="innerHTML" {
+                        (ctx.csrf_input())
+                        button.danger type="submit" { (t("Repack now")) }
+                        a.button href=(format!("{back}#publish")) { (t("Cancel")) }
+                    }
+                }
+            }
+        }
+    };
+    Ok(ctx.page_or_fragment(t("Repack the parts"), Nav::Sets, body))
+}
+
+/// Queue the repack (a Telegram publish with `repack`), then back to the
+/// export page with its job (htmx: the job's status box).
+pub async fn repack_submit(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {
+    let req = PublishRequest {
+        platforms: vec!["telegram".into()],
+        options: BTreeMap::from([("telegram".to_string(), serde_json::json!({ "repack": true }))]),
+    };
+    let done = publish::publish(&state, &ctx.user, &id, req).await?;
+    let back = export_url(&id);
+    let fragment = html! { @for job in &done.jobs { (job_fragment(job, Some(&back))) } };
+    let ids: Vec<&str> = done.jobs.iter().map(|j| j.id.as_str()).collect();
+    Ok(ctx.done(fragment, None, &format!("{back}?jobs={}#publish", ids.join(","))))
 }
 
 pub async fn whatsapp_build(State(state): State<AppState>, ctx: Ctx, Path(id): Path<String>) -> AppResult<Response> {
