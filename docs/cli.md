@@ -447,7 +447,7 @@ words inside longer words count, and the last may be just its start:
 negate. A server up to 0.8.1 takes `text:` words whole, so `x:lo` sent to
 it finds the word "lo" alone; one up to 0.8.7 finds nothing for `x:?`.
 Quote `?` and `*` for the shell. Words starting with a single dash after `search`/`copy` are query
-negations, not options (`-tag:nsfw`, `-naahh`). `-t`, `-n` and `-v` keep their
+negations, not options (`-tag:nsfw`, `-naahh`, `-?`). `-t`, `-n` and `-v` keep their
 meaning, and anything after `--` is query. With `--target`, items that cannot
 be sent to that app are marked `(!)` with the reason.
 

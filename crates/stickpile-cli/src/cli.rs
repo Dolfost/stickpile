@@ -683,8 +683,9 @@ const VALUE_OPTIONS: &[&str] = &["--target", "-t", "--limit", "-n", "--id", "--c
 
 /// Rewrite argv so that query negations after `search`/`copy` survive clap:
 /// a word like `-tag:nsfw` or `-naahh` (a single dash and at least two more
-/// characters, not `-vv…`) is a query word there, never an option. Words
-/// after `--` are left alone.
+/// characters, not `-vv…`), or a dash and one punctuation character such
+/// as `-?` (no option is punctuation), is a query word there, never an
+/// option. Words after `--` are left alone.
 pub fn protect_negations<I: IntoIterator<Item = std::ffi::OsString>>(args: I) -> Vec<std::ffi::OsString> {
     let mut out: Vec<std::ffi::OsString> = args.into_iter().collect();
     // Find the subcommand: the first word that is neither an option nor an option's value.
@@ -717,8 +718,13 @@ pub fn protect_negations<I: IntoIterator<Item = std::ffi::OsString>>(args: I) ->
             j += 2;
             continue;
         }
-        let single_dash = a.starts_with('-') && !a.starts_with("--");
-        if single_dash && a.chars().count() > 2 && !a[1..].chars().all(|c| c == 'v') {
+        // What follows a single dash (not `--`).
+        let rest = a.strip_prefix('-').filter(|r| !r.starts_with('-'));
+        let negation = rest.is_some_and(|r| {
+            let len = r.chars().count();
+            (len > 1 && !r.chars().all(|c| c == 'v')) || (len == 1 && !r.chars().any(char::is_alphanumeric))
+        });
+        if negation {
             out[j] = format!("{NEGATION_MARK}{a}").into();
         }
         j += 1;
@@ -824,6 +830,16 @@ mod tests {
         let Command::Search(a) = cli.command else { panic!() };
         assert_eq!(query_string(&a.query), "-e:😂");
         assert_eq!(a.limit, 3);
+
+        // A dash and one punctuation character is a negation too (no option is punctuation).
+        let cli = parse(&["search", "-?", "-n", "3"]).unwrap();
+        let Command::Search(a) = cli.command else { panic!() };
+        assert_eq!(query_string(&a.query), "-?");
+        assert_eq!(a.limit, 3);
+        // Words that do not start with a dash, in any script, stay as they are.
+        let cli = parse(&["search", "мішку", "-x:\"head empty\"", "-!"]).unwrap();
+        let Command::Search(a) = cli.command else { panic!() };
+        assert_eq!(query_string(&a.query), "мішку -x:\"head empty\" -!");
 
         let cli = parse(&["search", "--", "-tag:nsfw", "cat"]).unwrap();
         let Command::Search(a) = cli.command else { panic!() };
