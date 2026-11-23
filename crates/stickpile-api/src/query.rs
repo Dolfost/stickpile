@@ -625,4 +625,17 @@ mod tests {
         let q = Query::parse("- -");
         assert_eq!(q.text, vec!["-", "-"]);
     }
+
+    /// Punctuation is a value and a word like any other: the search
+    /// (stickpile-search) gives it its meaning.
+    #[test]
+    fn punctuation_values_and_words() {
+        let q = Query::parse(r#"x:? x:... x:"what?" -x:?! ? ... what? -? x:…"#);
+        assert_eq!(q.texts.any, vec!["?", "...", "what?", "…"]);
+        assert_eq!(q.texts.none, vec!["?!"]);
+        assert_eq!(q.text, vec!["?", "...", "what?"]);
+        assert_eq!(q.exclude_text, vec!["?"]);
+        assert_eq!(Query::parse("x:what?"), Query::parse(r#"x:"what?""#));
+        assert_eq!(Query::parse(&q.to_string()), q);
+    }
 }
