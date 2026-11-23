@@ -6,6 +6,7 @@ mod client;
 mod offline;
 mod offline_clients;
 mod reach;
+mod review_instant;
 mod session;
 mod usage;
 

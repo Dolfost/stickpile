@@ -4316,6 +4316,8 @@ mod tiles_tests;
 #[cfg(test)]
 mod pack_search_tests;
 #[cfg(test)]
+mod review_instant_tests;
+#[cfg(test)]
 mod review_tests;
 #[cfg(test)]
 mod safe_tests;
