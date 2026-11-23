@@ -212,7 +212,7 @@ fn to_u32(n: usize) -> u32 {
 
 /// Errors after which the offline cache answers instead (as in `Session`):
 /// the server is unreachable or failing.
-fn falls_back(e: &CoreError) -> bool {
+pub(crate) fn falls_back(e: &CoreError) -> bool {
     e.is_offline() || e.status().is_some_and(|s| s >= 500)
 }
 
@@ -803,32 +803,20 @@ impl StickpileLibrary {
         .await
     }
 
-    /// Who is signed in, asking the server; `None` when nobody is (no token
-    /// and no tailnet identity, or the server refused the token). When the
-    /// server cannot be reached, the account the cache last saw; with none
-    /// cached, `None` when no token is stored either (a fresh install, so
+    /// Who is signed in; `None` when nobody is (no token and no tailnet
+    /// identity, or the server refused the token). Does not wait for a
+    /// server that does not answer when the cache knows the account
+    /// (`Session::account_steps`): with the server believed unreachable the
+    /// account the cache last saw at once, else the server's answer if it
+    /// comes within 300 ms, else the cached account (`account_steps` also
+    /// gives the server's answer to come, for a revoked token). With nothing
+    /// cached the server is asked and waited for; when it cannot be
+    /// reached, `None` when no token is stored either (a fresh install, so
     /// the app shows onboarding) and `Unreachable` when one is.
     pub async fn account(&self) -> Result<Option<Account>, LibraryError> {
         self.read(|inner| async move {
             let session = inner.session();
-            let server_url = session.config().server_url.clone();
-            let auth = if session.is_logged_in() {
-                AuthKind::Token
-            } else {
-                AuthKind::Tailnet
-            };
-            match session.client().me().await {
-                Ok(user) => Ok(Some(Account::new(&user, &server_url, auth))),
-                Err(e) if e.is_unauthorized() => Ok(None),
-                Err(e) if falls_back(&e) => match session.cache().me()? {
-                    Some(user) => Ok(Some(Account::new(&user, &server_url, auth))),
-                    // No token and nothing cached: signed out, whatever the
-                    // server would say about a tailnet identity.
-                    None if !session.is_logged_in() => Ok(None),
-                    None => Err(e.into()),
-                },
-                Err(e) => Err(e.into()),
-            }
+            Ok(inner.account_answer(&session).await?.0)
         })
         .await
     }

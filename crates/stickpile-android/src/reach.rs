@@ -1,16 +1,96 @@
 //! Results without waiting, and what the library knows of the server
 //! (docs/offline.md, "Reachability and results without waiting"): the
-//! two-step search and the reachability watch for the app and the
-//! keyboard. Both are `stickpile_core`'s (`Session::search_steps`,
-//! `Session::reach`); this hands them over to Kotlin.
+//! two-step search and account check, and the reachability watch for the
+//! app and the keyboard. All are `stickpile_core`'s
+//! (`Session::search_steps`, `Session::account_steps`, `Session::reach`);
+//! this hands them over to Kotlin.
 
 use std::sync::{Arc, Mutex};
 
-use stickpile_core::{ServerStep, Session};
+use stickpile_core::{AccountStep, ServerStep, Session};
 
-use crate::library::{lock, AbortOnDrop, Inner, StickpileLibrary};
+use crate::library::{falls_back, lock, AbortOnDrop, Inner, StickpileLibrary};
 use crate::types::*;
 use crate::LibraryError;
+
+impl Inner {
+    /// Who is signed in (`StickpileLibrary::account`), and the server's
+    /// answer to come when that is the cached account
+    /// (`Session::account_steps`).
+    pub(crate) async fn account_answer(
+        &self,
+        session: &Session,
+    ) -> Result<(Option<Account>, Option<AccountStep>), LibraryError> {
+        let server_url = session.config().server_url.clone();
+        let auth = if session.is_logged_in() {
+            AuthKind::Token
+        } else {
+            AuthKind::Tailnet
+        };
+        match session.account_steps().await {
+            Ok(steps) => Ok((Some(Account::new(&steps.first, &server_url, auth)), steps.then)),
+            Err(e) if e.is_unauthorized() => Ok((None, None)),
+            // Nothing cached and no server to ask: without a token that is
+            // signed out, whatever the server would say about a tailnet
+            // identity; with one, not known.
+            Err(e) if falls_back(&e) && !session.is_logged_in() => Ok((None, None)),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+/// The server's answer to "who is signed in" after the cached account came
+/// first (`AccountAnswer.pending`). The request runs on its own: nobody
+/// waiting for it does not cancel it.
+#[derive(uniffi::Object)]
+pub struct PendingAccount {
+    /// Taken by the first `server_account`.
+    step: Mutex<Option<AccountStep>>,
+    handle: tokio::runtime::Handle,
+    /// The cached account's server and sign-in, for the account the
+    /// server answers with.
+    server_url: String,
+    auth: AuthKind,
+}
+
+impl std::fmt::Debug for PendingAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingAccount")
+            .field("waiting", &lock(&self.step).is_some())
+            .finish()
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl PendingAccount {
+    /// Wait for the server's word on the cached account: the account (the
+    /// token still works), or `None` when the server refused the token (a
+    /// revoked token: signed out, as `account` says). Throws `Unreachable`
+    /// when the server could not be reached or failed (the cached account
+    /// stands), and once it was answered (one answer per check); other
+    /// errors as `account`. Stops waiting when the calling coroutine is
+    /// cancelled; the request goes on.
+    pub async fn server_account(&self) -> Result<Option<Account>, LibraryError> {
+        let Some(step) = lock(&self.step).take() else {
+            return Err(LibraryError::Unreachable {
+                detail: "the server's answer was handed over already".into(),
+            });
+        };
+        let (server_url, auth) = (self.server_url.clone(), self.auth);
+        let task = self.handle.spawn(async move {
+            match step.wait().await {
+                Ok(Some(user)) => Ok(Some(Account::new(&user, &server_url, auth))),
+                Ok(None) => Err(LibraryError::Unreachable {
+                    detail: "the server did not say who is signed in; the cached account stands".into(),
+                }),
+                Err(e) if e.is_unauthorized() => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        });
+        let _abort = AbortOnDrop(task.abort_handle());
+        task.await?
+    }
+}
 
 /// The server's answer to a search whose offline results came first
 /// (`SearchAnswer.pending`). The request runs on its own: nobody waiting
@@ -93,6 +173,30 @@ impl StickpileLibrary {
                 })
             });
             Ok(SearchAnswer { list, pending })
+        })
+        .await
+    }
+
+    /// Who is signed in, as `account` answers, and when that is the cached
+    /// account because the server had not answered within 300 ms, the
+    /// server's word on it to come (`AccountAnswer.pending`): for the app's
+    /// start, which shows the library at once and signs out when the server
+    /// then refuses the token. Throws as `account`.
+    pub async fn account_steps(&self) -> Result<AccountAnswer, LibraryError> {
+        let handle = self.handle.clone();
+        self.read(move |inner| async move {
+            let session = inner.session();
+            let (account, step) = inner.account_answer(&session).await?;
+            let pending = match (step, &account) {
+                (Some(step), Some(cached)) => Some(Arc::new(PendingAccount {
+                    step: Mutex::new(Some(step)),
+                    handle,
+                    server_url: cached.server_url.clone(),
+                    auth: cached.auth,
+                })),
+                _ => None,
+            };
+            Ok(AccountAnswer { account, pending })
         })
         .await
     }

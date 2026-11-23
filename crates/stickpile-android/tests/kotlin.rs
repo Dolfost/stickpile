@@ -26,6 +26,7 @@ const METHODS: &[&str] = &[
     "fun `serverUrl`(): kotlin.String",
     "suspend fun `setServerUrl`(`url`: kotlin.String)",
     "suspend fun `account`(): Account?",
+    "suspend fun `accountSteps`(): AccountAnswer",
     "suspend fun `loginTailnet`(): Account?",
     "suspend fun `loginPassword`(`username`: kotlin.String, `password`: kotlin.String, `totp`: kotlin.String?): Account",
     "suspend fun `loginPairing`(`serverUrl`: kotlin.String, `code`: kotlin.String): Account",
@@ -156,6 +157,7 @@ const RECORDS: &[(&str, &[&str])] = &[
     ),
     ("ItemList", &["items: List<Item>", "offline: kotlin.Boolean"]),
     ("SearchAnswer", &["list: ItemList", "pending: PendingSearch?"]),
+    ("AccountAnswer", &["account: Account?", "pending: PendingAccount?"]),
     (
         "SearchHint",
         &[
@@ -542,6 +544,8 @@ fn the_kotlin_bindings_carry_the_contract() {
         "StickpileLibraryInterface",
         "PendingSearch",
         "PendingSearchInterface",
+        "PendingAccount",
+        "PendingAccountInterface",
         "LibraryException",
     ]);
     for name in exported {
@@ -590,25 +594,35 @@ fn the_kotlin_bindings_carry_the_contract() {
         assert_eq!(throws, !NOT_THROWING.contains(&name), "{name}: throws");
     }
 
-    // The server's answer to a search (`SearchAnswer.pending`): one method,
-    // which throws; a class a test can subclass (`NoHandle`).
-    let pending = kt
-        .split("public interface PendingSearchInterface {")
-        .nth(1)
-        .and_then(|s| s.split("companion object").next())
-        .expect("PendingSearchInterface");
-    let declared: Vec<&str> = pending
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("fun ") || l.starts_with("suspend fun "))
-        .collect();
-    assert_eq!(declared, ["suspend fun `serverResults`(): ItemList?"]);
-    assert!(squashed.contains(&squash(
-        "@Throws(LibraryException::class) @Suppress(\"ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE\") override suspend fun `serverResults`()"
-    )));
-    assert!(squashed.contains(&squash(
-        "open class PendingSearch: Disposable, AutoCloseable, PendingSearchInterface {"
-    )));
+    // The server's answer to a search (`SearchAnswer.pending`) and to the
+    // account check (`AccountAnswer.pending`): one method each, which
+    // throws; classes a test can subclass (`NoHandle`).
+    for (object, method) in [
+        ("PendingSearch", "suspend fun `serverResults`(): ItemList?"),
+        ("PendingAccount", "suspend fun `serverAccount`(): Account?"),
+    ] {
+        let body = kt
+            .split(&format!("public interface {object}Interface {{"))
+            .nth(1)
+            .and_then(|s| s.split("companion object").next())
+            .unwrap_or_else(|| panic!("{object}Interface"));
+        let declared: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("fun ") || l.starts_with("suspend fun "))
+            .collect();
+        assert_eq!(declared, [method], "{object}");
+        let name = method.split('`').nth(1).unwrap();
+        assert!(
+            squashed.contains(&squash(&format!(
+                "@Throws(LibraryException::class) @Suppress(\"ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE\") override suspend fun `{name}`()"
+            ))),
+            "{object}.{name} throws"
+        );
+        assert!(squashed.contains(&squash(&format!(
+            "open class {object}: Disposable, AutoCloseable, {object}Interface {{"
+        ))));
+    }
     assert!(squashed.contains(&squash("constructor(noHandle: NoHandle)")));
 
     // The primary constructor (not async: UniFFI cannot make it so for Kotlin).

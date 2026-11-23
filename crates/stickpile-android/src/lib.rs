@@ -57,7 +57,7 @@ pub mod types;
 
 pub use error::{LibraryError, LibraryErrorKind};
 pub use library::StickpileLibrary;
-pub use reach::PendingSearch;
+pub use reach::{PendingAccount, PendingSearch};
 pub use types::*;
 
 /// The chat app behind an Android package name (the focused field's

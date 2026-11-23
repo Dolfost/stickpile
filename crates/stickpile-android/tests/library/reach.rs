@@ -7,7 +7,7 @@
 
 use std::time::{Instant, SystemTime};
 
-use stickpile_android::{ServerReach, Target};
+use stickpile_android::{LibraryErrorKind, ServerReach, Target};
 
 use super::*;
 
@@ -234,4 +234,84 @@ async fn check_server_from_any_thread() {
     .unwrap();
     assert!(wait_until(|| requests(&server, "GET /healthz") == 2).await);
     assert_eq!(lib.server_reach(), ServerReach::Reachable);
+}
+
+/// In place of the stopped `server`, at its address: a listener that
+/// accepts and never answers (a server that hangs). Closed when dropped.
+fn hang_in_place_of(server: &mut MockServer) -> std::net::TcpListener {
+    server.stop();
+    std::net::TcpListener::bind(server.url.trim_start_matches("http://")).unwrap()
+}
+
+/// The keyboard asks whether someone is signed in when its Recent tab is
+/// empty (`account`): a library opened with the server hanging answers
+/// with the cached account after 300 ms, not after the request's timeout
+/// (2 s here), and at once once the server is believed away.
+#[tokio::test]
+async fn keyboard_signed_in_without_waiting() {
+    let (mut server, _items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    synced(&server, dir.path()).await;
+    let _hung = hang_in_place_of(&mut server);
+
+    let lib = open(dir.path(), &server.url);
+    let start = Instant::now();
+    let account = lib.account().await.unwrap().expect("the cached account");
+    assert_eq!(account.username, "alice");
+    assert!(start.elapsed() < ms(800), "{:?}", start.elapsed());
+
+    // The request went on and timed out: believed away, answered at once.
+    assert!(wait_until(|| matches!(lib.server_reach(), ServerReach::Unreachable { .. })).await);
+    let start = Instant::now();
+    assert_eq!(lib.account().await.unwrap().unwrap().username, "alice");
+    assert!(start.elapsed() < ms(100), "{:?}", start.elapsed());
+}
+
+/// The app's start (`account_steps`): the cached account to go on with,
+/// and the server's word on it after.
+#[tokio::test]
+async fn account_steps_hand_over_the_servers_word() {
+    let (mut server, _items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let lib = synced(&server, dir.path()).await;
+
+    // In time: the server's answer, nothing to come.
+    let answer = lib.account_steps().await.unwrap();
+    assert_eq!(answer.account.unwrap().username, "alice");
+    assert!(answer.pending.is_none());
+
+    // Slow: the cached account, then the server confirms it.
+    server.state().me_delay = Some(Duration::from_secs(1));
+    let answer = lib.account_steps().await.unwrap();
+    assert_eq!(answer.account.clone().unwrap().username, "alice");
+    let pending = answer.pending.expect("to come");
+    let confirmed = pending.server_account().await.unwrap().expect("still signed in");
+    assert_eq!(Some(confirmed), answer.account);
+    assert_eq!(
+        kind(pending.server_account().await),
+        LibraryErrorKind::Unreachable,
+        "once"
+    );
+
+    // Revoked: the cached account, then signed out.
+    for t in server.state().tokens.iter_mut() {
+        t.info.revoked = true;
+    }
+    let answer = lib.account_steps().await.unwrap();
+    assert_eq!(answer.account.unwrap().username, "alice");
+    assert_eq!(answer.pending.expect("to come").server_account().await.unwrap(), None);
+    server.state().me_delay = None;
+    assert_eq!(lib.account().await.unwrap(), None, "answered in time: signed out");
+
+    // Hanging (a new start): the cached account, and no word from the
+    // server: the account stands.
+    for t in server.state().tokens.iter_mut() {
+        t.info.revoked = false;
+    }
+    let _hung = hang_in_place_of(&mut server);
+    let lib = open(dir.path(), &server.url);
+    let answer = lib.account_steps().await.unwrap();
+    assert_eq!(answer.account.unwrap().username, "alice");
+    let pending = answer.pending.expect("the server was asked");
+    assert_eq!(kind(pending.server_account().await), LibraryErrorKind::Unreachable);
 }

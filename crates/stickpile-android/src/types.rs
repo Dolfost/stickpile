@@ -226,6 +226,18 @@ pub struct SearchAnswer {
     pub pending: Option<std::sync::Arc<crate::reach::PendingSearch>>,
 }
 
+/// What `StickpileLibrary.account_steps` answers: who is signed in to go
+/// on with now (as `account` answers), and the server's word on it to come
+/// when that is the cached account because the server had not answered.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AccountAnswer {
+    /// As `account` answers.
+    pub account: Option<Account>,
+    /// The server's answer to wait for (`PendingAccount.server_account`);
+    /// `None` when nothing is to come.
+    pub pending: Option<std::sync::Arc<crate::reach::PendingAccount>>,
+}
+
 /// What the library knows of the server (`stickpile_core::Reach`): a
 /// request or a background check found it there or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
