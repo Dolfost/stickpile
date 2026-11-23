@@ -1918,6 +1918,24 @@ mod tests {
         assert!(start.elapsed() < ms(50), "{:?}", start.elapsed());
     }
 
+    /// A backend the shell replaces during an outage (the popup opens
+    /// another session on every opening while a login is needed, and when
+    /// the settings change) ends the shell's watch of its reachability:
+    /// the watch value goes with it, though its server was being checked.
+    #[test]
+    fn a_dropped_backend_ends_its_reach_watch() {
+        let (_server, items) = world();
+        let dir = tempfile::tempdir().unwrap();
+        let rt = rt();
+        let gone = cached(&rt, &dead_url(), dir.path(), &items);
+        let mut rx = gone.reach().unwrap();
+        gone.check_server();
+        assert!(next_reach(&rt, &mut rx).is_unreachable());
+        drop(gone);
+        let ended = rt.block_on(async { tokio::time::timeout(ms(1000), rx.changed()).await });
+        assert!(matches!(ended, Ok(Err(_))), "the watch outlived the backend: {ended:?}");
+    }
+
     /// The popup's suggestion line per keystroke on 50,000 cached items
     /// (rule 8 of the text-search round), the vocabulary loaded as the
     /// backend loads it (`CoreBackend::vocabulary`): the query changes

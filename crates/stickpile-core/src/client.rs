@@ -20,7 +20,7 @@
 //!   ([`ApiClient::reach`], [`Reach`]).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::{Duration, SystemTime};
 
 use futures::future::BoxFuture;
@@ -373,10 +373,21 @@ impl Reachability {
         // Spawned with the lock released: a runtime that is shutting down
         // drops the task at once, and the drop takes the lock.
         let task = CheckTask {
-            reach: self.clone(),
+            reach: Arc::downgrade(self),
             wake,
         };
         runtime.spawn(task.run());
+    }
+}
+
+impl Drop for Reachability {
+    /// The client and its clones are gone: the check task ends now rather
+    /// than at its next turn.
+    fn drop(&mut self) {
+        let s = self.state.get_mut().unwrap_or_else(|e| e.into_inner());
+        if let Some(wake) = &s.prober {
+            wake.notify_waiters();
+        }
     }
 }
 
@@ -384,9 +395,11 @@ impl Reachability {
 /// on the schedule of [`PROBE_FAST`] and [`PROBE_SLOW`], and at once when
 /// asked ([`ApiClient::check_now`]), until the server answers. One at a
 /// time; when it is dropped (its runtime ended) the next read or check
-/// starts another.
+/// starts another. It does not keep the client alive: once the client and
+/// its clones are dropped (a shell opened another session), nothing can
+/// read what a check finds, and it ends.
 struct CheckTask {
-    reach: Arc<Reachability>,
+    reach: Weak<Reachability>,
     wake: Arc<Notify>,
 }
 
@@ -400,7 +413,8 @@ impl CheckTask {
             tokio::pin!(woken);
             woken.as_mut().enable();
             let next = {
-                let mut s = self.reach.state();
+                let Some(reach) = self.reach.upgrade() else { return };
+                let mut s = reach.state();
                 match s.down_since {
                     _ if s.asked => None,
                     Some(since) => {
@@ -413,18 +427,23 @@ impl CheckTask {
             if let Some(at) = next {
                 let _ = tokio::time::timeout_at(at, woken).await;
             }
-            {
-                let mut s = self.reach.state();
-                if !s.asked && s.down_since.is_none() {
-                    return self.end(&mut s);
+            let probe = {
+                let Some(reach) = self.reach.upgrade() else { return };
+                {
+                    let mut s = reach.state();
+                    if !s.asked && s.down_since.is_none() {
+                        return self.end(&mut s);
+                    }
+                    s.asked = false;
+                    s.probing = true;
                 }
-                s.asked = false;
-                s.probing = true;
-            }
+                (reach.probe)()
+            };
             last = tokio::time::Instant::now();
-            let result = (self.reach.probe)().await;
-            self.reach.record(&result);
-            self.reach.state().probing = false;
+            let result = probe.await;
+            let Some(reach) = self.reach.upgrade() else { return };
+            reach.record(&result);
+            reach.state().probing = false;
         }
     }
 
@@ -440,8 +459,9 @@ impl CheckTask {
 
 impl Drop for CheckTask {
     fn drop(&mut self) {
-        let s = &mut *self.reach.state();
-        self.end(s);
+        if let Some(reach) = self.reach.upgrade() {
+            self.end(&mut reach.state());
+        }
     }
 }
 

@@ -414,7 +414,10 @@ value of `stickpile_core::Reach`:
   for the first 5 minutes of the outage, then every 60 s (`PROBE_FAST`,
   `PROBE_FAST_FOR`, `PROBE_SLOW`), whether or not anything reads. It
   starts on any offline failure and stops when the value leaves
-  `Unreachable`. Reads never check the server themselves; they only start
+  `Unreachable`, or when the client and its clones are dropped (a shell
+  opened another session): it does not keep them, and the watch value
+  goes with them, so whatever follows it (a receiver, `reach_changed`)
+  sees it end. Reads never check the server themselves; they only start
   the task again when it is gone (its Tokio runtime ended). Any answer
   ends the outage: a check, a write, or a request that was out already.
 - `Session::check_server()` (`ApiClient::check_now()`) checks at once in

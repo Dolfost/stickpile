@@ -392,6 +392,27 @@ async fn watch_value_flips_when_server_returns() {
     assert_eq!(*rx.borrow_and_update(), Reach::Unknown);
 }
 
+/// What follows the reachability of a client that is dropped (the GTK
+/// popup's and the macOS app's watch of an old session, Android's long
+/// poll) ends with it, during an outage too: its check task does not keep
+/// the watch value alive, and it checks no more.
+#[tokio::test(start_paused = true)]
+async fn a_dropped_client_ends_its_watchers() {
+    let checked = Arc::new(Checked::default());
+    let client = checked.client();
+    let mut rx = client.reach();
+    client.check_now();
+    rx.changed().await.unwrap();
+    assert!(rx.borrow_and_update().is_unreachable());
+    assert_eq!(checked.checks(), 1);
+
+    drop(client);
+    let ended = tokio::time::timeout(ms(10), rx.changed()).await;
+    assert!(matches!(ended, Ok(Err(_))), "the watch outlived the client");
+    tokio::time::sleep(PROBE_SLOW * 10).await;
+    assert_eq!(checked.checks(), 1);
+}
+
 #[tokio::test]
 async fn search_unreachable_answers_offline_at_once() {
     let (_server, items) = seeded_server();
