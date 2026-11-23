@@ -1359,6 +1359,7 @@ async fn publications(
         last_error: None,
         last_result: None,
         job,
+        parts: Vec::new(),
     }]))
 }
 

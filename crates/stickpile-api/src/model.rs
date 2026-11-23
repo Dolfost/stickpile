@@ -1000,6 +1000,27 @@ pub struct Publication {
     pub last_result: Option<serde_json::Value>,
     /// A publish of this set to the platform that is queued or running.
     pub job: Option<Job>,
+    /// Every pack the set is published as, when the platform splits a set
+    /// larger than one pack into parts (Telegram 120, Signal 200 stickers
+    /// per pack); part 1 is `target`/`url`. Empty for one pack and from
+    /// servers older than parts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PublishedPart>,
+}
+
+/// One pack of a set published as several (see [`Publication::parts`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PublishedPart {
+    /// 1 for the first pack.
+    pub number: u32,
+    /// The pack's name on the platform (Telegram: `<name>_<k>_by_<bot>`).
+    pub name: String,
+    /// Link to the pack.
+    pub url: Option<String>,
+    /// How many stickers the pack holds, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stickers: Option<u32>,
 }
 
 /// An item left out of an export, and why.

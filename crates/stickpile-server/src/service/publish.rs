@@ -371,6 +371,8 @@ fn publication(
             .and_then(|r| r.last_result.as_deref())
             .and_then(|s| serde_json::from_str(s).ok()),
         job,
+        // Filled by the platforms that split a set into parts.
+        parts: Vec::new(),
     }
 }
 
