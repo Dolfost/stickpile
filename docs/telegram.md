@@ -333,8 +333,10 @@ export continues from there:
   is then filled or deleted, never left behind on Telegram.
 - A part whose pack was deleted by hand on Telegram is created again, as a
   single pack is.
-- A repack that stopped is finished by the next repack. If an item ends up
-  in two parts' mappings (a repack stopped after an earlier part took the
+- A repack that stopped is finished by the next repack (a retried job
+  repeats it). An ordinary export after it does not finish it, but also
+  leaves every sticker in exactly one pack: if an item ends up in two
+  parts' mappings (the repack stopped after an earlier part took the
   sticker over), the lower part keeps it and the other drops its copy.
 
 **Server side** (design, being built):
