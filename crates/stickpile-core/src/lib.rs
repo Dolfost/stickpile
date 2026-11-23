@@ -38,6 +38,7 @@ pub mod usage;
 mod tests;
 
 pub use client::ApiClient;
+pub use client::Reach;
 pub use config::ClientConfig;
 pub use insert::{target_for_package, variant_for, InsertChoice};
 pub use session::{PreparedCopy, SearchOutcome, Session};

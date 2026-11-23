@@ -11,9 +11,10 @@ use stickpile_api::{
     CreateToken, ItemSummary, MediaKind, PairRequest, SearchHit, SetSource, SetSummary, TargetApp, TokenCreated,
     TokenRequest, User, Variant, VariantInfo, Visibility,
 };
+use tokio::sync::watch;
 
 use crate::cache::{self, safe_component, Cache, OfflineIndex, SyncReport};
-use crate::client::{summary_from_detail, summary_from_set_item, ApiClient, SearchParams};
+use crate::client::{summary_from_detail, summary_from_set_item, ApiClient, Reach, SearchParams};
 use crate::clipboard::adjust::adjust_copy_file;
 use crate::clipboard::{build_offers, ClipOffer};
 use crate::offline::run::Foreground;
@@ -160,11 +161,37 @@ impl Session {
     }
 
     /// Once the server is found unreachable, answer reads from the offline
-    /// cache at once for `window` instead of waiting for the timeout on each
-    /// ([`ApiClient::with_fail_fast`]).
-    pub fn with_fail_fast(mut self, window: std::time::Duration) -> Session {
-        self.client = self.client.with_fail_fast(window);
+    /// cache at once instead of waiting for the timeout on each, check the
+    /// server in the background until it answers, and publish what is known
+    /// of it ([`ApiClient::with_fail_fast`], [`Session::reach`]). For the
+    /// clients that show results (the popup, the apps); the CLI does without.
+    pub fn with_fail_fast(mut self) -> Session {
+        let runtime = self.runtime.clone();
+        let _in = enter(runtime.as_ref());
+        self.client = self.client.with_fail_fast();
         self
+    }
+
+    /// What the client knows of the server, as a watch value
+    /// ([`ApiClient::reach`]). The contract for a shell (docs/offline.md):
+    /// when it turns [`Reach::Reachable`] after [`Reach::Unreachable`], run
+    /// the current search again and start a sync.
+    pub fn reach(&self) -> watch::Receiver<Reach> {
+        self.client.reach()
+    }
+
+    /// Wait until the state is another than `seen` ([`ApiClient::reach_changed`]).
+    pub async fn reach_changed(&self, seen: Reach) -> Reach {
+        self.client.reach_changed(seen).await
+    }
+
+    /// Check the server now, in the background ([`ApiClient::check_now`]):
+    /// when the popup or the app opens, or a network appeared. Callable
+    /// from any thread; outside a runtime the check runs on the one the
+    /// session was opened on.
+    pub fn check_server(&self) {
+        let _in = enter(self.runtime.as_ref());
+        self.client.check_now();
     }
 
     pub fn config(&self) -> &ClientConfig {
@@ -745,6 +772,15 @@ impl Session {
 /// unreachable or failing.
 fn falls_back(e: &CoreError) -> bool {
     e.is_offline() || e.status().is_some_and(|s| s >= 500)
+}
+
+/// `runtime` entered when called outside a runtime (from a UI thread), so
+/// that what the client starts in the background runs there.
+fn enter(runtime: Option<&tokio::runtime::Handle>) -> Option<tokio::runtime::EnterGuard<'_>> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return None;
+    }
+    runtime.map(|rt| rt.enter())
 }
 
 /// Token name for a client on this machine, e.g. `stickpile-cli@laptop`.

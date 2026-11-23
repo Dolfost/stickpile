@@ -57,3 +57,5 @@ x11rb = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile.workspace = true
 axum.workspace = true
+# Paused time, for the schedule of the background checks of the server.
+tokio = { workspace = true, features = ["test-util"] }

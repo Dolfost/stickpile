@@ -839,14 +839,14 @@ Behaviour the signatures do not show:
   the account last changed. Offline and not cached: `Unreachable`.
 - **An unreachable server.** Once a request finds the server unreachable
   (no connection, a timeout, or 502 to 504 from a proxy), the reads fail
-  as `Unreachable` at once for five minutes instead of each waiting for
-  the timeout, so the lists answer from the cache straight away
-  (`stickpile_core::ApiClient::with_fail_fast`). While reads come in, the
-  server is checked in the background 15 s after the last failure; when
-  it answers, the reads go to it again. After five minutes without a
-  check one read tries the server itself. What the user asks for tries
-  the server whatever it did a moment ago: `sync_now`, `prepare`,
-  `toggle_like`, `upload` and the logins.
+  as `Unreachable` at once instead of each waiting for the timeout, so
+  the lists answer from the cache straight away
+  (`stickpile_core::ApiClient::with_fail_fast`, docs/offline.md
+  "Reachability"). Meanwhile the server is checked in the background
+  every 15 s for five minutes, then every 60 s, whether or not anything
+  reads; when it answers, the reads go to it again. What the user asks
+  for tries the server whatever it did a moment ago: `sync_now`,
+  `prepare`, `toggle_like`, `upload` and the logins.
 - **Pairing input.** `parse_pairing_link` returns the server URL
   normalised (above), the one `login_pairing` contacts, and null for a
   link whose URL has a user name or password, a query or a fragment.

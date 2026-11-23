@@ -43,14 +43,6 @@ const FAVORITES_KEY: &str = "android_favorites:";
 /// server's most for a search.
 const FAVORITES_SAVED: usize = 200;
 
-/// How long a server found unreachable is believed so: meanwhile the reads
-/// answer from the offline cache at once, without each waiting for the
-/// timeout, and while they come in the server is checked in the background
-/// every 15 s, so the lists are live again as soon as it is back
-/// ([`ApiClient::with_fail_fast`]). Only a library left alone longer tries
-/// the server in the foreground (waiting for the timeout once).
-const FAIL_FAST: Duration = Duration::from_secs(5 * 60);
-
 /// The stickpile library: an account on one server, its offline cache, and
 /// the sync. Create one per process and share it; every method may be
 /// called from any thread. `suspend` methods run on the library's own Tokio
@@ -638,7 +630,7 @@ async fn open_session(config: ClientConfig) -> Result<Session, LibraryError> {
     Ok(Session::open(config)
         .await?
         .with_client_name(crate::client_name())
-        .with_fail_fast(FAIL_FAST)
+        .with_fail_fast()
         .with_grid_playback(true)
         .with_inserts(true))
 }

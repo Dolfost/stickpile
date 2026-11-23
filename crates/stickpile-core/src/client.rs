@@ -14,14 +14,16 @@
 //!   [`INTERACTIVE_CONNECT_TIMEOUT`] (2 s), the others within
 //!   `timeout_secs`.
 //! * Opt-in ([`ApiClient::with_fail_fast`]): once a request finds the server
-//!   unreachable, reads fail as offline at once for a while instead of each
-//!   waiting for the timeout, and the server is tried again in the
-//!   background.
+//!   unreachable, reads fail as offline at once instead of each waiting for
+//!   the timeout, `GET /healthz` checks the server in the background until
+//!   it answers, and the state is published as a watch value
+//!   ([`ApiClient::reach`], [`Reach`]).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::{Duration, SystemTime};
 
+use futures::future::BoxFuture;
 use reqwest::multipart::{Form, Part};
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
@@ -29,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use stickpile_api::profiles::TargetProfile;
 use stickpile_api::routes::{self, path};
 use stickpile_api::*;
+use tokio::sync::{watch, Notify};
 
 use crate::{ClientConfig, CoreError, Result};
 
@@ -174,9 +177,9 @@ pub struct RecheckStarted {
     pub started: bool,
 }
 
-/// The message of a read refused because the server was unreachable a
-/// moment ago ([`ApiClient::with_fail_fast`]).
-pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached a moment ago";
+/// The message of a read refused because the server is believed
+/// unreachable ([`ApiClient::with_fail_fast`]).
+pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached; it is checked again in the background";
 
 /// How long a read (a `GET` with the ordinary timeout: searches, lists,
 /// the sync, `/healthz`) may take to connect, so that a server that is
@@ -186,104 +189,259 @@ pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached a moment
 /// `timeout_secs` as before. Never more than the client's timeout.
 pub const INTERACTIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// While a server is believed unreachable ([`ApiClient::with_fail_fast`]),
+/// `GET /healthz` checks it this often for the first [`PROBE_FAST_FOR`] of
+/// the outage, then every [`PROBE_SLOW`].
+pub const PROBE_FAST: Duration = Duration::from_secs(15);
+/// How long [`PROBE_FAST`] applies, from the start of an outage.
+pub const PROBE_FAST_FOR: Duration = Duration::from_secs(5 * 60);
+/// The check's period after [`PROBE_FAST_FOR`].
+pub const PROBE_SLOW: Duration = Duration::from_secs(60);
+
+/// What a client with [`ApiClient::with_fail_fast`] knows of its server,
+/// published as a watch value ([`ApiClient::reach`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// Nothing has been asked yet, or the outage was forgotten
+    /// ([`ApiClient::forget_unreachable`]).
+    Unknown,
+    /// The server answered the last request or check (any answer, an
+    /// error status too).
+    Reachable,
+    /// A request found the server unreachable (no connection, a timeout,
+    /// a proxy's 502 to 504 without an API error) and nothing answered
+    /// since: reads fail at once, and `GET /healthz` checks the server in
+    /// the background ([`PROBE_FAST`], [`PROBE_SLOW`]).
+    Unreachable {
+        /// When the outage was noticed (its first failure).
+        since: SystemTime,
+    },
+}
+
+impl Reach {
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, Reach::Unreachable { .. })
+    }
+}
+
+/// A check of the server: `Ok`, or an error that is not offline, when it
+/// answers.
+pub(crate) type ProbeFn = Arc<dyn Fn() -> BoxFuture<'static, Result<()>> + Send + Sync>;
+
 /// What a client with [`ApiClient::with_fail_fast`] remembers of the
-/// server: when a request last found it unreachable, and whether a request
-/// is trying it again now. Shared by the client's clones.
-#[derive(Debug)]
+/// server, and its background check. Shared by the client's clones.
 struct Reachability {
-    /// How long a failure is believed.
-    window: Duration,
-    /// How long after a failure the reads that come in check the server in
-    /// the background.
-    recheck: Duration,
+    /// The published state; set only with `state` locked.
+    value: watch::Sender<Reach>,
     state: Mutex<ReachState>,
+    /// `GET /healthz`, past the gate of the reads.
+    probe: ProbeFn,
 }
 
-/// The longest wait between background checks while reads come in.
-const MAX_RECHECK: Duration = Duration::from_secs(15);
-
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct ReachState {
-    /// When a request last found the server unreachable; `None` once it
-    /// answered.
-    down_at: Option<Instant>,
-    /// A request is trying the server again (a read let through, or the
-    /// background check); the others are refused meanwhile.
+    /// When the outage began, on Tokio's clock (the checks' schedule);
+    /// `Some` exactly while the value is `Unreachable`.
+    down_since: Option<tokio::time::Instant>,
+    /// The wake-up of the check task while one runs.
+    prober: Option<Arc<Notify>>,
+    /// A check was asked for ([`ApiClient::check_now`]) and has not
+    /// started yet.
+    asked: bool,
+    /// A check is waiting for its answer.
     probing: bool,
-}
-
-/// What to do with a read.
-#[derive(Debug, PartialEq, Eq)]
-enum Gate {
-    /// Send it.
-    Send,
-    /// Send it as the one request trying the server again.
-    Probe,
-    /// Fail it at once; `background`: and check the server in the
-    /// background.
-    Refuse { background: bool },
+    /// The runtime of the last request, where a check asked for outside a
+    /// runtime (from a UI thread) runs.
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 impl Reachability {
-    fn new(window: Duration) -> Reachability {
+    fn new(probe: ProbeFn) -> Reachability {
         Reachability {
-            window,
-            recheck: (window / 2).min(MAX_RECHECK),
-            state: Mutex::new(ReachState::default()),
+            value: watch::channel(Reach::Unknown).0,
+            state: Mutex::new(ReachState {
+                runtime: tokio::runtime::Handle::try_current().ok(),
+                ..ReachState::default()
+            }),
+            probe,
         }
     }
 
-    fn state(&self) -> std::sync::MutexGuard<'_, ReachState> {
+    fn state(&self) -> MutexGuard<'_, ReachState> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// A read at `now`: sent while the server is believed reachable.
-    /// Within `window` of a failure it is refused, and from `recheck` on
-    /// the server is checked in the background (a failed check is a new
-    /// failure), so that a client in use never waits again while the server
-    /// stays away, and finds it as soon as it is back. After the window (a
-    /// client left alone that long) one read at a time goes out to try it,
-    /// the others refused until it is answered; taking that slot is the
-    /// caller's [`Probing`] guard.
-    fn gate(&self, now: Instant) -> Gate {
-        let mut s = self.state();
-        let Some(at) = s.down_at else {
-            return Gate::Send;
-        };
-        if s.probing {
-            return Gate::Refuse { background: false };
-        }
-        let age = now.saturating_duration_since(at);
-        if age >= self.window {
-            s.probing = true;
-            return Gate::Probe;
-        }
-        let background = age >= self.recheck;
-        s.probing = background;
-        Gate::Refuse { background }
+    fn now(&self) -> Reach {
+        *self.value.borrow()
     }
 
-    /// Note what a request's `result` says of the server, at `now`.
-    fn record<T>(&self, result: &Result<T>, now: Instant) {
-        let mut s = self.state();
-        s.down_at = match result {
-            Err(e) if e.is_offline() => Some(now),
-            _ => None,
-        };
+    /// Remember the current runtime for checks asked for from outside one.
+    fn note_runtime(&self) {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            self.state().runtime = Some(runtime);
+        }
     }
 
+    /// Whether a read is to fail at once: the server is believed
+    /// unreachable. The check task is started again if it is gone (its
+    /// runtime ended); reads never check the server themselves.
+    fn refuse_read(self: &Arc<Self>) -> bool {
+        if self.state().down_since.is_none() {
+            return false;
+        }
+        self.start_checks();
+        true
+    }
+
+    /// Note what a request's or a check's `result` says of the server: an
+    /// offline error begins an outage (and the checks), anything else ends
+    /// it.
+    fn record<T>(self: &Arc<Self>, result: &Result<T>) {
+        if matches!(result, Err(e) if e.is_offline()) {
+            self.went_down();
+        } else {
+            self.set_up(Reach::Reachable);
+        }
+    }
+
+    fn went_down(self: &Arc<Self>) {
+        {
+            let mut s = self.state();
+            if s.down_since.is_none() {
+                s.down_since = Some(tokio::time::Instant::now());
+                self.value.send_replace(Reach::Unreachable {
+                    since: SystemTime::now(),
+                });
+            }
+        }
+        self.start_checks();
+    }
+
+    /// The outage is over (`Reachable`) or forgotten (`Unknown`). A check
+    /// task waiting for its next turn ends.
+    fn set_up(&self, to: Reach) {
+        let s = &mut *self.state();
+        s.down_since = None;
+        self.value.send_if_modified(|v| {
+            let changed = *v != to;
+            *v = to;
+            changed
+        });
+        if let Some(wake) = &s.prober {
+            wake.notify_waiters();
+        }
+    }
+
+    /// [`ApiClient::forget_unreachable`].
     fn forget(&self) {
-        self.state().down_at = None;
+        if self.state().down_since.is_some() {
+            self.set_up(Reach::Unknown);
+        }
+    }
+
+    /// [`ApiClient::check_now`].
+    fn check_now(self: &Arc<Self>) {
+        {
+            let mut s = self.state();
+            if s.probing {
+                return;
+            }
+            s.asked = true;
+            if let Some(wake) = &s.prober {
+                wake.notify_waiters();
+                return;
+            }
+        }
+        self.start_checks();
+    }
+
+    /// Start the check task unless it runs: on the current runtime, else on
+    /// the one of the last request.
+    fn start_checks(self: &Arc<Self>) {
+        let (wake, runtime) = {
+            let mut s = self.state();
+            if s.prober.is_some() {
+                return;
+            }
+            let Some(runtime) = tokio::runtime::Handle::try_current().ok().or_else(|| s.runtime.clone()) else {
+                return;
+            };
+            let wake = Arc::new(Notify::new());
+            s.prober = Some(wake.clone());
+            (wake, runtime)
+        };
+        // Spawned with the lock released: a runtime that is shutting down
+        // drops the task at once, and the drop takes the lock.
+        let task = CheckTask {
+            reach: self.clone(),
+            wake,
+        };
+        runtime.spawn(task.run());
     }
 }
 
-/// The slot of the request trying the server again; given back when
-/// dropped, also when the request is cancelled.
-struct Probing(Arc<Reachability>);
+/// The background check of a server believed unreachable: `GET /healthz`
+/// on the schedule of [`PROBE_FAST`] and [`PROBE_SLOW`], and at once when
+/// asked ([`ApiClient::check_now`]), until the server answers. One at a
+/// time; when it is dropped (its runtime ended) the next read or check
+/// starts another.
+struct CheckTask {
+    reach: Arc<Reachability>,
+    wake: Arc<Notify>,
+}
 
-impl Drop for Probing {
+impl CheckTask {
+    async fn run(self) {
+        let mut last = tokio::time::Instant::now();
+        loop {
+            // Listening before the state is read: a wake-up sent after it
+            // is not lost.
+            let woken = self.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            let next = {
+                let mut s = self.reach.state();
+                match s.down_since {
+                    _ if s.asked => None,
+                    Some(since) => {
+                        let fast = last.saturating_duration_since(since) < PROBE_FAST_FOR;
+                        Some(last + if fast { PROBE_FAST } else { PROBE_SLOW })
+                    }
+                    None => return self.end(&mut s),
+                }
+            };
+            if let Some(at) = next {
+                let _ = tokio::time::timeout_at(at, woken).await;
+            }
+            {
+                let mut s = self.reach.state();
+                if !s.asked && s.down_since.is_none() {
+                    return self.end(&mut s);
+                }
+                s.asked = false;
+                s.probing = true;
+            }
+            last = tokio::time::Instant::now();
+            let result = (self.reach.probe)().await;
+            self.reach.record(&result);
+            self.reach.state().probing = false;
+        }
+    }
+
+    /// Give up the task's place, with the state locked: the next failure
+    /// or check starts a new one.
+    fn end(&self, s: &mut ReachState) {
+        if s.prober.as_ref().is_some_and(|w| Arc::ptr_eq(w, &self.wake)) {
+            s.prober = None;
+            s.probing = false;
+        }
+    }
+}
+
+impl Drop for CheckTask {
     fn drop(&mut self) {
-        self.0.state().probing = false;
+        let s = &mut *self.reach.state();
+        self.end(s);
     }
 }
 
@@ -368,33 +526,105 @@ impl ApiClient {
         self
     }
 
-    /// Fail fast while the server is away: once a request finds it
-    /// unreachable ([`CoreError::Offline`]), reads (`GET`) fail the same way
-    /// at once for `window` instead of each waiting for the timeout, so a
-    /// caller with an offline cache answers from it straight away
-    /// ([`RECENTLY_UNREACHABLE`]). Meanwhile, while reads come in,
-    /// `GET /healthz` checks the server in the background, 15 s (or half
-    /// the window, if less) after the last failure; a failed check renews
-    /// the failure. After the window one read at a time tries the server
-    /// itself. Any answer from the server ends it. Writes are always sent.
-    /// Shared with the clones made from now on.
-    pub fn with_fail_fast(mut self, window: Duration) -> ApiClient {
-        self.reach = Some(Arc::new(Reachability::new(window)));
+    /// Fail fast while the server is away, for the clients that show
+    /// results (docs/offline.md). Once a request finds it unreachable
+    /// ([`CoreError::Offline`]), the state is [`Reach::Unreachable`] and
+    /// reads (`GET`) fail the same way at once ([`RECENTLY_UNREACHABLE`])
+    /// instead of each waiting for the timeout, so a caller with an offline
+    /// cache answers from it straight away. Meanwhile a background task
+    /// checks the server with `GET /healthz` every [`PROBE_FAST`] for the
+    /// first [`PROBE_FAST_FOR`] of the outage, then every [`PROBE_SLOW`],
+    /// whether or not anything reads; reads never check it themselves.
+    /// Any answer from the server (a check, a write, a request that was
+    /// out already) ends the outage: [`Reach::Reachable`]. Writes are
+    /// always sent. The state is a watch value ([`ApiClient::reach`]); a
+    /// shell asks for a check at once with [`ApiClient::check_now`].
+    /// Shared with the clones made from now on. The checks run on a Tokio
+    /// runtime: the one of the request that failed, or of the last request.
+    pub fn with_fail_fast(mut self) -> ApiClient {
+        let http = self.http_read.clone();
+        let url = self.url(routes::HEALTH);
+        let timeout = self.timeout;
+        let probe: ProbeFn = Arc::new(move || {
+            let rb = http.get(&url).timeout(timeout);
+            Box::pin(async move {
+                let resp = check_status(rb.send().await.map_err(map_reqwest)?).await?;
+                // Drain the body so the connection can be reused.
+                let _ = resp.bytes().await;
+                Ok(())
+            })
+        });
+        self.reach = Some(Arc::new(Reachability::new(probe)));
         self
     }
 
-    /// Forget that the server was unreachable: the next read goes out (the
-    /// user asked to refresh). Nothing without [`ApiClient::with_fail_fast`].
+    /// [`ApiClient::with_fail_fast`] with another check than `GET /healthz`
+    /// (tests count and steer the checks).
+    #[cfg(test)]
+    pub(crate) fn with_fail_fast_probe(mut self, probe: ProbeFn) -> ApiClient {
+        self.reach = Some(Arc::new(Reachability::new(probe)));
+        self
+    }
+
+    /// Forget that the server was unreachable: the state is
+    /// [`Reach::Unknown`] and the next read goes out (the user asked to
+    /// refresh). Nothing without [`ApiClient::with_fail_fast`].
     pub fn forget_unreachable(&self) {
         if let Some(reach) = &self.reach {
             reach.forget();
         }
     }
 
-    /// The server was found unreachable lately and reads fail at once
-    /// ([`ApiClient::with_fail_fast`]).
+    /// The server is believed unreachable and reads fail at once
+    /// ([`Reach::Unreachable`]).
     pub fn believed_unreachable(&self) -> bool {
-        self.reach.as_ref().is_some_and(|r| r.state().down_at.is_some())
+        self.reach_now().is_unreachable()
+    }
+
+    /// What the client knows of the server, as a watch value to subscribe
+    /// to (docs/offline.md, "Reachability"). Without
+    /// [`ApiClient::with_fail_fast`] it is [`Reach::Unknown`] and never
+    /// changes ([`watch::Receiver::changed`] fails at once).
+    pub fn reach(&self) -> watch::Receiver<Reach> {
+        match &self.reach {
+            Some(reach) => reach.value.subscribe(),
+            None => watch::channel(Reach::Unknown).1,
+        }
+    }
+
+    /// The current value of [`ApiClient::reach`].
+    pub fn reach_now(&self) -> Reach {
+        self.reach.as_ref().map_or(Reach::Unknown, |r| r.now())
+    }
+
+    /// Wait until the state is another than `seen`, and return it: a long
+    /// poll for a bridge that cannot hold a watch receiver (UniFFI).
+    /// Without [`ApiClient::with_fail_fast`] it returns only if `seen` is
+    /// not [`Reach::Unknown`].
+    pub async fn reach_changed(&self, seen: Reach) -> Reach {
+        let mut rx = self.reach();
+        if let Ok(now) = rx.wait_for(|v| *v != seen).await {
+            return *now;
+        }
+        let now = *rx.borrow();
+        if now != seen {
+            return now;
+        }
+        std::future::pending().await
+    }
+
+    /// Check the server now with `GET /healthz`, in the background: when
+    /// the popup or the app opens, or a network appeared. The answer
+    /// updates [`ApiClient::reach`] (a failure starts the outage and its
+    /// checks, as a failed request does). Nothing if a check is waiting for
+    /// its answer already, and nothing without
+    /// [`ApiClient::with_fail_fast`]. Callable from any thread: outside a
+    /// Tokio runtime the check runs on the runtime of the client's last
+    /// request (or the one it was made fail-fast on).
+    pub fn check_now(&self) {
+        if let Some(reach) = &self.reach {
+            reach.check_now();
+        }
     }
 
     pub fn set_token(&self, token: Option<String>) {
@@ -467,40 +697,15 @@ impl ApiClient {
         let Some(reach) = self.reach.clone() else {
             return self.answer(rb.send().await, pass_429).await;
         };
+        reach.note_runtime();
         let (http, request) = rb.build_split();
         let request = request.map_err(map_reqwest)?;
-        let _probing = if *request.method() == Method::GET {
-            match reach.gate(Instant::now()) {
-                Gate::Send => None,
-                Gate::Probe => Some(Probing(reach.clone())),
-                Gate::Refuse { background } => {
-                    if background {
-                        self.check_in_background(Probing(reach));
-                    }
-                    return Err(CoreError::Offline(RECENTLY_UNREACHABLE.into()));
-                }
-            }
-        } else {
-            None
-        };
+        if *request.method() == Method::GET && reach.refuse_read() {
+            return Err(CoreError::Offline(RECENTLY_UNREACHABLE.into()));
+        }
         let result = self.answer(http.execute(request).await, pass_429).await;
-        reach.record(&result, Instant::now());
+        reach.record(&result);
         result
-    }
-
-    /// `GET /healthz` on the current Tokio runtime, noting what it says of
-    /// the server; `probing` is given back when it ends.
-    fn check_in_background(&self, probing: Probing) {
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        let client = self.clone();
-        runtime.spawn(async move {
-            let rb = client.http_read.get(client.url(routes::HEALTH)).timeout(client.timeout);
-            let result = client.answer(rb.send().await, false).await;
-            probing.0.record(&result, Instant::now());
-            drop(probing);
-        });
     }
 
     /// What a request got back: its response, or the error it means (with
@@ -1353,73 +1558,5 @@ fn summary_of(i: &Item, set_slug: &str, set_name: &str, owner_username: &str) ->
         phash: i.media.phash.clone(),
         variants: i.media.variants.clone(),
         updated_at: i.updated_at,
-    }
-}
-
-#[cfg(test)]
-mod reach_tests {
-    use super::*;
-
-    fn secs(n: u64) -> Duration {
-        Duration::from_secs(n)
-    }
-
-    #[test]
-    fn a_failure_is_believed_for_a_window_then_one_read_tries_again() {
-        let reach = Arc::new(Reachability::new(secs(10)));
-        let t0 = Instant::now();
-        assert_eq!(reach.gate(t0), Gate::Send);
-
-        reach.record::<()>(&Err(CoreError::Offline("refused".into())), t0);
-        assert_eq!(reach.gate(t0 + secs(1)), Gate::Refuse { background: false });
-        assert_eq!(reach.gate(t0 + secs(5)), Gate::Refuse { background: true });
-        assert_eq!(
-            reach.gate(t0 + secs(6)),
-            Gate::Refuse { background: false },
-            "one check at a time"
-        );
-        // The check timed out: the failure is newer.
-        reach.record::<()>(&Err(CoreError::Offline("timeout".into())), t0 + secs(8));
-        drop(Probing(reach.clone()));
-        assert_eq!(reach.gate(t0 + secs(17)), Gate::Refuse { background: true });
-        drop(Probing(reach.clone()));
-
-        assert_eq!(
-            reach.gate(t0 + secs(18)),
-            Gate::Probe,
-            "after the window a read goes out"
-        );
-        assert_eq!(
-            reach.gate(t0 + secs(18)),
-            Gate::Refuse { background: false },
-            "only one"
-        );
-        drop(Probing(reach.clone()));
-        assert_eq!(
-            reach.gate(t0 + secs(19)),
-            Gate::Probe,
-            "a cancelled one gives its slot back"
-        );
-
-        // Any answer of the server ends it, an error too.
-        let error = CoreError::Api {
-            status: 500,
-            error: ApiError {
-                code: "internal".into(),
-                message: "boom".into(),
-            },
-        };
-        reach.record::<()>(&Err(error), t0 + secs(20));
-        drop(Probing(reach.clone()));
-        assert_eq!(reach.gate(t0 + secs(20)), Gate::Send);
-
-        reach.record::<()>(&Err(CoreError::Offline("refused".into())), t0 + secs(30));
-        reach.forget();
-        assert_eq!(reach.gate(t0 + secs(30)), Gate::Send);
-        // A long window still checks every 15 s while reads come in.
-        let long = Reachability::new(secs(300));
-        long.record::<()>(&Err(CoreError::Offline("refused".into())), t0);
-        assert_eq!(long.gate(t0 + secs(14)), Gate::Refuse { background: false });
-        assert_eq!(long.gate(t0 + secs(15)), Gate::Refuse { background: true });
     }
 }

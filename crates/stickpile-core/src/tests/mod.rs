@@ -5,6 +5,7 @@ mod cache_sync;
 mod client;
 mod offline;
 mod offline_clients;
+mod reach;
 mod session;
 mod usage;
 
