@@ -6,6 +6,8 @@ import android.content.Intent
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,6 +51,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
@@ -197,7 +201,8 @@ fun LibraryScreen(
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
                 onRefresh = vm::refresh,
-                modifier = Modifier.fillMaxSize(),
+                // A list replaced in place waits while a finger is on it.
+                modifier = Modifier.fillMaxSize().watchPresses(vm::pressing),
             ) {
                 when (content) {
                     LibraryContent.Loading -> Loading()
@@ -256,6 +261,26 @@ fun LibraryScreen(
 
 /** A pack's cover in the list of packs. */
 private val PACK_COVER = 48.dp
+
+/**
+ * Says when a finger goes down on this element and when the last one
+ * lifts (or the gesture is cancelled), without taking the touches from
+ * what is under it: taps, long presses, scrolling and pulling to refresh
+ * work as before.
+ */
+private fun Modifier.watchPresses(onPress: (Boolean) -> Unit): Modifier = pointerInput(onPress) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        onPress(true)
+        try {
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+            } while (event.changes.any { it.pressed })
+        } finally {
+            onPress(false)
+        }
+    }
+}
 
 private val LibraryTab.label: Int
     get() = when (this) {

@@ -18,11 +18,13 @@ import io.github.dolfost.stickpile.rust.KeepReason
 import io.github.dolfost.stickpile.rust.LibraryErrorKind
 import io.github.dolfost.stickpile.rust.OfflineScope
 import io.github.dolfost.stickpile.rust.Pack
+import io.github.dolfost.stickpile.rust.PendingSearch
 import io.github.dolfost.stickpile.rust.Prepared
 import io.github.dolfost.stickpile.rust.SearchHint
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.rust.Target
 import io.github.dolfost.stickpile.sync.CacheChanges
+import io.github.dolfost.stickpile.sync.ServerWatch
 import io.github.dolfost.stickpile.ui.common.Doing
 import io.github.dolfost.stickpile.ui.common.Failure
 import io.github.dolfost.stickpile.ui.common.FailureLog
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -166,6 +169,15 @@ sealed interface LibraryEvent {
  * [requestOfflineRun] lets the downloads run, [mobileData] says on which
  * networks. Each list asks which of its stickers work without the server,
  * for the tiles' marks. The non-suspend library calls run on [io].
+ *
+ * Results without waiting (docs/offline.md): a search shows what the
+ * library answers first (the offline cache's, with the offline notice, when
+ * the server is away or slow) and the server's results replace them in
+ * place when they come. A list replaced in place waits while a finger is on
+ * the grid ([pressing]); the details and a share going on stay. The screen
+ * follows what the library knows of the server ([ServerWatch]): back after
+ * it was away, what is shown loads again in place and [serverBack] starts
+ * a sync. Back on the screen ([resumed]) the server is checked.
  */
 @OptIn(FlowPreview::class)
 class LibraryViewModel(
@@ -177,6 +189,7 @@ class LibraryViewModel(
     private val log: FailureLog = FailureLog.android,
     private val requestOfflineRun: () -> Unit = {},
     val mobileData: () -> Boolean = { false },
+    private val serverBack: () -> Unit = {},
 ) : ViewModel() {
 
     var state: LibraryState by mutableStateOf(LibraryState())
@@ -202,6 +215,9 @@ class LibraryViewModel(
     /** The text to offer hints for; null until the search field is used. */
     private val hintQueries = MutableStateFlow<String?>(null)
 
+    /** A finger is on the grid: a list replaced in place waits until it lifts. */
+    private val pressed = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             loads
@@ -220,6 +236,7 @@ class LibraryViewModel(
                 reload()
             }
         }
+        viewModelScope.launch { followServer() }
     }
 
     fun setQuery(text: String) {
@@ -270,11 +287,26 @@ class LibraryViewModel(
     }
 
     /**
-     * Back on the screen: the recent items may have changed (a chat, the
-     * settings), and the likes are read now and then, after which the list
-     * is loaded again to show them.
+     * A finger went down on the grid ([down]) or lifted: a list that
+     * replaces the one shown in place (the server's results after the
+     * offline ones) waits for it, so nothing moves under it.
+     */
+    fun pressing(down: Boolean) {
+        pressed.value = down
+    }
+
+    /**
+     * Back on the screen: the server is checked (in the background; what
+     * it finds comes through [followServer]), the recent items may have
+     * changed (a chat, the settings), and the likes are read now and then,
+     * after which the list is loaded again to show them.
      */
     fun resumed() {
+        // No gesture outlives the screen going away.
+        pressed.value = false
+        viewModelScope.launch {
+            withContext(io) { catching { library.checkServer() } }.onFailure { log.failed(Doing.LOADING, it) }
+        }
         if (state.request == LibraryRequest.Recent) reload() else loadMarks()
         val reading = refreshLikes() ?: return
         viewModelScope.launch {
@@ -472,43 +504,102 @@ class LibraryViewModel(
         loads.value = Load(state.request, typed, generation)
     }
 
+    /**
+     * What a request answered: the content to show now, and for a search
+     * answered from the offline cache first, the server's results to come
+     * ([PendingSearch]).
+     */
+    private class Fetched(val content: LibraryContent, val pending: PendingSearch? = null)
+
     private suspend fun load(request: LibraryRequest) {
         // A reload or a refined search keeps the old list until the new
         // one is there; anything else (another tab or pack) starts empty.
-        if (!refines(shown, request)) {
+        val inPlace = refines(shown, request)
+        if (!inPlace) {
             show(LibraryContent.Loading)
             state = state.copy(marks = OfflineMarks())
         }
         shown = request
-        val result = catching { fetch(request) }
-        show(
-            result.getOrElse { e ->
-                log.failed(Doing.LOADING, e)
-                val failure = Failure.of(e)
-                val gone = failure.kind == LibraryErrorKind.NOT_SIGNED_IN || failure.kind == LibraryErrorKind.UNAUTHORIZED
-                LibraryContent.Failed(messageFor(failure, Doing.LOADING), signInAgain = gone)
-            },
-        )
+        val fetched = catching { fetch(request) }.getOrElse { e -> Fetched(failed(e)) }
+        if (inPlace) untilReleased()
+        show(fetched.content)
+        loadMarks()
+        fetched.pending?.let { replaceWithServers(it) }
+    }
+
+    /**
+     * The server's results for the search shown, which came from the
+     * offline cache first: they replace it in place once no finger is on
+     * the grid, and the offline notice goes with it. None (the server could
+     * not be reached or failed): the offline results and the notice stay.
+     * Dropped with the load (another request, a reload).
+     */
+    private suspend fun replaceWithServers(pending: PendingSearch) {
+        val server = pending.use { catching { it.serverResults() } }.getOrElse { e ->
+            // The offline results stand, unless the account is gone.
+            val failed = failed(e)
+            if (failed.signInAgain) show(failed)
+            return
+        } ?: return
+        untilReleased()
+        show(items(server))
         loadMarks()
     }
 
-    private suspend fun fetch(request: LibraryRequest): LibraryContent = when (request) {
+    /** Until no finger is on the grid ([pressing]). */
+    private suspend fun untilReleased() {
+        pressed.first { !it }
+    }
+
+    /** What the grid area says for a failed load; logged. */
+    private fun failed(e: Throwable): LibraryContent.Failed {
+        log.failed(Doing.LOADING, e)
+        val failure = Failure.of(e)
+        val gone = failure.kind == LibraryErrorKind.NOT_SIGNED_IN || failure.kind == LibraryErrorKind.UNAUTHORIZED
+        return LibraryContent.Failed(messageFor(failure, Doing.LOADING), signInAgain = gone)
+    }
+
+    private suspend fun fetch(request: LibraryRequest): Fetched = when (request) {
         is LibraryRequest.Search -> {
             val query = SafeMode.query(request.query, display.value.safeMode)
-            items(library.search(query, Target.GENERIC, SEARCH_LIMIT))
+            val answer = library.searchSteps(query, Target.GENERIC, SEARCH_LIMIT)
+            Fetched(items(answer.list), answer.pending)
         }
         is LibraryRequest.PackSearch -> {
             val query = SafeMode.query(request.query, display.value.safeMode)
-            items(library.packSearch(request.packId, query))
+            Fetched(items(library.packSearch(request.packId, query)))
         }
-        LibraryRequest.Recent -> LibraryContent.Items(withContext(io) { library.recent(LIST_LIMIT) }, offline = false)
-        LibraryRequest.Favorites -> items(library.favorites(LIST_LIMIT))
-        LibraryRequest.MostUsed -> items(library.mostUsed(LIST_LIMIT))
-        LibraryRequest.Packs -> library.packs().let { LibraryContent.Packs(it.packs, it.offline) }
-        is LibraryRequest.PackItems -> items(library.packItems(request.packId))
+        LibraryRequest.Recent -> Fetched(LibraryContent.Items(withContext(io) { library.recent(LIST_LIMIT) }, offline = false))
+        LibraryRequest.Favorites -> Fetched(items(library.favorites(LIST_LIMIT)))
+        LibraryRequest.MostUsed -> Fetched(items(library.mostUsed(LIST_LIMIT)))
+        LibraryRequest.Packs -> Fetched(library.packs().let { LibraryContent.Packs(it.packs, it.offline) })
+        is LibraryRequest.PackItems -> Fetched(items(library.packItems(request.packId)))
     }
 
     private fun items(list: ItemList) = LibraryContent.Items(list.items, list.offline)
+
+    /**
+     * Follows what the library knows of the server ([ServerWatch]): back
+     * after it was away, what is shown loads again in place (its offline
+     * notice goes when the server answers) and a sync starts. Ends with the
+     * view model.
+     */
+    private suspend fun followServer() {
+        catching {
+            val now = withContext(io) { library.serverReach() }
+            ServerWatch.follow(now, library::serverReachChange, stale = ::showsOffline) {
+                reload()
+                serverBack()
+            }
+        }.onFailure { log.failed(Doing.LOADING, it) }
+    }
+
+    /** What is shown came from the offline cache. */
+    private fun showsOffline(): Boolean = when (val shown = answer) {
+        is LibraryContent.Items -> shown.offline
+        is LibraryContent.Packs -> shown.offline
+        else -> false
+    }
 
     /** Show [content] the way safe mode wants it, keeping it whole for when safe mode changes. */
     private fun show(content: LibraryContent) {

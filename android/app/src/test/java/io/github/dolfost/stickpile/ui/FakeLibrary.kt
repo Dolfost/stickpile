@@ -22,9 +22,13 @@ import io.github.dolfost.stickpile.rust.MediaKind
 import io.github.dolfost.stickpile.rust.Motion
 import io.github.dolfost.stickpile.rust.Pack
 import io.github.dolfost.stickpile.rust.PackList
+import io.github.dolfost.stickpile.rust.NoHandle
 import io.github.dolfost.stickpile.rust.PairingLink
+import io.github.dolfost.stickpile.rust.PendingSearch
 import io.github.dolfost.stickpile.rust.Prepared
+import io.github.dolfost.stickpile.rust.SearchAnswer
 import io.github.dolfost.stickpile.rust.SearchHint
+import io.github.dolfost.stickpile.rust.ServerReach
 import io.github.dolfost.stickpile.rust.StickpileLibraryInterface
 import io.github.dolfost.stickpile.rust.Suggestions
 import io.github.dolfost.stickpile.rust.SyncState
@@ -265,6 +269,32 @@ class FakeLibrary : StickpileLibraryInterface {
         return search.invoke(query)
     }
 
+    /**
+     * The server's results to come for a search ([searchSteps]); null:
+     * none, [search] answered as the server would.
+     */
+    var pendingFor: (String) -> PendingSearch? = { null }
+
+    /** Answers with [search] first and [pendingFor] after it; recorded as `search`. */
+    override suspend fun searchSteps(query: String, target: Target, limit: UInt): SearchAnswer {
+        calls += "search $query $target"
+        return SearchAnswer(search.invoke(query), pendingFor(query))
+    }
+
+    /** What the library knows of the server; a test moves it. */
+    val reach = MutableStateFlow<ServerReach>(ServerReach.Unknown)
+
+    /** The `checkServer` calls (not in [calls]: every resume checks). */
+    var checks = 0
+
+    override fun serverReach(): ServerReach = reach.value
+
+    override suspend fun serverReachChange(seen: ServerReach): ServerReach = reach.first { it != seen }
+
+    override fun checkServer() {
+        checks++
+    }
+
     override fun serverUrl(): String {
         calls += "serverUrl"
         return serverUrl
@@ -313,6 +343,21 @@ class FakeLibrary : StickpileLibraryInterface {
     }
 
     override suspend fun upload(setId: String, file: UploadFile): Item = unexpected("upload")
+}
+
+/**
+ * The server's answer to a search whose offline results came first:
+ * [answer] gives it (null: the server could not be reached). [closed] once
+ * the view model let it go.
+ */
+class FakePending(private val answer: suspend () -> ItemList?) : PendingSearch(NoHandle) {
+    var closed = false
+
+    override suspend fun serverResults(): ItemList? = answer()
+
+    override fun close() {
+        closed = true
+    }
 }
 
 val alice = Account(username = "alice", displayName = null, serverUrl = "https://s.example", auth = AuthKind.TOKEN, isAdmin = false)

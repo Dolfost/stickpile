@@ -21,11 +21,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -102,6 +104,22 @@ internal fun ItemGrid(
     val shareLabel = stringResource(R.string.library_share)
     val detailsLabel = stringResource(R.string.library_details_open)
     val configuration = LocalConfiguration.current
+    val gridState = rememberLazyGridState()
+    // Another list in place of this one (the server's results after the
+    // offline ones, a search typed further): at the top, the grid stays at
+    // the top, so the best come first; scrolled down, the sticker first in
+    // view stays where it is while it is still listed (the grid follows the
+    // keys). Decided before the new list is measured.
+    val drawn = remember { arrayOfNulls<List<Item>>(1) }
+    SideEffect {
+        val before = drawn[0]
+        if (before != null && before !== items &&
+            gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+        ) {
+            gridState.requestScrollToItem(0)
+        }
+        drawn[0] = items
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthDp = maxWidth.value.toInt()
         val count = Columns.count(display.columns, widthDp, configuration.smallestScreenWidthDp)
@@ -109,6 +127,7 @@ internal fun ItemGrid(
         val tileDp = ((widthDp - 16) / count).coerceAtLeast(1)
         val maxLines = LineFit.maxLines(tileDp, configuration.fontScale)
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(count),
             contentPadding = PaddingValues(8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap),

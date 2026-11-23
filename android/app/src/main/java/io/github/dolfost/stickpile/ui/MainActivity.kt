@@ -185,6 +185,7 @@ private fun MainContent(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     cacheChanges = app.cacheChanges,
                     requestOfflineRun = { app.requestOfflineRun() },
                     mobileData = { app.offline.current.options.mobileData },
+                    serverBack = app::syncBackOnline,
                 )
             }
             LibraryScreen(
