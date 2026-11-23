@@ -111,6 +111,8 @@ pub struct MockState {
     /// Delay before answering `GET /tokens` (a token revocation looks its
     /// token up there first).
     pub tokens_delay: Option<Duration>,
+    /// Delay before answering `GET /me` (who is signed in).
+    pub me_delay: Option<Duration>,
     /// Answer `POST /usage` with this status (and an ApiError body).
     pub fail_usage: Option<u16>,
     /// Username that requests without a bearer token are authenticated as,
@@ -170,6 +172,7 @@ impl Default for MockState {
             search_delay: None,
             usage_delay: None,
             tokens_delay: None,
+            me_delay: None,
             fail_usage: None,
             tailnet_user: None,
             requests: Vec::new(),
@@ -881,6 +884,10 @@ async fn create_pairing(State(s): State<Shared>, h: HeaderMap) -> HResult<(Statu
 }
 
 async fn me(State(s): State<Shared>, h: HeaderMap) -> HResult<Json<User>> {
+    let delay = lock(&s).me_delay;
+    if let Some(d) = delay {
+        tokio::time::sleep(d).await;
+    }
     Ok(Json(auth(&lock(&s), &h)?))
 }
 

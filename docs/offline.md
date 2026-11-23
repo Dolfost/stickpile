@@ -462,6 +462,23 @@ first, then }`:
 for (up to `timeout_secs`), and the offline cache answers when it fails.
 The CLI uses it.
 
+Who is signed in is answered the same way, so that an app opens at once
+with the server away: `Session::account_steps()` returns `AccountSteps {
+first, cached, then }`.
+
+- Nothing cached (a fresh install, a tailnet identity never synced): the
+  server is asked and waited for, as `ApiClient::me`; its error as it is.
+- With the value `Unreachable`: the account the cache last saw
+  (`cached: true`), `then: None`. No request.
+- Else the server is asked: its account if it answers within 300 ms
+  (`OFFLINE_AFTER`; the cached one at once when it fails, an error such
+  as `401` as it is); if not, the cached account first and `then`, whose
+  `AccountStep::wait()` gives the server's account (`Some`), `None` when
+  it could not be reached or failed (the cached account stands), or what
+  it answered instead, such as `401` for a revoked token: a shell that
+  went on with the cached account signs out then. The request runs as its
+  own task, as a search's does.
+
 ### Connect timeout
 
 Reads with the ordinary timeout (`GET`: searches, item lists, the sync,

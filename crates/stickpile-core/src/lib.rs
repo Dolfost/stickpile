@@ -42,7 +42,7 @@ pub use client::ApiClient;
 pub use client::Reach;
 pub use config::ClientConfig;
 pub use insert::{target_for_package, variant_for, InsertChoice};
-pub use session::{PreparedCopy, SearchOutcome, SearchSteps, ServerStep, Session};
+pub use session::{AccountStep, AccountSteps, PreparedCopy, SearchOutcome, SearchSteps, ServerStep, Session};
 pub use sync_policy::SyncPolicy;
 
 #[derive(Debug, thiserror::Error)]

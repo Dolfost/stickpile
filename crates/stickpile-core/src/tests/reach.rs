@@ -563,3 +563,110 @@ async fn cli_search_unchanged() {
         assert!(start.elapsed() >= Duration::from_secs(2), "{:?}", start.elapsed());
     }
 }
+
+/// Alice as the server knows her, for the cache of a session on another
+/// server (one that never answers, or is gone).
+async fn alice(server: &MockServer) -> stickpile_api::User {
+    let token = server.state().issue_token("alice", "for the cache");
+    client_for(&server.url, Some(token)).me().await.unwrap()
+}
+
+/// An app opened with the server away: the account the cache last saw,
+/// after OFFLINE_AFTER at most (not the request's timeout), and at once
+/// once the server is believed unreachable; with nothing cached the server
+/// is still asked and waited for (a fresh install).
+#[tokio::test]
+async fn cold_start_with_unreachable_server_uses_cached_account() {
+    let (server, items) = seeded_server();
+    let me = alice(&server).await;
+    let (_hung, url) = hung_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = hung_session(&url, dir.path(), &items, true).await;
+    session.cache().set_me(&me).unwrap();
+    assert_eq!(*session.reach().borrow(), Reach::Unknown);
+
+    // Unknown: the server is asked, and does not answer in time.
+    let start = Instant::now();
+    let steps = session.account_steps().await.unwrap();
+    let first_at = start.elapsed();
+    assert_eq!(steps.first.username, "alice");
+    assert!(steps.cached);
+    assert!(
+        first_at >= OFFLINE_AFTER && first_at < OFFLINE_AFTER + ms(300),
+        "{first_at:?}"
+    );
+    // Its answer never comes: the request times out (`timeout_secs` = 2)
+    // and the cached account stands; the server is believed away.
+    let then = steps.then.expect("the server was asked");
+    assert!(then.wait().await.unwrap().is_none());
+    assert!(session.reach().borrow().is_unreachable());
+
+    // Believed away: the cached account at once, nothing asked.
+    let start = Instant::now();
+    let steps = session.account_steps().await.unwrap();
+    assert!(steps.cached && steps.then.is_none());
+    assert_eq!(steps.first.username, "alice");
+    assert!(start.elapsed() < ms(100), "{:?}", start.elapsed());
+
+    // A server that is gone (refused): the cached account at once.
+    let gone = tempfile::tempdir().unwrap();
+    let session = Session::open(config_for(&dead_url(), gone.path()))
+        .await
+        .unwrap()
+        .with_fail_fast();
+    session.cache().set_me(&me).unwrap();
+    let start = Instant::now();
+    let steps = session.account_steps().await.unwrap();
+    assert!(steps.cached && steps.then.is_none());
+    assert!(start.elapsed() < OFFLINE_AFTER, "{:?}", start.elapsed());
+
+    // Nothing cached (a fresh install): the server decides, waited for.
+    let fresh = tempfile::tempdir().unwrap();
+    let session = hung_session(&url, fresh.path(), &[], true).await;
+    let start = Instant::now();
+    let err = session.account_steps().await.unwrap_err();
+    assert!(err.is_offline(), "{err}");
+    assert!(start.elapsed() >= Duration::from_secs(2), "{:?}", start.elapsed());
+}
+
+/// A revoked token signs out once the server answers, also when the cached
+/// account was handed over first; a server that answers in time says so at
+/// once, and confirms a token that works.
+#[tokio::test]
+async fn revoked_token_still_signs_out_when_server_answers() {
+    let (server, _items) = seeded_server();
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_for(&server, dir.path()).await.with_fail_fast();
+    session.sync().await.unwrap();
+
+    // In time: the server's account.
+    let steps = session.account_steps().await.unwrap();
+    assert!(!steps.cached && steps.then.is_none());
+    assert_eq!(steps.first.username, "alice");
+
+    // Slow: the cached account first, the server's word after it.
+    server.state().me_delay = Some(Duration::from_secs(1));
+    let steps = session.account_steps().await.unwrap();
+    assert!(steps.cached);
+    let confirmed = steps.then.expect("to come").wait().await.unwrap();
+    assert_eq!(confirmed.map(|u| u.username).as_deref(), Some("alice"));
+
+    // Revoked meanwhile: the cached account first, then 401.
+    for t in server.state().tokens.iter_mut() {
+        t.info.revoked = true;
+    }
+    let start = Instant::now();
+    let steps = session.account_steps().await.unwrap();
+    assert!(steps.cached);
+    assert_eq!(steps.first.username, "alice");
+    assert!(start.elapsed() < OFFLINE_AFTER + ms(300), "{:?}", start.elapsed());
+    let err = steps.then.expect("to come").wait().await.unwrap_err();
+    assert!(err.is_unauthorized(), "{err}");
+    assert!(start.elapsed() >= Duration::from_secs(1), "{:?}", start.elapsed());
+    assert_eq!(*session.reach().borrow(), Reach::Reachable, "a 401 is an answer");
+
+    // Answered in time: the 401 at once.
+    server.state().me_delay = None;
+    let err = session.account_steps().await.unwrap_err();
+    assert!(err.is_unauthorized(), "{err}");
+}

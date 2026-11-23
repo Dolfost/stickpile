@@ -88,6 +88,51 @@ impl ServerStep {
     }
 }
 
+/// What [`Session::account_steps`] answers: who is signed in, to go on with
+/// now, and maybe the server's word on it to come.
+#[derive(Debug)]
+pub struct AccountSteps {
+    /// The server's answer if it came within [`OFFLINE_AFTER`]; else, or
+    /// when it could not be reached, the account the cache last saw.
+    pub first: User,
+    /// `first` is the cached account (the server did not answer in time,
+    /// could not be reached, or was not asked).
+    pub cached: bool,
+    /// `Some` when `first` is cached because the server had not answered
+    /// yet: its answer, to wait for.
+    pub then: Option<AccountStep>,
+}
+
+/// The server's answer to "who is signed in" after the cached account was
+/// handed over first ([`AccountSteps::then`]). The request runs on its own:
+/// dropping this does not cancel it, so its outcome still tells the client
+/// whether the server is there.
+#[derive(Debug)]
+pub struct AccountStep {
+    task: tokio::task::JoinHandle<Result<User>>,
+}
+
+impl AccountStep {
+    /// Wait for the server. `Ok(Some)`: the account it knows (the token
+    /// still works). `Ok(None)`: it could not be reached or failed (5xx),
+    /// and the cached account stands. `Err`: what it answered instead, such
+    /// as `401` for a revoked token (signed out).
+    pub async fn wait(self) -> Result<Option<User>> {
+        let answer = self
+            .task
+            .await
+            .map_err(|e| CoreError::Other(format!("account task: {e}")))?;
+        match answer {
+            Ok(user) => Ok(Some(user)),
+            Err(e) if falls_back(&e) => {
+                tracing::debug!("the server did not say who is signed in; the cached account stands: {e}");
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
 /// A list from the server, or from the offline cache when the server could
 /// not be reached.
 #[derive(Debug, Clone)]
@@ -346,6 +391,51 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// Who is signed in, without waiting for a server that does not answer
+    /// when the cache knows the account (docs/offline.md, "Results without
+    /// waiting"), so that an app opens at once with the server away. With
+    /// nothing cached (a fresh install, a tailnet identity never synced)
+    /// the server is asked and waited for, as [`ApiClient::me`]. Else, with
+    /// the server believed unreachable ([`Reach::Unreachable`]), the cached
+    /// account at once, without a request. Else the server is asked: its
+    /// answer if it comes within [`OFFLINE_AFTER`] (the cached account at
+    /// once when it fails, an error such as `401` as it is); if not, the
+    /// cached account first and the server's answer to wait for
+    /// ([`AccountSteps::then`]), so that a revoked token still signs out
+    /// once the server answers.
+    pub async fn account_steps(&self) -> Result<AccountSteps> {
+        let Some(cached) = self.cache.me()? else {
+            return Ok(AccountSteps {
+                first: self.client.me().await?,
+                cached: false,
+                then: None,
+            });
+        };
+        let from_cache = |then| AccountSteps {
+            first: cached.clone(),
+            cached: true,
+            then,
+        };
+        if self.client.refuses_reads() {
+            return Ok(from_cache(None));
+        }
+        let client = self.client.clone();
+        let mut task = tokio::spawn(async move { client.me().await });
+        if let Ok(joined) = tokio::time::timeout(OFFLINE_AFTER, &mut task).await {
+            let answer = joined.map_err(|e| CoreError::Other(format!("account task: {e}")))?;
+            return match answer {
+                Ok(user) => Ok(AccountSteps {
+                    first: user,
+                    cached: false,
+                    then: None,
+                }),
+                Err(e) if falls_back(&e) => Ok(from_cache(None)),
+                Err(e) => Err(e),
+            };
+        }
+        Ok(from_cache(Some(AccountStep { task })))
     }
 
     /// The outcome of a search the server was asked: its results, or the
