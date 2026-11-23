@@ -306,14 +306,11 @@ impl Reachability {
     }
 
     /// The outage is over (`Reachable`) or forgotten (`Unknown`). A check
-    /// task waiting for its next turn ends. The server answered
-    /// (`Reachable`): that answers a check asked for too.
+    /// task waiting for its next turn ends, unless a check was asked for
+    /// ([`ApiClient::check_now`]): that one still goes out.
     fn set_up(&self, to: Reach) {
         let s = &mut *self.state();
         s.down_since = None;
-        if to == Reach::Reachable {
-            s.asked = false;
-        }
         self.value.send_if_modified(|v| {
             let changed = *v != to;
             *v = to;
@@ -433,8 +430,13 @@ impl CheckTask {
             let result = probe.await;
             let Some(reach) = self.reach.upgrade() else { return };
             // A check asked for meanwhile goes out next, at once, unless
-            // this one found the server.
+            // this one found the server. Only a check's own answer settles
+            // it: a request that answers meanwhile may have left before an
+            // outage the check is asked for to find.
             reach.record(&result);
+            if !matches!(&result, Err(e) if e.is_offline()) {
+                reach.state().asked = false;
+            }
         }
     }
 

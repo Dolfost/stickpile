@@ -425,7 +425,9 @@ value of `stickpile_core::Reach`:
   and on Android when a network appears (`ConnectivityManager`; no new
   permission). Asked for while a check waits for its answer (it may have
   gone out before the network appeared), another goes out at once if that
-  one fails; one that finds the server answers both. Callable from any
+  one fails; one that finds the server answers both. Another request that
+  answers meanwhile does not (it may have left before the outage the
+  check is asked for to find), so the check still goes out. Callable from any
   thread: outside a Tokio runtime the check runs on the runtime of the
   client's last request. A failed check starts an outage like a failed
   request.
