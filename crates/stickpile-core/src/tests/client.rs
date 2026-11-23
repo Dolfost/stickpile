@@ -662,3 +662,57 @@ async fn rechecks_on_a_server_without_them() {
     assert_eq!(err.status(), Some(404));
     assert_eq!(err.api_code(), Some("not_found"));
 }
+
+/// A listener whose backlog is full: a connection to it gets no answer
+/// (Linux drops the SYN), like a host that is gone. The streams hold the
+/// backlog.
+#[cfg(target_os = "linux")]
+fn blackhole() -> (tokio::net::TcpListener, Vec<std::net::TcpStream>, String) {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let listener = socket.listen(1).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut held = Vec::new();
+    while let Ok(stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
+        held.push(stream);
+        assert!(held.len() < 16, "the backlog does not fill");
+    }
+    (listener, held, format!("http://{addr}"))
+}
+
+/// Reads connect within 2 s, so a host that is gone is recognised quickly;
+/// a transfer connects within `timeout_secs` (here 4 s) as before.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn interactive_connect_timeout_is_2s() {
+    use std::time::Instant;
+    let ms = Duration::from_millis;
+    let (_listener, _held, url) = blackhole();
+    let client = ApiClient::new(&url, Duration::from_secs(4)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("file");
+    let read = async {
+        let start = Instant::now();
+        let err = client.me().await.unwrap_err();
+        (start.elapsed(), err)
+    };
+    let transfer = async {
+        let start = Instant::now();
+        let err = client
+            .download("/api/v1/items/x/file/original", &dest)
+            .await
+            .unwrap_err();
+        (start.elapsed(), err)
+    };
+    let ((read_took, read_err), (transfer_took, transfer_err)) = tokio::join!(read, transfer);
+    assert!(read_err.is_offline(), "{read_err}");
+    assert!(transfer_err.is_offline(), "{transfer_err}");
+    assert!(
+        read_took >= ms(1900) && read_took < ms(3000),
+        "a read connects within 2 s: {read_took:?}"
+    );
+    assert!(
+        transfer_took >= ms(3900),
+        "a transfer connects within timeout_secs: {transfer_took:?}"
+    );
+}

@@ -9,7 +9,10 @@
 //!   without an `ApiError` body) become [`CoreError::Offline`] so callers can
 //!   fall back to the offline cache.
 //! * Ordinary requests use the configured `timeout_secs`; uploads, imports,
-//!   exports and file downloads use [`ApiClient::transfer_timeout`].
+//!   exports and file downloads use [`ApiClient::transfer_timeout`]. Reads
+//!   with the ordinary timeout connect within
+//!   [`INTERACTIVE_CONNECT_TIMEOUT`] (2 s), the others within
+//!   `timeout_secs`.
 //! * Opt-in ([`ApiClient::with_fail_fast`]): once a request finds the server
 //!   unreachable, reads fail as offline at once for a while instead of each
 //!   waiting for the timeout, and the server is tried again in the
@@ -175,6 +178,14 @@ pub struct RecheckStarted {
 /// moment ago ([`ApiClient::with_fail_fast`]).
 pub const RECENTLY_UNREACHABLE: &str = "the server could not be reached a moment ago";
 
+/// How long a read (a `GET` with the ordinary timeout: searches, lists,
+/// the sync, `/healthz`) may take to connect, so that a server that is
+/// gone (a tailnet peer that left, a host that is off) is recognised
+/// quickly. `timeout_secs` still bounds the whole request; writes,
+/// uploads, imports, exports and file downloads connect within
+/// `timeout_secs` as before. Never more than the client's timeout.
+pub const INTERACTIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// What a client with [`ApiClient::with_fail_fast`] remembers of the
 /// server: when a request last found it unreachable, and whether a request
 /// is trying it again now. Shared by the client's clones.
@@ -276,9 +287,13 @@ impl Drop for Probing {
     }
 }
 
-/// Async REST client. Cheap to clone (shares the connection pool and token).
+/// Async REST client. Cheap to clone (shares the connection pools and token).
 #[derive(Clone)]
 pub struct ApiClient {
+    /// Reads with the ordinary timeout: they connect within
+    /// [`INTERACTIVE_CONNECT_TIMEOUT`].
+    http_read: reqwest::Client,
+    /// Writes and transfers: they connect within `timeout`.
     http: reqwest::Client,
     base: String,
     token: Arc<RwLock<Option<String>>>,
@@ -306,13 +321,16 @@ impl ApiClient {
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(CoreError::Other(format!("server URL must be http(s): {base_url:?}")));
         }
-        let http = reqwest::Client::builder()
-            .connect_timeout(timeout)
-            .user_agent(concat!("stickpile-core/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| CoreError::Other(format!("HTTP client: {e}")))?;
+        let http = |connect: Duration| {
+            reqwest::Client::builder()
+                .connect_timeout(connect)
+                .user_agent(concat!("stickpile-core/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map_err(|e| CoreError::Other(format!("HTTP client: {e}")))
+        };
         Ok(ApiClient {
-            http,
+            http_read: http(INTERACTIVE_CONNECT_TIMEOUT.min(timeout))?,
+            http: http(timeout)?,
             base: base_url.trim_end_matches('/').to_string(),
             token: Arc::new(RwLock::new(None)),
             timeout,
@@ -335,6 +353,7 @@ impl ApiClient {
     /// server makes of us by tailnet identity alone.
     pub fn anonymous(&self) -> ApiClient {
         ApiClient {
+            http_read: self.http_read.clone(),
             http: self.http.clone(),
             base: self.base.clone(),
             token: Arc::new(RwLock::new(None)),
@@ -409,14 +428,33 @@ impl ApiClient {
 
     // -- plumbing -----------------------------------------------------------
 
+    /// A request with the ordinary timeout; a read connects within
+    /// [`INTERACTIVE_CONNECT_TIMEOUT`].
     fn request(&self, method: Method, route_path: &str, auth: bool) -> Result<RequestBuilder> {
-        let mut rb = self.http.request(method, self.url(route_path)).timeout(self.timeout);
-        if auth {
-            if let Some(t) = self.token() {
-                rb = rb.bearer_auth(t);
-            }
+        let http = if method == Method::GET {
+            &self.http_read
+        } else {
+            &self.http
+        };
+        let rb = http.request(method, self.url(route_path)).timeout(self.timeout);
+        Ok(self.authorize(rb, auth))
+    }
+
+    /// An upload, import, export or file download: it connects within the
+    /// ordinary timeout and runs within [`ApiClient::transfer_timeout`].
+    fn transfer(&self, method: Method, url_path: &str) -> RequestBuilder {
+        let rb = self
+            .http
+            .request(method, self.url(url_path))
+            .timeout(self.transfer_timeout);
+        self.authorize(rb, true)
+    }
+
+    fn authorize(&self, rb: RequestBuilder, auth: bool) -> RequestBuilder {
+        match self.token() {
+            Some(t) if auth => rb.bearer_auth(t),
+            _ => rb,
         }
-        Ok(rb)
     }
 
     async fn send(&self, rb: RequestBuilder) -> Result<Response> {
@@ -429,7 +467,8 @@ impl ApiClient {
         let Some(reach) = self.reach.clone() else {
             return self.answer(rb.send().await, pass_429).await;
         };
-        let request = rb.build().map_err(map_reqwest)?;
+        let (http, request) = rb.build_split();
+        let request = request.map_err(map_reqwest)?;
         let _probing = if *request.method() == Method::GET {
             match reach.gate(Instant::now()) {
                 Gate::Send => None,
@@ -444,7 +483,7 @@ impl ApiClient {
         } else {
             None
         };
-        let result = self.answer(self.http.execute(request).await, pass_429).await;
+        let result = self.answer(http.execute(request).await, pass_429).await;
         reach.record(&result, Instant::now());
         result
     }
@@ -457,7 +496,7 @@ impl ApiClient {
         };
         let client = self.clone();
         runtime.spawn(async move {
-            let rb = client.http.get(client.url(routes::HEALTH)).timeout(client.timeout);
+            let rb = client.http_read.get(client.url(routes::HEALTH)).timeout(client.timeout);
             let result = client.answer(rb.send().await, false).await;
             probing.0.record(&result, Instant::now());
             drop(probing);
@@ -700,17 +739,13 @@ impl ApiClient {
             let part = Part::bytes(json).mime_str("application/json").map_err(map_reqwest)?;
             form = form.part("meta", part);
         }
-        let rb = self
-            .request(Method::POST, &path(routes::SET_ITEMS, &[set_id]), true)?
-            .timeout(self.transfer_timeout);
+        let rb = self.transfer(Method::POST, &path(routes::SET_ITEMS, &[set_id]));
         self.json(rb.multipart(form)).await
     }
 
     /// Download the set directory as a tar (`set.toml` + numbered files).
     pub async fn export_tar(&self, set_id: &str) -> Result<Vec<u8>> {
-        let rb = self
-            .request(Method::GET, &path(routes::SET_EXPORT, &[set_id]), true)?
-            .timeout(self.transfer_timeout);
+        let rb = self.transfer(Method::GET, &path(routes::SET_EXPORT, &[set_id]));
         let resp = self.send(rb).await?;
         Ok(resp.bytes().await.map_err(map_reqwest)?.to_vec())
     }
@@ -738,10 +773,7 @@ impl ApiClient {
             .map_err(map_reqwest)?;
         let form = Form::new().part("archive", part);
         let q: Vec<(&str, String)> = into.map(|s| ("into", s.to_string())).into_iter().collect();
-        let rb = self
-            .request(Method::POST, routes::SETS_IMPORT, true)?
-            .timeout(self.transfer_timeout)
-            .query(&q);
+        let rb = self.transfer(Method::POST, routes::SETS_IMPORT).query(&q);
         self.json(rb.multipart(form)).await
     }
 
@@ -871,9 +903,7 @@ impl ApiClient {
 
     /// Raw bytes of a variant and its `Content-Type`.
     pub async fn item_file(&self, id: &str, variant: Variant) -> Result<(Vec<u8>, Option<String>)> {
-        let rb = self
-            .request(Method::GET, &path(routes::ITEM_FILE, &[id, variant.as_str()]), true)?
-            .timeout(self.transfer_timeout);
+        let rb = self.transfer(Method::GET, &path(routes::ITEM_FILE, &[id, variant.as_str()]));
         let resp = self.send(rb).await?;
         let ct = resp
             .headers()
@@ -894,9 +924,7 @@ impl ApiClient {
     /// out, such as a set's `cover_url` (query string included).
     pub async fn download(&self, url_path: &str, dest: &Path) -> Result<u64> {
         use tokio::io::AsyncWriteExt;
-        let rb = self
-            .request(Method::GET, url_path, true)?
-            .timeout(self.transfer_timeout);
+        let rb = self.transfer(Method::GET, url_path);
         let mut resp = self.send(rb).await?;
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -931,9 +959,7 @@ impl ApiClient {
     /// of `GET url_path` to stream when the server sends the file, or how
     /// long a `429` asks to wait. Other errors as for every request.
     pub(crate) async fn fetch_file(&self, url_path: &str) -> Result<FileFetch> {
-        let rb = self
-            .request(Method::GET, url_path, true)?
-            .timeout(self.transfer_timeout);
+        let rb = self.transfer(Method::GET, url_path);
         let resp = self.send_as(rb, true).await?;
         if resp.status() == StatusCode::TOO_MANY_REQUESTS {
             let wait = resp
