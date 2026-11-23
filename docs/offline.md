@@ -493,3 +493,43 @@ its reads connect within 2 s too.
 - Subscribe to `reach()` (or poll `reach_changed`): when it turns
   `Reachable` after `Unreachable`, run the current search again, start a
   sync and drop the offline notice.
+
+The GTK popup and the macOS app do this once, in the desktop backend and
+the popup model (`stickpile-desktop/src/backend.rs`,
+`stickpile-quick/src/model.rs`), the shells only forwarding and drawing:
+
+- `CoreBackend::new` makes the session fail fast. `Backend::search`
+  answers `Searched { first, then }`: the shell hands `first` to the model
+  as `Event::Results` and the server's answer as `Event::ServerResults`
+  of the same generation; the model drops either for another one.
+  `Backend::reach` is the session's watch value, the one record of the
+  server's state (the backend keeps none of its own); the shells follow
+  it on their main loop and tell the model (`backend::reach_event`:
+  `Reachable` and `Unreachable` as `Event::Reachable(bool)`, `Unknown`
+  not at all, so `Unreachable`, `Unknown`, `Reachable` is still the
+  server back). The model's own flag says whether an `Unreachable` was
+  seen since the last `Reachable`. Offline results alone do not tell the
+  model the server is away (a slow one sends them first).
+- The notice is the footer status "Offline: showing saved stickers"
+  (Ukrainian "Немає зв'язку: показано збережені стікери"), as on Android,
+  shown with the offline results and gone when the server's replace them.
+  "Searching..." lasts until the first step.
+- In place: the selected sticker stays selected wherever it is now,
+  whether or not the user moved the selection; when it is gone, the same
+  place in the grid if the user had moved the selection (as fresh data
+  for a shown list), else the first, the server's best. A status that
+  tells what the user did (a copy, a like) stays. While a pointer button
+  is down on the grid or the menu of a tile is open, the results wait
+  and go in when the press ends or the menu closes (`Event::Pressing`);
+  the click the press makes acts on the tile it pressed. GTK tells the
+  release after the click is handled; macOS also holds them for the
+  double-click interval after the release. GTK selects the tile under a
+  resting pointer once the tiles change; the shell undoes that until the
+  pointer moves.
+- The server back: the search shown from the offline index runs again
+  in place, without "Searching..." over the results (a search still
+  waiting for its answer runs again as a new one), and `Command::Sync`
+  syncs at once unless a sync runs (the schedule of `SyncPolicy` would
+  wait up to 10 minutes, or a minute after a failure). A sync that
+  changed the cache runs offline results again in place too. Thumbnails
+  that failed meanwhile load again.

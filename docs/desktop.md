@@ -725,9 +725,27 @@ The Offline group under it holds the [options](configuration.md#keeping-stickers
 
 ## Offline behaviour
 
-- Search falls back to the local cache when the server does not answer
-  within `timeout_secs`: metadata-only ranking (no image-content matches),
-  and the footer says "Offline — showing cached results".
+- A search never waits for a server that does not answer
+  ([offline.md](offline.md#reachability-and-results-without-waiting)).
+  Once the server is found unreachable, the local cache answers at once,
+  without a request: metadata-only ranking (no image-content matches), and
+  the footer says "Offline: showing saved stickers". While the server is
+  believed reachable it is asked; if it has not answered after 300 ms, the
+  cache's results show first with the same notice, and the server's
+  replace them in place when they come (they include image-content
+  matches and stickers the cache does not hold). The replacement does not
+  jump: the selected sticker stays selected wherever it is in the new
+  list (when it is not in it: the same place if you had moved the
+  selection, else the first), a copy in progress goes on, and while a
+  mouse button is held on a tile or the menu of a tile is open the
+  results wait until the button is up or the menu closed. A pointer
+  resting over the grid does not select the tile that came under it.
+- Whether the server answers is checked in the background: when the popup
+  opens, every 15 s for the first 5 minutes of an outage, then every
+  minute. When it answers again, the search shown from the cache runs
+  again and its results replace the shown ones in place, the notice goes,
+  and a sync starts at once (it uploads the copies made meanwhile and
+  lets the downloader go on).
 - Thumbnails and recently used files are cached under
   `$XDG_CACHE_HOME/stickpile` up to `cache_max_mb`, and kept files besides
   them up to `offline.max_mb`. An item whose file is on the device copies

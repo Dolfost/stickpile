@@ -128,6 +128,19 @@ goes before; `Popup::offline_keep_library`, `offline_pause`,
 `Stickpile --fake=offline`, `--fake=confirm` and `--fake=offline-settings`
 show the marks, the question and the block without a driver.
 
+A search never waits for a server that does not answer, as in the Linux
+popup ([desktop.md](desktop.md#offline-behaviour)): the saved stickers at
+once (or after 300 ms while the server is believed there) with "Offline:
+showing saved stickers" in the status, the server's results in their
+place when they come, without moving the selection off the selected
+sticker; the server is checked when the popup opens and in the
+background, and when it is back the search runs again and a sync starts.
+The status and the grid come in `ViewState` as for any search. The grid
+reports the mouse button on a tile (`Popup::pressing(down, hold_ms)`,
+with `hold_ms` the double-click interval): while it is down, and for the
+double-click interval after, the server's results wait, so the second
+click of a double click lands on the sticker the first one selected.
+
 ## Target detection
 
 When the shortcut is pressed, the app reads the frontmost application's
