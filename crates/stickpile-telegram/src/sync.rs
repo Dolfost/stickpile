@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::api::{BotApi, DownloadError, InputSticker, Sticker, StickerFormat, TelegramError};
+use crate::api::{BotApi, DownloadError, InputSticker, Sticker, StickerFormat, StickerSet, TelegramError};
 
 /// Telegram's limit for regular sticker packs.
 pub const MAX_PACK_STICKERS: usize = 120;
@@ -166,6 +166,9 @@ impl ExportReport {
 /// is not exported (Telegram would ignore the identical file) and gets no
 /// mapping entry. More than [`MAX_PACK_STICKERS`] items or duplicate keys are
 /// an error before any call is made.
+///
+/// A failure loses what the export did so far; [`export_pack_resumable`]
+/// keeps it.
 pub async fn export_pack(
     api: &BotApi,
     owner_user_id: i64,
@@ -175,67 +178,274 @@ pub async fn export_pack(
     previous: &PackState,
     thumbnail: Option<&PackThumbnail>,
 ) -> Result<ExportReport, TelegramError> {
+    export_pack_resumable(api, owner_user_id, name, title, items, previous, thumbnail)
+        .await
+        .map_err(|e| e.error)
+}
+
+/// [`export_pack`] that, when it fails, also says what the pack holds as far
+/// as the export got ([`PackExportError::partial`]). Persisted in place of
+/// `previous`, it lets the next export continue from there: it neither
+/// uploads a sticker twice nor loses track of one.
+pub async fn export_pack_resumable(
+    api: &BotApi,
+    owner_user_id: i64,
+    name: &str,
+    title: &str,
+    items: &[ExportItem],
+    previous: &PackState,
+    thumbnail: Option<&PackThumbnail>,
+) -> Result<ExportReport, PackExportError> {
+    let items: Vec<&ExportItem> = items.iter().collect();
+    let pack = Pack {
+        api,
+        owner_user_id,
+        name,
+        thumbnail,
+    };
+    sync_pack(&pack, title, &items, previous).await
+}
+
+/// An export that stopped half-way.
+#[derive(Debug)]
+pub struct PackExportError {
+    pub error: TelegramError,
+    /// What to persist in place of the previous state, and pass to the next
+    /// export. Its mapping holds every sticker the export knows to be in the
+    /// pack: the ones it kept, and the ones it added as far as reading the
+    /// pack back confirms them. Entries of `previous` for the other items
+    /// stay, so the items keep their pack; their stickers, gone or not, are
+    /// checked again by the next export. The thumbnail key is the previous
+    /// one until the export has set the thumbnail.
+    pub partial: PackState,
+}
+
+impl std::fmt::Display for PackExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for PackExportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+/// The pack an export works on.
+pub(crate) struct Pack<'a> {
+    pub api: &'a BotApi,
+    pub owner_user_id: i64,
+    pub name: &'a str,
+    pub thumbnail: Option<&'a PackThumbnail>,
+}
+
+/// [`export_pack_resumable`] on borrowed items.
+pub(crate) async fn sync_pack(
+    pack: &Pack<'_>,
+    title: &str,
+    items: &[&ExportItem],
+    previous: &PackState,
+) -> Result<ExportReport, PackExportError> {
+    let unchanged = |error| PackExportError {
+        error,
+        partial: previous.clone(),
+    };
     let mut keys = HashSet::new();
     for it in items {
         if !keys.insert(it.key.as_str()) {
-            return Err(TelegramError::Invalid(format!("duplicate item key {:?}", it.key)));
+            return Err(unchanged(TelegramError::Invalid(format!(
+                "duplicate item key {:?}",
+                it.key
+            ))));
         }
     }
     let mut contents = HashSet::new();
     let items: Vec<&ExportItem> = items
         .iter()
+        .copied()
         .filter(|it| contents.insert(it.content_key.as_str()))
         .collect();
     if items.is_empty() {
-        return Err(TelegramError::Invalid("nothing to export: the set has no items".into()));
-    }
-    if items.len() > MAX_PACK_STICKERS {
-        return Err(TelegramError::Invalid(format!(
-            "Telegram packs hold at most {MAX_PACK_STICKERS} stickers; the set has {}",
-            items.len()
+        return Err(unchanged(TelegramError::Invalid(
+            "nothing to export: the set has no items".into(),
         )));
     }
-    let title = clamp_title(title, name);
-    let mut report = ExportReport::default();
+    if items.len() > MAX_PACK_STICKERS {
+        return Err(unchanged(TelegramError::Invalid(format!(
+            "Telegram packs hold at most {MAX_PACK_STICKERS} stickers; the set has {}",
+            items.len()
+        ))));
+    }
+    let title = clamp_title(title, pack.name);
+    match pack.api.get_sticker_set(pack.name).await {
+        Ok(current) => update_pack(pack, &title, &items, current, previous).await,
+        Err(e) if e.is_missing_sticker_set() => create_pack(pack, &title, &items, previous).await,
+        Err(e) => Err(unchanged(e)),
+    }
+}
 
-    let current = match api.get_sticker_set(name).await {
-        Ok(set) => set,
-        Err(e) if e.is_missing_sticker_set() => {
-            let first: Vec<InputSticker> = items
-                .iter()
-                .take(MAX_CREATE_BATCH)
-                .map(|it| input_sticker(it))
-                .collect();
-            api.create_new_sticker_set(owner_user_id, name, &title, &first).await?;
-            for it in items.iter().skip(MAX_CREATE_BATCH) {
-                api.add_sticker_to_set(owner_user_id, name, &input_sticker(it)).await?;
-            }
-            let set = api.get_sticker_set(name).await?;
-            if set.stickers.len() != items.len() {
-                return Err(TelegramError::Invalid(format!(
-                    "pack {name} has {} stickers after creation, expected {}",
-                    set.stickers.len(),
-                    items.len()
-                )));
-            }
-            report.created_pack = true;
-            report.added = items.len() as u32;
-            report.mapping = items
-                .iter()
-                .zip(&set.stickers)
-                .map(|(it, s)| (it.key.clone(), (it.content_key.clone(), s.file_unique_id.clone())))
-                .collect();
-            sync_thumbnail(api, owner_user_id, name, thumbnail, None, &mut report).await?;
-            return Ok(report);
-        }
-        Err(e) => return Err(e),
+/// `previous` with the entries this export confirmed.
+fn carried(previous: &PackMapping, confirmed: PackMapping) -> PackMapping {
+    let mut mapping = previous.clone();
+    mapping.extend(confirmed);
+    mapping
+}
+
+/// The failure of a step after every sticker is in place: the new mapping
+/// holds.
+fn after_stickers(error: TelegramError, mapping: &PackMapping, thumbnail: Option<&str>) -> PackExportError {
+    PackExportError {
+        error,
+        partial: PackState {
+            mapping: mapping.clone(),
+            thumbnail: thumbnail.map(str::to_string),
+        },
+    }
+}
+
+/// How many stickers a failed call may still have added: none when Telegram
+/// refused it (an answer below 500), `stickers` when its answer was lost or
+/// was a server error.
+fn in_flight(e: &TelegramError, stickers: usize) -> usize {
+    match e {
+        TelegramError::Api { code, .. } if *code < 500 => 0,
+        _ => stickers,
+    }
+}
+
+/// After a failure while stickers were being added: which of `to_add` are in
+/// the pack now? The pack is read back. Its stickers that are not `kept`, in
+/// pack order, are the first of `to_add` (Telegram appends) when their number
+/// shows which calls took effect: the `done` stickers of the calls that
+/// succeeded, or `done + in_flight` when the failed call took effect too.
+/// Anything else (the read fails, a kept sticker is missing, another count)
+/// confirms nothing; the next export then treats those stickers as unknown.
+async fn read_back(
+    api: &BotApi,
+    name: &str,
+    kept: &HashSet<String>,
+    to_add: &[&ExportItem],
+    done: usize,
+    in_flight: usize,
+) -> PackMapping {
+    if done + in_flight == 0 {
+        return PackMapping::new();
+    }
+    let Ok(set) = api.get_sticker_set(name).await else {
+        return PackMapping::new();
     };
+    let present: HashSet<&str> = set.stickers.iter().map(|s| s.file_unique_id.as_str()).collect();
+    if !kept.iter().all(|f| present.contains(f.as_str())) {
+        return PackMapping::new();
+    }
+    let added: Vec<&Sticker> = set
+        .stickers
+        .iter()
+        .filter(|s| !kept.contains(&s.file_unique_id))
+        .collect();
+    let n = added.len();
+    if n > to_add.len() || !(n == done || (in_flight > 0 && n == done + in_flight)) {
+        return PackMapping::new();
+    }
+    to_add
+        .iter()
+        .zip(added)
+        .map(|(it, s)| (it.key.clone(), (it.content_key.clone(), s.file_unique_id.clone())))
+        .collect()
+}
+
+/// First export, or the pack disappeared: create it.
+async fn create_pack(
+    pack: &Pack<'_>,
+    title: &str,
+    items: &[&ExportItem],
+    previous: &PackState,
+) -> Result<ExportReport, PackExportError> {
+    let (api, owner, name) = (pack.api, pack.owner_user_id, pack.name);
+    let none = HashSet::new();
+    // A new pack has no thumbnail yet. The entries of `previous` (stickers of
+    // a pack that disappeared) are kept for the items' sake; none of them is
+    // in the new pack.
+    let failed = |error: TelegramError, confirmed: PackMapping| PackExportError {
+        error,
+        partial: PackState {
+            mapping: carried(&previous.mapping, confirmed),
+            thumbnail: None,
+        },
+    };
+    let first: Vec<InputSticker> = items
+        .iter()
+        .take(MAX_CREATE_BATCH)
+        .map(|it| input_sticker(it))
+        .collect();
+    if let Err(e) = api.create_new_sticker_set(owner, name, title, &first).await {
+        let confirmed = read_back(api, name, &none, items, 0, in_flight(&e, first.len())).await;
+        return Err(failed(e, confirmed));
+    }
+    let mut done = first.len();
+    for it in items.iter().skip(MAX_CREATE_BATCH) {
+        if let Err(e) = api.add_sticker_to_set(owner, name, &input_sticker(it)).await {
+            let confirmed = read_back(api, name, &none, items, done, in_flight(&e, 1)).await;
+            return Err(failed(e, confirmed));
+        }
+        done += 1;
+    }
+    let set = match api.get_sticker_set(name).await {
+        Ok(set) => set,
+        Err(e) => {
+            let confirmed = read_back(api, name, &none, items, done, 0).await;
+            return Err(failed(e, confirmed));
+        }
+    };
+    if set.stickers.len() != items.len() {
+        let e = TelegramError::Invalid(format!(
+            "pack {name} has {} stickers after creation, expected {}",
+            set.stickers.len(),
+            items.len()
+        ));
+        return Err(failed(e, PackMapping::new()));
+    }
+    let mut report = ExportReport {
+        created_pack: true,
+        added: items.len() as u32,
+        mapping: items
+            .iter()
+            .zip(&set.stickers)
+            .map(|(it, s)| (it.key.clone(), (it.content_key.clone(), s.file_unique_id.clone())))
+            .collect(),
+        ..ExportReport::default()
+    };
+    if let Err(e) = sync_thumbnail(pack, None, &mut report).await {
+        return Err(after_stickers(e, &report.mapping, None));
+    }
+    Ok(report)
+}
+
+/// Later exports: bring the pack in line with `items`.
+async fn update_pack(
+    pack: &Pack<'_>,
+    title: &str,
+    items: &[&ExportItem],
+    current: StickerSet,
+    previous: &PackState,
+) -> Result<ExportReport, PackExportError> {
+    let (api, owner, name) = (pack.api, pack.owner_user_id, pack.name);
+    let before = previous.thumbnail.as_deref();
+    let failed = |error: TelegramError, confirmed: PackMapping| PackExportError {
+        error,
+        partial: PackState {
+            mapping: carried(&previous.mapping, confirmed),
+            thumbnail: previous.thumbnail.clone(),
+        },
+    };
+    let mut report = ExportReport::default();
 
     // Which existing stickers can stay?
     let present: HashSet<&str> = current.stickers.iter().map(|s| s.file_unique_id.as_str()).collect();
     let mut kept: HashMap<&str, String> = HashMap::new(); // item key -> file_unique_id
     let mut kept_fuids: HashSet<String> = HashSet::new();
-    for it in &items {
+    for it in items {
         if let Some((content_key, fuid)) = previous.mapping.get(&it.key) {
             if *content_key == it.content_key && present.contains(fuid.as_str()) && kept_fuids.insert(fuid.clone()) {
                 kept.insert(it.key.as_str(), fuid.clone());
@@ -263,26 +473,46 @@ pub async fn export_pack(
     };
 
     for s in &to_delete {
-        api.delete_sticker_from_set(&s.file_id).await?;
+        if let Err(e) = api.delete_sticker_from_set(&s.file_id).await {
+            return Err(failed(e, PackMapping::new()));
+        }
         report.removed += 1;
     }
     let mut adds = to_add.iter();
+    let mut done = 0;
     if let Some(old) = replaced {
         let first = adds.next().expect("to_add is not empty");
-        api.replace_sticker_in_set(owner_user_id, name, &old.file_id, &input_sticker(first))
-            .await?;
+        if let Err(e) = api
+            .replace_sticker_in_set(owner, name, &old.file_id, &input_sticker(first))
+            .await
+        {
+            // The pack's only sticker is then the old one or the new one,
+            // which reading it back cannot tell apart: nothing is confirmed.
+            return Err(failed(e, PackMapping::new()));
+        }
         report.removed += 1;
         report.added += 1;
+        done = 1;
     }
     for it in adds {
-        api.add_sticker_to_set(owner_user_id, name, &input_sticker(it)).await?;
+        if let Err(e) = api.add_sticker_to_set(owner, name, &input_sticker(it)).await {
+            let confirmed = read_back(api, name, &kept_fuids, &to_add, done, in_flight(&e, 1)).await;
+            return Err(failed(e, confirmed));
+        }
         report.added += 1;
+        done += 1;
     }
 
     let set = if report.added == 0 && report.removed == 0 {
         current.clone()
     } else {
-        api.get_sticker_set(name).await?
+        match api.get_sticker_set(name).await {
+            Ok(set) => set,
+            Err(e) => {
+                let confirmed = read_back(api, name, &kept_fuids, &to_add, done, 0).await;
+                return Err(failed(e, confirmed));
+            }
+        }
     };
     let new_stickers: Vec<&Sticker> = set
         .stickers
@@ -290,13 +520,14 @@ pub async fn export_pack(
         .filter(|s| !kept_fuids.contains(&s.file_unique_id))
         .collect();
     if new_stickers.len() != to_add.len() || set.stickers.len() != items.len() {
-        return Err(TelegramError::Invalid(format!(
+        let e = TelegramError::Invalid(format!(
             "pack {name} has {} stickers ({} new) after the update, expected {} ({} new); was it changed concurrently?",
             set.stickers.len(),
             new_stickers.len(),
             items.len(),
             to_add.len()
-        )));
+        ));
+        return Err(failed(e, PackMapping::new()));
     }
     let mut fuid_of: HashMap<&str, String> = kept.iter().map(|(k, f)| (*k, f.clone())).collect();
     for (it, s) in to_add.iter().zip(&new_stickers) {
@@ -307,45 +538,6 @@ pub async fn export_pack(
         .iter()
         .map(|s| (s.file_unique_id.as_str(), s.file_id.as_str()))
         .collect();
-
-    // Metadata of stickers that stayed (new ones were uploaded with theirs).
-    for it in &items {
-        let Some(fuid) = kept.get(it.key.as_str()) else {
-            continue;
-        };
-        let file_id = file_id_of[fuid.as_str()];
-        api.set_sticker_emoji_list(file_id, &emoji_list(it)).await?;
-        api.set_sticker_keywords(file_id, &keyword_list(it)).await?;
-        report.updated += 1;
-    }
-
-    // Order.
-    let mut order: Vec<&str> = set.stickers.iter().map(|s| s.file_unique_id.as_str()).collect();
-    for (position, it) in items.iter().enumerate() {
-        let want = fuid_of[it.key.as_str()].as_str();
-        if order[position] != want {
-            api.set_sticker_position_in_set(file_id_of[want], position as u32)
-                .await?;
-            let from = order.iter().position(|f| *f == want).expect("sticker is in the pack");
-            let moved = order.remove(from);
-            order.insert(position, moved);
-            report.reordered = true;
-        }
-    }
-
-    if set.title != title {
-        api.set_sticker_set_title(name, &title).await?;
-    }
-    sync_thumbnail(
-        api,
-        owner_user_id,
-        name,
-        thumbnail,
-        previous.thumbnail.as_deref(),
-        &mut report,
-    )
-    .await?;
-
     report.mapping = items
         .iter()
         .map(|it| {
@@ -355,18 +547,55 @@ pub async fn export_pack(
             )
         })
         .collect();
+
+    // Metadata of stickers that stayed (new ones were uploaded with theirs).
+    for it in items {
+        let Some(fuid) = kept.get(it.key.as_str()) else {
+            continue;
+        };
+        let file_id = file_id_of[fuid.as_str()];
+        api.set_sticker_emoji_list(file_id, &emoji_list(it))
+            .await
+            .map_err(|e| after_stickers(e, &report.mapping, before))?;
+        api.set_sticker_keywords(file_id, &keyword_list(it))
+            .await
+            .map_err(|e| after_stickers(e, &report.mapping, before))?;
+        report.updated += 1;
+    }
+
+    // Order.
+    let mut order: Vec<&str> = set.stickers.iter().map(|s| s.file_unique_id.as_str()).collect();
+    for (position, it) in items.iter().enumerate() {
+        let want = fuid_of[it.key.as_str()].as_str();
+        if order[position] != want {
+            api.set_sticker_position_in_set(file_id_of[want], position as u32)
+                .await
+                .map_err(|e| after_stickers(e, &report.mapping, before))?;
+            let from = order.iter().position(|f| *f == want).expect("sticker is in the pack");
+            let moved = order.remove(from);
+            order.insert(position, moved);
+            report.reordered = true;
+        }
+    }
+
+    if set.title != title {
+        api.set_sticker_set_title(name, title)
+            .await
+            .map_err(|e| after_stickers(e, &report.mapping, before))?;
+    }
+    if let Err(e) = sync_thumbnail(pack, before, &mut report).await {
+        return Err(after_stickers(e, &report.mapping, before));
+    }
     Ok(report)
 }
 
 async fn sync_thumbnail(
-    api: &BotApi,
-    owner_user_id: i64,
-    name: &str,
-    thumbnail: Option<&PackThumbnail>,
+    pack: &Pack<'_>,
     previous: Option<&str>,
     report: &mut ExportReport,
 ) -> Result<(), TelegramError> {
-    match thumbnail {
+    let (api, owner_user_id, name) = (pack.api, pack.owner_user_id, pack.name);
+    match pack.thumbnail {
         Some(t) if previous != Some(t.key.as_str()) => {
             api.set_sticker_set_thumbnail(name, owner_user_id, Some(&t.png)).await?;
             report.thumbnail_changed = true;
@@ -377,7 +606,7 @@ async fn sync_thumbnail(
         }
         _ => {}
     }
-    report.thumbnail = thumbnail.map(|t| t.key.clone());
+    report.thumbnail = pack.thumbnail.map(|t| t.key.clone());
     Ok(())
 }
 

@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use mock_bot::{start, unique_id, BOT, BOT_ID, OWNER, TOKEN};
 use stickpile_telegram::{
-    export_pack, import_pack, BotApi, ExportItem, PackState, PackThumbnail, StickerFormat, TelegramError,
-    DEFAULT_EMOJI, TGS_SKIP_REASON,
+    export_pack, export_pack_resumable, import_pack, BotApi, ExportItem, PackState, PackThumbnail, StickerFormat,
+    TelegramError, DEFAULT_EMOJI, TGS_SKIP_REASON,
 };
 
 const PACK: &str = "cats_by_stickpile_test_bot";
@@ -624,6 +624,105 @@ async fn identical_content_is_exported_once() {
         .unwrap();
     assert_eq!(report.mapping.keys().collect::<Vec<_>>(), ["a"]);
     assert_eq!(state.lock().unwrap().pack(PACK).stickers.len(), 1);
+}
+
+fn stars(range: std::ops::Range<usize>) -> Vec<ExportItem> {
+    range
+        .map(|i| {
+            item(
+                &format!("k{i:03}"),
+                &format!("C{i}"),
+                StickerFormat::Static,
+                &["⭐"],
+                &[],
+            )
+        })
+        .collect()
+}
+
+fn pack_fuids(state: &mock_bot::Shared, name: &str) -> Vec<String> {
+    let st = state.lock().unwrap();
+    st.pack(name).stickers.iter().map(|s| s.fuid.clone()).collect()
+}
+
+#[tokio::test]
+async fn a_failed_export_keeps_what_it_did() {
+    for applied in [false, true] {
+        let (base, state) = start().await;
+        let client = api(&base);
+        let items = stars(0..70);
+        // Creation stops at the 11th addStickerToSet; with `applied` the
+        // sticker gets in and only the answer is lost.
+        {
+            let mut st = state.lock().unwrap();
+            st.fail_after.insert("addStickerToSet".into(), 10);
+            st.fail_after_applying = applied;
+        }
+        let err = export_pack_resumable(&client, OWNER, PACK, "Stars", &items, &PackState::default(), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err.error, TelegramError::Api { code: 500, .. }), "{err}");
+        let got_in = if applied { 61 } else { 60 };
+        assert_eq!(pack_fuids(&state, PACK).len(), got_in);
+        assert_eq!(err.partial.mapping.len(), got_in, "read back after the failure");
+        for it in &items[..got_in] {
+            assert_eq!(err.partial.mapping[&it.key], (it.content_key.clone(), fuid(it)));
+        }
+        assert_eq!(err.partial.thumbnail, None);
+
+        // The next export goes on from there.
+        state.lock().unwrap().fail_after.clear();
+        state.lock().unwrap().calls.clear();
+        let report = export_pack(&client, OWNER, PACK, "Stars", &items, &err.partial, None)
+            .await
+            .unwrap();
+        assert!(!report.created_pack);
+        assert_eq!((report.added, report.removed), (70 - got_in as u32, 0));
+        assert_eq!(pack_fuids(&state, PACK), items.iter().map(fuid).collect::<Vec<_>>());
+        assert_eq!(state.lock().unwrap().count("createNewStickerSet"), 0);
+    }
+}
+
+#[tokio::test]
+async fn a_failed_update_that_cannot_read_back_loses_no_sticker() {
+    let (base, state) = start().await;
+    let client = api(&base);
+    let first = export_pack(
+        &client,
+        OWNER,
+        PACK,
+        "Stars",
+        &stars(0..10),
+        &PackState::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    // Ten more, and a changed one. The update stops at the 4th add, and the
+    // pack cannot be read back either.
+    let mut items = stars(0..20);
+    items[2].content_key = "C2 new".into();
+    items[2].bytes = b"new bytes of C2".to_vec();
+    {
+        let mut st = state.lock().unwrap();
+        st.fail_after.insert("addStickerToSet".into(), 3);
+        st.fail_after.insert("getStickerSet".into(), 1);
+        st.fail_after_applying = true;
+    }
+    let err = export_pack_resumable(&client, OWNER, PACK, "Stars", &items, &first.state(), None)
+        .await
+        .unwrap_err();
+    // The kept stickers are known and the changed item keeps its old entry;
+    // the four added stickers are unknown.
+    assert_eq!(err.partial.mapping, first.mapping);
+    assert_eq!(pack_fuids(&state, PACK).len(), 9 + 4);
+
+    state.lock().unwrap().fail_after.clear();
+    let report = export_pack(&client, OWNER, PACK, "Stars", &items, &err.partial, None)
+        .await
+        .unwrap();
+    assert_eq!(report.mapping.len(), 20);
+    assert_eq!(pack_fuids(&state, PACK), items.iter().map(fuid).collect::<Vec<_>>());
 }
 
 #[tokio::test]
