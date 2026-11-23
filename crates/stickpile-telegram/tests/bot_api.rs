@@ -698,30 +698,47 @@ async fn a_failed_update_that_cannot_read_back_loses_no_sticker() {
     )
     .await
     .unwrap();
-    // Ten more, and a changed one. The update stops at the 4th add, and the
-    // pack cannot be read back either.
-    let mut items = stars(0..20);
+    // Ten more, k002 changed and k005 removed.
+    let mut items: Vec<ExportItem> = stars(0..20).into_iter().filter(|it| it.key != "k005").collect();
     items[2].content_key = "C2 new".into();
     items[2].bytes = b"new bytes of C2".to_vec();
+
+    // Stopped before any sticker is deleted: the state is unchanged.
+    state
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("deleteStickerFromSet".into(), 0);
+    let err = export_pack_resumable(&client, OWNER, PACK, "Stars", &items, &first.state(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.partial, first.state());
+    assert_eq!(pack_fuids(&state, PACK).len(), 10);
+
+    // Stopped at the 4th add, and the pack cannot be read back either.
     {
         let mut st = state.lock().unwrap();
+        st.fail_after.clear();
         st.fail_after.insert("addStickerToSet".into(), 3);
         st.fail_after.insert("getStickerSet".into(), 1);
         st.fail_after_applying = true;
     }
-    let err = export_pack_resumable(&client, OWNER, PACK, "Stars", &items, &first.state(), None)
+    let err = export_pack_resumable(&client, OWNER, PACK, "Stars", &items, &err.partial, None)
         .await
         .unwrap_err();
     // The kept stickers are known and the changed item keeps its old entry;
-    // the four added stickers are unknown.
-    assert_eq!(err.partial.mapping, first.mapping);
-    assert_eq!(pack_fuids(&state, PACK).len(), 9 + 4);
+    // the removed item's sticker is deleted, and so is its entry; the four
+    // added stickers are unknown.
+    let mut expected = first.mapping.clone();
+    expected.remove("k005");
+    assert_eq!(err.partial.mapping, expected);
+    assert_eq!(pack_fuids(&state, PACK).len(), 8 + 4);
 
     state.lock().unwrap().fail_after.clear();
     let report = export_pack(&client, OWNER, PACK, "Stars", &items, &err.partial, None)
         .await
         .unwrap();
-    assert_eq!(report.mapping.len(), 20);
+    assert_eq!(report.mapping.len(), 19);
     assert_eq!(pack_fuids(&state, PACK), items.iter().map(fuid).collect::<Vec<_>>());
 }
 

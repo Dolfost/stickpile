@@ -213,10 +213,12 @@ pub struct PackExportError {
     /// What to persist in place of the previous state, and pass to the next
     /// export. Its mapping holds every sticker the export knows to be in the
     /// pack: the ones it kept, and the ones it added as far as reading the
-    /// pack back confirms them. Entries of `previous` for the other items
-    /// stay, so the items keep their pack; their stickers, gone or not, are
-    /// checked again by the next export. The thumbnail key is the previous
-    /// one until the export has set the thumbnail.
+    /// pack back confirms them. The entries of `previous` for the export's
+    /// other items stay, so the items keep their pack; their stickers, gone
+    /// or not, are checked again by the next export. Entries for items not in
+    /// the export stay only until it has deleted their stickers. The
+    /// thumbnail key is the previous one until the export has set the
+    /// thumbnail.
     pub partial: PackState,
 }
 
@@ -292,6 +294,16 @@ fn carried(previous: &PackMapping, confirmed: PackMapping) -> PackMapping {
     mapping
 }
 
+/// The entries of `previous` for `items`, once the pack holds no sticker of
+/// another item.
+fn of_items(previous: &PackMapping, items: &[&ExportItem]) -> PackMapping {
+    items
+        .iter()
+        .filter_map(|it| previous.get_key_value(&it.key))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// The failure of a step after every sticker is in place: the new mapping
 /// holds.
 fn after_stickers(error: TelegramError, mapping: &PackMapping, thumbnail: Option<&str>) -> PackExportError {
@@ -365,12 +377,13 @@ async fn create_pack(
     let (api, owner, name) = (pack.api, pack.owner_user_id, pack.name);
     let none = HashSet::new();
     // A new pack has no thumbnail yet. The entries of `previous` (stickers of
-    // a pack that disappeared) are kept for the items' sake; none of them is
-    // in the new pack.
+    // a pack that disappeared) are kept for the items' sake, though none of
+    // them is in the new pack; those of other items go with the old pack.
+    let mine = of_items(&previous.mapping, items);
     let failed = |error: TelegramError, confirmed: PackMapping| PackExportError {
         error,
         partial: PackState {
-            mapping: carried(&previous.mapping, confirmed),
+            mapping: carried(&mine, confirmed),
             thumbnail: None,
         },
     };
@@ -478,6 +491,16 @@ async fn update_pack(
         }
         report.removed += 1;
     }
+    // The stickers of items not in `items` are gone now (but for the one
+    // being replaced), and so are their entries.
+    let mine = of_items(&previous.mapping, items);
+    let failed = |error: TelegramError, confirmed: PackMapping| PackExportError {
+        error,
+        partial: PackState {
+            mapping: carried(&mine, confirmed),
+            thumbnail: previous.thumbnail.clone(),
+        },
+    };
     let mut adds = to_add.iter();
     let mut done = 0;
     if let Some(old) = replaced {
