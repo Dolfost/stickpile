@@ -357,7 +357,10 @@ lists and the thumbnails come from the cache, and stickers inserted before
 or kept offline can be inserted again. When the server stops answering, a
 search shows what is saved on the phone after 300 ms (at once once the
 server is known to be away), and only the first other list waits for it
-(5 s by default). From then on everything comes from the cache at once,
+(5 s by default). Opening the app or the keyboard does not wait for it
+either: who is signed in is the account the phone last saw when the
+server does not answer within 300 ms, and a token the server refuses
+once it answers still signs out. From then on everything comes from the cache at once,
 while the server is checked in the background (every 15 seconds for five
 minutes, then every minute, and at once when a network appears or the app
 or the keyboard opens); once it answers, what is shown loads again from
@@ -526,7 +529,11 @@ object StickpileLibrary
   async fn set_server_url(url: String) throws          // checked and normalised, saved, session
                                                        // reopened; another server signs out first
   async fn account() throws -> Account?                // null: signed out; auth = Tailnet: known
-                                                       // by its tailnet identity, no token
+                                                       // by its tailnet identity, no token; the
+                                                       // cached account when the server is slow
+                                                       // or away
+  async fn account_steps() throws -> AccountAnswer     // the same, and the server's word on a
+                                                       // cached account to come (the app's start)
   async fn login_tailnet() throws -> Account?          // null: not on the tailnet
   async fn login_password(username: String, password: String, totp: String?) throws -> Account
   async fn login_pairing(server_url: String, code: String) throws -> Account
@@ -612,6 +619,12 @@ object PendingSearch                                   // SearchAnswer.pending
   async fn server_results() throws -> ItemList?        // the server's results (offline = false);
                                                        // null: it failed, the offline ones stand;
                                                        // once
+
+object PendingAccount                                  // AccountAnswer.pending
+  async fn server_account() throws -> Account?         // the server's word: the account, or null
+                                                       // for a refused (revoked) token; throws
+                                                       // Unreachable when it gave none (the cached
+                                                       // account stands); once
   async fn offline_run() throws -> OfflineOutcome      // the downloader (network); stops when the
                                                        // coroutine is cancelled
   fn offline_status() -> OfflineStatus
@@ -628,6 +641,8 @@ Records and enums:
 record LibraryDirs { config_file: String, cache_dir: String, token_file: String }
 record Account     { username: String, display_name: String?, server_url: String,
                      auth: AuthKind, is_admin: Boolean }
+record AccountAnswer { account: Account?,           // as account() answers
+                     pending: PendingAccount? }     // the server's word to come, or null
 enum   AuthKind    { Token, Tailnet }
 enum   LibraryErrorKind { NotSignedIn, Unauthorized, Unreachable, NotFound, RateLimited,
                           NothingFits, InvalidInput, Server, Io, Other }
@@ -760,7 +775,18 @@ Behaviour the signatures do not show:
   login that fails (a wrong password or code) keeps the stored token.
 - **Account.** `account()` is null when no token is stored and when the
   server rejects it; offline it is the cached user, else null when no
-  token is stored (a fresh install) and `Unreachable` when one is. Behind
+  token is stored (a fresh install) and `Unreachable` when one is. It
+  does not wait for a server that does not answer when the cache knows
+  the account (`Session::account_steps`, docs/offline.md): with the
+  server believed unreachable the cached user at once, else the server's
+  answer if it comes within 300 ms, else the cached user; with nothing
+  cached it asks the server and waits, as before. `account_steps()` gives
+  the same answer and, when it is the cached user because the server had
+  not answered, `pending`: the launcher shows the library at once and,
+  when `server_account` then says null (the token was refused, a revoked
+  one), goes to onboarding as it would have at the start; when it throws
+  (no answer) the account stands. The keyboard's empty Recent tab asks
+  `account()`, so it no longer waits for the request's timeout. Behind
   `tailscale serve` with no token stored, the server may know the phone by
   its tailnet identity: then `account()` is that account with
   `auth = Tailnet`, and `logout()` changes nothing (there is no token; the
