@@ -304,12 +304,23 @@ async fn telegram_blockers_for_a_published_set() {
     assert!(!kinds(&problems_of(&s, &alice, &set.id, "").await).contains(&ProblemKind::NoEmoji));
     // Published with only `a` on Telegram, then a failed export.
     let mapping = json!({ a.id.clone(): [a.media.sha256.clone(), "fu-a"] }).to_string();
-    sqlx::query("UPDATE sets SET telegram_pack = 'pack_by_bot', telegram_mapping = ? WHERE id = ?")
-        .bind(mapping)
+    sqlx::query("UPDATE sets SET telegram_pack = 'pack_by_bot', telegram_base = 'pack_by_bot' WHERE id = ?")
         .bind(&set.id)
         .execute(&s.state.db)
         .await
         .unwrap();
+    let part = |n: i64, name: &'static str, mapping: String| {
+        sqlx::query(
+            "INSERT INTO telegram_parts (set_id, part, pack_name, mapping, stickers, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, 1, 0, 0)",
+        )
+        .bind(set.id.clone())
+        .bind(n)
+        .bind(name)
+        .bind(mapping)
+        .execute(&s.state.db)
+    };
+    part(1, "pack_by_bot", mapping).await.unwrap();
     let sp = problems_of(&s, &alice, &set.id, "").await;
     let ks = kinds(&sp);
     assert!(ks.contains(&ProblemKind::NoEmoji), "{ks:?}");
@@ -326,6 +337,12 @@ async fn telegram_blockers_for_a_published_set() {
         "{}",
         outdated.message
     );
+    // `b` in a second pack of the set (a set larger than one pack has
+    // several): every item is on Telegram.
+    let mapping = json!({ b.id.clone(): [b.media.sha256.clone(), "fu-b"] }).to_string();
+    part(2, "pack_2_by_bot", mapping).await.unwrap();
+    let sp = problems_of(&s, &alice, &set.id, "").await;
+    assert!(!kinds(&sp).contains(&ProblemKind::TelegramOutdated), "{:?}", kinds(&sp));
     sqlx::query(
         "INSERT INTO jobs (id, kind, payload, subject, status, attempts, error, owner_id, run_after, created_at, finished_at) \
          VALUES ('j1', 'telegram_export', '{}', ?, 'failed', 3, 'Bad Request: STICKER_PNG_DIMENSIONS', ?, 0, 1, 2)",

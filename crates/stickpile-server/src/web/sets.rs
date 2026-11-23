@@ -507,7 +507,13 @@ pub async fn page(
                 " · " (tf("version {version}", &[("version", &set.version)]))
                 " · " (tf("updated {time}", &[("time", &fmt_time(set.updated_at))]))
                 " · " code { (set.slug) }
-                @if let Some(tg) = &set.telegram_pack {
+                @if !set.telegram_parts.is_empty() {
+                    " · Telegram: "
+                    @for (i, part) in set.telegram_parts.iter().enumerate() {
+                        @if i > 0 { ", " }
+                        a href=(format!("https://t.me/addstickers/{}", part.name)) rel="noopener noreferrer" target="_blank" { (part.name) }
+                    }
+                } @else if let Some(tg) = &set.telegram_pack {
                     " · Telegram: " a href=(format!("https://t.me/addstickers/{tg}")) rel="noopener noreferrer" target="_blank" { (tg) }
                 }
             }

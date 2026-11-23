@@ -457,7 +457,16 @@ fn tg_export_form(ctx: &Ctx, set: &Set, f: &TgExportForm, error: Option<&str>) -
             (t("Every item becomes a sticker (stills as 512 px WebP, animations and videos as video stickers)."))
             " " (t("The first export creates the pack, later ones update it. Items that cannot become stickers are listed afterwards."))
         }
-        @if let Some(p) = &set.telegram_pack {
+        @if !set.telegram_parts.is_empty() {
+            p {
+                (t("Currently published as")) " "
+                @for (i, part) in set.telegram_parts.iter().enumerate() {
+                    @if i > 0 { ", " }
+                    a href=(telegram::pack_url(&part.name)) rel="noopener noreferrer" target="_blank" { (part.name) }
+                }
+                "."
+            }
+        } @else if let Some(p) = &set.telegram_pack {
             p { (t("Currently published as")) " " a href=(telegram::pack_url(p)) rel="noopener noreferrer" target="_blank" { (p) } "." }
         }
         @if !has_owner {
@@ -500,7 +509,9 @@ pub async fn telegram_export_page(
 ) -> AppResult<Markup> {
     let set = own_set(&state, &ctx, &id).await?;
     let f = TgExportForm {
-        pack_name: set.telegram_pack.clone().unwrap_or_default(),
+        // The name the parts derive from (part 1's, also when part 1's own
+        // pack was deleted and the set links to a later part).
+        pack_name: telegram::base_name(&state.db, &set.id).await?.unwrap_or_default(),
         title: String::new(),
     };
     Ok(tg_export_form(&ctx, &set, &f, None))
@@ -516,6 +527,7 @@ pub async fn telegram_export(
     let req = TelegramExport {
         pack_name: opt(&f.pack_name),
         title: opt(&f.title),
+        repack: false,
     };
     match telegram::export(&state, &ctx.user, &id, req).await {
         Ok(job) => {

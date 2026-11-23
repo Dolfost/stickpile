@@ -98,6 +98,8 @@ pub struct SetFacts {
     /// `git_last_error` of a git pack.
     pub git_error: Option<String>,
     pub telegram_pack: Option<String>,
+    /// What is on Telegram: the mappings of every part of the set together
+    /// (item id -> sticker; a set larger than one pack has several).
     pub telegram_mapping: Option<PackMapping>,
     /// The newest `TelegramExport` job of the set.
     pub last_export: Option<JobFact>,

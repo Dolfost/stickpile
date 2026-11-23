@@ -5,16 +5,18 @@
 //! request). The git webhook is the only unauthenticated route here.
 
 use axum::body::Body;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Deserialize;
 use stickpile_api::routes as r;
 use stickpile_api::{
     ApiError, CreateGitPack, DiscordImport, GitPackCreated, Job, Publication, PublishJobs, PublishRequest,
-    SignalImport, TelegramExport, TelegramImport, WhatsappStatus,
+    SignalImport, TelegramExport, TelegramImport, TelegramPlan, WhatsappStatus,
 };
 use tower::ServiceExt;
+use utoipa::IntoParams;
 
 use super::disposition;
 use crate::auth::{ClientIp, CurrentUser};
@@ -90,6 +92,35 @@ pub async fn telegram_export(
     Json(req): Json<TelegramExport>,
 ) -> AppResult<Json<Job>> {
     Ok(Json(telegram::export(&state, &user, &id, req).await?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TelegramPlanQuery {
+    /// Plan a repack: every sticker assigned to the parts again in set
+    /// order (default false).
+    #[serde(default)]
+    pub repack: bool,
+}
+
+/// What a Telegram export of the set would do to its packs (its parts,
+/// 120 stickers each), without changing anything: `moved` is how many
+/// published stickers a repack would move to another pack.
+#[utoipa::path(get, path = r::SET_TELEGRAM_PLAN, tag = "integrations",
+    params(("id" = String, Path, description = "set id"), TelegramPlanQuery),
+    responses((status = 200, body = TelegramPlan),
+              (status = 400, description = "no item of the set can become a Telegram sticker", body = ApiError),
+              (status = 403, body = ApiError),
+              (status = 404, description = "unknown set, or Telegram disabled", body = ApiError),
+              (status = 503, description = "Telegram did not answer", body = ApiError)),
+    security(("bearer" = []), ("session" = [])))]
+pub async fn telegram_plan(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<String>,
+    Query(q): Query<TelegramPlanQuery>,
+) -> AppResult<Json<TelegramPlan>> {
+    Ok(Json(telegram::plan(&state, &user, &id, q.repack).await?))
 }
 
 /// Import a Telegram sticker pack into a new set, as a job.

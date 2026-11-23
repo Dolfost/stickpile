@@ -581,11 +581,26 @@ async fn load(state: &AppState, sets: &[SetRow], telegram_on: bool) -> AppResult
             .filter(|s| s.telegram_pack.is_some())
             .map(|s| s.id.clone())
             .collect();
-        let maps: Vec<(String, Option<String>)> =
-            rows_in(state, "SELECT id, telegram_mapping FROM sets WHERE", "id", &bound, "").await?;
+        // Every part's mapping together (a set larger than one pack has
+        // several); an item in two parts' belongs to the lower, as for the
+        // export.
+        for id in &bound {
+            mappings.insert(id.clone(), PackMapping::new());
+        }
+        let maps: Vec<(String, Option<String>)> = rows_in(
+            state,
+            "SELECT set_id, mapping FROM telegram_parts WHERE",
+            "set_id",
+            &bound,
+            "ORDER BY set_id, part",
+        )
+        .await?;
         for (id, m) in maps {
-            let m = m.and_then(|m| serde_json::from_str(&m).ok()).unwrap_or_default();
-            mappings.insert(id, m);
+            let m: PackMapping = m.and_then(|m| serde_json::from_str(&m).ok()).unwrap_or_default();
+            let all = mappings.entry(id).or_default();
+            for (key, sticker) in m {
+                all.entry(key).or_insert(sticker);
+            }
         }
     }
 

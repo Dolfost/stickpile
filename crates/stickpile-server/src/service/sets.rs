@@ -245,6 +245,7 @@ pub fn to_api(row: &SetRow, owner_username: &str, item_count: u64, cover: Cover,
         source: parse_enum(&row.source).unwrap_or(SetSource::Local),
         git,
         telegram_pack: row.telegram_pack.clone(),
+        telegram_parts: Vec::new(),
         cover_url: cover.url(),
         cover_item_id: cover.item,
         cover_image: cover.image,
@@ -285,13 +286,15 @@ pub async fn load_api_for(db: &SqlitePool, access: &authz::SetAccess) -> AppResu
         .bind(&access.set.id)
         .fetch_one(db)
         .await?;
-    Ok(to_api(
+    let mut set = to_api(
         &r.set,
         &r.owner_username,
         r.item_count.max(0) as u64,
         r.cover(),
         access.standing,
-    ))
+    );
+    set.telegram_parts = crate::service::telegram::published_parts(db, &set.id).await?;
+    Ok(set)
 }
 
 /// The chosen cover of a set while that item is still in it.

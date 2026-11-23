@@ -79,6 +79,7 @@ impl Modify for SecuritySchemes {
         integrations::pull,
         integrations::git_webhook,
         integrations::telegram_export,
+        integrations::telegram_plan,
         integrations::telegram_import,
         integrations::discord_import,
         integrations::signal_import,

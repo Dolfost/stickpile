@@ -49,3 +49,18 @@ choose at least one platform to publish to	виберіть щонайменше
 
 # A job of a kind this server version does not know (web/integrations.rs).
 Job	Завдання
+
+# Sets published as several Telegram packs, their parts (web/export.rs, service/publish.rs, service/telegram.rs).
+{exported} stickers in {packs} packs: {added} added, {removed} removed, {skipped} left out	Стікерів: {exported}, наборів: {packs}; додано {added}, вилучено {removed}, пропущено {skipped}
+Published as {n} pack.|Published as {n} packs.	Опубліковано як {n} набір.|Опубліковано як {n} набори.|Опубліковано як {n} наборів.
+A Telegram pack holds at most 120 stickers. A published sticker stays in its pack, new stickers go to the first pack with room, and a pack left without stickers is deleted.	Набір у Telegram вміщує щонайбільше 120 стікерів. Опублікований стікер лишається у своєму наборі, нові стікери потрапляють до першого набору, де є місце, а набір, що лишився без стікерів, буде видалено.
+Repack the parts	Перепакувати частини
+Repack the Telegram packs of {name}?	Перепакувати набори Telegram для {name}?
+A repack puts the stickers into the packs again in set order: the first pack gets the first 120, the next pack the next 120, and so on. Packs left without stickers are deleted.	Перепакування знову розкладає стікери по наборах у порядку набору: перший набір отримує перші 120, наступний набір наступні 120 і так далі. Набори, що лишилися без стікерів, буде видалено.
+No published sticker moves to another pack.	Жоден опублікований стікер не перейде в інший набір.
+{n} published sticker moves to another pack.|{n} published stickers move to other packs.	{n} опублікований стікер перейде в інший набір.|{n} опубліковані стікери перейдуть в інші набори.|{n} опублікованих стікерів перейдуть в інші набори.
+Someone who added only some of the packs in Telegram loses the stickers that move out of them.	Хто додав у Telegram лише деякі з наборів, втратить стікери, що з них перейдуть.
+deleted	видалено
+Repack now	Перепакувати зараз
+Telegram did not answer; try again later.	Telegram не відповів; спробуйте пізніше.
+nothing to export: no item of the set can become a Telegram sticker	нічого експортувати: жоден стікер набору не може стати стікером Telegram

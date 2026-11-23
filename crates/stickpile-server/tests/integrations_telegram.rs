@@ -3,12 +3,18 @@
 
 mod common;
 mod integrations_support;
+mod web_common;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use common::{png, TestServer, TestUser};
 use integrations_support::mock_bot::{self, unique_id, Shared, BOT};
 use integrations_support::run_jobs_now;
 use serde_json::{json, Value};
-use stickpile_api::{routes, Job, JobKind, JobStatus, Set, SetDetail, SetSource, User, Visibility};
+use stickpile_api::{
+    routes, Job, JobKind, JobStatus, Publication, PublishJobs, Set, SetDetail, SetSource, TelegramPlan, User,
+    Visibility,
+};
 
 struct Tg {
     srv: TestServer,
@@ -776,4 +782,962 @@ async fn the_cover_image_is_the_pack_thumbnail() {
     assert_eq!(j.result.unwrap()["thumbnail_changed"], true);
     assert_eq!(thumbnail(&tg), None);
     assert_eq!(tg.mock.lock().unwrap().packs[&name].stickers.len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Sets larger than one pack: parts (docs/telegram.md)
+// ---------------------------------------------------------------------------
+
+/// Upload `n` distinct stills (seeds `from..from + n`, in that order) in
+/// batches and render them; their item ids in set order.
+async fn add_items(srv: &TestServer, u: &TestUser, set_id: &str, from: u64, n: u64) -> Vec<String> {
+    let seeds: Vec<u64> = (from..from + n).collect();
+    let mut ids = Vec::new();
+    for chunk in seeds.chunks(50) {
+        let files: Vec<(String, Vec<u8>)> = chunk.iter().map(|s| (format!("s{s:05}.png"), png(*s))).collect();
+        let res: Vec<stickpile_api::UploadResult> = srv
+            .upload(
+                u,
+                set_id,
+                files.iter().map(|(n, b)| (n.as_str(), b.clone())).collect(),
+                None,
+            )
+            .await
+            .expect(200)
+            .json();
+        ids.extend(res.into_iter().map(|r| r.item.expect("item").id));
+    }
+    run_jobs_now(srv).await;
+    ids
+}
+
+/// A user with a Telegram user id and a set `slug` of `n` stills.
+async fn big_set(tg: &Tg, username: &str, slug: &str, n: u64) -> (TestUser, Set, Vec<String>) {
+    let srv = &tg.srv;
+    let u = srv.user(username).await;
+    srv.patch(&u, routes::ME, json!({"telegram_user_id": 555}))
+        .await
+        .expect(200);
+    let set = srv.create_set(&u, slug, Visibility::Private).await;
+    let ids = add_items(srv, &u, &set.id, 1, n).await;
+    (u, set, ids)
+}
+
+fn part_name(base: &str, k: u32) -> String {
+    stickpile_telegram::part_pack_name(&format!("{base}_by_{BOT}"), k, BOT).unwrap()
+}
+
+/// pack name -> file_unique_ids of its stickers, in pack order.
+fn packs(tg: &Tg) -> BTreeMap<String, Vec<String>> {
+    let m = tg.mock.lock().unwrap();
+    m.packs
+        .iter()
+        .map(|(n, p)| (n.clone(), p.stickers.iter().map(|s| s.fuid.clone()).collect()))
+        .collect()
+}
+
+/// The `telegram_parts` rows of a set: (part, pack name, stickers, has a
+/// stored state).
+async fn part_rows(srv: &TestServer, set_id: &str) -> Vec<(i64, String, i64, bool)> {
+    sqlx::query_as(
+        "SELECT part, pack_name, stickers, mapping IS NOT NULL FROM telegram_parts WHERE set_id = ? ORDER BY part",
+    )
+    .bind(set_id)
+    .fetch_all(&srv.state.db)
+    .await
+    .unwrap()
+}
+
+async fn telegram_base(srv: &TestServer, set_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT telegram_base FROM sets WHERE id = ?")
+        .bind(set_id)
+        .fetch_one(&srv.state.db)
+        .await
+        .unwrap()
+}
+
+/// The pack every published item's sticker is in (item id -> pack name),
+/// from the mappings stored with the parts.
+async fn item_packs(srv: &TestServer, set_id: &str) -> BTreeMap<String, String> {
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT pack_name, mapping FROM telegram_parts WHERE set_id = ? ORDER BY part")
+            .bind(set_id)
+            .fetch_all(&srv.state.db)
+            .await
+            .unwrap();
+    let mut out = BTreeMap::new();
+    for (name, mapping) in rows {
+        let m: stickpile_telegram::PackMapping = serde_json::from_str(mapping.as_deref().unwrap_or("{}")).unwrap();
+        for key in m.keys() {
+            assert!(out.insert(key.clone(), name.clone()).is_none(), "{key} in two parts");
+        }
+    }
+    out
+}
+
+/// Calls that change a pack on Telegram.
+const WRITES: [&str; 10] = [
+    "createNewStickerSet",
+    "addStickerToSet",
+    "replaceStickerInSet",
+    "deleteStickerFromSet",
+    "setStickerPositionInSet",
+    "setStickerEmojiList",
+    "setStickerKeywords",
+    "setStickerSetTitle",
+    "setStickerSetThumbnail",
+    "deleteStickerSet",
+];
+
+fn writes_since(tg: &Tg, from: usize) -> Vec<String> {
+    let m = tg.mock.lock().unwrap();
+    m.calls[from..]
+        .iter()
+        .filter(|c| WRITES.contains(&c.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Writes other than the emoji and keywords set again on every export.
+fn uploads_since(tg: &Tg, from: usize) -> Vec<String> {
+    writes_since(tg, from)
+        .into_iter()
+        .filter(|c| c != "setStickerEmojiList" && c != "setStickerKeywords")
+        .collect()
+}
+
+async fn publication(srv: &TestServer, u: &TestUser, set_id: &str) -> Publication {
+    let list: Vec<Publication> = srv
+        .get(u, &routes::path(routes::SET_PUBLISH, &[set_id]))
+        .await
+        .expect(200)
+        .json();
+    list.into_iter().find(|p| p.platform == "telegram").unwrap()
+}
+
+async fn delete_items(srv: &TestServer, u: &TestUser, ids: &[String]) {
+    for id in ids {
+        srv.delete(u, &routes::path(routes::ITEM, &[id])).await.expect(204);
+    }
+}
+
+async fn plan(srv: &TestServer, u: &TestUser, set_id: &str, repack: bool) -> TelegramPlan {
+    srv.get(
+        u,
+        &format!("{}?repack={repack}", routes::path(routes::SET_TELEGRAM_PLAN, &[set_id])),
+    )
+    .await
+    .expect(200)
+    .json()
+}
+
+async fn sticker_id(srv: &TestServer, u: &TestUser, item_id: &str) -> String {
+    let f = srv
+        .get(u, &routes::path(routes::ITEM_FILE, &[item_id, "tg_sticker"]))
+        .await
+        .expect(200);
+    unique_id(&f.body)
+}
+
+#[tokio::test]
+async fn migration_keeps_existing_binding_as_part_1() {
+    use sqlx::sqlite::SqliteConnectOptions;
+    let dir = tempfile::tempdir().unwrap();
+    let opts = SqliteConnectOptions::new()
+        .filename(dir.path().join("t.db"))
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+    // The schema before parts, then that migration on top.
+    for m in stickpile_server::db::MIGRATOR.iter().filter(|m| m.version < 17) {
+        sqlx::raw_sql(&m.sql).execute(&pool).await.unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO users (id, username, display_name, role, created_at) VALUES ('u1', 'alice', 'alice', 'user', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mapping = r#"{"i1":["sha1","fu1"],"i2":["sha2","fu2"]}"#;
+    for (id, pack, mapping, thumb) in [
+        ("s1", Some("cats_by_b_bot"), Some(mapping), Some("image:abc")),
+        ("s2", Some("Dogs_by_b_bot"), None, None),
+        ("s3", None, None, None),
+    ] {
+        sqlx::query(
+            "INSERT INTO sets (id, owner_id, slug, name, telegram_pack, telegram_mapping, telegram_thumbnail, \
+             created_at, updated_at) VALUES (?, 'u1', ?, ?, ?, ?, ?, 10, 20)",
+        )
+        .bind(id)
+        .bind(id)
+        .bind(id)
+        .bind(pack)
+        .bind(mapping)
+        .bind(thumb)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO telegram_packs (name, user_id, created_at) VALUES ('cats_by_b_bot', 'u1', 5)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/0017_telegram_parts.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    type PartRow = (String, i64, String, Option<String>, Option<String>, i64);
+    let parts: Vec<PartRow> = sqlx::query_as(
+        "SELECT set_id, part, pack_name, mapping, thumbnail, stickers FROM telegram_parts ORDER BY set_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        parts,
+        vec![
+            (
+                "s1".into(),
+                1,
+                "cats_by_b_bot".into(),
+                Some(mapping.into()),
+                Some("image:abc".into()),
+                2
+            ),
+            ("s2".into(), 1, "Dogs_by_b_bot".into(), None, None, 0),
+        ],
+        "every binding is part 1, unchanged"
+    );
+    type SetRow = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    let sets: Vec<SetRow> = sqlx::query_as(
+        "SELECT id, telegram_pack, telegram_base, telegram_mapping, telegram_thumbnail FROM sets ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let bound = |id: &str, pack: &str| {
+        (
+            id.to_string(),
+            Some(pack.to_string()),
+            Some(pack.to_string()),
+            None,
+            None,
+        )
+    };
+    assert_eq!(
+        sets,
+        vec![
+            bound("s1", "cats_by_b_bot"),
+            bound("s2", "Dogs_by_b_bot"),
+            ("s3".into(), None, None, None, None),
+        ],
+        "the binding stays; the mapping lives with the part now"
+    );
+    let deleted: Option<i64> = sqlx::query_scalar("SELECT deleted_at FROM telegram_packs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deleted, None);
+}
+
+#[tokio::test]
+async fn existing_single_pack_exports_as_part_1_without_change() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 3).await;
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let name = format!("cats_by_{BOT}");
+    let stored: (String, Option<String>) =
+        sqlx::query_as("SELECT mapping, thumbnail FROM telegram_parts WHERE set_id = ? AND part = 1")
+            .bind(&set.id)
+            .fetch_one(&srv.state.db)
+            .await
+            .unwrap();
+    // The binding as a server before parts kept it, then the 0017
+    // migration's own statements on it.
+    sqlx::query("DELETE FROM telegram_parts")
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE sets SET telegram_base = NULL, telegram_mapping = ?, telegram_thumbnail = ? WHERE id = ?")
+        .bind(&stored.0)
+        .bind(&stored.1)
+        .bind(&set.id)
+        .execute(&srv.state.db)
+        .await
+        .unwrap();
+    let migration = include_str!("../migrations/0017_telegram_parts.sql");
+    let at = migration.find("-- Every existing binding").unwrap();
+    sqlx::raw_sql(&migration[at..]).execute(&srv.state.db).await.unwrap();
+    assert_eq!(part_rows(srv, &set.id).await, vec![(1, name.clone(), 3, true)]);
+
+    let before = packs(&tg);
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    for (k, v) in [
+        ("pack_name", json!(name)),
+        ("url", json!(format!("https://t.me/addstickers/{name}"))),
+        ("title", json!("cats")),
+        ("created_pack", json!(false)),
+        ("added", json!(0)),
+        ("removed", json!(0)),
+        ("reordered", json!(false)),
+        ("exported", json!(3)),
+        ("moved", json!(0)),
+    ] {
+        assert_eq!(r[k], v, "{k}: {r}");
+    }
+    assert_eq!(r["parts"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["parts"][0]["number"], 1);
+    let uploads = uploads_since(&tg, calls);
+    assert!(uploads.is_empty(), "{uploads:?}");
+    assert_eq!(packs(&tg), before, "the pack is as it was");
+    let s = detail(srv, &alice, &set.id).await.set;
+    assert_eq!(s.telegram_pack.as_deref(), Some(name.as_str()));
+    assert!(s.telegram_parts.is_empty(), "one pack");
+    assert!(publication(srv, &alice, &set.id).await.parts.is_empty());
+    assert_eq!(telegram_base(srv, &set.id).await.as_deref(), Some(name.as_str()));
+}
+
+#[tokio::test]
+async fn export_250_items_makes_three_parts_with_links() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 250).await;
+    srv.patch(
+        &alice,
+        &routes::path(routes::SET, &[&set.id]),
+        json!({"name": "Cats", "cover_item_id": ids[200]}),
+    )
+    .await
+    .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    let names: Vec<String> = (1..=3).map(|k| part_name("cats", k)).collect();
+    assert_eq!(names[1], format!("cats_2_by_{BOT}"));
+    let urls: Vec<String> = names.iter().map(|n| format!("https://t.me/addstickers/{n}")).collect();
+    // Part 1's fields as a single pack's, then every part.
+    assert_eq!(r["pack_name"], names[0].as_str());
+    assert_eq!(r["url"], urls[0].as_str());
+    assert_eq!(r["created_pack"], true);
+    assert_eq!(r["exported"], 250);
+    let got: Vec<(u64, String, u64, String)> = r["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["number"].as_u64().unwrap(),
+                p["name"].as_str().unwrap().to_string(),
+                p["stickers"].as_u64().unwrap(),
+                p["url"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (1, names[0].clone(), 120, urls[0].clone()),
+            (2, names[1].clone(), 120, urls[1].clone()),
+            (3, names[2].clone(), 10, urls[2].clone()),
+        ]
+    );
+    {
+        let m = tg.mock.lock().unwrap();
+        let titles: Vec<&str> = names.iter().map(|n| m.packs[n].title.as_str()).collect();
+        assert_eq!(titles, ["Cats", "Cats 2", "Cats 3"]);
+        for n in &names {
+            assert_eq!(m.packs[n].owner, 555);
+            assert!(m.packs[n].thumbnail.is_some(), "the cover on every part: {n}");
+        }
+        assert_eq!(m.count("createNewStickerSet"), 3);
+    }
+    // The packs hold the set in order, 120 at a time.
+    let mut want = Vec::new();
+    for id in &ids {
+        want.push(sticker_id(srv, &alice, id).await);
+    }
+    let now = packs(&tg);
+    assert_eq!(now[&names[0]], want[..120]);
+    assert_eq!(now[&names[1]], want[120..240]);
+    assert_eq!(now[&names[2]], want[240..]);
+    // Every name is the owner's.
+    for n in &names {
+        let owner: String = sqlx::query_scalar("SELECT user_id FROM telegram_packs WHERE name = ?")
+            .bind(n)
+            .fetch_one(&srv.state.db)
+            .await
+            .unwrap();
+        assert_eq!(owner, alice.id);
+    }
+    // The set and its publication list every part; the link is part 1.
+    let want_parts = vec![
+        (1, names[0].clone(), Some(120)),
+        (2, names[1].clone(), Some(120)),
+        (3, names[2].clone(), Some(10)),
+    ];
+    let s = detail(srv, &alice, &set.id).await.set;
+    assert_eq!(s.telegram_pack.as_deref(), Some(names[0].as_str()));
+    let listed: Vec<(u32, String, Option<u32>)> = s
+        .telegram_parts
+        .iter()
+        .map(|p| (p.number, p.name.clone(), p.stickers))
+        .collect();
+    assert_eq!(listed, want_parts);
+    let p = publication(srv, &alice, &set.id).await;
+    assert_eq!(p.target.as_deref(), Some(names[0].as_str()));
+    let listed: Vec<(u32, String, Option<u32>)> =
+        p.parts.iter().map(|p| (p.number, p.name.clone(), p.stickers)).collect();
+    assert_eq!(listed, want_parts);
+    assert_eq!(p.parts[2].url.as_deref(), Some(urls[2].as_str()));
+    // The same again changes nothing.
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let uploads = uploads_since(&tg, calls);
+    assert!(uploads.is_empty(), "{uploads:?}");
+    assert_eq!(packs(&tg), now);
+}
+
+#[tokio::test]
+async fn add_items_fill_first_part_with_room() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 130).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let before = item_packs(srv, &set.id).await;
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    // Two stickers of part 1 go; five new items come at the end.
+    let gone = [ids[3].clone(), ids[50].clone()];
+    delete_items(srv, &alice, &gone).await;
+    let new = add_items(srv, &alice, &set.id, 1000, 5).await;
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["moved"], 0);
+    let after = item_packs(srv, &set.id).await;
+    // Published stickers stay where they were.
+    for (item, pack) in before.iter().filter(|(i, _)| !gone.contains(i)) {
+        assert_eq!(after.get(item), Some(pack), "{item} moved");
+    }
+    // The new ones: the first two fill part 1, the rest go to part 2.
+    let placed: Vec<&str> = new.iter().map(|i| after[i].as_str()).collect();
+    assert_eq!(
+        placed,
+        [p1.as_str(), p1.as_str(), p2.as_str(), p2.as_str(), p2.as_str()]
+    );
+    let now = packs(&tg);
+    assert_eq!((now[&p1].len(), now[&p2].len()), (120, 13));
+}
+
+#[tokio::test]
+async fn delete_items_frees_room_nothing_moves() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    let part2 = packs(&tg)[&p2].clone();
+    delete_items(srv, &alice, &ids[10..13]).await;
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    assert_eq!((r["removed"].clone(), r["moved"].clone()), (json!(3), json!(0)), "{r}");
+    let now = packs(&tg);
+    assert_eq!(now[&p1].len(), 117, "the room stays free");
+    assert_eq!(now[&p2], part2, "part 2 is as it was");
+    let uploads = uploads_since(&tg, calls);
+    assert!(!uploads.iter().any(|c| c == "addStickerToSet"), "{uploads:?}");
+}
+
+#[tokio::test]
+async fn reorder_across_boundary_moves_nothing() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let before = item_packs(srv, &set.id).await;
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    let contents =
+        |p: &BTreeMap<String, Vec<String>>| [&p1, &p2].map(|n| p[n].iter().cloned().collect::<BTreeSet<String>>());
+    let stickers_before = contents(&packs(&tg));
+    // Part 2's first item to the start of the set, part 1's first to the end.
+    let mut order: Vec<String> = vec![ids[120].clone()];
+    order.extend(ids[1..120].iter().cloned());
+    order.extend(ids[121..].iter().cloned());
+    order.push(ids[0].clone());
+    srv.put(
+        &alice,
+        &routes::path(routes::SET_ORDER, &[&set.id]),
+        json!({"item_ids": order}),
+    )
+    .await
+    .expect(200);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["moved"], 0);
+    assert_eq!(item_packs(srv, &set.id).await, before, "no sticker changes pack");
+    let now = packs(&tg);
+    assert_eq!(contents(&now), stickers_before);
+    // The order inside a pack follows the set: in part 1, ids[0] is last now.
+    assert_eq!(now[&p1].last(), Some(&sticker_id(srv, &alice, &ids[0]).await));
+    assert_eq!(now[&p2].first(), Some(&sticker_id(srv, &alice, &ids[120]).await));
+}
+
+#[tokio::test]
+async fn repack_count_matches_what_moves() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    // Five of part 1 go: an ordinary export leaves part 1 with 115.
+    delete_items(srv, &alice, &ids[..5]).await;
+    let stay = plan(srv, &alice, &set.id, false).await;
+    assert_eq!(stay.moved, 0);
+    let sizes: Vec<(u32, Option<u32>)> = stay.parts.iter().map(|p| (p.number, p.stickers)).collect();
+    assert_eq!(sizes, [(1, Some(115)), (2, Some(5))]);
+    // A repack moves part 2's five into part 1 and deletes part 2.
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let repack = plan(srv, &alice, &set.id, true).await;
+    assert_eq!(repack.moved, 5);
+    assert_eq!(repack.parts.len(), 1);
+    assert_eq!(repack.parts[0].stickers, Some(120));
+    assert_eq!(repack.delete.len(), 1);
+    assert_eq!(repack.delete[0].name, p2);
+    assert!(writes_since(&tg, calls).is_empty(), "the plan changed nothing");
+    let before = item_packs(srv, &set.id).await;
+    let j = export(srv, &alice, &set.id, json!({"repack": true})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["moved"], repack.moved);
+    let after = item_packs(srv, &set.id).await;
+    let moved = after
+        .iter()
+        .filter(|(item, pack)| before.get(*item).is_some_and(|b| b != *pack))
+        .count();
+    assert_eq!(moved as u32, repack.moved, "the confirmation's count is what moved");
+    let now = packs(&tg);
+    assert_eq!(now[&p1].len(), 120);
+    assert!(!now.contains_key(&p2), "the empty part was deleted");
+    each_sticker_once(&tg, &alice, &set.id).await;
+    // Through the publish route too, with the option as text.
+    let jobs: PublishJobs = srv
+        .post(
+            &alice,
+            &routes::path(routes::SET_PUBLISH, &[&set.id]),
+            json!({"platforms": ["telegram"], "options": {"telegram": {"repack": "true"}}}),
+        )
+        .await
+        .expect(200)
+        .json();
+    let j = run(srv, &alice, &jobs.jobs[0]).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["moved"], 0);
+}
+
+#[tokio::test]
+async fn shrink_deletes_empty_parts_on_telegram() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    delete_items(srv, &alice, &ids[120..]).await;
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    let deleted: Vec<bool> = r["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["deleted"].as_bool().unwrap())
+        .collect();
+    assert_eq!(deleted, [false, true], "{r}");
+    // Deleted after the other parts were updated.
+    let writes = writes_since(&tg, calls);
+    assert_eq!(
+        writes.last().map(String::as_str),
+        Some("deleteStickerSet"),
+        "{writes:?}"
+    );
+    assert_eq!(tg.mock.lock().unwrap().deleted, std::slice::from_ref(&p2));
+    assert!(!packs(&tg).contains_key(&p2));
+    assert_eq!(part_rows(srv, &set.id).await, vec![(1, p1.clone(), 120, true)]);
+    let gone: Option<i64> = sqlx::query_scalar("SELECT deleted_at FROM telegram_packs WHERE name = ?")
+        .bind(&p2)
+        .fetch_one(&srv.state.db)
+        .await
+        .unwrap();
+    assert!(gone.is_some(), "the name is marked as deleted");
+    let s = detail(srv, &alice, &set.id).await.set;
+    assert_eq!(s.telegram_pack.as_deref(), Some(p1.as_str()));
+    assert!(s.telegram_parts.is_empty(), "one pack left");
+}
+
+#[tokio::test]
+async fn part1_emptied_repoints_telegram_pack() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    delete_items(srv, &alice, &ids[..120]).await;
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let r = j.result.unwrap();
+    // The link of a set whose part 1 is gone: the lowest part left.
+    assert_eq!(r["pack_name"], p2.as_str(), "{r}");
+    assert!(!packs(&tg).contains_key(&p1), "part 1 was deleted on Telegram");
+    let s = detail(srv, &alice, &set.id).await.set;
+    assert_eq!(s.telegram_pack.as_deref(), Some(p2.as_str()));
+    assert!(s.telegram_parts.is_empty(), "one pack left");
+    let p = publication(srv, &alice, &set.id).await;
+    assert_eq!(p.target.as_deref(), Some(p2.as_str()));
+    assert_eq!(p.url, Some(format!("https://t.me/addstickers/{p2}")));
+    // The names still derive from part 1's.
+    assert_eq!(telegram_base(srv, &set.id).await.as_deref(), Some(p1.as_str()));
+    // New stickers go to the part left, not to a new part 1; asking for the
+    // pack the set links to by name keeps the parts as they are.
+    let new = add_items(srv, &alice, &set.id, 2000, 3).await;
+    let j = export(srv, &alice, &set.id, json!({"pack_name": p2})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let placed = item_packs(srv, &set.id).await;
+    assert!(new.iter().all(|i| placed[i] == p2), "{placed:?}");
+    let now = packs(&tg);
+    assert_eq!(now[&p2].len(), 8);
+    assert!(!now.contains_key(&p1));
+    assert_eq!(telegram_base(srv, &set.id).await.as_deref(), Some(p1.as_str()));
+    // The old form offers part 1's name, the name the parts derive from.
+    let b = web_common::Browser::login(srv, &alice).await;
+    let html = b.get(&format!("/sets/{}/telegram", set.id)).await.expect(200).text();
+    assert!(html.contains(&format!("value=\"{p1}\"")), "{html}");
+}
+
+#[tokio::test]
+async fn deleted_part_number_not_reused() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, ids) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (p2, p3) = (part_name("cats", 2), part_name("cats", 3));
+    delete_items(srv, &alice, &ids[120..]).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    assert!(!packs(&tg).contains_key(&p2));
+    // More than part 1 has room for: a new part, numbered 3.
+    add_items(srv, &alice, &set.id, 3000, 10).await;
+    let numbers = |plan: TelegramPlan| plan.parts.iter().map(|p| p.number).collect::<Vec<u32>>();
+    assert_eq!(numbers(plan(srv, &alice, &set.id, false).await), [1, 3]);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let now = packs(&tg);
+    assert_eq!(now[&p3].len(), 10);
+    assert!(!now.contains_key(&p2), "the deleted name is not created again");
+    assert_eq!(
+        tg.mock.lock().unwrap().count("createNewStickerSet"),
+        3,
+        "parts 1, 2 and 3, once each"
+    );
+    // A repack does not use it either.
+    assert_eq!(numbers(plan(srv, &alice, &set.id, true).await), [1, 3]);
+}
+
+#[tokio::test]
+async fn part_name_owned_by_another_user_fails_before_any_change() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    // Bob publishes under the name Alice's part 2 would get.
+    let (bob, bobs, _) = big_set(&tg, "bob", "bobs", 1).await;
+    let taken = part_name("cats", 2);
+    let j = export(srv, &bob, &bobs.id, json!({"pack_name": "cats_2"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let before = packs(&tg);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    failed_with(
+        &j,
+        &format!("the pack {taken} (part 2 of this set) belongs to another stickpile user"),
+    );
+    assert_eq!(j.attempts, 1, "not retried");
+    assert!(writes_since(&tg, calls).is_empty(), "nothing on Telegram changed");
+    assert_eq!(packs(&tg), before);
+    // Nothing was claimed or bound either.
+    let claimed: Option<String> = sqlx::query_scalar("SELECT user_id FROM telegram_packs WHERE name = ?")
+        .bind(part_name("cats", 1))
+        .fetch_optional(&srv.state.db)
+        .await
+        .unwrap();
+    assert_eq!(claimed, None);
+    assert!(part_rows(srv, &set.id).await.is_empty());
+    assert_eq!(detail(srv, &alice, &set.id).await.set.telegram_pack, None);
+}
+
+#[tokio::test]
+async fn part_name_bound_to_another_set_fails_before_any_change() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    // Alice's other set is published under the name part 2 of "cats" gets.
+    let dogs = srv.create_set(&alice, "dogs", Visibility::Private).await;
+    add_items(srv, &alice, &dogs.id, 5000, 2).await;
+    let j = export(srv, &alice, &dogs.id, json!({"pack_name": "cats_2"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let taken = part_name("cats", 2);
+    assert_eq!(j.result.unwrap()["pack_name"], taken.as_str());
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let before = packs(&tg);
+    let j = export(srv, &alice, &set.id, json!({})).await;
+    failed_with(
+        &j,
+        &format!("the pack {taken} (part 2 of this set) is part 1 of your set dogs"),
+    );
+    assert!(writes_since(&tg, calls).is_empty(), "nothing on Telegram changed");
+    assert_eq!(packs(&tg), before);
+    assert!(part_rows(srv, &set.id).await.is_empty());
+    assert_eq!(
+        detail(srv, &alice, &dogs.id).await.set.telegram_pack.as_deref(),
+        Some(taken.as_str()),
+        "dogs keeps its pack"
+    );
+    // Under another name it works.
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "kittens"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(packs(&tg)[&part_name("kittens", 2)].len(), 5);
+}
+
+/// Every sticker of the set is in exactly one pack: the stickers of the
+/// set's items, each once over all packs.
+async fn each_sticker_once(tg: &Tg, u: &TestUser, set_id: &str) {
+    let srv = &tg.srv;
+    let mut want = BTreeSet::new();
+    for it in &detail(srv, u, set_id).await.items {
+        want.insert(sticker_id(srv, u, &it.id).await);
+    }
+    let all: Vec<String> = packs(tg).into_values().flatten().collect();
+    let distinct: BTreeSet<String> = all.iter().cloned().collect();
+    assert_eq!(all.len(), distinct.len(), "a sticker in two packs");
+    assert_eq!(distinct, want);
+}
+
+#[tokio::test]
+async fn failed_export_between_parts_continues_without_duplicates() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 250).await;
+    let names: Vec<String> = (1..=3).map(|k| part_name("cats", k)).collect();
+    // Parts 1 and 2 are created, part 3's creation fails.
+    tg.mock
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("createNewStickerSet".into(), 2);
+    let j: Job = srv
+        .post(
+            &alice,
+            &routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]),
+            json!({}),
+        )
+        .await
+        .expect(200)
+        .json();
+    srv.run_jobs().await;
+    let failed = job(srv, &alice, &j.id).await;
+    assert_eq!(failed.status, JobStatus::Queued, "retried later: {failed:?}");
+    assert!(
+        failed
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains(&format!("part 3 ({})", names[2])),
+        "{failed:?}"
+    );
+    // What was done is kept: parts 1 and 2 with their stickers, part 3
+    // known without stickers.
+    let rows = part_rows(srv, &set.id).await;
+    assert_eq!(
+        rows,
+        vec![
+            (1, names[0].clone(), 120, true),
+            (2, names[1].clone(), 120, true),
+            (3, names[2].clone(), 0, rows[2].3),
+        ]
+    );
+    assert_eq!(
+        detail(srv, &alice, &set.id).await.set.telegram_pack.as_deref(),
+        Some(names[0].as_str())
+    );
+    // The retried job continues: no second pack for a part, each sticker once.
+    tg.mock.lock().unwrap().fail_after.clear();
+    run_jobs_now(srv).await;
+    let done = job(srv, &alice, &j.id).await;
+    assert_eq!(done.status, JobStatus::Done, "{done:?}");
+    let r = done.result.unwrap();
+    let created: Vec<bool> = r["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["created_pack"].as_bool().unwrap())
+        .collect();
+    assert_eq!(created, [false, false, true], "{r}");
+    let m = packs(&tg);
+    assert_eq!(m.len(), 3);
+    let sizes: Vec<usize> = names.iter().map(|n| m[n].len()).collect();
+    assert_eq!(sizes, [120, 120, 10]);
+    each_sticker_once(&tg, &alice, &set.id).await;
+}
+
+#[tokio::test]
+async fn failed_export_mid_part_continues_without_duplicates() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 130).await;
+    let (p1, p2) = (part_name("cats", 1), part_name("cats", 2));
+    // Part 1 is created with 50 stickers, 30 more are added, then adding
+    // fails.
+    tg.mock.lock().unwrap().fail_after.insert("addStickerToSet".into(), 30);
+    let j: Job = srv
+        .post(
+            &alice,
+            &routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]),
+            json!({}),
+        )
+        .await
+        .expect(200)
+        .json();
+    srv.run_jobs().await;
+    let failed = job(srv, &alice, &j.id).await;
+    assert_eq!(failed.status, JobStatus::Queued, "retried later: {failed:?}");
+    assert_eq!(packs(&tg)[&p1].len(), 80);
+    assert!(!packs(&tg).contains_key(&p2));
+    // Part 1's state as far as it got.
+    let rows = part_rows(srv, &set.id).await;
+    assert_eq!(rows[0], (1, p1.clone(), 80, true));
+    assert_eq!(rows[1].0, 2);
+    tg.mock.lock().unwrap().fail_after.clear();
+    run_jobs_now(srv).await;
+    let done = job(srv, &alice, &j.id).await;
+    assert_eq!(done.status, JobStatus::Done, "{done:?}");
+    let m = packs(&tg);
+    assert_eq!((m[&p1].len(), m[&p2].len()), (120, 10));
+    assert_eq!(tg.mock.lock().unwrap().count("createNewStickerSet"), 2);
+    each_sticker_once(&tg, &alice, &set.id).await;
+    // And again: nothing to upload.
+    let calls = tg.mock.lock().unwrap().calls.len();
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let uploads = uploads_since(&tg, calls);
+    assert!(uploads.is_empty(), "{uploads:?}");
+}
+
+/// The shapes a 0.8.8 client reads (`stickpile-api` of v0.8.8): no
+/// `Set::telegram_parts`, no `Publication::parts`.
+mod v088 {
+    use serde::Deserialize;
+    use stickpile_api::{CoverImage, GitBinding, Job, JobStatus, Permissions, SetRole, SetSource, Visibility};
+
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    pub struct Set {
+        pub id: String,
+        pub owner_id: String,
+        pub owner_username: String,
+        pub slug: String,
+        pub name: String,
+        pub description: String,
+        pub visibility: Visibility,
+        pub aspect_ratio: Option<(u32, u32)>,
+        pub recommended_px: Option<u32>,
+        pub version: u64,
+        pub source: SetSource,
+        pub git: Option<GitBinding>,
+        pub telegram_pack: Option<String>,
+        #[serde(default)]
+        pub cover_item_id: Option<String>,
+        #[serde(default)]
+        pub cover_image: Option<CoverImage>,
+        #[serde(default)]
+        pub cover_url: Option<String>,
+        pub item_count: u64,
+        pub editable: bool,
+        #[serde(default)]
+        pub role: SetRole,
+        #[serde(default)]
+        pub permissions: Permissions,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    pub struct Publication {
+        pub platform: String,
+        pub name: String,
+        pub configured: bool,
+        pub target: Option<String>,
+        pub url: Option<String>,
+        pub published_at: Option<i64>,
+        pub last_status: Option<JobStatus>,
+        pub last_finished_at: Option<i64>,
+        pub last_error: Option<String>,
+        pub last_result: Option<serde_json::Value>,
+        pub job: Option<Job>,
+    }
+}
+
+#[tokio::test]
+async fn old_client_reads_set_and_publication() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "cats", "title": "Cats"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    let p1 = part_name("cats", 1);
+    // A 0.8.8 client reads the set: telegram_pack is a working link, part 1.
+    let raw = srv
+        .get(&alice, &routes::path(routes::SET, &[&set.id]))
+        .await
+        .expect(200)
+        .value();
+    assert_eq!(raw["set"]["telegram_parts"].as_array().map(Vec::len), Some(2));
+    let old: v088::Set = serde_json::from_value(raw["set"].clone()).unwrap();
+    assert_eq!(old.telegram_pack.as_deref(), Some(p1.as_str()));
+    let raw = srv
+        .get(&alice, &routes::path(routes::SET_PUBLISH, &[&set.id]))
+        .await
+        .expect(200)
+        .value();
+    let old: Vec<v088::Publication> = serde_json::from_value(raw).unwrap();
+    let tgp = old.iter().find(|p| p.platform == "telegram").unwrap();
+    assert_eq!(tgp.target.as_deref(), Some(p1.as_str()));
+    assert_eq!(tgp.url, Some(format!("https://t.me/addstickers/{p1}")));
+    // The job result keeps every field a 0.8.8 client reads, for part 1.
+    let r = tgp.last_result.clone().unwrap();
+    for k in [
+        "pack_name",
+        "url",
+        "title",
+        "created_pack",
+        "added",
+        "removed",
+        "updated",
+        "reordered",
+        "thumbnail",
+        "thumbnail_changed",
+        "exported",
+        "skipped",
+    ] {
+        assert!(r.get(k).is_some(), "{k} missing: {r}");
+    }
+    assert_eq!(r["pack_name"], p1.as_str());
+    assert_eq!(r["added"], 120, "part 1's");
+    assert_eq!(r["title"], "Cats");
+    // A 0.8.8 client's export request (no repack) is read as before.
+    let j = export(srv, &alice, &set.id, json!({"pack_name": null, "title": null})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(j.result.unwrap()["moved"], 0);
 }

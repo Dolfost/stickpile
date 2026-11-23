@@ -535,8 +535,14 @@ impl Platform for SignalPlatform {
         Box::pin(prepare_export(state, user, set_id, options))
     }
 
-    fn parts(&self, _set: &SetRow, row: Option<&PublicationRow>) -> Vec<PublishedPart> {
-        published_parts(row)
+    fn parts<'a>(
+        &'a self,
+        _state: &'a AppState,
+        _set: &'a SetRow,
+        row: Option<&'a PublicationRow>,
+    ) -> BoxFuture<'a, AppResult<Vec<PublishedPart>>> {
+        let parts = published_parts(row);
+        Box::pin(async move { Ok(parts) })
     }
 
     fn summary(&self, r: &Value) -> String {

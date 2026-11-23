@@ -3,9 +3,11 @@
 //! `getStickerSet`, `getFile` + file downloads, `createNewStickerSet`,
 //! `addStickerToSet`, `replaceStickerInSet`, `deleteStickerFromSet`,
 //! `setStickerPositionInSet`, `setStickerEmojiList`, `setStickerKeywords`,
-//! `setStickerSetTitle`. JSON or multipart requests (`attach://` parts),
-//! `{ok, result}` envelopes, `file_unique_id` derived from the content, new
-//! stickers appended, and the last sticker of a pack cannot be deleted.
+//! `setStickerSetTitle`, `deleteStickerSet`. JSON or multipart requests
+//! (`attach://` parts), `{ok, result}` envelopes, `file_unique_id` derived
+//! from the content, new stickers appended, at most 120 per pack, and the
+//! last sticker of a pack cannot be deleted. Calls can fail on purpose
+//! (`MockState::fail_after`) to test exports that stop half-way.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -45,6 +47,11 @@ pub struct MockState {
     files: HashMap<String, (String, Vec<u8>)>,
     /// Method names in call order.
     pub calls: Vec<String>,
+    /// method -> how many more calls of it succeed; every later call fails
+    /// with a 500 (which the server retries) until the entry is removed.
+    pub fail_after: HashMap<String, u32>,
+    /// Packs deleted with deleteStickerSet, in order.
+    pub deleted: Vec<String>,
     next: u64,
 }
 
@@ -281,6 +288,15 @@ impl MockState {
                 pack.title = text(p, "title")?;
                 Ok(json!(true))
             }
+            "deleteStickerSet" => {
+                // A bot deletes only the packs it created.
+                let name = text(p, "name")?;
+                if !name.to_ascii_lowercase().ends_with(&format!("_by_{BOT}")) || self.packs.remove(&name).is_none() {
+                    return Err("STICKERSET_INVALID".into());
+                }
+                self.deleted.push(name);
+                Ok(json!(true))
+            }
             _ => Err("method not found".into()),
         }
     }
@@ -396,6 +412,16 @@ async fn handle(State(state): State<Shared>, req: Request) -> Response {
     };
     let mut st = state.lock().unwrap();
     st.calls.push(method.clone());
+    if let Some(n) = st.fail_after.get_mut(&method) {
+        if *n == 0 {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error_code": 500, "description": "Internal Server Error: injected failure"})),
+            )
+                .into_response();
+        }
+        *n -= 1;
+    }
     match st.dispatch(&method, &params, &files) {
         Ok(v) => Json(json!({"ok": true, "result": v})).into_response(),
         Err(e) => fail(&e),
@@ -405,7 +431,11 @@ async fn handle(State(state): State<Shared>, req: Request) -> Response {
 /// Start the mock; returns its base URL and state.
 pub async fn start() -> (String, Shared) {
     let state: Shared = Arc::default();
-    let app = Router::new().fallback(handle).with_state(state.clone());
+    // createNewStickerSet sends up to 50 stickers in one request.
+    let app = Router::new()
+        .fallback(handle)
+        .layer(axum::extract::DefaultBodyLimit::max(64 << 20))
+        .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

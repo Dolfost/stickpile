@@ -360,6 +360,7 @@ impl MockState {
             source: SetSource::Local,
             git: None,
             telegram_pack: None,
+            telegram_parts: Vec::new(),
             cover_item_id: None,
             cover_image: None,
             cover_url: None,

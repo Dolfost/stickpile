@@ -17,7 +17,8 @@
 //! * where the set is published now ([`Platform::published`]): Telegram
 //!   reads its own binding (`sets.telegram_pack`); other platforms keep
 //!   theirs in `set_publications` (migration 0012) with [`bind`] and
-//!   [`stored`];
+//!   [`stored`]; a platform that splits a large set into several packs
+//!   lists them with [`Platform::parts`] (Telegram from `telegram_parts`);
 //! * the options it takes ([`Platform::options`], text fields or choices
 //!   on the export page, prefilled by [`Platform::option_values`]) and a
 //!   one-line summary of a job result ([`Platform::summary`]).
@@ -117,11 +118,17 @@ pub trait Platform: Send + Sync {
         let _ = set;
         row.map(|r| (r.target.clone(), r.url.clone())).unwrap_or_default()
     }
-    /// Every pack the set is published as when the platform split it into
-    /// parts, part 1 included ([`Publication::parts`]); by default none.
-    fn parts(&self, set: &SetRow, row: Option<&PublicationRow>) -> Vec<PublishedPart> {
-        let _ = (set, row);
-        Vec::new()
+    /// Every pack the set is published as, when the platform splits a set
+    /// larger than one pack into parts ([`Publication::parts`]); empty by
+    /// default and for one pack.
+    fn parts<'a>(
+        &'a self,
+        state: &'a AppState,
+        set: &'a SetRow,
+        row: Option<&'a PublicationRow>,
+    ) -> BoxFuture<'a, AppResult<Vec<PublishedPart>>> {
+        let _ = (state, set, row);
+        Box::pin(async { Ok(Vec::new()) })
     }
     /// One line about a finished publish, from its job result, in the
     /// request's language.
@@ -188,13 +195,12 @@ impl Platform for TelegramPlatform {
     ) -> BoxFuture<'a, AppResult<Value>> {
         Box::pin(async move {
             let req: TelegramExport = if options.is_null() {
-                TelegramExport {
-                    pack_name: None,
-                    title: None,
-                }
+                TelegramExport::default()
             } else {
                 serde_json::from_value(options.clone()).map_err(|e| {
-                    AppError::bad_request(format!("options.telegram: {e} (pack_name and title, both optional)"))
+                    AppError::bad_request(format!(
+                        "options.telegram: {e} (pack_name, title and repack, all optional)"
+                    ))
                 })?
             };
             telegram::prepare_export(state, user, set_id, req).await
@@ -208,9 +214,34 @@ impl Platform for TelegramPlatform {
         }
     }
 
+    fn parts<'a>(
+        &'a self,
+        state: &'a AppState,
+        set: &'a SetRow,
+        _row: Option<&'a PublicationRow>,
+    ) -> BoxFuture<'a, AppResult<Vec<PublishedPart>>> {
+        Box::pin(telegram::published_parts(&state.db, &set.id))
+    }
+
     fn summary(&self, r: &Value) -> String {
         let n = |k: &str| r.get(k).and_then(Value::as_u64).unwrap_or(0);
         let skipped = r.get("skipped").and_then(Value::as_array).map_or(0, Vec::len);
+        // A set published as several packs: the changes of every part.
+        let parts = r.get("parts").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+        let packs = parts.iter().filter(|p| p["deleted"] != Value::Bool(true)).count();
+        if packs > 1 {
+            let sum = |k: &str| parts.iter().map(|p| p[k].as_u64().unwrap_or(0)).sum::<u64>();
+            return tf(
+                "{exported} stickers in {packs} packs: {added} added, {removed} removed, {skipped} left out",
+                &[
+                    ("exported", &n("exported")),
+                    ("packs", &packs),
+                    ("added", &sum("added")),
+                    ("removed", &sum("removed")),
+                    ("skipped", &skipped),
+                ],
+            );
+        }
         tf(
             "{exported} stickers: {added} added, {removed} removed, {skipped} left out",
             &[
@@ -377,8 +408,8 @@ fn publication(
             .and_then(|r| r.last_result.as_deref())
             .and_then(|s| serde_json::from_str(s).ok()),
         job,
-        // Filled by the platforms that split a set into parts.
-        parts: p.parts(set, row),
+        // Filled by `list` from the platform (`Platform::parts`).
+        parts: Vec::new(),
     }
 }
 
@@ -390,7 +421,10 @@ pub async fn list(state: &AppState, user: &CurrentUser, set_id: &str) -> AppResu
     let mut out = Vec::with_capacity(PLATFORMS.len());
     for p in PLATFORMS {
         let job = pending_job(&state.db, p.job_kind(), &set.id).await?;
-        out.push(publication(*p, state, &set, rows.get(p.id()), job));
+        let row = rows.get(p.id());
+        let mut publication = publication(*p, state, &set, row, job);
+        publication.parts = p.parts(state, &set, row).await?;
+        out.push(publication);
     }
     Ok(out)
 }

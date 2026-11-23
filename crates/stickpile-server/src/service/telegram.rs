@@ -12,18 +12,28 @@
 //!   becomes its `tg_sticker` (stills) or `tg_video_sticker` (animations and
 //!   videos) variant. Variants the `Variants` job has not produced yet are
 //!   rendered in the job. Items that cannot become stickers are skipped and
-//!   listed. The pack name and mapping are stored in `sets.telegram_*`.
+//!   listed. A set with more stickers than one pack holds is published as
+//!   several packs, its parts (`stickpile_telegram::parts`); each part's
+//!   pack name, mapping and thumbnail key are stored in `telegram_parts`
+//!   (migration 0017), `sets.telegram_pack` names the first, and
+//!   `sets.telegram_base` is the name the parts' names derive from.
+//! * [`plan`] says what an export would do to the parts, without changing
+//!   anything (the count a repack's confirmation shows).
 //!
 //! The pack owner is the exporting user's `telegram_user_id` (`PATCH
 //! /api/v1/me`), else `telegram.default_owner_user_id`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use stickpile_api::{Job, JobKind, MediaKind, TelegramExport, TelegramImport, Variant, Visibility};
+use sqlx::SqlitePool;
+use stickpile_api::{
+    Job, JobKind, MediaKind, PublishedPart, TelegramExport, TelegramImport, TelegramPlan, Variant, Visibility,
+};
 use stickpile_telegram::{
-    BotApi, ExportItem, PackMapping, PackState, PackThumbnail, StickerFormat, TelegramError, MAX_PACK_STICKERS,
+    BotApi, ExportItem, PackMapping, PackState, PackThumbnail, PartStates, PartUpdate, PartsError, PartsFailure,
+    PartsPlan, StickerFormat, TelegramError, MAX_PACK_STICKERS,
 };
 
 use crate::auth::CurrentUser;
@@ -238,14 +248,12 @@ pub async fn import_job(state: &AppState, job: &JobRow) -> JobResult {
     let own_bot_pack = bot_username
         .as_deref()
         .is_some_and(|b| stickpile_telegram::valid_pack_name(&pack.name, b));
-    let bound = own_bot_pack
+    let allowed = own_bot_pack
         && match pack_owner(state, &pack.name).await? {
             Some(owner) => owner == user.id,
             None => user.is_admin() && claim_pack(state, &pack.name, &user.id).await? == user.id,
         };
-    if bound {
-        bind_pack(state, &row.id, &pack.name, &mapping, None).await?;
-    }
+    let bound = allowed && bind_imported(state, &row.id, &pack.name, &pack.title, &mapping).await?;
     Ok(Some(json!({
         "set_id": row.id,
         "slug": row.slug,
@@ -293,64 +301,446 @@ async fn claim_pack(state: &AppState, name: &str, user_id: &str) -> Result<Strin
         .ok_or_else(|| JobError::Retry(format!("the claim on pack {name} vanished")))
 }
 
-/// Bind set `set_id` to pack `name`. A pack follows exactly one set: another
-/// set bound to it (necessarily the same user's) loses its binding.
-/// Bind `set_id` to pack `name` with the sticker `mapping` and `thumbnail`,
-/// the key of the thumbnail stickpile set on the pack (None: none).
-async fn bind_pack(
+/// May `user` export the parts `names` (number -> pack name) of set
+/// `set_id`? Every name is checked before any is claimed, and nothing on
+/// Telegram changes here. A name fails the export when it belongs to
+/// another stickpile user, is bound to another of the user's sets (as one
+/// of its parts, or as the name its parts derive from) other than `from`,
+/// whose binding the export takes over, or exists on Telegram without
+/// being published through this server, which only an admin may adopt.
+/// The new names are then claimed for the user.
+async fn authorize_parts(
     state: &AppState,
+    api: &BotApi,
+    user: &db::UserRow,
     set_id: &str,
-    name: &str,
-    mapping: &PackMapping,
-    thumbnail: Option<&str>,
+    from: Option<&str>,
+    names: &BTreeMap<u32, String>,
 ) -> Result<(), JobError> {
-    let mapping = serde_json::to_string(mapping).map_err(retry)?;
-    let mut tx = state.db.begin().await.map_err(retry)?;
-    sqlx::query(
-        "UPDATE sets SET telegram_pack = NULL, telegram_mapping = NULL, telegram_thumbnail = NULL \
-         WHERE telegram_pack = ? COLLATE NOCASE AND id <> ?",
+    let mut new = Vec::new();
+    for (&number, name) in names {
+        let what = if number == 1 {
+            format!("the pack {name}")
+        } else {
+            format!("the pack {name} (part {number} of this set)")
+        };
+        let owned = match pack_owner(state, name).await? {
+            Some(owner) if owner == user.id => true,
+            Some(_) => return Err(JobError::Fatal(format!("{what} {PACK_TAKEN}"))),
+            None => false,
+        };
+        if let Some((slug, part)) = bound_elsewhere(state, name, set_id, from).await? {
+            return Err(JobError::Fatal(match part {
+                Some(p) => format!("{what} is part {p} of your set {slug}; choose another pack name"),
+                None => format!("{what} is the name of your set {slug}'s packs; choose another pack name"),
+            }));
+        }
+        if owned {
+            continue;
+        }
+        match api.get_sticker_set(name).await {
+            Err(e) if e.is_missing_sticker_set() => {}
+            Err(e) => return Err(tg_error(e)),
+            Ok(_) if user.is_admin() => {}
+            Ok(_) if number == 1 => {
+                return Err(JobError::Fatal(format!(
+                    "a pack named {name} already exists but was not published through this server; \
+                     choose another pack name (an administrator can take it over)"
+                )))
+            }
+            Ok(_) => {
+                return Err(JobError::Fatal(format!(
+                    "a pack named {name}, the name of part {number} of this set, already exists but was not \
+                     published through this server; choose another pack name (an administrator can take it over)"
+                )))
+            }
+        }
+        new.push(name);
+    }
+    for name in new {
+        if claim_pack(state, name, &user.id).await? != user.id {
+            return Err(JobError::Fatal(format!("the pack {name} {PACK_TAKEN}")));
+        }
+    }
+    Ok(())
+}
+
+/// The other set (not `set_id`, not `from`) bound to pack `name`: its slug
+/// and the part the pack is (None: its parts' names derive from `name`,
+/// whose own pack it no longer has).
+async fn bound_elsewhere(
+    state: &AppState,
+    name: &str,
+    set_id: &str,
+    from: Option<&str>,
+) -> Result<Option<(String, Option<u32>)>, JobError> {
+    let from = from.unwrap_or("");
+    let part: Option<(String, i64)> = sqlx::query_as(
+        "SELECT s.slug, p.part FROM telegram_parts p JOIN sets s ON s.id = p.set_id \
+         WHERE p.pack_name = ? AND p.set_id <> ? AND p.set_id <> ?",
     )
     .bind(name)
     .bind(set_id)
+    .bind(from)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(retry)?;
+    if let Some((slug, part)) = part {
+        return Ok(Some((slug, u32::try_from(part).ok())));
+    }
+    let base: Option<String> =
+        sqlx::query_scalar("SELECT slug FROM sets WHERE telegram_base = ? COLLATE NOCASE AND id <> ? AND id <> ?")
+            .bind(name)
+            .bind(set_id)
+            .bind(from)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(retry)?;
+    Ok(base.map(|slug| (slug, None)))
+}
+
+// ---------------------------------------------------------------------------
+// Parts: the packs a set is published as
+// ---------------------------------------------------------------------------
+
+/// A row of `telegram_parts` (migration 0017): one pack of a set published
+/// to Telegram. A set of at most 120 stickers has one, part 1.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PartRow {
+    pub set_id: String,
+    pub part: i64,
+    pub pack_name: String,
+    pub title: String,
+    /// JSON [`PackMapping`]; None: claimed for an export that stored no
+    /// state yet.
+    pub mapping: Option<String>,
+    pub thumbnail: Option<String>,
+    pub stickers: i64,
+}
+
+impl PartRow {
+    pub fn number(&self) -> u32 {
+        u32::try_from(self.part).unwrap_or(u32::MAX)
+    }
+
+    /// What the last export left on the pack. A part without a stored state
+    /// is passed to the next export empty, so that it is filled or deleted.
+    fn state(&self) -> PackState {
+        PackState {
+            mapping: self
+                .mapping
+                .as_deref()
+                .and_then(|m| serde_json::from_str(m).ok())
+                .unwrap_or_default(),
+            thumbnail: self.thumbnail.clone(),
+        }
+    }
+}
+
+const PART_COLUMNS: &str = "set_id, part, pack_name, title, mapping, thumbnail, stickers";
+
+/// The parts of set `set_id`, by number.
+pub async fn parts(db: &SqlitePool, set_id: &str) -> AppResult<Vec<PartRow>> {
+    Ok(sqlx::query_as(&format!(
+        "SELECT {PART_COLUMNS} FROM telegram_parts WHERE set_id = ? ORDER BY part"
+    ))
+    .bind(set_id)
+    .fetch_all(db)
+    .await?)
+}
+
+/// Every pack a set is published as when it is published as several
+/// (`Publication::parts`, `Set::telegram_parts`): the parts that hold
+/// stickers, by number. Empty for one pack.
+pub async fn published_parts(db: &SqlitePool, set_id: &str) -> AppResult<Vec<PublishedPart>> {
+    let rows: Vec<PartRow> = sqlx::query_as(&format!(
+        "SELECT {PART_COLUMNS} FROM telegram_parts WHERE set_id = ? AND stickers > 0 ORDER BY part"
+    ))
+    .bind(set_id)
+    .fetch_all(db)
+    .await?;
+    if rows.len() < 2 {
+        return Ok(Vec::new());
+    }
+    Ok(rows
+        .iter()
+        .map(|r| PublishedPart {
+            number: r.number(),
+            name: r.pack_name.clone(),
+            url: Some(pack_url(&r.pack_name)),
+            stickers: u32::try_from(r.stickers).ok(),
+        })
+        .collect())
+}
+
+/// The name every part's name of set `set_id` derives from
+/// (`sets.telegram_base`): part 1's, kept when part 1's own pack is
+/// deleted.
+pub async fn base_name(db: &SqlitePool, set_id: &str) -> AppResult<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT telegram_base FROM sets WHERE id = ?")
+        .bind(set_id)
+        .fetch_optional(db)
+        .await?
+        .flatten())
+}
+
+/// Point `sets.telegram_pack` at the lowest part of the set that holds
+/// stickers: part 1, or the lowest part left when part 1's pack was
+/// deleted, so that older clients have a working link. While no part holds
+/// stickers yet (a first export under way, a binding whose mapping is not
+/// known), the link stays as long as it names one of the set's parts, and
+/// is None otherwise.
+async fn sync_link(conn: &mut sqlx::SqliteConnection, set_id: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE sets SET telegram_pack = COALESCE( \
+         (SELECT pack_name FROM telegram_parts WHERE set_id = ?1 AND stickers > 0 ORDER BY part LIMIT 1), \
+         (SELECT pack_name FROM telegram_parts WHERE set_id = ?1 AND pack_name = sets.telegram_pack)) \
+         WHERE id = ?1",
+    )
+    .bind(set_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Bind the new set `set_id` to the pack `name` it was imported from, as its
+/// part 1, with the mapping seeded from the import. A pack follows exactly
+/// one set: another set bound to it as its only pack loses that binding. A
+/// pack that is a part of a set published as several stays with that set:
+/// nothing is bound, and false is returned.
+async fn bind_imported(
+    state: &AppState,
+    set_id: &str,
+    name: &str,
+    title: &str,
+    mapping: &PackMapping,
+) -> Result<bool, JobError> {
+    let json = serde_json::to_string(mapping).map_err(retry)?;
+    let now = ids::now();
+    let mut tx = state.db.begin().await.map_err(retry)?;
+    let holder: Option<(String, i64)> = sqlx::query_as("SELECT set_id, part FROM telegram_parts WHERE pack_name = ?")
+        .bind(name)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(retry)?;
+    if let Some((other, part)) = holder {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM telegram_parts WHERE set_id = ?")
+            .bind(&other)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(retry)?;
+        if part != 1 || count > 1 {
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM telegram_parts WHERE set_id = ?")
+            .bind(&other)
+            .execute(&mut *tx)
+            .await
+            .map_err(retry)?;
+        sqlx::query("UPDATE sets SET telegram_base = NULL, telegram_pack = NULL WHERE id = ?")
+            .bind(&other)
+            .execute(&mut *tx)
+            .await
+            .map_err(retry)?;
+    }
+    let based: Option<String> =
+        sqlx::query_scalar("SELECT id FROM sets WHERE telegram_base = ? COLLATE NOCASE AND id <> ?")
+            .bind(name)
+            .bind(set_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(retry)?;
+    if based.is_some() {
+        return Ok(false);
+    }
+    sqlx::query(
+        "INSERT INTO telegram_parts (set_id, part, pack_name, title, mapping, thumbnail, stickers, created_at, \
+         updated_at) VALUES (?, 1, ?, ?, ?, NULL, ?, ?, ?)",
+    )
+    .bind(set_id)
+    .bind(name)
+    .bind(title)
+    .bind(&json)
+    .bind(mapping.len() as i64)
+    .bind(now)
+    .bind(now)
     .execute(&mut *tx)
     .await
     .map_err(retry)?;
-    sqlx::query("UPDATE sets SET telegram_pack = ?, telegram_mapping = ?, telegram_thumbnail = ? WHERE id = ?")
+    sqlx::query("UPDATE sets SET telegram_base = ?1, telegram_pack = ?1 WHERE id = ?2")
         .bind(name)
-        .bind(mapping)
-        .bind(thumbnail)
         .bind(set_id)
         .execute(&mut *tx)
         .await
         .map_err(retry)?;
+    tx.commit().await.map_err(retry)?;
+    Ok(true)
+}
+
+/// Where the parts of an export come from.
+enum Source {
+    /// The set's own parts: the export keeps them in step.
+    Own,
+    /// A new name: the set's parts are left on Telegram as they are,
+    /// unbound, and the export starts from nothing, as an export under a
+    /// new name always did.
+    Rename,
+    /// The name of the user's set `from`: its binding moves to this set,
+    /// every part with it (known to exist, without a mapping), as a pack
+    /// follows exactly one set.
+    Takeover { from: String },
+}
+
+/// Before the export: apply `source` (drop the set's old parts on a
+/// rename, move another set's parts here on a takeover), store `base` as
+/// the name the parts derive from, and register every part of `names`
+/// without a row, so that a part whose export stops before it stores a
+/// state is still known to the next export.
+async fn register_parts(
+    state: &AppState,
+    set_id: &str,
+    base: &str,
+    source: &Source,
+    names: &BTreeMap<u32, String>,
+) -> Result<(), JobError> {
+    let now = ids::now();
+    let mut tx = state.db.begin().await.map_err(retry)?;
+    if !matches!(source, Source::Own) {
+        sqlx::query("DELETE FROM telegram_parts WHERE set_id = ?")
+            .bind(set_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(retry)?;
+    }
+    if let Source::Takeover { from } = source {
+        sqlx::query(
+            "UPDATE telegram_parts SET set_id = ?, mapping = NULL, thumbnail = NULL, stickers = 0, updated_at = ? \
+             WHERE set_id = ?",
+        )
+        .bind(set_id)
+        .bind(now)
+        .bind(from)
+        .execute(&mut *tx)
+        .await
+        .map_err(retry)?;
+        sqlx::query("UPDATE sets SET telegram_base = NULL, telegram_pack = NULL WHERE id = ?")
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .map_err(retry)?;
+    }
+    sqlx::query("UPDATE sets SET telegram_base = ? WHERE id = ?")
+        .bind(base)
+        .bind(set_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(retry)?;
+    for (&number, name) in names {
+        sqlx::query(
+            "INSERT INTO telegram_parts (set_id, part, pack_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT(set_id, part) DO UPDATE SET pack_name = excluded.pack_name",
+        )
+        .bind(set_id)
+        .bind(i64::from(number))
+        .bind(name)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(retry)?;
+    }
+    sync_link(&mut tx, set_id).await.map_err(retry)?;
     tx.commit().await.map_err(retry)
 }
 
-/// May `user` export to pack `name`? Claims the name for them when it is
-/// new. A pack that exists on Telegram but was not created through this
-/// server can only be taken over by an admin.
-async fn authorize_export(state: &AppState, api: &BotApi, user: &db::UserRow, name: &str) -> Result<(), JobError> {
-    match pack_owner(state, name).await? {
-        Some(owner) if owner == user.id => return Ok(()),
-        Some(_) => return Err(JobError::Fatal(format!("the pack {name} {PACK_TAKEN}"))),
-        None => {}
-    }
-    match api.get_sticker_set(name).await {
-        Err(e) if e.is_missing_sticker_set() => {}
-        Err(e) => return Err(tg_error(e)),
-        Ok(_) if user.is_admin() => {}
-        Ok(_) => {
-            return Err(JobError::Fatal(format!(
-                "a pack named {name} already exists but was not published through this server; \
-                 choose another pack name (an administrator can take it over)"
-            )))
+/// Store what the export did to one part, as soon as it is done with it: its
+/// state (mapping, thumbnail key, title, sticker count), or, when its pack
+/// was deleted, forget the part and mark the name as deleted, so that it is
+/// never given to a part again. A set deleted meanwhile is left alone.
+async fn store_part(db: &SqlitePool, set_id: &str, title: &str, u: PartUpdate) -> Result<(), JobError> {
+    let now = ids::now();
+    let mut tx = db.begin().await.map_err(retry)?;
+    match &u.state {
+        Some(st) => {
+            let mapping = serde_json::to_string(&st.mapping).map_err(retry)?;
+            let title = match stickpile_telegram::part_title(title, u.number) {
+                t if t.is_empty() => u.name.clone(),
+                t => t,
+            };
+            sqlx::query(
+                "INSERT INTO telegram_parts \
+                 (set_id, part, pack_name, title, mapping, thumbnail, stickers, created_at, updated_at) \
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8 WHERE EXISTS (SELECT 1 FROM sets WHERE id = ?1) \
+                 ON CONFLICT(set_id, part) DO UPDATE SET pack_name = excluded.pack_name, title = excluded.title, \
+                 mapping = excluded.mapping, thumbnail = excluded.thumbnail, stickers = excluded.stickers, \
+                 updated_at = excluded.updated_at",
+            )
+            .bind(set_id)
+            .bind(i64::from(u.number))
+            .bind(&u.name)
+            .bind(title)
+            .bind(mapping)
+            .bind(st.thumbnail.as_deref())
+            .bind(st.mapping.len() as i64)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(retry)?;
+        }
+        None => {
+            sqlx::query("DELETE FROM telegram_parts WHERE set_id = ? AND part = ?")
+                .bind(set_id)
+                .bind(i64::from(u.number))
+                .execute(&mut *tx)
+                .await
+                .map_err(retry)?;
+            sqlx::query("UPDATE telegram_packs SET deleted_at = ? WHERE name = ?")
+                .bind(now)
+                .bind(&u.name)
+                .execute(&mut *tx)
+                .await
+                .map_err(retry)?;
         }
     }
-    if claim_pack(state, name, &user.id).await? == user.id {
-        Ok(())
-    } else {
-        Err(JobError::Fatal(format!("the pack {name} {PACK_TAKEN}")))
+    sync_link(&mut tx, set_id).await.map_err(retry)?;
+    tx.commit().await.map_err(retry)
+}
+
+/// The part numbers of the parts named after `base` that must not be given
+/// to a part again: those whose pack stickpile deleted (`deleted_at` on the
+/// user's claims, so also after a rename or a takeover), up to every number
+/// an export of `items` stickers with `previous` could give a new part.
+async fn retired_numbers(
+    db: &SqlitePool,
+    user_id: &str,
+    base: &str,
+    bot: &str,
+    previous: &PartStates,
+    items: usize,
+) -> AppResult<BTreeSet<u32>> {
+    let deleted: HashSet<String> =
+        sqlx::query_scalar::<_, String>("SELECT name FROM telegram_packs WHERE user_id = ? AND deleted_at IS NOT NULL")
+            .bind(user_id)
+            .fetch_all(db)
+            .await?
+            .into_iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect();
+    let mut retired = BTreeSet::new();
+    if deleted.is_empty() {
+        return Ok(retired);
     }
+    let highest = previous.keys().max().copied().unwrap_or(0) as usize;
+    let limit = u32::try_from(highest + deleted.len() + items + 1).unwrap_or(u32::MAX);
+    for number in 1..=limit {
+        let Ok(name) = stickpile_telegram::part_pack_name(base, number, bot) else {
+            break;
+        };
+        if deleted.contains(&name.to_ascii_lowercase()) {
+            retired.insert(number);
+        }
+    }
+    Ok(retired)
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +785,7 @@ pub async fn prepare_export(
     if owner_id(state, &row).is_none() {
         return Err(AppError::bad_request(NO_OWNER));
     }
-    Ok(json!({ "set_id": set.id, "pack_name": pack_name, "title": title }))
+    Ok(json!({ "set_id": set.id, "pack_name": pack_name, "title": title, "repack": req.repack }))
 }
 
 fn find_variant(rows: Option<&Vec<VariantRow>>, want: Variant) -> Option<VariantRow> {
@@ -468,74 +858,60 @@ async fn render_thumbnail(state: &AppState, path: &str) -> Result<Vec<u8>, JobEr
     .map_err(|e| JobError::Fatal(format!("rendering the cover: {e}")))
 }
 
-/// `TelegramExport` job.
-pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
-    let p = job.payload();
-    let set_id = p["set_id"]
-        .as_str()
-        .ok_or_else(|| JobError::Fatal("payload without set_id".into()))?
-        .to_string();
-    let lock = jobs::subject_lock(&format!("telegram:{set_id}"));
-    let _guard = lock.lock().await;
-    let Some(set) = db::set_by_id(&state.db, &set_id).await.map_err(retry)? else {
-        return Ok(Some(json!({"skipped": "the set no longer exists"})));
-    };
-    let Some(user) = db::user_by_id(&state.db, &set.owner_id).await.map_err(retry)? else {
-        return Ok(Some(json!({"skipped": "the owner no longer exists"})));
-    };
-    let owner = owner_id(state, &user).ok_or_else(|| JobError::Fatal(NO_OWNER.into()))?;
-    let api = bot(state)?;
-    let me = api.get_me().await.map_err(tg_error)?;
-    let bot_name = me
-        .username
-        .ok_or_else(|| JobError::Fatal("the bot has no username (getMe)".into()))?;
-    let name = match p["pack_name"].as_str() {
-        Some(n) => stickpile_telegram::complete_pack_name(n, &bot_name),
-        None => match &set.telegram_pack {
-            Some(n) => n.clone(),
-            None => stickpile_telegram::default_pack_name(&set.slug, &bot_name)
-                .ok_or_else(|| JobError::Fatal(format!("cannot derive a pack name from {:?}", set.slug)))?,
-        },
-    };
-    if !stickpile_telegram::valid_pack_name(&name, &bot_name) {
-        return Err(JobError::Fatal(format!(
-            "pack name {name:?} is not valid for @{bot_name}: Telegram requires 1-64 characters of A-Z a-z 0-9 _, \
-             starting with a letter, without \"__\", ending in _by_{bot_name} (added for you when the name has no \
-             _by_…bot suffix), and a bot can only edit its own packs"
-        )));
-    }
-    authorize_export(state, &api, &user, &name).await?;
-    let title = p["title"]
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| set.name.clone());
+/// How [`export_items`] treats the set's items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemsFor {
+    /// An export: render the stickers the `Variants` job has not made yet,
+    /// read every file and fit stills into Telegram's 512 KB.
+    Export,
+    /// A plan: change nothing and read no file. An item whose sticker is
+    /// not rendered yet counts as exportable while its renditions are still
+    /// to be made (a still, or an animation or video with ffmpeg on the
+    /// server); every still is taken to fit.
+    Plan,
+}
 
-    let (bound, mapping, thumbnail_key): (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT telegram_pack, telegram_mapping, telegram_thumbnail FROM sets WHERE id = ?")
-            .bind(&set.id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(retry)?;
-    // The stored mapping and thumbnail belong to the bound pack only.
-    let same_pack = bound.as_deref() == Some(name.as_str());
-    let previous: PackMapping = match (same_pack, mapping) {
-        (true, Some(m)) => serde_json::from_str(&m).unwrap_or_default(),
-        _ => PackMapping::new(),
-    };
-    let previous_thumbnail = thumbnail_key.filter(|_| same_pack);
-
-    let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
-    let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
-    let mut variants = hydrate::variant_rows(&state.db, &media_ids).await?;
+/// The set's items as Telegram stickers, in set order, and the items left
+/// out (`{item_id, name, reason}`).
+async fn export_items(
+    state: &AppState,
+    rows: &[hydrate::ItemFull],
+    variants: &mut std::collections::HashMap<String, Vec<VariantRow>>,
+    mode: ItemsFor,
+) -> Result<(Vec<ExportItem>, Vec<Value>), JobError> {
     let mut generated: HashSet<String> = HashSet::new();
     let mut items = Vec::new();
     let mut skipped: Vec<Value> = Vec::new();
-    for r in &rows {
+    for r in rows {
         let (want, format) = match r.kind() {
             MediaKind::Still => (Variant::TgSticker, StickerFormat::Static),
             MediaKind::Animation | MediaKind::Video => (Variant::TgVideoSticker, StickerFormat::Video),
         };
+        let item = |bytes| ExportItem {
+            key: r.id.clone(),
+            content_key: r.sha256.clone(),
+            bytes,
+            format,
+            emojis: r.emojis(),
+            keywords: r.keywords(),
+        };
         let mut variant = find_variant(variants.get(&r.media_id), want);
+        if mode == ItemsFor::Plan {
+            let exportable = match variant {
+                Some(_) => true,
+                None => {
+                    let pending = !db::media_by_id(&state.db, &r.media_id)
+                        .await
+                        .map_err(retry)?
+                        .is_some_and(|m| m.variants_done);
+                    pending && (format == StickerFormat::Static || state.ffmpeg_available)
+                }
+            };
+            if exportable {
+                items.push(item(Vec::new()));
+            }
+            continue;
+        }
         let mut why: Option<String> = None;
         if variant.is_none() && generated.insert(r.media_id.clone()) {
             // The Variants job has not run (or failed): render it now.
@@ -576,50 +952,260 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
                 }
             }
         }
-        items.push(ExportItem {
-            key: r.id.clone(),
-            content_key: r.sha256.clone(),
-            bytes,
-            format,
-            emojis: r.emojis(),
-            keywords: r.keywords(),
-        });
+        items.push(item(bytes));
     }
+    Ok((items, skipped))
+}
+
+/// The set's parts as previous states for the planner: what each part's
+/// last export left on it (an empty state for a part registered without
+/// one).
+fn own_states(rows: &[PartRow]) -> PartStates {
+    rows.iter().map(|r| (r.number(), r.state())).collect()
+}
+
+/// The pack name of every part `plan` touches.
+fn plan_names(plan: &PartsPlan, base: &str, bot: &str) -> Result<BTreeMap<u32, String>, TelegramError> {
+    plan.numbers()
+        .map(|n| stickpile_telegram::part_pack_name(base, n, bot).map(|name| (n, name)))
+        .collect()
+}
+
+/// `TelegramExport` job: the set as one pack, or as several, its parts,
+/// when it has more stickers than one pack holds (docs/telegram.md, "Sets
+/// larger than one pack").
+///
+/// Before any change the parts are planned, and every part's name is
+/// checked and claimed ([`authorize_parts`]) and registered
+/// ([`register_parts`]). Then `export_parts` exports them, and each part's
+/// state is stored as soon as that part is done ([`store_part`]), as far
+/// as it got when the export stops: a retried job continues from there,
+/// with the same names, so it neither creates a second pack for a part nor
+/// leaves one behind.
+pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
+    let p = job.payload();
+    let set_id = p["set_id"]
+        .as_str()
+        .ok_or_else(|| JobError::Fatal("payload without set_id".into()))?
+        .to_string();
+    let repack = p["repack"].as_bool().unwrap_or(false);
+    let lock = jobs::subject_lock(&format!("telegram:{set_id}"));
+    let _guard = lock.lock().await;
+    let Some(set) = db::set_by_id(&state.db, &set_id).await.map_err(retry)? else {
+        return Ok(Some(json!({"skipped": "the set no longer exists"})));
+    };
+    let Some(user) = db::user_by_id(&state.db, &set.owner_id).await.map_err(retry)? else {
+        return Ok(Some(json!({"skipped": "the owner no longer exists"})));
+    };
+    let owner = owner_id(state, &user).ok_or_else(|| JobError::Fatal(NO_OWNER.into()))?;
+    let api = bot(state)?;
+    let me = api.get_me().await.map_err(tg_error)?;
+    let bot_name = me
+        .username
+        .ok_or_else(|| JobError::Fatal("the bot has no username (getMe)".into()))?;
+
+    // Part 1's name, which every part's name derives from: the one asked
+    // for, else the set's own (kept when part 1's pack was deleted), else
+    // one from the slug. Asking for one of the set's own packs by name
+    // keeps the parts as they are.
+    let own = parts(&state.db, &set.id).await?;
+    let stored = base_name(&state.db, &set.id).await?;
+    let same = |name: &str| {
+        stored.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(name))
+            || own.iter().any(|r| r.pack_name.eq_ignore_ascii_case(name))
+    };
+    let base = match p["pack_name"].as_str() {
+        Some(n) => match stickpile_telegram::complete_pack_name(n, &bot_name) {
+            n if same(&n) => stored.clone().unwrap_or(n),
+            n => n,
+        },
+        None => match &stored {
+            Some(n) => n.clone(),
+            None => stickpile_telegram::default_pack_name(&set.slug, &bot_name)
+                .ok_or_else(|| JobError::Fatal(format!("cannot derive a pack name from {:?}", set.slug)))?,
+        },
+    };
+    if !stickpile_telegram::valid_pack_name(&base, &bot_name) {
+        return Err(JobError::Fatal(format!(
+            "pack name {base:?} is not valid for @{bot_name}: Telegram requires 1-64 characters of A-Z a-z 0-9 _, \
+             starting with a letter, without \"__\", ending in _by_{bot_name} (added for you when the name has no \
+             _by_…bot suffix), and a bot can only edit its own packs"
+        )));
+    }
+    let title = p["title"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| set.name.clone());
+
+    let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
+    let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
+    let mut variants = hydrate::variant_rows(&state.db, &media_ids).await?;
+    let (items, skipped) = export_items(state, &rows, &mut variants, ItemsFor::Export).await?;
     if items.is_empty() {
         return Err(JobError::Fatal(
             "nothing to export: no item of the set can become a Telegram sticker".into(),
         ));
     }
-    if items.len() > MAX_PACK_STICKERS {
-        return Err(JobError::Fatal(format!(
-            "the set has {} exportable items; a Telegram pack takes at most {MAX_PACK_STICKERS}: split the set",
-            items.len()
-        )));
-    }
     let thumbnail = cover_thumbnail(state, &set, &rows, &mut variants).await?;
-    let previous = PackState {
-        mapping: previous,
-        thumbnail: previous_thumbnail,
-    };
-    let report = stickpile_telegram::export_pack(&api, owner, &name, &title, &items, &previous, thumbnail.as_ref())
+
+    // Where the parts come from: the set's own, none (a new name), or the
+    // user's other set published under this name, whose parts move here.
+    let source = if same(&base) {
+        Source::Own
+    } else {
+        let other: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM sets WHERE telegram_base = ? COLLATE NOCASE AND id <> ? AND owner_id = ?",
+        )
+        .bind(&base)
+        .bind(&set.id)
+        .bind(&set.owner_id)
+        .fetch_optional(&state.db)
         .await
+        .map_err(retry)?;
+        match other {
+            Some(from) => Source::Takeover { from },
+            None => Source::Rename,
+        }
+    };
+    let previous: PartStates = match &source {
+        Source::Own => own_states(&own),
+        Source::Rename => PartStates::new(),
+        Source::Takeover { from } => parts(&state.db, from)
+            .await?
+            .iter()
+            .map(|r| (r.number(), PackState::default()))
+            .collect(),
+    };
+    let retired = retired_numbers(&state.db, &user.id, &base, &bot_name, &previous, items.len()).await?;
+    let plan = stickpile_telegram::plan_parts_skipping(&items, &previous, &retired, MAX_PACK_STICKERS, repack)
         .map_err(tg_error)?;
-    bind_pack(state, &set.id, &name, &report.mapping, report.thumbnail.as_deref()).await?;
+    let names = plan_names(&plan, &base, &bot_name).map_err(tg_error)?;
+    let from = match &source {
+        Source::Takeover { from } => Some(from.as_str()),
+        _ => None,
+    };
+    authorize_parts(state, &api, &user, &set.id, from, &names).await?;
+    register_parts(state, &set.id, &base, &source, &names).await?;
+
+    let export = stickpile_telegram::PartsExport {
+        owner_user_id: owner,
+        bot_username: &bot_name,
+        part1_name: &base,
+        title: &title,
+        items: &items,
+        previous: &previous,
+        thumbnail: thumbnail.as_ref(),
+    };
+    let persist = |u: PartUpdate| {
+        let (db, set_id, title) = (state.db.clone(), set.id.clone(), title.clone());
+        async move { store_part(&db, &set_id, &title, u).await }
+    };
+    let several = names.len() > 1;
+    let report = stickpile_telegram::export_parts(&api, &export, &plan, persist)
+        .await
+        .map_err(|e| parts_error(e, several))?;
+    // The set's link: part 1, or the lowest part left.
+    let main = plan
+        .parts
+        .first()
+        .and_then(|p| report.part(p.number))
+        .cloned()
+        .unwrap_or_default();
     Ok(Some(json!({
         "set_id": set.id,
-        "pack_name": name,
-        "url": pack_url(&name),
-        "title": title,
-        "created_pack": report.created_pack,
-        "added": report.added,
-        "removed": report.removed,
-        "updated": report.updated,
-        "reordered": report.reordered,
-        "thumbnail": report.thumbnail.is_some(),
-        "thumbnail_changed": report.thumbnail_changed,
+        "pack_name": main.name,
+        "url": main.url,
+        "title": main.title,
+        "created_pack": main.created_pack,
+        "added": main.added,
+        "removed": main.removed,
+        "updated": main.updated,
+        "reordered": main.reordered,
+        "thumbnail": main.thumbnail,
+        "thumbnail_changed": main.thumbnail_changed,
         "exported": items.len(),
         "skipped": skipped,
+        "parts": report.parts,
+        "moved": report.moved,
     })))
+}
+
+/// A stopped export of parts as a job error: retried when Telegram's
+/// answer says so (as a single pack's), and with the part it stopped at
+/// when the set has several.
+fn parts_error(e: PartsError<JobError>, several: bool) -> JobError {
+    let at = e
+        .report
+        .parts
+        .last()
+        .filter(|p| several && p.error.is_some())
+        .map(|p| format!("part {} ({}): ", p.number, p.name))
+        .unwrap_or_default();
+    match e.failure {
+        PartsFailure::Telegram(te) => match tg_error(te) {
+            JobError::Retry(m) => JobError::Retry(format!("{at}{m}")),
+            JobError::Fatal(m) => JobError::Fatal(format!("{at}{m}")),
+        },
+        PartsFailure::Persist(je) => je,
+    }
+}
+
+/// What an export of the caller's set `set_id` would do to its Telegram
+/// packs, without changing anything: the parts after it with how many
+/// stickers each would hold, the parts it would delete, and how many
+/// published stickers would change pack (only a repack moves any). Owner
+/// only. The plan is for the set's own packs (no new name), from its items
+/// as they are rendered now ([`ItemsFor::Plan`]).
+pub async fn plan(state: &AppState, user: &CurrentUser, set_id: &str, repack: bool) -> AppResult<TelegramPlan> {
+    if !enabled(state) {
+        return Err(disabled());
+    }
+    let set = authz::owned_set(state, user.id(), set_id).await?;
+    let token = token(state).ok_or_else(disabled)?;
+    let api = BotApi::new(&state.config.telegram.api_url, &token);
+    let bot_name = api
+        .get_me()
+        .await
+        .ok()
+        .and_then(|me| me.username)
+        .ok_or_else(|| AppError::unavailable("Telegram did not answer; try again later."))?;
+    let base = match base_name(&state.db, &set.id).await? {
+        Some(b) => b,
+        None => stickpile_telegram::default_pack_name(&set.slug, &bot_name)
+            .ok_or_else(|| AppError::bad_request(format!("cannot derive a pack name from {:?}", set.slug)))?,
+    };
+    let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
+    let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
+    let mut variants = hydrate::variant_rows(&state.db, &media_ids).await?;
+    let (items, _) = export_items(state, &rows, &mut variants, ItemsFor::Plan)
+        .await
+        .map_err(AppError::internal)?;
+    if items.is_empty() {
+        return Err(AppError::bad_request(
+            "nothing to export: no item of the set can become a Telegram sticker",
+        ));
+    }
+    let previous = own_states(&parts(&state.db, &set.id).await?);
+    let retired = retired_numbers(&state.db, &set.owner_id, &base, &bot_name, &previous, items.len()).await?;
+    let plan = stickpile_telegram::plan_parts_skipping(&items, &previous, &retired, MAX_PACK_STICKERS, repack)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    let names = plan_names(&plan, &base, &bot_name).map_err(|e| AppError::bad_request(e.to_string()))?;
+    let part = |number: u32, stickers: Option<u32>| PublishedPart {
+        number,
+        name: names[&number].clone(),
+        url: Some(pack_url(&names[&number])),
+        stickers,
+    };
+    Ok(TelegramPlan {
+        repack,
+        parts: plan
+            .parts
+            .iter()
+            .map(|p| part(p.number, u32::try_from(p.items.len()).ok()))
+            .collect(),
+        delete: plan.delete.iter().map(|&n| part(n, None)).collect(),
+        moved: u32::try_from(plan.moved).unwrap_or(u32::MAX),
+    })
 }
 
 #[cfg(test)]

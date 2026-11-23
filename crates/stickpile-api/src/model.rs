@@ -476,8 +476,14 @@ pub struct Set {
     pub version: u64,
     pub source: SetSource,
     pub git: Option<GitBinding>,
-    /// Telegram pack name this set is published as, if any.
+    /// Telegram pack name this set is published as, if any: its first pack
+    /// when it is published as several ([`Set::telegram_parts`]).
     pub telegram_pack: Option<String>,
+    /// Every Telegram pack the set is published as, when it is larger than
+    /// one pack (120 stickers) and so published as several, its parts.
+    /// Empty for one pack and from servers older than parts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub telegram_parts: Vec<PublishedPart>,
     /// The item chosen as the cover: shown for the set in lists and sent to
     /// Telegram as the pack's thumbnail. `None`: the first item is shown and
     /// Telegram uses the first sticker. A [`Set::cover_image`] wins over it.
@@ -883,14 +889,65 @@ pub struct TelegramImport {
     pub visibility: Visibility,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TelegramExport {
     /// Pack short name; must end in `_by_<bot username>`. Default: previously
-    /// bound pack, else `<slug>_by_<bot>`.
+    /// bound pack, else `<slug>_by_<bot>`. A set larger than one pack is
+    /// published as several: this is part 1's name, part k's is
+    /// `<name>_<k>_by_<bot>`.
     pub pack_name: Option<String>,
-    /// Pack title; default set name.
+    /// Pack title; default set name. Part k's is `<title> <k>`.
     pub title: Option<String>,
+    /// Assign every sticker to the parts again in set order (part 1 the
+    /// first 120, and so on), moving published stickers between packs; ask
+    /// [`TelegramPlan::moved`] how many first. Without it published
+    /// stickers stay in their pack. `true`/`false`, or the same as text
+    /// (`"true"`, `"on"`, ...), as the export page and the CLI send options.
+    /// Servers before parts ignore it.
+    #[serde(
+        default,
+        skip_serializing_if = "std::ops::Not::not",
+        deserialize_with = "bool_or_text"
+    )]
+    pub repack: bool,
+}
+
+/// A boolean as JSON `true`/`false` or as text: `true`, `on`, `yes`, `1`
+/// and `false`, `off`, `no`, `0`, empty (case ignored).
+fn bool_or_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Bool(bool),
+        Text(String),
+    }
+    match Either::deserialize(d)? {
+        Either::Bool(b) => Ok(b),
+        Either::Text(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "on" | "yes" | "1" => Ok(true),
+            "false" | "off" | "no" | "0" | "" => Ok(false),
+            _ => Err(serde::de::Error::custom(format!("expected true or false, not {s:?}"))),
+        },
+    }
+}
+
+/// `GET /api/v1/sets/{id}/telegram/plan?repack=`: what a Telegram export of
+/// the set would do to its packs, without changing anything. A set larger
+/// than one pack (120 stickers) is published as several, its parts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TelegramPlan {
+    /// The plan is for a repack ([`TelegramExport::repack`]).
+    pub repack: bool,
+    /// The parts that hold stickers after the export, by number, with how
+    /// many each would hold.
+    pub parts: Vec<PublishedPart>,
+    /// Parts left without stickers: their packs are deleted.
+    #[serde(default)]
+    pub delete: Vec<PublishedPart>,
+    /// Published stickers that would change pack. Only a repack moves any.
+    pub moved: u32,
 }
 
 /// `POST /api/v1/discord/import`: a Discord server's stickers and/or emoji
@@ -2095,6 +2152,33 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(serde_json::to_value(&clear).unwrap()["vibe"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn telegram_export_repack_is_optional_and_takes_text() {
+        let old: TelegramExport = serde_json::from_str(r#"{"pack_name": "cats", "title": null}"#).unwrap();
+        assert!(!old.repack);
+        // An export without repack sends what a 0.8.8 server reads.
+        let v = serde_json::to_value(&old).unwrap();
+        assert_eq!(v, serde_json::json!({"pack_name": "cats", "title": null}));
+        for (raw, want) in [
+            (r#"true"#, true),
+            (r#"false"#, false),
+            (r#""on""#, true),
+            (r#"" TRUE ""#, true),
+            (r#""1""#, true),
+            (r#""no""#, false),
+            (r#""""#, false),
+        ] {
+            let r: TelegramExport = serde_json::from_str(&format!(r#"{{"repack": {raw}}}"#)).unwrap();
+            assert_eq!(r.repack, want, "{raw}");
+        }
+        assert!(serde_json::from_str::<TelegramExport>(r#"{"repack": "maybe"}"#).is_err());
+        let r = TelegramExport {
+            repack: true,
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_value(&r).unwrap()["repack"], true);
     }
 
     #[test]
