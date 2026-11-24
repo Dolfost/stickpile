@@ -1984,6 +1984,47 @@ async fn takeover_takes_effect_when_its_export_finishes() {
     assert_eq!(pending_rows(srv).await, 0);
 }
 
+#[tokio::test]
+async fn repack_is_only_for_the_sets_own_packs() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let url = |q: &str| format!("{}?{q}", routes::path(routes::SET_TELEGRAM_PLAN, &[&set.id]));
+    // The set's own names, bare or in full, plan its own packs.
+    for name in ["cats".to_string(), part_name("cats", 1), part_name("cats", 2)] {
+        let p: TelegramPlan = srv
+            .get(&alice, &url(&format!("repack=true&pack_name={name}")))
+            .await
+            .expect(200)
+            .json();
+        assert_eq!(p.parts.len(), 2, "{name}");
+    }
+    // Another name with a repack is refused, by the plan and by the job,
+    // before anything changes.
+    let refused = "a repack is only for the Telegram packs the set is published as";
+    let e = srv
+        .get(&alice, &url("repack=true&pack_name=dogs"))
+        .await
+        .expect(400)
+        .text();
+    assert!(e.contains(refused), "{e}");
+    let calls = tg.mock.lock().unwrap().calls.len();
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "dogs", "repack": true})).await;
+    failed_with(&j, refused);
+    assert!(writes_since(&tg, calls).is_empty());
+    assert_eq!(pending_rows(srv).await, 0);
+    // Without a repack, the plan under another name is that export's: new
+    // packs from nothing.
+    let p: TelegramPlan = srv.get(&alice, &url("pack_name=dogs")).await.expect(200).json();
+    let planned: Vec<(String, Option<u32>)> = p.parts.into_iter().map(|p| (p.name, p.stickers)).collect();
+    assert_eq!(
+        planned,
+        [(part_name("dogs", 1), Some(120)), (part_name("dogs", 2), Some(5))]
+    );
+    assert!(p.delete.is_empty() && p.moved == 0);
+}
+
 // ---------------------------------------------------------------------------
 // Review of the parts round: findings
 // ---------------------------------------------------------------------------

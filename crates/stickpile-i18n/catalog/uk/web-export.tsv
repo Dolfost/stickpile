@@ -64,3 +64,4 @@ deleted	видалено
 Repack now	Перепакувати зараз
 Telegram did not answer; try again later.	Telegram не відповів; спробуйте пізніше.
 nothing to export: no item of the set can become a Telegram sticker	нічого експортувати: жоден стікер набору не може стати стікером Telegram
+a repack is only for the Telegram packs the set is published as; leave out the pack name to repack them (a new pack name starts new packs, with nothing to repack)	перепакувати можна лише набори Telegram, у яких опубліковано цей набір; щоб перепакувати їх, не вказуйте назву набору (нова назва створює нові набори, і перепаковувати нічого)

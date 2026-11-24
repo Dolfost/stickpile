@@ -508,7 +508,7 @@ pub async fn repack_confirm(State(state): State<AppState>, ctx: Ctx, Path(id): P
     let set = sets::detail(&state, &ctx.user, &id).await?.set;
     // Who may not repack gets the error page; a plan that cannot be made
     // (nothing to export, Telegram not answering) is shown in the box.
-    let plan = match telegram::plan(&state, &ctx.user, &set.id, true).await {
+    let plan = match telegram::plan(&state, &ctx.user, &set.id, true, None).await {
         Err(e) if e.code == "not_found" || e.code == "forbidden" => return Err(e),
         Err(e) if !e.status.is_client_error() && e.status != StatusCode::SERVICE_UNAVAILABLE => return Err(e),
         plan => plan,

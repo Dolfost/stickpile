@@ -77,7 +77,7 @@ pub const SET_PULL: &str = "/api/v1/sets/{id}/pull";
 pub const GIT_WEBHOOK: &str = "/api/v1/hooks/git/{id}";
 /// POST [`crate::model::TelegramExport`] -> [`crate::model::Job`]
 pub const SET_TELEGRAM_EXPORT: &str = "/api/v1/sets/{id}/telegram/export";
-/// GET `?repack=` -> [`crate::model::TelegramPlan`]: the parts an export
+/// GET `?repack=&pack_name=` -> [`crate::model::TelegramPlan`]: the parts an export
 /// would make, without changing anything (servers before parts: 404).
 pub const SET_TELEGRAM_PLAN: &str = "/api/v1/sets/{id}/telegram/plan";
 /// POST [`crate::model::TelegramImport`] -> [`crate::model::Job`]

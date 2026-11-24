@@ -773,6 +773,15 @@ pub fn parse_platform_option(s: &str) -> Result<(String, String, String), String
     if platform.is_empty() || key.is_empty() {
         return Err(bad());
     }
+    // A repack moves published stickers between packs: --repack shows how
+    // many first and asks.
+    if platform.eq_ignore_ascii_case("telegram") && key.eq_ignore_ascii_case("repack") {
+        return Err(
+            "telegram.repack is not an option: use --repack, which says how many published stickers move \
+                    and asks first"
+                .into(),
+        );
+    }
     Ok((platform.to_string(), key.to_string(), value.to_string()))
 }
 
@@ -1040,6 +1049,10 @@ mod tests {
         assert!(parse(&["publish", "cats", "-O", "nodot=1", "--to", "telegram"]).is_err());
         assert!(parse(&["publish", "cats", "--wait"]).is_err(), "--wait needs --to");
         assert!(parse(&["publish", "cats", "--repack"]).is_err(), "--repack needs --to");
+        for option in ["telegram.repack=true", "Telegram.Repack=on"] {
+            let err = parse(&["publish", "cats", "--to", "telegram", "-O", option]).unwrap_err();
+            assert!(err.to_string().contains("use --repack"), "{err}");
+        }
         assert!(
             parse(&["telegram", "export", "cats", "--yes"]).is_err(),
             "--yes is for --repack"

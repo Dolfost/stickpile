@@ -619,6 +619,10 @@ struct Target {
     previous: PartStates,
 }
 
+/// A repack asked for under a name that is not one of the set's own packs.
+const REPACK_OTHER: &str = "a repack is only for the Telegram packs the set is published as; leave out the pack \
+     name to repack them (a new pack name starts new packs, with nothing to repack)";
+
 /// What an export of `set` under `asked` (a pack name as given; None: the
 /// set's own) works on, as the export and its plan see it.
 ///
@@ -1264,7 +1268,11 @@ pub async fn export_job(state: &AppState, job: &JobRow) -> JobResult {
     // Part 1's name and where the parts come from: the set's own, none (a
     // new name), or the user's other set published under this name, whose
     // parts move here once the export has finished.
-    let Target { base, source, previous } = target(&state.db, &set, p["pack_name"].as_str(), &bot_name).await?;
+    let target = target(&state.db, &set, p["pack_name"].as_str(), &bot_name).await?;
+    if repack && target.source.pending() {
+        return Err(JobError::Fatal(REPACK_OTHER.into()));
+    }
+    let Target { base, source, previous } = target;
     let title = p["title"]
         .as_str()
         .map(str::to_string)
@@ -1359,13 +1367,25 @@ fn parts_error(e: PartsError<JobError>, several: bool) -> JobError {
 /// packs, without changing anything: the parts after it with how many
 /// stickers each would hold, the parts it would delete, and how many
 /// published stickers would change pack (only a repack moves any). Owner
-/// only. The plan is for the set's own packs (no new name), from its items
-/// as they are rendered now ([`ItemsFor::Plan`]).
-pub async fn plan(state: &AppState, user: &CurrentUser, set_id: &str, repack: bool) -> AppResult<TelegramPlan> {
+/// only. The plan is for the export under `pack_name` (None: the set's own
+/// packs), from the set's items as they are rendered now
+/// ([`ItemsFor::Plan`]); a repack under a name that is not one of the
+/// set's own packs is refused, as the export refuses it.
+pub async fn plan(
+    state: &AppState,
+    user: &CurrentUser,
+    set_id: &str,
+    repack: bool,
+    pack_name: Option<&str>,
+) -> AppResult<TelegramPlan> {
     if !enabled(state) {
         return Err(disabled());
     }
     let set = authz::owned_set(state, user.id(), set_id).await?;
+    let asked = match pack_name.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(p) => Some(clean_pack_name(p)?),
+        None => None,
+    };
     let token = token(state).ok_or_else(disabled)?;
     let api = BotApi::new(&state.config.telegram.api_url, &token);
     let bot_name = api
@@ -1374,10 +1394,16 @@ pub async fn plan(state: &AppState, user: &CurrentUser, set_id: &str, repack: bo
         .ok()
         .and_then(|me| me.username)
         .ok_or_else(|| AppError::unavailable("Telegram did not answer; try again later."))?;
-    let Target { base, previous, .. } = target(&state.db, &set, None, &bot_name).await.map_err(|e| match e {
-        JobError::Fatal(m) => AppError::bad_request(m),
-        JobError::Retry(m) => AppError::internal(m),
-    })?;
+    let Target { base, source, previous } =
+        target(&state.db, &set, asked.as_deref(), &bot_name)
+            .await
+            .map_err(|e| match e {
+                JobError::Fatal(m) => AppError::bad_request(m),
+                JobError::Retry(m) => AppError::internal(m),
+            })?;
+    if repack && source.pending() {
+        return Err(AppError::bad_request(REPACK_OTHER));
+    }
     let rows = hydrate::fetch_by_set(&state.db, &set.id).await?;
     let media_ids: Vec<String> = rows.iter().map(|r| r.media_id.clone()).collect();
     let mut variants = hydrate::variant_rows(&state.db, &media_ids).await?;

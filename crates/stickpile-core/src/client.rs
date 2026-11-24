@@ -1031,13 +1031,15 @@ impl ApiClient {
 
     /// What a Telegram export of the set would do to its packs (owner), without
     /// changing anything; with `repack`, how many published stickers a repack
-    /// moves. Servers before parts answer 404.
-    pub async fn telegram_plan(&self, set_id: &str, repack: bool) -> Result<TelegramPlan> {
-        self.get(
-            &path(routes::SET_TELEGRAM_PLAN, &[set_id]),
-            &[("repack", repack.to_string())],
-        )
-        .await
+    /// moves. `pack_name`: the export under that name (None: the set's own
+    /// packs); a repack under a name that is not one of the set's own packs
+    /// is a 400. Servers before parts answer 404.
+    pub async fn telegram_plan(&self, set_id: &str, repack: bool, pack_name: Option<&str>) -> Result<TelegramPlan> {
+        let mut query = vec![("repack", repack.to_string())];
+        if let Some(name) = pack_name {
+            query.push(("pack_name", name.to_string()));
+        }
+        self.get(&path(routes::SET_TELEGRAM_PLAN, &[set_id]), &query).await
     }
 
     pub async fn telegram_import(&self, req: &TelegramImport) -> Result<Job> {

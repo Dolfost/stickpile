@@ -434,7 +434,13 @@ export continues from there:
   `--repack` in the CLI. Before it, `GET /api/v1/sets/{id}/telegram/plan?repack=true`
   says how many published stickers move (`moved`), which parts would hold
   how many and which would be deleted, without changing anything; the web
-  page and the CLI show that and ask for a confirmation.
+  page and the CLI show that and ask for a confirmation. A repack is for
+  the packs the set is published as: with a pack name that is not one of
+  them (a new name, or another set's), the plan answers 400 and the job
+  fails before any change ("a repack is only for the Telegram packs the
+  set is published as"). The CLI asks the plan with the pack name it was
+  given, so it stops there, and the export page's repack never sends a
+  name. `pack_name` plans the export under that name.
 - **Results.** The job's result keeps every field it had for one pack, for
   part 1 (or the lowest part left), so older clients read it as before,
   and adds `parts` (every part's `number`, `name`, `url`, `title`,
@@ -488,9 +494,11 @@ part names owned by another user or bound to another set failing before
 any change, exports failing between parts and in the middle of one and then
 continuing without a duplicate, a rename and a takeover that fail keeping
 the bindings as they were and then finishing under the new name, a part
-never created keeping its number, what a 0.8.8 client reads, and the
-export page. `crates/stickpile-cli/tests/server_e2e.rs` runs `--repack`
-in the CLI against the real server and the same mock.
+never created keeping its number, a repack refused under another name,
+what a 0.8.8 client reads, and the export page.
+`crates/stickpile-cli/tests/server_e2e.rs` runs `--repack` in the CLI
+against the real server and the same mock, with the set's own pack name
+and with another.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps

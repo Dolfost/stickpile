@@ -768,9 +768,43 @@ fn cli_repack_asks_with_count() {
     // --repack needs telegram among the platforms.
     let out = env.run(&["publish", "big", "--to", "signal", "--repack", "--yes"]);
     assert!(!out.status.success());
+    // A repack is for the set's own packs: under another name it is refused
+    // before anything is asked or published.
+    for args in [
+        &[
+            "telegram", "export", "big", "--pack", "other", "--repack", "--yes", "--wait",
+        ][..],
+        &[
+            "publish",
+            "big",
+            "--to",
+            "telegram",
+            "-O",
+            "telegram.pack_name=other",
+            "--repack",
+            "--yes",
+            "--wait",
+        ],
+    ] {
+        let out = env.run(args);
+        assert!(!out.status.success(), "{args:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("a repack is only for the Telegram packs the set is published as"),
+            "{args:?}: {stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("Repacking"));
+    }
+    // The option cannot ask for one without the question either.
+    let out = env.run(&["publish", "big", "--to", "telegram", "-O", "telegram.repack=true"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("use --repack"));
+    assert_eq!(mock.lock().unwrap().packs.len(), 2, "no pack was made");
 
-    // With --yes it repacks.
-    let out = env.ok(&["telegram", "export", "big", "--repack", "--yes", "--wait"]);
+    // With --yes it repacks; the set's own name is its own packs.
+    let out = env.ok(&[
+        "telegram", "export", "big", "--pack", "big", "--repack", "--yes", "--wait",
+    ]);
     assert!(out.contains("moved:    3 stickers to another pack"), "{out}");
     assert!(
         out.contains(&format!("part 2:   https://t.me/addstickers/{p2} (2 stickers)")),

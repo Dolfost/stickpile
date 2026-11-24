@@ -672,6 +672,12 @@ many published stickers move to another pack, from the server's plan
 (`GET /api/v1/sets/{id}/telegram/plan?repack=true`), and asks
 `Repack the parts? [y/N]`. `--yes` (`-y`) does not ask; without a terminal
 it is required (`refusing to repack without confirmation; pass --yes`). A
+repack is for the packs the set is published as: `--repack` together with
+a `--pack` that names another pack (a new name, or one of your other
+sets') fails before it asks or publishes anything ("a repack is only for
+the Telegram packs the set is published as; leave out the pack name to
+repack them"), as the plan is asked for that name; `--pack` with one of
+the set's own names is the same as leaving it out. A
 server up to 0.8.8 publishes a set as one pack and has no plan: `--repack`
 then fails with "nothing to repack; publish without --repack" and changes
 nothing. `sets show` lists every pack (`telegram: cats_by_my_bot,
@@ -701,7 +707,10 @@ server id, required the first time, afterwards the server used last;
 has none, and every publish makes a new Signal pack with a new link (a
 set of more than 200 stickers: a new pack per 200).
 `--repack` (Telegram only, with `--yes` to skip the question) asks for a
-repack of the Telegram parts as `telegram export --repack` does; a set
+repack of the Telegram parts as `telegram export --repack` does, with the
+plan for `-O telegram.pack_name` when given (another pack name is refused
+the same way); `-O telegram.repack=...` is refused, pointing to
+`--repack`, so that a repack is never asked for without the question; a set
 published as several packs gets a list of them under the table (`telegram:
 published as 2 packs:`), and a finished Telegram job prints every part's
 link.

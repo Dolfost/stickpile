@@ -892,7 +892,12 @@ async fn publish(ctx: &Ctx, a: PublishArgs) -> Result<()> {
         if !a.to.iter().any(|p| p.trim() == "telegram") {
             bail!("--repack is for Telegram packs: add telegram to --to");
         }
-        confirm_repack(ctx, &client, &id, &a.set, a.yes).await?;
+        let pack = options
+            .get("telegram")
+            .and_then(|o| o.get("pack_name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        confirm_repack(ctx, &client, &id, &a.set, pack.as_deref(), a.yes).await?;
         options.entry("telegram".into()).or_insert_with(|| json!({}))["repack"] = json!(true);
     }
     let req = PublishRequest {
@@ -1360,7 +1365,7 @@ async fn telegram(ctx: &Ctx, cmd: TelegramCmd) -> Result<()> {
         } => {
             let id = resolve_set(&client, &set).await?;
             if repack {
-                confirm_repack(ctx, &client, &id, &set, yes).await?;
+                confirm_repack(ctx, &client, &id, &set, pack.as_deref(), yes).await?;
             }
             let req = TelegramExport {
                 pack_name: pack,
@@ -1405,9 +1410,19 @@ pub(crate) fn repack_summary(set: &str, plan: &TelegramPlan) -> String {
 /// Before `--repack`: show what the repack does and how many published
 /// stickers move, then ask (`--yes` does not; without a terminal it is
 /// required). A server older than parts has no plan, and nothing to
-/// repack: it publishes a set as one pack.
-async fn confirm_repack(ctx: &Ctx, client: &ApiClient, set_id: &str, set: &str, yes: bool) -> Result<()> {
-    let plan = match client.telegram_plan(set_id, true).await {
+/// repack: it publishes a set as one pack. The plan is for the pack name
+/// asked for (`--pack`, `-O telegram.pack_name`), as the export runs under
+/// it: the server refuses a repack under a name that is not one of the
+/// set's own packs, and so nothing is asked or published.
+async fn confirm_repack(
+    ctx: &Ctx,
+    client: &ApiClient,
+    set_id: &str,
+    set: &str,
+    pack: Option<&str>,
+    yes: bool,
+) -> Result<()> {
+    let plan = match client.telegram_plan(set_id, true, pack).await {
         Ok(plan) => plan,
         Err(CoreError::Api { status: 404, error })
             if error.code == "not_found" && !error.message.contains("Telegram integration is disabled") =>

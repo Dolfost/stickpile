@@ -932,7 +932,7 @@ fn bool_or_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error
     }
 }
 
-/// `GET /api/v1/sets/{id}/telegram/plan?repack=`: what a Telegram export of
+/// `GET /api/v1/sets/{id}/telegram/plan?repack=&pack_name=`: what a Telegram export of
 /// the set would do to its packs, without changing anything. A set larger
 /// than one pack (120 stickers) is published as several, its parts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

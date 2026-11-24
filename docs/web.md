@@ -698,7 +698,9 @@ every set page. Three sections:
   another pack, how many stickers each pack would hold and which packs
   would be deleted, from `GET /api/v1/sets/{id}/telegram/plan?repack=true`;
   nothing changes until "Repack now", which queues the Telegram publish
-  with `repack` and comes back with its status box. The set page's
+  with `repack` (never with a pack name, so it repacks the packs the plan
+  showed; the publish form has no repack field) and comes back with its
+  status box. The set page's
   "Telegram:" line links every pack, and its "Publish to Telegram" /
   "Update Telegram pack" button is unchanged.
   Tick several rows and press "Publish to the selected platforms" to queue

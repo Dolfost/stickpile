@@ -101,6 +101,11 @@ pub struct TelegramPlanQuery {
     /// order (default false).
     #[serde(default)]
     pub repack: bool,
+    /// Plan the export under this pack name (as `TelegramExport.pack_name`;
+    /// default: the set's own packs). A repack under a name that is not one
+    /// of the set's own packs is a 400.
+    #[serde(default)]
+    pub pack_name: Option<String>,
 }
 
 /// What a Telegram export of the set would do to its packs (its parts,
@@ -109,7 +114,7 @@ pub struct TelegramPlanQuery {
 #[utoipa::path(get, path = r::SET_TELEGRAM_PLAN, tag = "integrations",
     params(("id" = String, Path, description = "set id"), TelegramPlanQuery),
     responses((status = 200, body = TelegramPlan),
-              (status = 400, description = "no item of the set can become a Telegram sticker", body = ApiError),
+              (status = 400, description = "no item of the set can become a Telegram sticker, a bad pack name, or a repack under a name that is not one of the set's packs", body = ApiError),
               (status = 403, body = ApiError),
               (status = 404, description = "unknown set, or Telegram disabled", body = ApiError),
               (status = 503, description = "Telegram did not answer", body = ApiError)),
@@ -120,7 +125,9 @@ pub async fn telegram_plan(
     Path(id): Path<String>,
     Query(q): Query<TelegramPlanQuery>,
 ) -> AppResult<Json<TelegramPlan>> {
-    Ok(Json(telegram::plan(&state, &user, &id, q.repack).await?))
+    Ok(Json(
+        telegram::plan(&state, &user, &id, q.repack, q.pack_name.as_deref()).await?,
+    ))
 }
 
 /// Import a Telegram sticker pack into a new set, as a job.
