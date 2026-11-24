@@ -440,7 +440,13 @@ export continues from there:
   fails before any change ("a repack is only for the Telegram packs the
   set is published as"). The CLI asks the plan with the pack name it was
   given, so it stops there, and the export page's repack never sends a
-  name. `pack_name` plans the export under that name.
+  name.
+- **The plan without Telegram.** The plan reads the bot's username from
+  the set's stored part 1 name, so the plan of a published set makes no
+  call to Telegram. Only when the name does not tell (a set never
+  published, or a name with two `_by_...bot` tails) does it ask Telegram
+  (`getMe`, waiting at most 10 s), and answers 503 when Telegram does not
+  answer. `pack_name` plans the export under that name.
 - **Results.** The job's result keeps every field it had for one pack, for
   part 1 (or the lowest part left), so older clients read it as before,
   and adds `parts` (every part's `number`, `name`, `url`, `title`,
@@ -495,10 +501,10 @@ any change, exports failing between parts and in the middle of one and then
 continuing without a duplicate, a rename and a takeover that fail keeping
 the bindings as they were and then finishing under the new name, a part
 never created keeping its number, a repack refused under another name,
-what a 0.8.8 client reads, and the export page.
-`crates/stickpile-cli/tests/server_e2e.rs` runs `--repack` in the CLI
-against the real server and the same mock, with the set's own pack name
-and with another.
+the plan of a published set without Telegram, what a 0.8.8 client reads,
+and the export page. `crates/stickpile-cli/tests/server_e2e.rs` runs
+`--repack` in the CLI against the real server and the same mock, with
+the set's own pack name and with another.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps

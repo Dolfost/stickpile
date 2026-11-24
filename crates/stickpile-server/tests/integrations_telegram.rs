@@ -2025,6 +2025,28 @@ async fn repack_is_only_for_the_sets_own_packs() {
     assert!(p.delete.is_empty() && p.moved == 0);
 }
 
+#[tokio::test]
+async fn plan_of_a_published_set_needs_no_telegram() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    tg.mock.lock().unwrap().fail_after.insert("getMe".into(), 0);
+    let calls = tg.mock.lock().unwrap().calls.len();
+    // The stored pack name tells the bot: no call to Telegram.
+    let p = plan(srv, &alice, &set.id, true).await;
+    assert_eq!(p.parts.len(), 2);
+    assert_eq!(tg.mock.lock().unwrap().calls.len(), calls);
+    // A set never published needs the bot's username from Telegram.
+    let dogs = srv.create_set(&alice, "dogs", Visibility::Private).await;
+    add_items(srv, &alice, &dogs.id, 7000, 2).await;
+    let url = format!("{}?repack=true", routes::path(routes::SET_TELEGRAM_PLAN, &[&dogs.id]));
+    srv.get(&alice, &url).await.expect(503);
+    tg.mock.lock().unwrap().fail_after.clear();
+    let p: TelegramPlan = srv.get(&alice, &url).await.expect(200).json();
+    assert_eq!(p.parts.len(), 1);
+}
+
 // ---------------------------------------------------------------------------
 // Review of the parts round: findings
 // ---------------------------------------------------------------------------

@@ -1363,6 +1363,30 @@ fn parts_error(e: PartsError<JobError>, several: bool) -> JobError {
     }
 }
 
+/// How long the plan waits for `getMe` when it needs the bot's username.
+const PLAN_GET_ME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The bot username a stored part 1 name `base` (`<name>_by_<bot>`) was
+/// made for, when the name tells: exactly one of its `_by_` tails can be a
+/// bot username (5 to 32 of A-Z a-z 0-9 _, ending in `bot`). A name such as
+/// `cats_by_made_by_me_bot` does not tell (`made_by_me_bot` or `me_bot`).
+fn bot_of(base: &str) -> Option<String> {
+    let lower = base.to_ascii_lowercase();
+    let mut found = lower
+        .match_indices("_by_")
+        .map(|(at, _)| &base[at + 4..])
+        .filter(|bot| {
+            (5..=32).contains(&bot.len())
+                && bot.to_ascii_lowercase().ends_with("bot")
+                && bot.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && stickpile_telegram::valid_pack_name(base, bot)
+        });
+    match (found.next(), found.next()) {
+        (Some(bot), None) => Some(bot.to_string()),
+        _ => None,
+    }
+}
+
 /// What an export of the caller's set `set_id` would do to its Telegram
 /// packs, without changing anything: the parts after it with how many
 /// stickers each would hold, the parts it would delete, and how many
@@ -1371,6 +1395,10 @@ fn parts_error(e: PartsError<JobError>, several: bool) -> JobError {
 /// packs), from the set's items as they are rendered now
 /// ([`ItemsFor::Plan`]); a repack under a name that is not one of the
 /// set's own packs is refused, as the export refuses it.
+///
+/// Telegram is asked for the bot's username (`getMe`, for at most
+/// [`PLAN_GET_ME_TIMEOUT`]) only when the set's stored pack name does not
+/// tell it ([`bot_of`]), so the plan of a published set needs no call.
 pub async fn plan(
     state: &AppState,
     user: &CurrentUser,
@@ -1386,14 +1414,19 @@ pub async fn plan(
         Some(p) => Some(clean_pack_name(p)?),
         None => None,
     };
-    let token = token(state).ok_or_else(disabled)?;
-    let api = BotApi::new(&state.config.telegram.api_url, &token);
-    let bot_name = api
-        .get_me()
-        .await
-        .ok()
-        .and_then(|me| me.username)
-        .ok_or_else(|| AppError::unavailable("Telegram did not answer; try again later."))?;
+    let bot_name = match base_name(&state.db, &set.id).await?.as_deref().and_then(bot_of) {
+        Some(bot) => bot,
+        None => {
+            let token = token(state).ok_or_else(disabled)?;
+            let api = BotApi::new(&state.config.telegram.api_url, &token);
+            tokio::time::timeout(PLAN_GET_ME_TIMEOUT, api.get_me())
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .and_then(|me| me.username)
+                .ok_or_else(|| AppError::unavailable("Telegram did not answer; try again later."))?
+        }
+    };
     let Target { base, source, previous } =
         target(&state.db, &set, asked.as_deref(), &bot_name)
             .await
@@ -1451,6 +1484,21 @@ mod tests {
         assert_eq!(clean_pack_name("t.me/addstickers/Dogs").unwrap(), "Dogs");
         for bad in ["", "1abc", "a b", "a/b", "ä", &"a".repeat(65)] {
             assert!(clean_pack_name(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn bot_from_a_stored_pack_name() {
+        assert_eq!(bot_of("cats_by_pile_test_bot").as_deref(), Some("pile_test_bot"));
+        assert_eq!(bot_of("Cats_2_By_MyBot").as_deref(), Some("MyBot"));
+        // Two tails that can be bot usernames: the name does not tell.
+        assert_eq!(bot_of("cats_by_made_by_me_bot"), None);
+        // `_by_` in the name, but only one tail can be a bot username (the
+        // other is longer than 32 characters).
+        let long = format!("cats_by_{}_by_cats_bot", "a".repeat(30));
+        assert_eq!(bot_of(&long).as_deref(), Some("cats_bot"));
+        for bad in ["cats", "cats_by_", "cats_by_bot", "cats_by_my_robot_x"] {
+            assert_eq!(bot_of(bad), None, "{bad}");
         }
     }
 }
