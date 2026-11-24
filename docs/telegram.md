@@ -134,7 +134,8 @@ to a pack, in the `telegram_packs` table (migration
   user gets "already exists but was not published through this server".
 - A pack follows exactly one set. Publishing another of your sets to the
   same pack moves the binding to that set, every part of a set published as
-  several packs with it.
+  several packs with it, once that export has finished; until then the
+  first set keeps it.
 - Each part of a set larger than one pack is a pack of its own, claimed and
   checked the same way ([Sets larger than one
   pack](#sets-larger-than-one-pack)).
@@ -386,7 +387,9 @@ export continues from there:
   admin may adopt it, as a single pack) fails the export with a message
   that names the part, and nothing on Telegram changes. Then every new
   name is claimed for the set's owner in `telegram_packs` and registered as
-  a row without a state, before its pack is created.
+  a row without a state, before its pack is created: a row of
+  `telegram_parts`, or, for an export under a new name, of
+  `telegram_pending_parts` (see Moving and renaming).
 - **Exporting.** `export_parts` runs the plan, and each part's state is
   stored as soon as that part is done (on failure, as far as it got); a
   part whose pack was deleted is forgotten. A retried job, or the next
@@ -403,14 +406,29 @@ export continues from there:
   is used again.
 - **Moving and renaming.** Publishing another of the user's sets under a
   set's part 1 name moves the whole binding: every part goes to that set,
-  each without a mapping (as a single pack's binding moved before), and is
-  then filled or deleted. Publishing under a new name starts from nothing
-  and leaves the old packs on Telegram, unbound and still claimed, as an
-  export under a new name always did. Either takes effect when its export
-  starts, once every name passed the checks: an export that then fails is
-  continued under the new name by the next one. Asking for one of the
-  set's own pack names (for example the one `Set.telegram_pack` shows)
-  keeps the parts as they are.
+  and the export starts from those parts without a mapping (as a single
+  pack's binding moved before), so each is filled or deleted. Publishing
+  under a new name starts from nothing and leaves the old packs on
+  Telegram, unbound and still claimed, as an export under a new name
+  always did. Either takes effect only once its export has finished, as
+  a rename did before parts: until then the set keeps its binding as it
+  was (its rows, `telegram_base` and `telegram_pack`), and so does the set
+  whose name it is. The new names are claimed before any change, and the
+  export's parts are kept apart as pending (`telegram_pending_parts`,
+  migration `0018_telegram_pending_parts.sql`), with their states stored
+  as for any part. When the export finishes, in one transaction, the
+  pending parts replace the set's parts (and take the other set's), and
+  the new name becomes its base. An export that fails leaves them
+  pending: a retried job, or the next export under the same name,
+  continues from them (a takeover is still a takeover, as the other set
+  still has the name), without a second pack for a part and without
+  leaving one behind; an export under the old name keeps the old packs in
+  step meanwhile. A pending export under another name is given up when
+  the set is published under a third one; its packs stay on Telegram,
+  unbound and still claimed. Asking for one of the set's own pack names
+  (for example the one `Set.telegram_pack` shows) keeps the parts as they
+  are. A set's first export has no binding to keep, and its parts are the
+  set's from the start.
 - **Repack.** Only on request: `repack: true` in the API (also as text,
   `"true"`, in the publish options), "Repack the parts" on the export page,
   `--repack` in the CLI. Before it, `GET /api/v1/sets/{id}/telegram/plan?repack=true`
@@ -468,9 +486,11 @@ matching what moves, emptied parts deleted on Telegram (part 1 too, with
 the link moving to the part left), deleted part numbers not used again,
 part names owned by another user or bound to another set failing before
 any change, exports failing between parts and in the middle of one and then
-continuing without a duplicate, what a 0.8.8 client reads, and the export
-page. `crates/stickpile-cli/tests/server_e2e.rs` runs `--repack` in the CLI
-against the real server and the same mock.
+continuing without a duplicate, a rename and a takeover that fail keeping
+the bindings as they were and then finishing under the new name, a part
+never created keeping its number, what a 0.8.8 client reads, and the
+export page. `crates/stickpile-cli/tests/server_e2e.rs` runs `--repack`
+in the CLI against the real server and the same mock.
 
 `crates/stickpile-telegram/tests/bot_api.rs` runs everything against an
 in-process axum mock of the Bot API on `127.0.0.1:0`. The mock keeps

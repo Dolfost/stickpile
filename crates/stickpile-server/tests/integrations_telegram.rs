@@ -1799,6 +1799,191 @@ async fn web_export_page_lists_parts() {
     assert!(html.contains("Перепакувати частини"));
 }
 
+/// Whether each part of a finished export's result created its pack.
+fn created_packs(j: &Job) -> Vec<bool> {
+    j.result.as_ref().unwrap()["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["created_pack"].as_bool().unwrap())
+        .collect()
+}
+
+async fn pending_rows(srv: &TestServer) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM telegram_pending_parts")
+        .fetch_one(&srv.state.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn rename_takes_effect_when_its_export_finishes() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let (c1, c2) = (part_name("cats", 1), part_name("cats", 2));
+    let (d1, d2) = (part_name("dogs", 1), part_name("dogs", 2));
+    let rows = part_rows(srv, &set.id).await;
+
+    // The rename creates dogs' part 1, then stops at part 2: retried later.
+    tg.mock
+        .lock()
+        .unwrap()
+        .fail_after
+        .insert("createNewStickerSet".into(), 1);
+    let j: Job = srv
+        .post(
+            &alice,
+            &routes::path(routes::SET_TELEGRAM_EXPORT, &[&set.id]),
+            json!({"pack_name": "dogs"}),
+        )
+        .await
+        .expect(200)
+        .json();
+    srv.run_jobs().await;
+    assert_eq!(job(srv, &alice, &j.id).await.status, JobStatus::Queued);
+    assert_eq!(packs(&tg)[&d1].len(), 120);
+    assert!(!packs(&tg).contains_key(&d2));
+    // Until it finishes, the set is published as before.
+    assert_eq!(part_rows(srv, &set.id).await, rows);
+    assert_eq!(telegram_base(srv, &set.id).await.as_deref(), Some(c1.as_str()));
+    let s = detail(srv, &alice, &set.id).await.set;
+    assert_eq!(s.telegram_pack.as_deref(), Some(c1.as_str()));
+    assert_eq!(s.telegram_parts.len(), 2);
+    let names = |p: TelegramPlan| p.parts.into_iter().map(|p| p.name).collect::<Vec<_>>();
+    assert_eq!(names(plan(srv, &alice, &set.id, false).await), [c1.clone(), c2.clone()]);
+    assert_eq!(pending_rows(srv).await, 2);
+
+    // The retried job continues under the new name: part 1 is not made
+    // again, part 2 is, and then the set is published as dogs.
+    tg.mock.lock().unwrap().fail_after.clear();
+    run_jobs_now(srv).await;
+    let done = job(srv, &alice, &j.id).await;
+    assert_eq!(done.status, JobStatus::Done, "{done:?}");
+    assert_eq!(created_packs(&done), [false, true]);
+    let now: Vec<(i64, String, i64)> = part_rows(srv, &set.id)
+        .await
+        .into_iter()
+        .map(|(n, name, stickers, _)| (n, name, stickers))
+        .collect();
+    assert_eq!(now, [(1, d1.clone(), 120), (2, d2.clone(), 5)]);
+    assert_eq!(telegram_base(srv, &set.id).await.as_deref(), Some(d1.as_str()));
+    assert_eq!(
+        detail(srv, &alice, &set.id).await.set.telegram_pack.as_deref(),
+        Some(d1.as_str())
+    );
+    assert_eq!(pending_rows(srv).await, 0);
+    // The old packs stay on Telegram as they were, unbound.
+    let m = packs(&tg);
+    assert_eq!(
+        (m[&c1].len(), m[&c2].len(), m[&d1].len(), m[&d2].len()),
+        (120, 5, 120, 5)
+    );
+}
+
+#[tokio::test]
+async fn failed_rename_continues_under_its_name_or_is_given_up() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, set, _) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &set.id, json!({})).await.status, JobStatus::Done);
+    let rows = part_rows(srv, &set.id).await;
+    let fail_second_create = |tg: &Tg| {
+        tg.mock
+            .lock()
+            .unwrap()
+            .fail_after
+            .insert("createNewStickerSet".into(), 1);
+    };
+
+    // A rename that fails for good at part 2 leaves the set as it was.
+    fail_second_create(&tg);
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "dogs"})).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    tg.mock.lock().unwrap().fail_after.clear();
+    assert_eq!(part_rows(srv, &set.id).await, rows);
+    assert_eq!(pending_rows(srv).await, 2);
+    // The next export under that name continues: part 1 is not made again.
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "dogs"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(created_packs(&j), [false, true]);
+    assert_eq!(part_rows(srv, &set.id).await[0].1, part_name("dogs", 1));
+    assert_eq!(pending_rows(srv).await, 0);
+
+    // A rename that fails, then an export under a third name: the failed
+    // one is given up, its pack stays on Telegram, unbound and claimed.
+    fail_second_create(&tg);
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "birds"})).await;
+    assert_eq!(j.status, JobStatus::Failed, "{j:?}");
+    tg.mock.lock().unwrap().fail_after.clear();
+    let j = export(srv, &alice, &set.id, json!({"pack_name": "fish"})).await;
+    assert_eq!(j.status, JobStatus::Done, "{j:?}");
+    assert_eq!(part_rows(srv, &set.id).await[0].1, part_name("fish", 1));
+    assert_eq!(pending_rows(srv).await, 0);
+    let birds = part_name("birds", 1);
+    assert_eq!(packs(&tg)[&birds].len(), 120);
+    assert!(unbound_packs(&tg).await.contains(&birds));
+    let owner: Option<String> = sqlx::query_scalar("SELECT user_id FROM telegram_packs WHERE name = ?")
+        .bind(&birds)
+        .fetch_optional(&srv.state.db)
+        .await
+        .unwrap();
+    assert_eq!(owner.as_deref(), Some(alice.id.as_str()));
+}
+
+#[tokio::test]
+async fn takeover_takes_effect_when_its_export_finishes() {
+    let tg = setup(|_| {}).await;
+    let srv = &tg.srv;
+    let (alice, cats, _) = big_set(&tg, "alice", "cats", 125).await;
+    assert_eq!(export(srv, &alice, &cats.id, json!({})).await.status, JobStatus::Done);
+    let (c1, c2) = (part_name("cats", 1), part_name("cats", 2));
+    let rows = part_rows(srv, &cats.id).await;
+    let dogs = srv.create_set(&alice, "dogs", Visibility::Private).await;
+    add_items(srv, &alice, &dogs.id, 7000, 3).await;
+
+    // Dogs is published under cats' name: part 1 takes dogs' stickers, then
+    // deleting part 2 fails, and the job is retried later.
+    tg.mock.lock().unwrap().fail_after.insert("deleteStickerSet".into(), 0);
+    let j: Job = srv
+        .post(
+            &alice,
+            &routes::path(routes::SET_TELEGRAM_EXPORT, &[&dogs.id]),
+            json!({"pack_name": "cats"}),
+        )
+        .await
+        .expect(200)
+        .json();
+    srv.run_jobs().await;
+    assert_eq!(job(srv, &alice, &j.id).await.status, JobStatus::Queued);
+    assert_eq!(packs(&tg)[&c1].len(), 3);
+    // Until it finishes, cats keeps its binding, and dogs has none.
+    assert_eq!(part_rows(srv, &cats.id).await, rows);
+    assert_eq!(
+        detail(srv, &alice, &cats.id).await.set.telegram_pack.as_deref(),
+        Some(c1.as_str())
+    );
+    assert!(part_rows(srv, &dogs.id).await.is_empty());
+    assert_eq!(detail(srv, &alice, &dogs.id).await.set.telegram_pack, None);
+
+    // The retried job is still a takeover: it deletes part 2 and then moves
+    // the binding.
+    tg.mock.lock().unwrap().fail_after.clear();
+    let calls = tg.mock.lock().unwrap().calls.len();
+    run_jobs_now(srv).await;
+    let done = job(srv, &alice, &j.id).await;
+    assert_eq!(done.status, JobStatus::Done, "{done:?}");
+    assert_eq!(uploads_since(&tg, calls), ["deleteStickerSet"]);
+    assert!(!packs(&tg).contains_key(&c2));
+    assert_eq!(part_rows(srv, &dogs.id).await, vec![(1, c1.clone(), 3, true)]);
+    assert_eq!(telegram_base(srv, &dogs.id).await.as_deref(), Some(c1.as_str()));
+    assert!(part_rows(srv, &cats.id).await.is_empty());
+    assert_eq!(telegram_base(srv, &cats.id).await, None);
+    assert_eq!(detail(srv, &alice, &cats.id).await.set.telegram_pack, None);
+    assert_eq!(pending_rows(srv).await, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Review of the parts round: findings
 // ---------------------------------------------------------------------------
