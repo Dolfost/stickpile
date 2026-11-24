@@ -1,0 +1,1 @@
+No changes in the app. The server now publishes a set larger than one pack as several packs: more than 120 stickers become several Telegram packs, more than 200 several Signal packs.
