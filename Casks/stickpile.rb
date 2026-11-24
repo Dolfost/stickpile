@@ -9,9 +9,9 @@
 cask "stickpile" do
   arch arm: "arm64", intel: "x86_64"
 
-  version "0.8.8"
-  sha256 arm:   "b064637b6ba1240d6e51f1a3e2bae6352ec383091253e674a35605620e4f7284",
-         intel: "2db02b5acd9a937db2fb4c339f32526caa0f4260166f8996efef765168e61388"
+  version "0.8.9"
+  sha256 arm:   "62312f2ffb0efbcdad6163ffce0a2468cf56763c133f027195895a6983823338",
+         intel: "2c92dcecfdd663d2affec4212928e39745ea3a5ae5dce656f94aa37ec403ae47"
 
   url "https://github.com/Dolfost/stickpile/releases/download/v#{version}/Stickpile-v#{version}-#{arch}-macos.zip"
   name "stickpile"
