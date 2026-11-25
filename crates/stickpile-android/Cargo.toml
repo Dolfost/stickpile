@@ -57,5 +57,5 @@ serde_json.workspace = true
 # tests/interface.rs reads the interface from the built library as
 # uniffi-bindgen does: its symbols (goblin) and UniFFI's metadata
 # (uniffi_meta). Both are uniffi_bindgen's own dependencies.
-goblin = "0.8"
+goblin = "0.10"
 uniffi_meta = "0.32"
